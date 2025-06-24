@@ -91,6 +91,19 @@ public:
         return false;
     }
 
+    template<typename Fn>
+    bool GetWith(const K& key, Fn&& fn)
+    {
+        auto& shard = GetShard(key);
+        auto lock = shard.UniqueLock();
+        
+        V* val = shard.Get(key);
+        if(val)
+            return fn(*val);
+
+        return false;
+    }
+
 private:
     BufferPool bufferPool_;
     std::array<std::unique_ptr<Shard>, SHARD_COUNT> shards_;

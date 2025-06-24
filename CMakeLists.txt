@@ -26,4 +26,4 @@ add_executable(wfx ${WFX_CLI_SOURCES} ${WFX_ENGINE_SOURCES} ${WFX_HTTP_SOURCES}
 target_include_directories(wfx PRIVATE ${CMAKE_SOURCE_DIR})
 
 # Link required libraries
-target_link_libraries(wfx PRIVATE Ws2_32 mswsock)
+target_link_libraries(wfx PRIVATE Ws2_32 mswsock bcrypt)

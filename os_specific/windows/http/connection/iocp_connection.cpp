@@ -283,17 +283,17 @@ void IocpConnectionHandler::WorkerLoop()
                 // We do not need buffer to be released as ioData does not own the buffer, ConnectionContext does
                 // Hence the 'false' in the PerIoDataDeleter
                 std::unique_ptr<PerIoData, PerIoDataDeleter> ioData(static_cast<PerIoData*>(base), PerIoDataDeleter{this, false});
-                SOCKET clientSocket = ioData->socket;
+                SOCKET socket = ioData->socket;
 
                 if(bytesTransferred <= 0) {
-                    Close(clientSocket);
+                    Close(socket);
                     break;
                 }
 
-                auto* ctxPtr = connections_.Get(clientSocket);
+                auto* ctxPtr = connections_.Get(socket);
                 if(!ctxPtr || !(*ctxPtr)) {
-                    logger_.Error("[IOCP]: No Connection Context found for RECV socket: ", clientSocket);
-                    Close(clientSocket);
+                    logger_.Error("[IOCP]: No Connection Context found for RECV socket: ", socket);
+                    Close(socket);
                     break;
                 }
 
@@ -301,8 +301,23 @@ void IocpConnectionHandler::WorkerLoop()
 
                 // Just in case
                 if(!ctx.onReceive) {
-                    logger_.Error("[IOCP]: No Receive Callback set for socket: ", clientSocket);
-                    Close(clientSocket);
+                    logger_.Error("[IOCP]: No Receive Callback set for socket: ", socket);
+                    Close(socket);
+                    break;
+                }
+
+                // Too many requests are not allowed
+                if(!limiter_.AllowRequest(ctx.connInfo)) {
+                    // Temporary solution rn, will change in future
+                    static constexpr const char* kRateLimitResponse =
+                        "HTTP/1.1 503 Service Unavailable\r\n"
+                        "Content-Length: 0\r\n"
+                        "Connection: keep-alive\r\n"
+                        "\r\n";
+
+                    // Not going to bother checking for return value. This is just for response
+                    Write(socket, kRateLimitResponse, strlen(kRateLimitResponse));
+                    ResumeReceive(socket);
                     break;
                 }
 

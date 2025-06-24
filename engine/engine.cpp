@@ -45,11 +45,15 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
     std::string httpResp =
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/plain\r\n"
+        "Connection: keep-alive\r\n"
         "Content-Length: 14\r\n"
         "\r\n"
         "Hello from WFX";
 
     connHandler_->Write(socket, httpResp.c_str(), httpResp.size());
+
+    // Super important, without this, shit breaks
+    connHandler_->ResumeReceive(socket);
 }
 
 } // namespace WFX

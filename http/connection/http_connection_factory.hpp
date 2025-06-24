@@ -14,7 +14,7 @@
 #include <memory>
 
 namespace WFX::Http {
-    // Factory function that returns the correct handler polymorphically
+    // Factory function that returns the correct handler
     inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler()
     {
     #ifdef _WIN32

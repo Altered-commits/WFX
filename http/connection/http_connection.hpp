@@ -2,6 +2,7 @@
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
 #include "utils/functional/move_only_function.hpp"
+#include "utils/crypt/hashers.hpp"
 
 #include <string>
 #include <memory>
@@ -11,6 +12,7 @@
     #define WIN32_LEAN_AND_MEAN
     #include <WinSock2.h>
     #include <ws2tcpip.h>
+    #pragma comment(lib, "Ws2_32.lib")
 
     using WFXSocket = SOCKET;
     constexpr WFXSocket WFX_INVALID_SOCKET = INVALID_SOCKET;
@@ -63,19 +65,6 @@ struct WFXIpAddress {
             return false;
 
         return memcmp(ip.raw, other.ip.raw, ipType == AF_INET ? 4 : 16) == 0;
-    }
-
-    inline std::size_t Hash() const
-    {
-        const size_t len = (ipType == AF_INET) ? 4 : 16;
-        std::size_t h = 14695981039346656037ULL;
-        
-        h = (h ^ ipType) * 1099511628211ULL;
-
-        for(size_t i = 0; i < len; ++i)
-            h = (h ^ ip.raw[i]) * 1099511628211ULL;
-
-        return h;
     }
 
     // Helper functions
@@ -152,5 +141,34 @@ public:
 };
 
 } // namespace WFX::Http
+
+// Write a std::hash specialization for WFXIpAddress
+namespace std {
+    using namespace WFX::Utils; // For 'Logger' and 'RandomPool'
+    using namespace WFX::Http;  // For 'WFXIpAddress'
+
+    template<>
+    struct hash<WFXIpAddress> {
+        std::size_t operator()(const WFXIpAddress& addr) const
+        {
+            static std::uint8_t sipKey[16];
+            
+            // Run only once, lambda returns void
+            static const struct InitKeyOnce {
+                InitKeyOnce()
+                {
+                    if(!RandomPool::GetInstance().GetBytes(sipKey, sizeof(sipKey)))
+                        Logger::GetInstance().Fatal("[WFXIpAddressHash]: Failed to initialize SipHash key");
+                }
+            } _initOnce;
+
+            return SipHash24(
+                addr.ip.raw,
+                addr.ipType == AF_INET ? sizeof(in_addr) : sizeof(in6_addr),
+                sipKey
+            );
+        }
+    };
+} // namespace std
 
 #endif // WFX_HTTP_CONNECTION_HANDLER_HPP

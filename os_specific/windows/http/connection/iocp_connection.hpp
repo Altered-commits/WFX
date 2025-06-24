@@ -32,8 +32,9 @@ namespace WFX::OSSpecific {
 
 using namespace WFX::Utils; // For 'Logger', 'BufferPool' and 'ConcurrentHashMap'
 using namespace moodycamel; // For BlockingConcurrentQueue
+using WFX::Http::HttpConnectionHandler;
 
-class IocpConnectionHandler : public WFX::Http::HttpConnectionHandler {
+class IocpConnectionHandler : public HttpConnectionHandler {
 public:
     IocpConnectionHandler();
     ~IocpConnectionHandler();
@@ -75,6 +76,9 @@ private: // Helper structs / functions used in unique_ptr deleter
                 ctx->bufferSize = 0;
                 ctx->dataLength = 0;
             }
+
+            // Release IP limiter state
+            handler->limiter_.ReleaseConnection(ctx->connInfo);
             
             // Delete the context itself
             delete ctx;
@@ -94,6 +98,7 @@ private:
     AcceptedConnectionCallback acceptCallback_;
 
     Logger& logger_ = Logger::GetInstance();
+    IpLimiter& limiter_ = IpLimiter::GetInstance();
     BufferPool bufferPool_{1024 * 1024, [](std::size_t curSize){ return curSize * 2; }}; // For variable size allocs
     ConfigurableFixedAllocPool allocPool_{{32, 64, 128}};                                // For fixed size small allocs
     BlockingConcurrentQueue<std::function<void(void)>> offloadCallbacks_;

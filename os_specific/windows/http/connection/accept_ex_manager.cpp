@@ -94,6 +94,30 @@ void AcceptExManager::HandleAcceptCompletion(PerIoContext* ctx)
         return;
     }
 
+    // Low-level socket close
+    auto ForceCloseSocket = [&]() {
+        linger soLinger{1, 0};
+        setsockopt(client, SOL_SOCKET, SO_LINGER, reinterpret_cast<const char*>(&soLinger), sizeof(soLinger));
+        closesocket(client);
+    };
+
+    // Fast reject without acceptOp, for limiter failure or alloc fail
+    auto FullReject = [&](const WFXIpAddress& ip, bool releaseLimiter) {
+        if(releaseLimiter)
+            connLimiter_.ReleaseConnection(ip);
+        ForceCloseSocket();
+        RepostAcceptAtSlot(slot);
+    };
+
+    // Used once acceptOp is alive
+    auto AggressiveClose = [&](PostAcceptOp* acceptOp, bool repost) {
+        connLimiter_.ReleaseConnection(acceptOp->ipAddr);
+        ForceCloseSocket();
+        allocator_.Release(acceptOp);
+        if(repost)
+            RepostAcceptAtSlot(slot);
+    };
+
     SOCKADDR* localSockaddr     = nullptr;
     SOCKADDR* remoteSockaddr    = nullptr;
     int       localSockaddrLen  = 0;
@@ -111,63 +135,66 @@ void AcceptExManager::HandleAcceptCompletion(PerIoContext* ctx)
         &remoteSockaddrLen
     );
 
-    // Stores IP info
-    PostAcceptOp* acceptOp = nullptr;
-
-    // Placement new for vtable
-    if(void* mem = allocator_.Lease(sizeof(PostAcceptOp)); mem)
-        acceptOp = new (mem) PostAcceptOp();
-    else {
-        logger_.Error("[AcceptExManager]: Failed to allocate PostAcceptOp for accepted socket");
-        closesocket(client);
-        RepostAcceptAtSlot(slot);
-        return;
-    }
-    acceptOp->socket = client;
-    acceptOp->operationType = PerIoOperationType::ACCEPT_DEFERRED;
-
+    // Pre-parse IP
+    WFXIpAddress tempIpAddr;
     switch(remoteSockaddr->sa_family) {
         case AF_INET:
         {
             sockaddr_in* ipv4 = reinterpret_cast<sockaddr_in*>(remoteSockaddr);
-            acceptOp->ipAddr.ip.v4  = ipv4->sin_addr;
-            acceptOp->ipAddr.ipType = AF_INET;
+            tempIpAddr.ip.v4  = ipv4->sin_addr;
+            tempIpAddr.ipType = AF_INET;
             break;
         }
         case AF_INET6:
         {
             sockaddr_in6* ipv6 = reinterpret_cast<sockaddr_in6*>(remoteSockaddr);
-            acceptOp->ipAddr.ip.v6  = ipv6->sin6_addr;
-            acceptOp->ipAddr.ipType = AF_INET6;
+            tempIpAddr.ip.v6  = ipv6->sin6_addr;
+            tempIpAddr.ipType = AF_INET6;
             break;
         }
         default:
         {
-            std::memset(&acceptOp->ipAddr.ip, 0, sizeof(acceptOp->ipAddr.ip));
-            acceptOp->ipAddr.ipType = 0;
+            std::memset(&tempIpAddr.ip, 0, sizeof(tempIpAddr.ip));
+            tempIpAddr.ipType = 0;
             break;
         }
     }
 
+    // Limiter check
+    if(!connLimiter_.AllowConnection(tempIpAddr)) {
+        logger_.Warn("[AcceptExManager]: Connection limit reached!");
+        FullReject(tempIpAddr, false);
+        return;
+    }
+
+    // Allocate acceptOp only if allowed
+    PostAcceptOp* acceptOp = nullptr;
+    if(void* mem = allocator_.Lease(sizeof(PostAcceptOp)); mem)
+        acceptOp = new (mem) PostAcceptOp();
+    else {
+        logger_.Error("[AcceptExManager]: Failed to allocate PostAcceptOp for accepted socket");
+        FullReject(tempIpAddr, true);
+        return;
+    }
+
+    acceptOp->socket         = client;
+    acceptOp->operationType  = PerIoOperationType::ACCEPT_DEFERRED;
+    acceptOp->ipAddr         = tempIpAddr;
+
+    // Socket options
     setsockopt(client, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (char*)&listenSocket_, sizeof(listenSocket_));
 
     if(!AssociateWithIOCP(client)) {
         logger_.Error("[AcceptExManager]: Failed to associate accepted socket with IOCP");
-        allocator_.Release(acceptOp);
-        shutdown(client, SD_BOTH);
-        closesocket(client);
-        RepostAcceptAtSlot(slot);
+        AggressiveClose(acceptOp, true);
         return;
     }
 
     RepostAcceptAtSlot(slot);
 
-    // Safe now to update context and options
     if(!PostQueuedCompletionStatus(iocp_, 0, 0, &(acceptOp->overlapped))) {
         logger_.Error("[AcceptExManager]: Failed to queue deferred accept for socket ", client);
-        allocator_.Release(acceptOp);
-        shutdown(client, SD_BOTH);
-        closesocket(client);
+        AggressiveClose(acceptOp, false);
     }
 }
 

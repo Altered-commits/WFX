@@ -4,7 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include "http/connection/http_connection.hpp"
-#include "http/limits/ip_connection_limiter/ip_connection_limiter.hpp"
+#include "http/limits/ip_limiter/ip_limiter.hpp"
 #include "utils/fixed_pool/fixed_pool.hpp"
 #include "utils/logger/logger.hpp"
 
@@ -85,11 +85,11 @@ private:
     LPFN_ACCEPTEX             lpfnAcceptEx             = nullptr;
     LPFN_GETACCEPTEXSOCKADDRS lpfnGetAcceptExSockaddrs = nullptr;
 
-    WFXSocket            listenSocket_;
-    HANDLE               iocp_;
-    BufferPool&          allocator_;
-    Logger&              logger_      = Logger::GetInstance();
-    IpConnectionLimiter& connLimiter_ = IpConnectionLimiter::GetInstance();
+    WFXSocket   listenSocket_;
+    HANDLE      iocp_;
+    BufferPool& allocator_;
+    Logger&     logger_      = Logger::GetInstance();
+    IpLimiter&  connLimiter_ = IpLimiter::GetInstance();
 
     std::array<PerIoContext, MAX_SLOTS> contexts_;
     uint64_t                            activeSlotsBits_ = 0;
