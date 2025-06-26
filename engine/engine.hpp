@@ -3,6 +3,7 @@
 
 #include "http/connection/http_connection_factory.hpp"
 #include "http/formatters/parser/http_parser.hpp"
+#include "http/formatters/serializer/http_serializer.hpp"
 
 #include <string>
 

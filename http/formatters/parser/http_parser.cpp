@@ -39,7 +39,7 @@ bool HttpParser::ParseRequest(const char* data, std::size_t size, std::size_t& p
         return false;
 
     std::string_view methodStr = line.substr(0, mEnd);
-    outRequest.method = ParseHttpMethod(methodStr);
+    outRequest.method = HttpMethodToEnum(methodStr);
     if(outRequest.method == HttpMethod::UNKNOWN)
         return false;
 
@@ -51,7 +51,7 @@ bool HttpParser::ParseRequest(const char* data, std::size_t size, std::size_t& p
     outRequest.path = std::string_view(data + pathStart, pathEnd - pathStart);
 
     std::string_view versionStr = line.substr(pathEnd + 1);
-    outRequest.version = ParseHttpVersion(versionStr);
+    outRequest.version = HttpVersionToEnum(versionStr);
     if(outRequest.version == HttpVersion::UNKNOWN)
         return false;
 
@@ -115,23 +115,6 @@ bool HttpParser::ParseBody(const char* data, std::size_t size, std::size_t& pos,
         outRequest.body = {};
 
     return true;
-}
-
-HttpMethod HttpParser::ParseHttpMethod(std::string_view method)
-{
-    if(method == "GET")  return HttpMethod::GET;
-    if(method == "POST") return HttpMethod::POST;
-    
-    return HttpMethod::UNKNOWN;
-}
-
-HttpVersion HttpParser::ParseHttpVersion(std::string_view version)
-{
-    if(version == "HTTP/1.1") return HttpVersion::HTTP_1_1;
-    if(version == "HTTP/1.0") return HttpVersion::HTTP_1_0;
-    if(version == "HTTP/2.0") return HttpVersion::HTTP_2_0;
-    
-    return HttpVersion::UNKNOWN;
 }
 
 // vvv Helpers vvv

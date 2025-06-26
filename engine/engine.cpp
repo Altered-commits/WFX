@@ -18,7 +18,7 @@ void Engine::Listen(const std::string& host, int port)
     logger_.Info("[Engine]: Listening on ", host, ':', port);
 
     connHandler_->Run([this](WFXSocket data) {
-        this->HandleConnection(std::move(data));
+        this->HandleConnection(data);
     });
 }
 
@@ -41,7 +41,9 @@ void Engine::HandleConnection(WFXSocket socket)
 
 void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
 {
-    HttpRequest req;
+    // These both will be transmitted through all the layers (from here to middleware to user)
+    HttpRequest  req;
+    HttpResponse res;
 
     if(!HttpParser::Parse(ctx, req))
     {
@@ -54,42 +56,36 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
             "\r\n"
             "Bad Request";
 
-        connHandler_->Write(socket, badResp, std::strlen(badResp));
+        connHandler_->Write(socket, badResp, 105);
 
         // You may or may not want to resume receive, depending on keep-alive support
         connHandler_->Close(socket); // Close since it's a bad request
         return;
     }
 
-    // === Parsing succeeded, handle normally ===
+    // JSON response
+    Json obj = {
+        {"ip_addr", ctx.connInfo.GetIpStr()},
+        {"ip_type", ctx.connInfo.GetIpType()},
+        {"length", ctx.dataLength},
+        {"size", ctx.bufferSize}
+    };
 
-    // Example: check method and path
-    if(req.method == HttpMethod::GET && req.path == "/hello")
-    {
-        const char* httpResp =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Connection: keep-alive\r\n"
-            "Content-Length: 14\r\n"
-            "\r\n"
-            "Hello from WFX";
+    // Response stage
+    res.version = req.version;
 
-        connHandler_->Write(socket, httpResp, 104);
-    }
-    else
-    {
-        const char* notFound =
-            "HTTP/1.1 404 Not Found\r\n"
-            "Content-Type: text/plain\r\n"
-            "Connection: keep-alive\r\n"
-            "Content-Length: 9\r\n"
-            "\r\n"
-            "Not Found";
+    res.Status(HttpStatus::OK)
+        .Set("X-Powered-By", "WFX")
+        .Set("Server", "WFX/1.0")
+        .Set("Cache-Control", "no-store")
+        .Set("Connection", "keep-alive")
+        .SendJson(obj);
 
-        connHandler_->Write(socket, notFound, 105);
-    }
-
-    // === Cleanup + resume ===
+    // Serializer stage
+    std::string writableString = HttpSerializer::Serialize(res);
+    connHandler_->Write(socket, writableString.data(), writableString.size());
+    
+    // vvv Cleanup + resume vvv
     ctx.dataLength = 0;                    // Clear current buffer
     connHandler_->ResumeReceive(socket);   // Re-arm socket for next request
 }

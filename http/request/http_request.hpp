@@ -16,8 +16,8 @@ struct HttpRequest {
     std::string_view path;
     std::string_view body;
 };
-    
+
 } // namespace WFX::Http
 
 
-#endif //
+#endif //WFX_HTTP_REQUEST_HPP

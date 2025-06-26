@@ -19,11 +19,9 @@ public:
     static bool Parse(ConnectionContext& ctx, HttpRequest& outRequest);
 
 private: // Parse helpers
-    static bool        ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
-    static bool        ParseHeaders(const char* data, std::size_t size, std::size_t& pos, HttpHeaders& outHeaders);
-    static bool        ParseBody(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
-    static HttpMethod  ParseHttpMethod(std::string_view method);
-    static HttpVersion ParseHttpVersion(std::string_view version);
+    static bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
+    static bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, HttpHeaders& outHeaders);
+    static bool ParseBody(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
 
 private: // Helpers
     static bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from, std::size_t& outNextPos, std::string_view& outLine);
