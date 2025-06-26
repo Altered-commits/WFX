@@ -41,19 +41,57 @@ void Engine::HandleConnection(WFXSocket socket)
 
 void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
 {
-    // Hardcode the request for now, later we do the do
-    std::string httpResp =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/plain\r\n"
-        "Connection: keep-alive\r\n"
-        "Content-Length: 14\r\n"
-        "\r\n"
-        "Hello from WFX";
+    HttpRequest req;
 
-    connHandler_->Write(socket, httpResp.c_str(), httpResp.size());
+    if(!HttpParser::Parse(ctx, req))
+    {
+        // Respond with 400 Bad Request if parsing failed
+        const char* badResp =
+            "HTTP/1.1 400 Bad Request\r\n"
+            "Content-Type: text/plain\r\n"
+            "Connection: close\r\n"
+            "Content-Length: 11\r\n"
+            "\r\n"
+            "Bad Request";
 
-    // Super important, without this, shit breaks
-    connHandler_->ResumeReceive(socket);
+        connHandler_->Write(socket, badResp, std::strlen(badResp));
+
+        // You may or may not want to resume receive, depending on keep-alive support
+        connHandler_->Close(socket); // Close since it's a bad request
+        return;
+    }
+
+    // === Parsing succeeded, handle normally ===
+
+    // Example: check method and path
+    if(req.method == HttpMethod::GET && req.path == "/hello")
+    {
+        const char* httpResp =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Connection: keep-alive\r\n"
+            "Content-Length: 14\r\n"
+            "\r\n"
+            "Hello from WFX";
+
+        connHandler_->Write(socket, httpResp, 104);
+    }
+    else
+    {
+        const char* notFound =
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Type: text/plain\r\n"
+            "Connection: keep-alive\r\n"
+            "Content-Length: 9\r\n"
+            "\r\n"
+            "Not Found";
+
+        connHandler_->Write(socket, notFound, 105);
+    }
+
+    // === Cleanup + resume ===
+    ctx.dataLength = 0;                    // Clear current buffer
+    connHandler_->ResumeReceive(socket);   // Re-arm socket for next request
 }
 
 } // namespace WFX

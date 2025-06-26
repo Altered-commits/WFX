@@ -2,13 +2,14 @@
 #define WFX_ENGINE_HPP
 
 #include "http/connection/http_connection_factory.hpp"
+#include "http/formatters/parser/http_parser.hpp"
 
 #include <string>
 
 namespace WFX::Core {
 
 using namespace WFX::Utils; // For 'Logger'
-using namespace WFX::Http;  // For 'HttpConnectionHandler'
+using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpRequest'
 
 class Engine {
 public:

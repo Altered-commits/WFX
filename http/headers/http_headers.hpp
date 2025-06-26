@@ -7,31 +7,37 @@
 
 namespace WFX::Http {
 
+// Idk, looks good like this, too much std::string gives me cancer
+using KeyType      = std::string_view;
+using ConstKeyType = const KeyType&;
+
 struct CaseInsensitiveHash {
-    size_t operator()(const std::string& key) const;
+    size_t operator()(ConstKeyType key) const;
 };
 
 struct CaseInsensitiveEqual {
-    bool operator()(const std::string& lhs, const std::string& rhs) const;
+    bool operator()(ConstKeyType lhs, ConstKeyType rhs) const;
 };
+
+using HttpHeaderMap = std::unordered_map<KeyType, KeyType, CaseInsensitiveHash, CaseInsensitiveEqual>;
 
 // === HttpHeaders class === //
 class HttpHeaders {
 public:
     HttpHeaders() = default;
 
-    void        SetHeader(const std::string& key, const std::string& value);
-    bool        HasHeader(const std::string& key) const;
-    std::string GetHeader(const std::string& key) const;
-    void        RemoveHeader(const std::string& key);
-    void        Clear();
+    void     SetHeader(ConstKeyType key, ConstKeyType value);
+    bool     HasHeader(ConstKeyType key) const;
+    KeyType  GetHeader(ConstKeyType key) const;
+    void     RemoveHeader(ConstKeyType key);
+    void     Clear();
     
-    std::vector<std::pair<std::string, std::string>> GetAllHeaders() const;
+    HttpHeaderMap& GetHeaderMap();
 
 private:
-    std::unordered_map<std::string, std::string, CaseInsensitiveHash, CaseInsensitiveEqual> headers_;
+    HttpHeaderMap headers_;
 };
 
-} // namespace WFX
+} // namespace WFX::Utils
 
 #endif // WFX_HTTP_HEADERS_HPP
