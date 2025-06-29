@@ -1,43 +1,53 @@
 #ifndef WFX_HTTP_HEADERS_HPP
 #define WFX_HTTP_HEADERS_HPP
 
+#include "utils/crypt/hash.hpp"
+#include "utils/crypt/string.hpp"
+
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace WFX::Http {
 
-// Idk, looks good like this, too much std::string gives me cancer
-using KeyType      = std::string_view;
-using ConstKeyType = const KeyType&;
-
 struct CaseInsensitiveHash {
-    size_t operator()(ConstKeyType key) const;
+    template<typename T>
+    std::size_t operator()(const T& key) const;
 };
 
 struct CaseInsensitiveEqual {
-    bool operator()(ConstKeyType lhs, ConstKeyType rhs) const;
+    template<typename T1, typename T2>
+    bool operator()(const T1& lhs, const T2& rhs) const;
 };
 
-using HttpHeaderMap = std::unordered_map<KeyType, KeyType, CaseInsensitiveHash, CaseInsensitiveEqual>;
-
-// === HttpHeaders class === //
+// --- Generic HttpHeaders ---
+template<typename KeyType, typename ValType>
 class HttpHeaders {
 public:
-    HttpHeaders() = default;
+    using HeaderMapType = std::unordered_map<KeyType, ValType, CaseInsensitiveHash, CaseInsensitiveEqual>;
 
-    void     SetHeader(ConstKeyType key, ConstKeyType value);
-    bool     HasHeader(ConstKeyType key) const;
-    KeyType  GetHeader(ConstKeyType key) const;
-    void     RemoveHeader(ConstKeyType key);
-    void     Clear();
-    
-    HttpHeaderMap& GetHeaderMap();
+    HttpHeaders();
+
+    void    SetHeader(const KeyType& key, const ValType& value);
+    bool    HasHeader(const KeyType& key) const;
+    ValType GetHeader(const KeyType& key) const;
+    void    RemoveHeader(const KeyType& key);
+    void    Clear();
+
+    HeaderMapType& GetHeaderMap();
+    const HeaderMapType& GetHeaderMap() const;
 
 private:
-    HttpHeaderMap headers_;
+    HeaderMapType headers_;
 };
 
-} // namespace WFX::Utils
+// vvv Type Aliases vvv
+using RequestHeaders  = HttpHeaders<std::string_view, std::string_view>;
+using ResponseHeaders = HttpHeaders<std::string, std::string>;
+
+} // namespace WFX::Http
+
+// For template definitions
+#include "http_headers.ipp"
 
 #endif // WFX_HTTP_HEADERS_HPP

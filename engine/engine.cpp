@@ -29,6 +29,7 @@ void Engine::Stop()
     logger_.Info("[Engine]: Stopped Successfully!");
 }
 
+// vvv Internals vvv
 void Engine::HandleConnection(WFXSocket socket)
 {
     connHandler_->SetReceiveCallback(socket, [this, socket](ConnectionContext& ctx) {
@@ -79,15 +80,19 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
         .Set("Server", "WFX/1.0")
         .Set("Cache-Control", "no-store")
         .Set("Connection", "keep-alive")
-        .SendJson(obj);
+        .SendJson(std::move(obj));
 
-    // Serializer stage
+    HandleResponse(socket, res, ctx);
+}
+
+void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx)
+{   
     std::string writableString = HttpSerializer::Serialize(res);
     connHandler_->Write(socket, writableString.data(), writableString.size());
     
-    // vvv Cleanup + resume vvv
-    ctx.dataLength = 0;                    // Clear current buffer
-    connHandler_->ResumeReceive(socket);   // Re-arm socket for next request
+    // vvv Cleanup + Resume vvv
+    ctx.dataLength = 0;
+    connHandler_->ResumeReceive(socket);
 }
 
 } // namespace WFX

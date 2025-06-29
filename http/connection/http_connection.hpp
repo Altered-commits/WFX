@@ -1,8 +1,8 @@
 #ifndef WFX_HTTP_CONNECTION_HANDLER_HPP
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
-#include "utils/functional/move_only_function.hpp"
-#include "utils/crypt/hashers.hpp"
+#include "utils/backport/move_only_function.hpp"
+#include "utils/crypt/hash.hpp"
 
 #include <string>
 #include <memory>

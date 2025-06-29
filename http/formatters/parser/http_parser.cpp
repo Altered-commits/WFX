@@ -58,7 +58,7 @@ bool HttpParser::ParseRequest(const char* data, std::size_t size, std::size_t& p
     return true;
 }
 
-bool HttpParser::ParseHeaders(const char* data, std::size_t size, std::size_t& pos, HttpHeaders& outHeaders)
+bool HttpParser::ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestHeaders& outHeaders)
 {
     std::size_t headerCount      = 0;
     std::size_t headerTotalBytes = 0;

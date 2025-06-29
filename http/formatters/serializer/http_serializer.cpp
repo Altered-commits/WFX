@@ -7,51 +7,40 @@ std::string HttpSerializer::Serialize(HttpResponse& res)
     std::string out;
     out.reserve(HEADER_RESERVE_SIZE_HINT + res.body.size());
 
-    char convBuf[24]; // For numeric conversions to strings
-
     // 1. HTTP version and status
     out.append("HTTP/1.");
-    out += (res.version == HttpVersion::HTTP_1_1 ? '1' : '0');
+    out.push_back(res.version == HttpVersion::HTTP_1_1 ? '1' : '0');
     out.append(" ");
 
-    // status code
-    uint16_t code = static_cast<uint16_t>(res.status);
-    int len = snprintf(convBuf, sizeof(convBuf), "%u", code);
-    out.append(convBuf, len);
+    uint8_t code = static_cast<uint8_t>(res.status);
+    
+    // Codes are 3 digits, so we can just push_back 3 times the 3 digits lmao
+    // This is actually faster than doing snprintf or std::to_string
+    out.push_back('0' + code / 100);
+    out.push_back('0' + (code / 10) % 10);
+    out.push_back('0' + code % 10);
 
     out.append(" ");
     out.append(HttpStatusToReason(res.status));
     out.append("\r\n");
 
     // 2. Headers
-    bool hasContentLength = false;
     for(const auto& [key, value] : res.headers.GetHeaderMap()) {
         out.append(key);
         out.append(": ");
         out.append(value);
         out.append("\r\n");
-
-        if(!hasContentLength && key.size() == 14 &&
-            std::equal(key.begin(), key.end(), "Content-Length", [](char a, char b) {
-                return tolower(a) == tolower(b);
-            }))
-            hasContentLength = true;
     }
 
-    // 3. Inject Content-Length if missing
-    if(!hasContentLength) {
-        out.append("Content-Length: ");
-
-        int len = snprintf(convBuf, sizeof(convBuf), "%zu", res.body.size());
-
-        out.append(convBuf, len);
-        out.append("\r\n");
-    }
-
-    // 4. End headers
+    // End headers
     out.append("\r\n");
 
-    // 5. Append body
+    // Split
+    // Its a file operation: Header only needed
+    if(res.IsFileOperation())
+        return out;
+
+    // Its a text operation: Body is also needed
     out.append(res.body);
 
     return out;

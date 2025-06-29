@@ -20,7 +20,7 @@ public:
 
 private: // Parse helpers
     static bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
-    static bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, HttpHeaders& outHeaders);
+    static bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestHeaders& outHeaders);
     static bool ParseBody(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
 
 private: // Helpers

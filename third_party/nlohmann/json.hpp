@@ -6176,12 +6176,12 @@ NLOHMANN_JSON_NAMESPACE_END
 NLOHMANN_JSON_NAMESPACE_BEGIN
 
 /// @sa https://json.nlohmann.me/api/adl_serializer/
-template<typename ValueType, typename>
+template<typename HeaderValType, typename>
 struct adl_serializer
 {
     /// @brief convert a JSON value to any value type
     /// @sa https://json.nlohmann.me/api/adl_serializer/from_json/
-    template<typename BasicJsonType, typename TargetType = ValueType>
+    template<typename BasicJsonType, typename TargetType = HeaderValType>
     static auto from_json(BasicJsonType && j, TargetType& val) noexcept(
         noexcept(::nlohmann::from_json(std::forward<BasicJsonType>(j), val)))
     -> decltype(::nlohmann::from_json(std::forward<BasicJsonType>(j), val), void())
@@ -6191,7 +6191,7 @@ struct adl_serializer
 
     /// @brief convert a JSON value to any value type
     /// @sa https://json.nlohmann.me/api/adl_serializer/from_json/
-    template<typename BasicJsonType, typename TargetType = ValueType>
+    template<typename BasicJsonType, typename TargetType = HeaderValType>
     static auto from_json(BasicJsonType && j) noexcept(
     noexcept(::nlohmann::from_json(std::forward<BasicJsonType>(j), detail::identity_tag<TargetType> {})))
     -> decltype(::nlohmann::from_json(std::forward<BasicJsonType>(j), detail::identity_tag<TargetType> {}))
@@ -6201,7 +6201,7 @@ struct adl_serializer
 
     /// @brief convert any value type to a JSON value
     /// @sa https://json.nlohmann.me/api/adl_serializer/to_json/
-    template<typename BasicJsonType, typename TargetType = ValueType>
+    template<typename BasicJsonType, typename TargetType = HeaderValType>
     static auto to_json(BasicJsonType& j, TargetType && val) noexcept(
         noexcept(::nlohmann::to_json(j, std::forward<TargetType>(val))))
     -> decltype(::nlohmann::to_json(j, std::forward<TargetType>(val)), void())
@@ -21697,48 +21697,48 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     Explicit type conversion between the JSON value and a compatible value
     which is [CopyConstructible](https://en.cppreference.com/w/cpp/named_req/CopyConstructible)
     and [DefaultConstructible](https://en.cppreference.com/w/cpp/named_req/DefaultConstructible).
-    The value is converted by calling the @ref json_serializer<ValueType>
+    The value is converted by calling the @ref json_serializer<HeaderValType>
     `from_json()` method.
 
     The function is equivalent to executing
     @code {.cpp}
-    ValueType ret;
-    JSONSerializer<ValueType>::from_json(*this, ret);
+    HeaderValType ret;
+    JSONSerializer<HeaderValType>::from_json(*this, ret);
     return ret;
     @endcode
 
     This overloads is chosen if:
-    - @a ValueType is not @ref basic_json,
-    - @ref json_serializer<ValueType> has a `from_json()` method of the form
-      `void from_json(const basic_json&, ValueType&)`, and
-    - @ref json_serializer<ValueType> does not have a `from_json()` method of
-      the form `ValueType from_json(const basic_json&)`
+    - @a HeaderValType is not @ref basic_json,
+    - @ref json_serializer<HeaderValType> has a `from_json()` method of the form
+      `void from_json(const basic_json&, HeaderValType&)`, and
+    - @ref json_serializer<HeaderValType> does not have a `from_json()` method of
+      the form `HeaderValType from_json(const basic_json&)`
 
-    @tparam ValueType the returned value type
+    @tparam HeaderValType the returned value type
 
-    @return copy of the JSON value, converted to @a ValueType
+    @return copy of the JSON value, converted to @a HeaderValType
 
-    @throw what @ref json_serializer<ValueType> `from_json()` method throws
+    @throw what @ref json_serializer<HeaderValType> `from_json()` method throws
 
     @liveexample{The example below shows several conversions from JSON values
     to other types. There a few things to note: (1) Floating-point numbers can
     be converted to integers\, (2) A JSON array can be converted to a standard
     `std::vector<short>`\, (3) A JSON object can be converted to C++
     associative containers such as `std::unordered_map<std::string\,
-    json>`.,get__ValueType_const}
+    json>`.,get__HeaderValType_const}
 
     @since version 2.1.0
     */
-    template < typename ValueType,
+    template < typename HeaderValType,
                detail::enable_if_t <
-                   detail::is_default_constructible<ValueType>::value&&
-                   detail::has_from_json<basic_json_t, ValueType>::value,
+                   detail::is_default_constructible<HeaderValType>::value&&
+                   detail::has_from_json<basic_json_t, HeaderValType>::value,
                    int > = 0 >
-    ValueType get_impl(detail::priority_tag<0> /*unused*/) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), std::declval<ValueType&>())))
+    HeaderValType get_impl(detail::priority_tag<0> /*unused*/) const noexcept(noexcept(
+            JSONSerializer<HeaderValType>::from_json(std::declval<const basic_json_t&>(), std::declval<HeaderValType&>())))
     {
-        auto ret = ValueType();
-        JSONSerializer<ValueType>::from_json(*this, ret);
+        auto ret = HeaderValType();
+        JSONSerializer<HeaderValType>::from_json(*this, ret);
         return ret;
     }
 
@@ -21748,38 +21748,38 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     Explicit type conversion between the JSON value and a compatible value
     which is **not** [CopyConstructible](https://en.cppreference.com/w/cpp/named_req/CopyConstructible)
     and **not** [DefaultConstructible](https://en.cppreference.com/w/cpp/named_req/DefaultConstructible).
-    The value is converted by calling the @ref json_serializer<ValueType>
+    The value is converted by calling the @ref json_serializer<HeaderValType>
     `from_json()` method.
 
     The function is equivalent to executing
     @code {.cpp}
-    return JSONSerializer<ValueType>::from_json(*this);
+    return JSONSerializer<HeaderValType>::from_json(*this);
     @endcode
 
     This overloads is chosen if:
-    - @a ValueType is not @ref basic_json and
-    - @ref json_serializer<ValueType> has a `from_json()` method of the form
-      `ValueType from_json(const basic_json&)`
+    - @a HeaderValType is not @ref basic_json and
+    - @ref json_serializer<HeaderValType> has a `from_json()` method of the form
+      `HeaderValType from_json(const basic_json&)`
 
-    @note If @ref json_serializer<ValueType> has both overloads of
+    @note If @ref json_serializer<HeaderValType> has both overloads of
     `from_json()`, this one is chosen.
 
-    @tparam ValueType the returned value type
+    @tparam HeaderValType the returned value type
 
-    @return copy of the JSON value, converted to @a ValueType
+    @return copy of the JSON value, converted to @a HeaderValType
 
-    @throw what @ref json_serializer<ValueType> `from_json()` method throws
+    @throw what @ref json_serializer<HeaderValType> `from_json()` method throws
 
     @since version 2.1.0
     */
-    template < typename ValueType,
+    template < typename HeaderValType,
                detail::enable_if_t <
-                   detail::has_non_default_from_json<basic_json_t, ValueType>::value,
+                   detail::has_non_default_from_json<basic_json_t, HeaderValType>::value,
                    int > = 0 >
-    ValueType get_impl(detail::priority_tag<1> /*unused*/) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>())))
+    HeaderValType get_impl(detail::priority_tag<1> /*unused*/) const noexcept(noexcept(
+            JSONSerializer<HeaderValType>::from_json(std::declval<const basic_json_t&>())))
     {
-        return JSONSerializer<ValueType>::from_json(*this);
+        return JSONSerializer<HeaderValType>::from_json(*this);
     }
 
     /*!
@@ -21856,32 +21856,32 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     - If the requested type is the current @ref basic_json, or a different @ref basic_json convertible
     from the current @ref basic_json.
 
-    - Otherwise the value is converted by calling the @ref json_serializer<ValueType> `from_json()`
+    - Otherwise the value is converted by calling the @ref json_serializer<HeaderValType> `from_json()`
     method.
 
-    @tparam ValueTypeCV the provided value type
-    @tparam ValueType the returned value type
+    @tparam HeaderValTypeCV the provided value type
+    @tparam HeaderValType the returned value type
 
-    @return copy of the JSON value, converted to @tparam ValueType if necessary
+    @return copy of the JSON value, converted to @tparam HeaderValType if necessary
 
-    @throw what @ref json_serializer<ValueType> `from_json()` method throws if conversion is required
+    @throw what @ref json_serializer<HeaderValType> `from_json()` method throws if conversion is required
 
     @since version 2.1.0
     */
-    template < typename ValueTypeCV, typename ValueType = detail::uncvref_t<ValueTypeCV>>
+    template < typename HeaderValTypeCV, typename HeaderValType = detail::uncvref_t<HeaderValTypeCV>>
 #if defined(JSON_HAS_CPP_14)
     constexpr
 #endif
     auto get() const noexcept(
-    noexcept(std::declval<const basic_json_t&>().template get_impl<ValueType>(detail::priority_tag<4> {})))
-    -> decltype(std::declval<const basic_json_t&>().template get_impl<ValueType>(detail::priority_tag<4> {}))
+    noexcept(std::declval<const basic_json_t&>().template get_impl<HeaderValType>(detail::priority_tag<4> {})))
+    -> decltype(std::declval<const basic_json_t&>().template get_impl<HeaderValType>(detail::priority_tag<4> {}))
     {
-        // we cannot static_assert on ValueTypeCV being non-const, because
+        // we cannot static_assert on HeaderValTypeCV being non-const, because
         // there is support for get<const basic_json_t>(), which is why we
         // still need the uncvref
-        static_assert(!std::is_reference<ValueTypeCV>::value,
+        static_assert(!std::is_reference<HeaderValTypeCV>::value,
                       "get() cannot be used with reference types, you might want to use get_ref()");
-        return get_impl<ValueType>(detail::priority_tag<4> {});
+        return get_impl<HeaderValType>(detail::priority_tag<4> {});
     }
 
     /*!
@@ -21921,25 +21921,25 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
 
     /// @brief get a value (explicit)
     /// @sa https://json.nlohmann.me/api/basic_json/get_to/
-    template < typename ValueType,
+    template < typename HeaderValType,
                detail::enable_if_t <
-                   !detail::is_basic_json<ValueType>::value&&
-                   detail::has_from_json<basic_json_t, ValueType>::value,
+                   !detail::is_basic_json<HeaderValType>::value&&
+                   detail::has_from_json<basic_json_t, HeaderValType>::value,
                    int > = 0 >
-    ValueType & get_to(ValueType& v) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), v)))
+    HeaderValType & get_to(HeaderValType& v) const noexcept(noexcept(
+            JSONSerializer<HeaderValType>::from_json(std::declval<const basic_json_t&>(), v)))
     {
-        JSONSerializer<ValueType>::from_json(*this, v);
+        JSONSerializer<HeaderValType>::from_json(*this, v);
         return v;
     }
 
     // specialization to allow calling get_to with a basic_json value
     // see https://github.com/nlohmann/json/issues/2175
-    template<typename ValueType,
+    template<typename HeaderValType,
              detail::enable_if_t <
-                 detail::is_basic_json<ValueType>::value,
+                 detail::is_basic_json<HeaderValType>::value,
                  int> = 0>
-    ValueType & get_to(ValueType& v) const
+    HeaderValType & get_to(HeaderValType& v) const
     {
         v = *this;
         return v;
@@ -21985,15 +21985,15 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     Implicit type conversion between the JSON value and a compatible value.
     The call is realized by calling @ref get() const.
 
-    @tparam ValueType non-pointer type compatible to the JSON value, for
+    @tparam HeaderValType non-pointer type compatible to the JSON value, for
     instance `int` for JSON integer numbers, `bool` for JSON booleans, or
     `std::vector` types for JSON arrays. The character type of @ref string_t
     as well as an initializer list of this type is excluded to avoid
     ambiguities as these types implicitly convert to `std::string`.
 
-    @return copy of the JSON value, converted to type @a ValueType
+    @return copy of the JSON value, converted to type @a HeaderValType
 
-    @throw type_error.302 in case passed type @a ValueType is incompatible
+    @throw type_error.302 in case passed type @a HeaderValType is incompatible
     to the JSON value type (e.g., the JSON value is of type boolean, but a
     string is requested); see example below
 
@@ -22004,30 +22004,30 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     be converted to integers\, (2) A JSON array can be converted to a standard
     `std::vector<short>`\, (3) A JSON object can be converted to C++
     associative containers such as `std::unordered_map<std::string\,
-    json>`.,operator__ValueType}
+    json>`.,operator__HeaderValType}
 
     @since version 1.0.0
     */
-    template < typename ValueType, typename std::enable_if <
+    template < typename HeaderValType, typename std::enable_if <
                    detail::conjunction <
-                       detail::negation<std::is_pointer<ValueType>>,
-                       detail::negation<std::is_same<ValueType, std::nullptr_t>>,
-                       detail::negation<std::is_same<ValueType, detail::json_ref<basic_json>>>,
-                                        detail::negation<std::is_same<ValueType, typename string_t::value_type>>,
-                                        detail::negation<detail::is_basic_json<ValueType>>,
-                                        detail::negation<std::is_same<ValueType, std::initializer_list<typename string_t::value_type>>>,
+                       detail::negation<std::is_pointer<HeaderValType>>,
+                       detail::negation<std::is_same<HeaderValType, std::nullptr_t>>,
+                       detail::negation<std::is_same<HeaderValType, detail::json_ref<basic_json>>>,
+                                        detail::negation<std::is_same<HeaderValType, typename string_t::value_type>>,
+                                        detail::negation<detail::is_basic_json<HeaderValType>>,
+                                        detail::negation<std::is_same<HeaderValType, std::initializer_list<typename string_t::value_type>>>,
 #if defined(JSON_HAS_CPP_17) && (defined(__GNUC__) || (defined(_MSC_VER) && _MSC_VER >= 1910 && _MSC_VER <= 1914))
-                                                detail::negation<std::is_same<ValueType, std::string_view>>,
+                                                detail::negation<std::is_same<HeaderValType, std::string_view>>,
 #endif
 #if defined(JSON_HAS_CPP_17) && JSON_HAS_STATIC_RTTI
-                                                detail::negation<std::is_same<ValueType, std::any>>,
+                                                detail::negation<std::is_same<HeaderValType, std::any>>,
 #endif
-                                                detail::is_detected_lazy<detail::get_template_function, const basic_json_t&, ValueType>
+                                                detail::is_detected_lazy<detail::get_template_function, const basic_json_t&, HeaderValType>
                                                 >::value, int >::type = 0 >
-                                        JSON_EXPLICIT operator ValueType() const
+                                        JSON_EXPLICIT operator HeaderValType() const
     {
         // delegate the call to get<>() const
-        return get<ValueType>();
+        return get<HeaderValType>();
     }
 
     /// @brief get a binary value
@@ -22342,19 +22342,19 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     using is_comparable_with_object_key = detail::is_comparable <
         object_comparator_t, const typename object_t::key_type&, KeyType >;
 
-    template<typename ValueType>
+    template<typename HeaderValType>
     using value_return_type = std::conditional <
-        detail::is_c_string_uncvref<ValueType>::value,
-        string_t, typename std::decay<ValueType>::type >;
+        detail::is_c_string_uncvref<HeaderValType>::value,
+        string_t, typename std::decay<HeaderValType>::type >;
 
   public:
     /// @brief access specified object element with default value
     /// @sa https://json.nlohmann.me/api/basic_json/value/
-    template < class ValueType, detail::enable_if_t <
+    template < class HeaderValType, detail::enable_if_t <
                    !detail::is_transparent<object_comparator_t>::value
-                   && detail::is_getable<basic_json_t, ValueType>::value
-                   && !std::is_same<value_t, detail::uncvref_t<ValueType>>::value, int > = 0 >
-    ValueType value(const typename object_t::key_type& key, const ValueType& default_value) const
+                   && detail::is_getable<basic_json_t, HeaderValType>::value
+                   && !std::is_same<value_t, detail::uncvref_t<HeaderValType>>::value, int > = 0 >
+    HeaderValType value(const typename object_t::key_type& key, const HeaderValType& default_value) const
     {
         // value only works for objects
         if (JSON_HEDLEY_LIKELY(is_object()))
@@ -22363,7 +22363,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
             const auto it = find(key);
             if (it != end())
             {
-                return it->template get<ValueType>();
+                return it->template get<HeaderValType>();
             }
 
             return default_value;
@@ -22374,12 +22374,12 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
 
     /// @brief access specified object element with default value
     /// @sa https://json.nlohmann.me/api/basic_json/value/
-    template < class ValueType, class ReturnType = typename value_return_type<ValueType>::type,
+    template < class HeaderValType, class ReturnType = typename value_return_type<HeaderValType>::type,
                detail::enable_if_t <
                    !detail::is_transparent<object_comparator_t>::value
                    && detail::is_getable<basic_json_t, ReturnType>::value
-                   && !std::is_same<value_t, detail::uncvref_t<ValueType>>::value, int > = 0 >
-    ReturnType value(const typename object_t::key_type& key, ValueType && default_value) const
+                   && !std::is_same<value_t, detail::uncvref_t<HeaderValType>>::value, int > = 0 >
+    ReturnType value(const typename object_t::key_type& key, HeaderValType && default_value) const
     {
         // value only works for objects
         if (JSON_HEDLEY_LIKELY(is_object()))
@@ -22391,7 +22391,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                 return it->template get<ReturnType>();
             }
 
-            return std::forward<ValueType>(default_value);
+            return std::forward<HeaderValType>(default_value);
         }
 
         JSON_THROW(type_error::create(306, detail::concat("cannot use value() with ", type_name()), this));
@@ -22399,13 +22399,13 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
 
     /// @brief access specified object element with default value
     /// @sa https://json.nlohmann.me/api/basic_json/value/
-    template < class ValueType, class KeyType, detail::enable_if_t <
+    template < class HeaderValType, class KeyType, detail::enable_if_t <
                    detail::is_transparent<object_comparator_t>::value
                    && !detail::is_json_pointer<KeyType>::value
                    && is_comparable_with_object_key<KeyType>::value
-                   && detail::is_getable<basic_json_t, ValueType>::value
-                   && !std::is_same<value_t, detail::uncvref_t<ValueType>>::value, int > = 0 >
-    ValueType value(KeyType && key, const ValueType& default_value) const
+                   && detail::is_getable<basic_json_t, HeaderValType>::value
+                   && !std::is_same<value_t, detail::uncvref_t<HeaderValType>>::value, int > = 0 >
+    HeaderValType value(KeyType && key, const HeaderValType& default_value) const
     {
         // value only works for objects
         if (JSON_HEDLEY_LIKELY(is_object()))
@@ -22414,7 +22414,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
             const auto it = find(std::forward<KeyType>(key));
             if (it != end())
             {
-                return it->template get<ValueType>();
+                return it->template get<HeaderValType>();
             }
 
             return default_value;
@@ -22425,14 +22425,14 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
 
     /// @brief access specified object element via JSON Pointer with default value
     /// @sa https://json.nlohmann.me/api/basic_json/value/
-    template < class ValueType, class KeyType, class ReturnType = typename value_return_type<ValueType>::type,
+    template < class HeaderValType, class KeyType, class ReturnType = typename value_return_type<HeaderValType>::type,
                detail::enable_if_t <
                    detail::is_transparent<object_comparator_t>::value
                    && !detail::is_json_pointer<KeyType>::value
                    && is_comparable_with_object_key<KeyType>::value
                    && detail::is_getable<basic_json_t, ReturnType>::value
-                   && !std::is_same<value_t, detail::uncvref_t<ValueType>>::value, int > = 0 >
-    ReturnType value(KeyType && key, ValueType && default_value) const
+                   && !std::is_same<value_t, detail::uncvref_t<HeaderValType>>::value, int > = 0 >
+    ReturnType value(KeyType && key, HeaderValType && default_value) const
     {
         // value only works for objects
         if (JSON_HEDLEY_LIKELY(is_object()))
@@ -22444,7 +22444,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                 return it->template get<ReturnType>();
             }
 
-            return std::forward<ValueType>(default_value);
+            return std::forward<HeaderValType>(default_value);
         }
 
         JSON_THROW(type_error::create(306, detail::concat("cannot use value() with ", type_name()), this));
@@ -22452,10 +22452,10 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
 
     /// @brief access specified object element via JSON Pointer with default value
     /// @sa https://json.nlohmann.me/api/basic_json/value/
-    template < class ValueType, detail::enable_if_t <
-                   detail::is_getable<basic_json_t, ValueType>::value
-                   && !std::is_same<value_t, detail::uncvref_t<ValueType>>::value, int > = 0 >
-    ValueType value(const json_pointer& ptr, const ValueType& default_value) const
+    template < class HeaderValType, detail::enable_if_t <
+                   detail::is_getable<basic_json_t, HeaderValType>::value
+                   && !std::is_same<value_t, detail::uncvref_t<HeaderValType>>::value, int > = 0 >
+    HeaderValType value(const json_pointer& ptr, const HeaderValType& default_value) const
     {
         // value only works for objects
         if (JSON_HEDLEY_LIKELY(is_object()))
@@ -22464,7 +22464,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
             // 'default_value'.
             JSON_TRY
             {
-                return ptr.get_checked(this).template get<ValueType>();
+                return ptr.get_checked(this).template get<HeaderValType>();
             }
             JSON_INTERNAL_CATCH (out_of_range&)
             {
@@ -22477,11 +22477,11 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
 
     /// @brief access specified object element via JSON Pointer with default value
     /// @sa https://json.nlohmann.me/api/basic_json/value/
-    template < class ValueType, class ReturnType = typename value_return_type<ValueType>::type,
+    template < class HeaderValType, class ReturnType = typename value_return_type<HeaderValType>::type,
                detail::enable_if_t <
                    detail::is_getable<basic_json_t, ReturnType>::value
-                   && !std::is_same<value_t, detail::uncvref_t<ValueType>>::value, int > = 0 >
-    ReturnType value(const json_pointer& ptr, ValueType && default_value) const
+                   && !std::is_same<value_t, detail::uncvref_t<HeaderValType>>::value, int > = 0 >
+    ReturnType value(const json_pointer& ptr, HeaderValType && default_value) const
     {
         // value only works for objects
         if (JSON_HEDLEY_LIKELY(is_object()))
@@ -22494,32 +22494,32 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
             }
             JSON_INTERNAL_CATCH (out_of_range&)
             {
-                return std::forward<ValueType>(default_value);
+                return std::forward<HeaderValType>(default_value);
             }
         }
 
         JSON_THROW(type_error::create(306, detail::concat("cannot use value() with ", type_name()), this));
     }
 
-    template < class ValueType, class BasicJsonType, detail::enable_if_t <
+    template < class HeaderValType, class BasicJsonType, detail::enable_if_t <
                    detail::is_basic_json<BasicJsonType>::value
-                   && detail::is_getable<basic_json_t, ValueType>::value
-                   && !std::is_same<value_t, detail::uncvref_t<ValueType>>::value, int > = 0 >
+                   && detail::is_getable<basic_json_t, HeaderValType>::value
+                   && !std::is_same<value_t, detail::uncvref_t<HeaderValType>>::value, int > = 0 >
     JSON_HEDLEY_DEPRECATED_FOR(3.11.0, basic_json::json_pointer or nlohmann::json_pointer<basic_json::string_t>) // NOLINT(readability/alt_tokens)
-    ValueType value(const ::nlohmann::json_pointer<BasicJsonType>& ptr, const ValueType& default_value) const
+    HeaderValType value(const ::nlohmann::json_pointer<BasicJsonType>& ptr, const HeaderValType& default_value) const
     {
         return value(ptr.convert(), default_value);
     }
 
-    template < class ValueType, class BasicJsonType, class ReturnType = typename value_return_type<ValueType>::type,
+    template < class HeaderValType, class BasicJsonType, class ReturnType = typename value_return_type<HeaderValType>::type,
                detail::enable_if_t <
                    detail::is_basic_json<BasicJsonType>::value
                    && detail::is_getable<basic_json_t, ReturnType>::value
-                   && !std::is_same<value_t, detail::uncvref_t<ValueType>>::value, int > = 0 >
+                   && !std::is_same<value_t, detail::uncvref_t<HeaderValType>>::value, int > = 0 >
     JSON_HEDLEY_DEPRECATED_FOR(3.11.0, basic_json::json_pointer or nlohmann::json_pointer<basic_json::string_t>) // NOLINT(readability/alt_tokens)
-    ReturnType value(const ::nlohmann::json_pointer<BasicJsonType>& ptr, ValueType && default_value) const
+    ReturnType value(const ::nlohmann::json_pointer<BasicJsonType>& ptr, HeaderValType && default_value) const
     {
-        return value(ptr.convert(), std::forward<ValueType>(default_value));
+        return value(ptr.convert(), std::forward<HeaderValType>(default_value));
     }
 
     /// @brief access the first element

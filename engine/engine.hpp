@@ -21,6 +21,7 @@ public:
 private:
     void HandleConnection(WFXSocket client);
     void HandleRequest(WFXSocket socket, ConnectionContext& ctx);
+    void HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx);
 
     Logger& logger_ = Logger::GetInstance();
 

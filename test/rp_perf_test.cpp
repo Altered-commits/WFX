@@ -10,7 +10,7 @@
 #include <cstring>
 
 // Include your RandomPool implementation here
-#include "utils/crypt/hashers.hpp"
+#include "utils/crypt/hash.hpp"
 
 using namespace WFX::Utils;
 

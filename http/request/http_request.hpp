@@ -12,7 +12,7 @@ namespace WFX::Http {
 struct HttpRequest {
     HttpMethod       method;
     HttpVersion      version;
-    HttpHeaders      headers;
+    RequestHeaders   headers;
     std::string_view path;
     std::string_view body;
 };
