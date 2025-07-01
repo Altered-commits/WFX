@@ -27,6 +27,7 @@ enum class PerIoOperationType {
     ARM_RECV,
     RECV,
     SEND,
+    SEND_FILE,
     ACCEPT,
     ACCEPT_DEFERRED
 };
@@ -45,6 +46,13 @@ struct PerIoData : PerIoBase {
 
 struct PerIoContext : PerIoBase {
     char buffer[2 * (sizeof(SOCKADDR_IN) + 16)];
+};
+
+struct PerTransmitFileContext : PerIoBase {
+    // This struct is exactly 128 bytes, which is what i needed for allocPool_ to function properly
+    std::string header;
+    HANDLE fileHandle         = INVALID_HANDLE_VALUE;
+    TRANSMIT_FILE_BUFFERS tfb = { 0 };
 };
 
 /* Just to not be confused:

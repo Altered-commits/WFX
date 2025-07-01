@@ -42,13 +42,14 @@ void Engine::HandleConnection(WFXSocket socket)
 
 void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
 {
-    // These both will be transmitted through all the layers (from here to middleware to user)
-    HttpRequest  req;
+    // This will be transmitted through all the layers (from here to middleware to user)
     HttpResponse res;
+    HttpParseState state = HttpParser::Parse(ctx);
 
-    if(!HttpParser::Parse(ctx, req))
-    {
-        // Respond with 400 Bad Request if parsing failed
+    logger_.Info("Current State of Parser: ", static_cast<std::uint64_t>(state), " on Socket: ", socket, " with Length: ", ctx.dataLength);
+
+    // Respond with 400 Bad Request if parsing failed
+    if(state == HttpParseState::PARSE_ERROR) {
         const char* badResp =
             "HTTP/1.1 400 Bad Request\r\n"
             "Content-Type: text/plain\r\n"
@@ -57,42 +58,49 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
             "\r\n"
             "Bad Request";
 
-        connHandler_->Write(socket, badResp, 105);
+        connHandler_->Write(socket, badResp);
 
-        // You may or may not want to resume receive, depending on keep-alive support
-        connHandler_->Close(socket); // Close since it's a bad request
+        // Mark the connection to be closed after write completes
+        ctx.parseInfo.shouldClose = true;
         return;
     }
 
-    // JSON response
-    Json obj = {
-        {"ip_addr", ctx.connInfo.GetIpStr()},
-        {"ip_type", ctx.connInfo.GetIpType()},
-        {"length", ctx.dataLength},
-        {"size", ctx.bufferSize}
-    };
+    // Need more stuff, resume receive
+    if(
+        state == HttpParseState::PARSE_INCOMPLETE_BODY ||
+        state == HttpParseState::PARSE_INCOMPLETE_HEADERS
+    ) {
+        connHandler_->ResumeReceive(socket);
+        return;
+    }
 
     // Response stage
-    res.version = req.version;
+    res.version = ctx.requestInfo->version;
 
     res.Status(HttpStatus::OK)
         .Set("X-Powered-By", "WFX")
         .Set("Server", "WFX/1.0")
         .Set("Cache-Control", "no-store")
         .Set("Connection", "keep-alive")
-        .SendJson(std::move(obj));
+        .SendFile("test.html");
 
     HandleResponse(socket, res, ctx);
 }
 
 void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx)
 {   
-    std::string writableString = HttpSerializer::Serialize(res);
-    connHandler_->Write(socket, writableString.data(), writableString.size());
+    std::string serializedContent = HttpSerializer::Serialize(res);
     
-    // vvv Cleanup + Resume vvv
+    // File operation via TransmitFile, res.body contains the file path
+    if(res.IsFileOperation())
+        connHandler_->WriteFile(socket, std::move(serializedContent), res.body);
+    // Regular WSASend write (text, JSON, etc)
+    else
+        connHandler_->Write(socket, serializedContent);
+
+    // vvv Cleanup vvv
+    ctx.parseInfo  = { 0 };
     ctx.dataLength = 0;
-    connHandler_->ResumeReceive(socket);
 }
 
 } // namespace WFX

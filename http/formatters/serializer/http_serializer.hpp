@@ -13,7 +13,7 @@ public:
     static std::string Serialize(HttpResponse& res);
 
 private:
-    constexpr static int HEADER_RESERVE_SIZE_HINT = 256;
+    constexpr static int HEADER_RESERVE_SIZE_HINT = 512;
 };
 
 } // namespace WFX::Http

@@ -39,13 +39,15 @@ public:
     IocpConnectionHandler();
     ~IocpConnectionHandler();
 
-    bool Initialize(const std::string& host, int port) override;
+    // Socket functions
     void SetReceiveCallback(WFXSocket socket, ReceiveCallback onData) override;
     void ResumeReceive(WFXSocket socket) override;
-    int  Write(WFXSocket socket, const char* buffer, size_t length) override;
+    int  Write(WFXSocket socket, std::string_view buffer) override;
+    int  WriteFile(WFXSocket socket, std::string&& header, std::string_view path) override;
     void Close(WFXSocket socket) override;
-
-    // Main function
+    
+    // Main functions
+    bool Initialize(const std::string& host, int port) override;
     void Run(AcceptedConnectionCallback) override;
     void Stop() override;
 
@@ -53,6 +55,7 @@ private:
     bool CreateWorkerThreads(unsigned int iocpThreads, unsigned int offloadThreads);
     void WorkerLoop();
     void SafeDeleteIoData(PerIoData* data, bool shouldCleanBuffer = true);
+    void SafeDeleteTransmitFileCtx(PerTransmitFileContext* transmitFileCtx);
     void PostReceive(WFXSocket socket);
     void InternalCleanup();
 
@@ -63,6 +66,14 @@ private: // Helper structs / functions used in unique_ptr deleter
         
         void operator()(PerIoData* data) const {
             handler->SafeDeleteIoData(data, shouldCleanBuffer);
+        }
+    };
+
+    struct PerTransmitFileCtxDeleter {
+        IocpConnectionHandler* handler;
+
+        void operator()(PerTransmitFileContext* data) const {
+            handler->SafeDeleteTransmitFileCtx(data);
         }
     };
 

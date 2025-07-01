@@ -5,8 +5,13 @@ using namespace WFX::Utils;
 template<typename T>
 void HttpResponse::SendText(T&& text)
 {
-    static_assert(std::is_same_v<std::decay_t<T>, std::string>,
-                  "SendText only accepts std::string (copy or move)");
+    using DecayedType = std::decay_t<T>;
+
+    static_assert(
+        std::is_same_v<DecayedType, std::string> ||
+        std::is_convertible_v<DecayedType, std::string_view>,
+        "SendFile only accepts std::string, const char*, string_view-like types"
+    );
 
     auto& logger = Logger::GetInstance();
 
@@ -45,8 +50,13 @@ void HttpResponse::SendJson(T&& json)
 template<typename T>
 void HttpResponse::SendFile(T&& path)
 {
-    static_assert(std::is_same_v<std::decay_t<T>, std::string>,
-                  "SendFile only accepts std::string (copy or move)");
+    using DecayedType = std::decay_t<T>;
+
+    static_assert(
+        std::is_same_v<DecayedType, std::string> ||
+        std::is_convertible_v<DecayedType, std::string_view>,
+        "SendFile only accepts std::string, const char*, string_view-like types"
+    );
     
     auto& logger = Logger::GetInstance();
     auto& fs     = FileSystem::GetFileSystem();

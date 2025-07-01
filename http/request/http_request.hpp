@@ -13,6 +13,7 @@ struct HttpRequest {
     HttpMethod       method;
     HttpVersion      version;
     RequestHeaders   headers;
+    std::size_t      expectedBodyLength;
     std::string_view path;
     std::string_view body;
 };

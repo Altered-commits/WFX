@@ -5,7 +5,7 @@ namespace WFX::Http {
 std::string HttpSerializer::Serialize(HttpResponse& res)
 {
     std::string out;
-    out.reserve(HEADER_RESERVE_SIZE_HINT + res.body.size());
+    out.reserve(HEADER_RESERVE_SIZE_HINT + (res.IsFileOperation() ? 0 : res.body.size()));
 
     // 1. HTTP version and status
     out.append("HTTP/1.");

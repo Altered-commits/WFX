@@ -45,7 +45,7 @@ private:
         TokenBucket bucket;
     };
 
-    static constexpr int MAX_CONNECTIONS = 10;  // Per normalized Ip
+    static constexpr int MAX_CONNECTIONS = 20;  // Per normalized Ip
     static constexpr int MAX_TOKENS = 10;       // Request burst size
     static constexpr int REFILL_RATE = 5;       // Tokens per second
 

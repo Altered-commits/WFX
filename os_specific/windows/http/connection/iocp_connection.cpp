@@ -91,8 +91,11 @@ void IocpConnectionHandler::ResumeReceive(WFXSocket socket)
     PostReceive(socket);
 }
 
-int IocpConnectionHandler::Write(WFXSocket socket, const char* buffer, size_t length)
+int IocpConnectionHandler::Write(WFXSocket socket, std::string_view buffer_)
 {
+    std::size_t length = buffer_.length();
+    const char* buffer = buffer_.data();
+
     void* outBuffer = bufferPool_.Lease(length);
     if(!outBuffer)
         return -1;
@@ -119,6 +122,56 @@ int IocpConnectionHandler::Write(WFXSocket socket, const char* buffer, size_t le
     }
 
     return static_cast<int>(length);
+}
+
+int IocpConnectionHandler::WriteFile(WFXSocket socket, std::string&& header, std::string_view path)
+{
+    void* rawMem = allocPool_.Allocate(sizeof(PerTransmitFileContext));
+    if(!rawMem) return -1;
+
+    // Because its fixed size alloc, we use alloc pool for efficiency
+    PerTransmitFileContext* fileData = new (rawMem) PerTransmitFileContext(); // Placement new for construction
+
+    // Open the file for sending
+    HANDLE file = CreateFileA(
+        path.data(), GENERIC_READ,
+        FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_OVERLAPPED | FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+
+    if(file == INVALID_HANDLE_VALUE) {
+        SafeDeleteTransmitFileCtx(fileData);
+        return -1;
+    }
+
+    // Set all the necessary stuff so we can clean them up later in WorkerThreads
+    fileData->overlapped     = { 0 };
+    fileData->operationType  = PerIoOperationType::SEND_FILE;
+    fileData->socket         = socket;
+    fileData->header         = std::move(header);
+    fileData->fileHandle     = file;
+    fileData->tfb.Head       = fileData->header.data();
+    fileData->tfb.HeadLength = fileData->header.length();
+    fileData->tfb.Tail       = nullptr;
+    fileData->tfb.TailLength = 0;
+
+    BOOL ok = TransmitFile(
+        socket,
+        file,
+        0, 0,
+        &fileData->overlapped,
+        &fileData->tfb,
+        TF_USE_KERNEL_APC
+    );
+
+    if(!ok && WSAGetLastError() != ERROR_IO_PENDING) {
+        SafeDeleteTransmitFileCtx(fileData);
+        return -1;
+    }
+
+    return static_cast<int>(fileData->header.length());
 }
 
 void IocpConnectionHandler::Close(WFXSocket socket)
@@ -187,7 +240,7 @@ void IocpConnectionHandler::PostReceive(WFXSocket socket)
             return;
         }
 
-        ((volatile char*)ctx.buffer)[0] = 0;  // page fault avoidance
+        ((volatile char*)ctx.buffer)[0] = 0;  // Page fault avoidance
         ctx.bufferSize = defaultSize;
         ctx.dataLength = 0;
     }
@@ -198,7 +251,7 @@ void IocpConnectionHandler::PostReceive(WFXSocket socket)
     if(ctx.dataLength >= ctx.bufferSize - 1) {
         // The buffer can no longer grow. Hmmm, lets kill the connection lmao
         if(ctx.bufferSize >= ctx.maxBufferSize) {
-            logger_.Error("[IOCP]: Max limit for connection buffer reached for socket: ", socket);
+            logger_.Error("[IOCP]: Max buffer limit reached for socket: ", socket);
             Close(socket);
             return;
         }
@@ -316,7 +369,7 @@ void IocpConnectionHandler::WorkerLoop()
                         "\r\n";
 
                     // Not going to bother checking for return value. This is just for response
-                    Write(socket, kRateLimitResponse, strlen(kRateLimitResponse));
+                    Write(socket, std::string_view(kRateLimitResponse));
                     ResumeReceive(socket);
                     break;
                 }
@@ -341,7 +394,33 @@ void IocpConnectionHandler::WorkerLoop()
                 std::unique_ptr<PerIoData, PerIoDataDeleter> ioData(
                     static_cast<PerIoData*>(base), PerIoDataDeleter{this}
                 );
-                break; // just cleanup, no callback
+
+                // Close if client wants to, by checking ctx.shouldClose
+                // Also Get is quite fast so no issue calling it in hot path
+                auto* ctx = connections_.Get(ioData->socket);
+                if(ctx && *ctx && (*ctx)->parseInfo.shouldClose)
+                    Close(ioData->socket);
+                else
+                    ResumeReceive(ioData->socket);
+
+                break;
+            }
+
+            case PerIoOperationType::SEND_FILE:
+            {
+                std::unique_ptr<PerTransmitFileContext, PerTransmitFileCtxDeleter> transmitFileCtx(
+                    static_cast<PerTransmitFileContext*>(base), PerTransmitFileCtxDeleter{this}
+                );
+
+                // Close if client wants to, by checking ctx.shouldClose
+                // Also Get is quite fast so no issue calling it in hot path
+                auto* ctx = connections_.Get(transmitFileCtx->socket);
+                if(ctx && *ctx && (*ctx)->parseInfo.shouldClose)
+                    Close(transmitFileCtx->socket);
+                else
+                    ResumeReceive(transmitFileCtx->socket);
+                
+                break;
             }
 
             case PerIoOperationType::ACCEPT:
@@ -372,8 +451,6 @@ void IocpConnectionHandler::WorkerLoop()
                 ConnectionContextPtr connectionContext(
                     new ConnectionContext(), ConnectionContextDeleter{this}
                 );
-
-                connectionContext->socket   = client;
                 connectionContext->connInfo = acceptOp->ipAddr;
 
                 if(!connections_.Emplace(client, std::move(connectionContext)))
@@ -417,13 +494,30 @@ bool IocpConnectionHandler::CreateWorkerThreads(unsigned int iocpThreads, unsign
 void IocpConnectionHandler::SafeDeleteIoData(PerIoData* data, bool shouldCleanBuffer)
 {
     if(!data) return;
+    
     // Buffer is variable, so we used buffer pool.
     if(data->wsaBuf.buf && shouldCleanBuffer) {
         bufferPool_.Release(data->wsaBuf.buf);
         data->wsaBuf.buf = nullptr;
     }
+    
     // PerIoData is fixed, so we used alloc pool
     allocPool_.Free(data, sizeof(PerIoData));
+}
+
+void IocpConnectionHandler::SafeDeleteTransmitFileCtx(PerTransmitFileContext* transmitFileCtx)
+{
+    if(!transmitFileCtx) return;
+    
+    // Close file handle if valid
+    if(transmitFileCtx->fileHandle != INVALID_HANDLE_VALUE)
+        CloseHandle(transmitFileCtx->fileHandle);
+    
+    // Manually call destructor (needed due to placement new)
+    transmitFileCtx->~PerTransmitFileContext();
+
+    // Finally, free za memory
+    allocPool_.Free(transmitFileCtx, sizeof(PerTransmitFileContext));
 }
 
 void IocpConnectionHandler::InternalCleanup()

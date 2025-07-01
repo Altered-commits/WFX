@@ -1,6 +1,8 @@
 #ifndef WFX_HTTP_CONNECTION_HANDLER_HPP
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
+#include "http/request/http_request.hpp"
+
 #include "utils/backport/move_only_function.hpp"
 #include "utils/crypt/hash.hpp"
 
@@ -99,18 +101,24 @@ using WFX::Utils::MoveOnlyFunction;
 
 using ReceiveCallback            = MoveOnlyFunction<void(ConnectionContext&)>;
 using AcceptedConnectionCallback = MoveOnlyFunction<void(WFXSocket)>;
+using HttpRequestPtr             = std::unique_ptr<HttpRequest>;
 
 // Quite important
 struct ConnectionContext {
-    WFXSocket socket = WFX_INVALID_SOCKET;
-
-    char*  buffer        = nullptr;
-    size_t bufferSize    = 0;
-    size_t dataLength    = 0;
-    size_t maxBufferSize = 16 * 1024; // 16KB. Can be set by the user as well
+    char*         buffer        = nullptr;
+    std::uint32_t bufferSize    = 0;
+    std::uint32_t dataLength    = 0;
+    std::uint32_t maxBufferSize = 16 * 1024; // 16KB. Can be set by the user as well. Max 4GB
     
-    ReceiveCallback onReceive;
     WFXIpAddress    connInfo;
+    HttpRequestPtr  requestInfo;
+    ReceiveCallback onReceive;
+
+    struct {
+        std::uint8_t  state       = 0;     // Interpreted by HttpParser as internal state enum
+        bool          shouldClose = false; // Whether we should close connection after HttpResponse
+        std::uint32_t trackBytes  = 0;     // Misc, tracking of bytes wherever necessary
+    } parseInfo;
 };
 
 // Abstraction for Windows and Linux impl
@@ -128,7 +136,10 @@ public:
     virtual void ResumeReceive(WFXSocket socket) = 0;
 
     // Write data to socket (Async)
-    virtual int Write(WFXSocket socket, const char* buffer, size_t length) = 0;
+    virtual int Write(WFXSocket socket, std::string_view buffer) = 0;
+
+    // Write file directly to sockets (Async)
+    virtual int WriteFile(WFXSocket socket, std::string&& header, std::string_view path) = 0;
 
     // Close a client socket
     virtual void Close(WFXSocket socket) = 0;

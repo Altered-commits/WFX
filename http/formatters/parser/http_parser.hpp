@@ -6,6 +6,8 @@
 #include "http/connection/http_connection.hpp"
 #include "http/request/http_request.hpp"
 
+#include "utils/backport/string.hpp"
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,18 +15,29 @@
 
 namespace WFX::Http {
 
+enum class HttpParseState {
+    PARSE_INCOMPLETE_HEADERS, // Header end sequence (\r\n\r\n) not found yet
+    PARSE_INCOMPLETE_BODY,    // Buffering body (Content-Length not fully received)
+    
+    PARSE_STREAMING_BODY,     // [Future] Streaming mode (body being processed in chunks)
+
+    PARSE_SUCCESS,            // Successfully received and parsed all data
+    PARSE_ERROR               // Malformed request
+};
+
 // Being used as a namespace rn, fun
 class HttpParser {
 public:
-    static bool Parse(ConnectionContext& ctx, HttpRequest& outRequest);
+    static HttpParseState Parse(ConnectionContext& ctx);
 
 private: // Parse helpers
     static bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
     static bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestHeaders& outHeaders);
-    static bool ParseBody(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
+    static bool ParseBody(const char* data, std::size_t size, std::size_t& pos, std::size_t contentLen, HttpRequest& outRequest);
 
 private: // Helpers
     static bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from, std::size_t& outNextPos, std::string_view& outLine);
+    static bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos);
     static std::string_view Trim(std::string_view sv);
 
 private: // Limits
