@@ -80,9 +80,8 @@ struct WFXIpAddress {
             : static_cast<const void*>(&ip.v6);
 
         // Convert to printable form
-        if(inet_ntop(ipType, addr, ipStrBuf, sizeof(ipStrBuf))) {
+        if(inet_ntop(ipType, addr, ipStrBuf, sizeof(ipStrBuf)))
             return std::string_view(ipStrBuf);
-        }
 
         return std::string_view("ip-malformed");
     }
@@ -103,7 +102,7 @@ using ReceiveCallback            = MoveOnlyFunction<void(ConnectionContext&)>;
 using AcceptedConnectionCallback = MoveOnlyFunction<void(WFXSocket)>;
 using HttpRequestPtr             = std::unique_ptr<HttpRequest>;
 
-// Quite important
+// Quite important, has to be 64 bytes and IS 64 BYTES, THIS CANNOT CHANGE NOW
 struct ConnectionContext {
     char*         buffer     = nullptr;
     std::uint32_t bufferSize = 0;
@@ -117,8 +116,9 @@ struct ConnectionContext {
     ReceiveCallback onReceive;
 
     // Used by HttpParser mostly
-    std::uint8_t  state        = 0;     // Interpreted by HttpParser as internal state enum
+    std::uint8_t  parseState   = 0;     // Interpreted by HttpParser as internal state enum
     bool          shouldClose  = false; // Whether we should close connection after HttpResponse
+    std::uint16_t timeoutTick  = 0;     // Used to track timeouts for various stuff like 'header' timeout or 'body' timeout
     std::uint32_t trackBytes   = 0;     // Misc, tracking of bytes wherever necessary
 };
 
@@ -165,7 +165,7 @@ namespace std {
         {
             static std::uint8_t sipKey[16];
             
-            // Run only once, lambda returns void
+            // Run only once
             static const struct InitKeyOnce {
                 InitKeyOnce()
                 {

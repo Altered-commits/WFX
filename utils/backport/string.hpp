@@ -24,18 +24,6 @@ inline constexpr bool EndsWith(std::string_view str, std::string_view suffix) no
            str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-inline constexpr bool CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs) noexcept
-{
-    if(lhs.size() != rhs.size())
-        return false;
-
-    for(std::size_t i = 0; i < lhs.size(); ++i)
-        if(ToLowerAscii(lhs[i]) != ToLowerAscii(rhs[i]))
-            return false;
-
-    return true;
-}
-
 // vvv Conversions vvv
 inline std::string UInt64ToStr(uint64_t value, const std::string& fallback = "0") noexcept
 {

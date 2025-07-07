@@ -6,6 +6,7 @@
 #include "accept_ex_manager.hpp"
 #include "third_party/concurrent_queue/blockingconcurrentqueue.h"
 #include "http/connection/http_connection.hpp"
+#include "http/limits/tick_scheduler/tick_scheduler.hpp"
 #include "utils/backport/move_only_function.hpp"
 #include "utils/fixed_pool/fixed_pool.hpp"
 #include "utils/hash_map/concurrent_hash_map.hpp"
@@ -112,6 +113,7 @@ private:
     IpLimiter& limiter_ = IpLimiter::GetInstance();
     Config&    config_  = Config::GetInstance();
 
+    TickScheduler timeoutHandler_;
     BufferPool bufferPool_{1024 * 1024, [](std::size_t curSize){ return curSize * 2; }}; // For variable size allocs
     ConfigurableFixedAllocPool allocPool_{{32, 64, 128}};                                // For fixed size small allocs
     BlockingConcurrentQueue<std::function<void(void)>> offloadCallbacks_;

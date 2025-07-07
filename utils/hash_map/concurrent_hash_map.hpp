@@ -10,6 +10,7 @@ class ConcurrentHashMap {
     using Shard = HashShard<K, V>;
 
     static_assert((SHARD_COUNT & (SHARD_COUNT - 1)) == 0, "SHARD_COUNT must be a power of 2");
+    static_assert((BUCKET_COUNT & (BUCKET_COUNT - 1)) == 0, "BUCKET_COUNT must be a power of 2");
 
 public:
     explicit ConcurrentHashMap(std::size_t poolSize = 512 * 1024)
@@ -102,6 +103,17 @@ public:
             return fn(*val);
 
         return false;
+    }
+
+    // Looping
+    template<typename Fn>
+    void ForEachEraseIf(Fn&& cb)
+    {
+        for(const auto& shard : shards_) {
+            if(!shard) continue;
+            shard->UniqueLock();
+            shard->ForEachEraseIf(std::forward<Fn>(cb));
+        }
     }
 
 private:

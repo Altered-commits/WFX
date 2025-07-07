@@ -20,11 +20,6 @@ using Json = nlohmann::json;
 
 namespace WFX::Http {
 
-/*
- * NOTE: ConstHeaderValRef is defined in http_headers.hpp as const std::string&
- *       HeaderValType is defined in http_headers.hpp as std::string
- */
-
 struct HttpResponse {
     HttpVersion     version = HttpVersion::HTTP_1_1;
     HttpStatus      status  = HttpStatus::OK;

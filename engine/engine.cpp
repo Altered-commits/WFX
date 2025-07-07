@@ -114,6 +114,12 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
         case HttpParseState::PARSE_STREAMING_BODY:
         default:
             logger_.Info("[Engine]: No Impl");
+            res.Status(HttpStatus::NOT_IMPLEMENTED)
+                .Set("Connection", "close")
+                .SendText("Not Implemented");
+            
+            ctx.shouldClose = true;
+            HandleResponse(socket, res, ctx);
             break;
     }
 }
@@ -131,7 +137,7 @@ void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionConte
 
     // vvv Cleanup vvv
     ctx.shouldClose = 0;
-    ctx.state       = 0;
+    ctx.parseState  = 0;
     ctx.trackBytes  = 0;
     ctx.dataLength  = 0;
     ctx.expectedBodyLength = 0;

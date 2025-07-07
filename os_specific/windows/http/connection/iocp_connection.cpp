@@ -9,10 +9,10 @@ IocpConnectionHandler::IocpConnectionHandler()
 {
     WSADATA wsaData;
     if(WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
-        logger_.Fatal("WSAStartup failed");
+        logger_.Fatal("[IOCP]: WSAStartup failed");
 
     if(LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2)
-        logger_.Fatal("Incorrect Winsock version");
+        logger_.Fatal("[IOCP]: Incorrect Winsock version");
 
     allocPool_.PreWarmAll(8);
 }
@@ -45,10 +45,10 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
 
     // Bind and Listen on the host:port combo provided
     if(bind(listenSocket_, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR)
-        return logger_.Error("[IOCP]: bind failed"), false;
+        return logger_.Error("[IOCP]: Bind failed"), false;
 
     if(listen(listenSocket_, SOMAXCONN) == SOCKET_ERROR)
-        return logger_.Error("[IOCP]: listen failed"), false;
+        return logger_.Error("[IOCP]: Listen failed"), false;
 
     // We using IOCP for async connection handling
     iocp_ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
@@ -56,7 +56,9 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
         return logger_.Error("[IOCP]: CreateIoCompletionPort failed"), false;
 
     if(!CreateIoCompletionPort((HANDLE)listenSocket_, iocp_, (ULONG_PTR)listenSocket_, 0))
-        return logger_.Error("[IOCP]: IOCP association failed"), false;
+        return logger_.Error("[IOCP]: Association failed"), false;
+
+    // All the networking stuff has been initialized, time to initialize the timeout handler now
 
     return true;
 }

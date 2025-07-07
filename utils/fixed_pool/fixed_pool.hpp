@@ -1,6 +1,8 @@
 #ifndef WFX_UTILS_CONFIGURABLE_FIXED_ALLOCATOR_SET_HPP
 #define WFX_UTILS_CONFIGURABLE_FIXED_ALLOCATOR_SET_HPP
 
+#include "utils/math/math.hpp"
+
 #include <vector>
 #include <atomic>
 #include <mutex>
@@ -63,9 +65,6 @@ public:
 
 private:
     FixedAllocPool* FindAllocator(std::size_t size) const;
-    static bool     IsPowerOfTwo(std::size_t x);
-    static int      Log2(std::size_t x);
-    static int      Log2RoundUp(std::size_t x);
 
 private:
     std::vector<FixedAllocPool*> allocators_;

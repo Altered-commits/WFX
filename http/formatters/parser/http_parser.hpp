@@ -9,6 +9,7 @@
 #include "http/request/http_request.hpp"
 
 #include "utils/backport/string.hpp"
+#include "utils/crypt/string.hpp"
 
 #include <memory>
 #include <string>

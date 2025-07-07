@@ -12,6 +12,13 @@ std::uint8_t ToLowerAscii(std::uint8_t c);
 bool CTStringCompare(std::string_view lhs, std::string_view rhs);
 bool CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs);
 
+// Case insensitive comparision
+bool CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs);
+
+// URI path normalization
+/* NOTE: 'path' buffer must be a valid writable buffer */
+bool NormalizeURIPathInplace(std::string_view& path);
+
 } // namespace WFX::Utils
 
 

@@ -15,7 +15,7 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
     std::uint32_t maxBodySize   = Config::GetInstance().networkConfig.maxBodyTotalSize;
 
     // Ctx variabled
-    std::uint8_t&  state      = ctx.state;
+    std::uint8_t&  state      = ctx.parseState;
     std::uint32_t& trackBytes = ctx.trackBytes;
     const char*    data       = ctx.buffer;
     std::size_t    size       = ctx.dataLength;
@@ -158,7 +158,7 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
             if(!ParseBody(data, size, pos, ctx.expectedBodyLength, request))
                 return HttpParseState::PARSE_ERROR;
 
-            ctx.state = static_cast<std::uint8_t>(HttpParseState::PARSE_SUCCESS);
+            state = static_cast<std::uint8_t>(HttpParseState::PARSE_SUCCESS);
             return HttpParseState::PARSE_SUCCESS;
         }
         
@@ -195,10 +195,14 @@ bool HttpParser::ParseRequest(const char* data, std::size_t size, std::size_t& p
 
     std::size_t pathStart = mEnd + 1;
     std::size_t pathEnd   = line.find(' ', pathStart);
-    if(pathEnd == std::string_view::npos)
+    if(pathEnd == std::string_view::npos || pathEnd == pathStart)
         return false;
 
     outRequest.path = std::string_view(data + pathStart, pathEnd - pathStart);
+
+    // Normalize the path, reject if its malformed
+    if(!NormalizeURIPathInplace(outRequest.path))
+        return false;
 
     std::string_view versionStr = line.substr(pathEnd + 1);
     outRequest.version = HttpVersionToEnum(versionStr);

@@ -2,17 +2,15 @@
 #define WFX_UTILS_HASH_SHARD_HPP
 
 #include "utils/buffer_pool/buffer_pool.hpp"
+#include "utils/math/math.hpp"
 
 #include <atomic>
 #include <shared_mutex>
-#include <functional>
 #include <cstdint>
 #include <cstring>
-#include <array>
 #include <cassert>
-#include <vector>
+#include <array>
 #include <memory>
-#include <immintrin.h>
 
 namespace WFX::Utils {
 
@@ -48,11 +46,16 @@ public:
 
     void Init(std::size_t cap);
     
+    // Operations
     bool Emplace(const K& key, V&& value);
     bool Insert(const K& key, const V& value);
     V*   Get(const K& key) const;
     bool Erase(const K& key);
     V*   GetOrInsert(const K& key, const V& defaultValue = V{});
+
+    // Looping
+    template<typename Fn>
+    void ForEachEraseIf(Fn&& cb);
 
     std::unique_lock<std::shared_mutex> UniqueLock() const;
     std::shared_lock<std::shared_mutex> SharedLock() const;
@@ -61,6 +64,7 @@ public:
 private:
     inline bool KeysEqual(const K& a, const K& b) const;
     void Resize(std::size_t newCapacity = 0);
+    bool BackwardShiftErase(std::size_t pos);
 };
 
 } // namespace WFX::Utils

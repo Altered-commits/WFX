@@ -96,11 +96,11 @@ ConfigurableFixedAllocPool::ConfigurableFixedAllocPool(std::initializer_list<std
     std::size_t index = 0;
 
     for(std::size_t s : allowedSizes) {
-        assert(IsPowerOfTwo(s));
+        assert(Math::IsPowerOfTwo(s));
     
         allocators_.push_back(new FixedAllocPool(s));
     
-        int l2 = Log2(s);
+        int l2 = Math::Log2(s);
         if(l2 < minLog2_) minLog2_ = l2;
         if(l2 > maxLog2_) maxLog2_ = l2;
     
@@ -111,7 +111,7 @@ ConfigurableFixedAllocPool::ConfigurableFixedAllocPool(std::initializer_list<std
     index = 0;
 
     for(std::size_t s : allowedSizes) {
-        int l2 = Log2(s);
+        int l2 = Math::Log2(s);
         log2ToIndex_[l2 - minLog2_] = static_cast<int8_t>(index++);
     }
 }
@@ -145,38 +145,12 @@ void ConfigurableFixedAllocPool::Free(void* ptr, std::size_t size)
 
 FixedAllocPool* ConfigurableFixedAllocPool::FindAllocator(std::size_t size) const
 {
-    int log2val = Log2RoundUp(size);
+    int log2val = Math::Log2RoundUp(size);
     if(log2val < minLog2_ || log2val > maxLog2_) return nullptr;
     
     int idx = log2ToIndex_[log2val - minLog2_];
     
     return idx >= 0 ? allocators_[idx] : nullptr;
-}
-
-bool ConfigurableFixedAllocPool::IsPowerOfTwo(std::size_t x)
-{
-    return x && !(x & (x - 1));
-}
-
-int ConfigurableFixedAllocPool::Log2(std::size_t x)
-{
-#if defined(_MSC_VER)
-    unsigned long index;
-    _BitScanReverse(&index, static_cast<unsigned long>(x));
-    return static_cast<int>(index);
-#elif defined(__GNUC__)
-    return 63 - __builtin_clzl(x);
-#else
-    int r = 0;
-    while(x >>= 1) ++r;
-    return r;
-#endif
-}
-
-int ConfigurableFixedAllocPool::Log2RoundUp(std::size_t x)
-{
-    if(IsPowerOfTwo(x)) return Log2(x);
-    return Log2(x) + 1;
 }
 
 } // namespace WFX::Utils
