@@ -20,18 +20,6 @@ namespace WFX::Http {
 
 using namespace WFX::Core; // For 'Config'
 
-enum class HttpParseState {
-    PARSE_INCOMPLETE_HEADERS, // Header end sequence (\r\n\r\n) not found yet
-    PARSE_INCOMPLETE_BODY,    // Buffering body (Content-Length not fully received)
-    
-    PARSE_STREAMING_BODY,     // [Future] Streaming mode (body being processed in chunks)
-
-    PARSE_EXPECT_100,         // It was a Expect: 100-continue header, accept it
-    PARSE_EXPECT_417,         // It was a Expect: 100-continue header, REJECT IT
-    PARSE_SUCCESS,            // Successfully received and parsed all data
-    PARSE_ERROR               // Malformed request
-};
-
 // Being used as a namespace rn, fun
 class HttpParser {
 public:

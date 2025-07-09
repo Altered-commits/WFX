@@ -45,7 +45,10 @@ public:
     void ResumeReceive(WFXSocket socket) override;
     int  Write(WFXSocket socket, std::string_view buffer) override;
     int  WriteFile(WFXSocket socket, std::string&& header, std::string_view path) override;
-    void Close(WFXSocket socket) override;
+    void Close(WFXSocket socket, bool shouldEraseContext = true) override;
+
+    // Getter function
+    TickScheduler::TickType GetCurrentTick() override;
     
     // Main functions
     bool Initialize(const std::string& host, int port) override;

@@ -102,6 +102,25 @@ using ReceiveCallback            = MoveOnlyFunction<void(ConnectionContext&)>;
 using AcceptedConnectionCallback = MoveOnlyFunction<void(WFXSocket)>;
 using HttpRequestPtr             = std::unique_ptr<HttpRequest>;
 
+// Honestly, while it would've been easier to include tick_scheduler.hpp for TickScheduler::TickType
+// Eh, idk cluttering this file just for a type, i'm just going to redefine it here for no absolute reason
+using HttpTickType = std::uint16_t;
+
+// Might be weird to define it here but its important, these states are further used in-
+// -both connection backend and parser so yeah
+enum class HttpParseState : std::uint8_t {
+    PARSE_INCOMPLETE_HEADERS, // Header end sequence (\r\n\r\n) not found yet
+    PARSE_INCOMPLETE_BODY,    // Buffering body (Content-Length not fully received)
+    
+    PARSE_STREAMING_BODY,     // [Future] Streaming mode (body being processed in chunks)
+    
+    PARSE_EXPECT_100,         // It was a Expect: 100-continue header, accept it
+    PARSE_EXPECT_417,         // It was a Expect: 100-continue header, REJECT IT
+    PARSE_SUCCESS,            // Successfully received and parsed all data
+    PARSE_ERROR,              // Malformed request
+    PARSE_IDLE                // After Request-Response cycle, waiting for another request
+};
+
 // Quite important, has to be 64 bytes and IS 64 BYTES, THIS CANNOT CHANGE NOW
 struct ConnectionContext {
     char*         buffer     = nullptr;
@@ -143,10 +162,13 @@ public:
     virtual int WriteFile(WFXSocket socket, std::string&& header, std::string_view path) = 0;
 
     // Close a client socket
-    virtual void Close(WFXSocket socket) = 0;
+    virtual void Close(WFXSocket socket, bool reserved = true) = 0;
 
     // Run the main connection loop (can be used by dev/serve mode)
     virtual void Run(AcceptedConnectionCallback) = 0;
+
+    // Get the current tick. Each of the connection backend will implement TickScheduler
+    virtual HttpTickType GetCurrentTick() = 0;
 
     // Shutdown the main connection loop, cleanup everything
     virtual void Stop() = 0;

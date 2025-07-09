@@ -59,6 +59,42 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
         return logger_.Error("[IOCP]: Association failed"), false;
 
     // All the networking stuff has been initialized, time to initialize the timeout handler now
+    timeoutHandler_.Start([this](TickScheduler::TickType currentTick) -> void {
+        connections_.ForEachEraseIf([this](WFXSocket socket, ConnectionContextPtr& value) -> bool {
+            std::uint16_t timeoutTicks = 0;
+
+            switch(value->parseState)
+            {
+                case static_cast<std::uint8_t>(WFX::Http::HttpParseState::PARSE_INCOMPLETE_HEADERS):
+                    timeoutTicks = config_.networkConfig.headerTimeout;
+                    break;
+
+                case static_cast<std::uint8_t>(WFX::Http::HttpParseState::PARSE_INCOMPLETE_BODY):
+                    timeoutTicks = config_.networkConfig.bodyTimeout;
+                    break;
+
+                case static_cast<std::uint8_t>(WFX::Http::HttpParseState::PARSE_IDLE):
+                    timeoutTicks = config_.networkConfig.idleTimeout;
+                    break;
+
+                default:
+                    return false;  // Skip all other states
+            }
+
+            bool shouldExpire = timeoutHandler_.IsExpired(
+                                    timeoutHandler_.GetCurrentTick(), value->timeoutTick, timeoutTicks
+                                );
+
+            // Debugging
+            if(shouldExpire) {
+                // Close the connection and let it get erased automatically
+                Close(socket);
+                logger_.Info("[IOCP-Debugging]: Timeout expired the following connection: ", value->connInfo.GetIpStr(), ':', socket);
+            }
+
+            return shouldExpire;
+        });
+    });
 
     return true;
 }
@@ -80,7 +116,7 @@ void IocpConnectionHandler::SetReceiveCallback(WFXSocket socket, ReceiveCallback
     // Store the callback for this connection
     (*ctx)->onReceive = std::move(callback);
     
-    // Hand off PostReceive to IOCP thread. sizeof(PostRecvOp) rounded to 64 bytes
+    // Hand off PostReceive to IOCP thread.
     if(!PostQueuedCompletionStatus(iocp_, 0, static_cast<ULONG_PTR>(socket), &(ARM_RECV_OP.overlapped))) {
         logger_.Error("[IOCP]: Failed to queue PostReceive for socket: ", socket);
         Close(socket);
@@ -177,11 +213,14 @@ int IocpConnectionHandler::WriteFile(WFXSocket socket, std::string&& header, std
     return static_cast<int>(fileData->header.length());
 }
 
-void IocpConnectionHandler::Close(WFXSocket socket)
+void IocpConnectionHandler::Close(WFXSocket socket, bool shouldEraseSocket)
 {
     CancelIoEx((HANDLE)socket, NULL);
     shutdown(socket, SD_BOTH);
     closesocket(socket);
+
+    if(!shouldEraseSocket)
+        return;
 
     if(!connections_.Erase(socket))
         logger_.Warn("[IOCP]: Failed to erase Connection Context for socket: ", socket);
@@ -533,8 +572,16 @@ void IocpConnectionHandler::SafeDeleteTransmitFileCtx(PerTransmitFileContext* tr
     allocPool_.Free(transmitFileCtx, sizeof(PerTransmitFileContext));
 }
 
+TickScheduler::TickType IocpConnectionHandler::GetCurrentTick()
+{
+    return timeoutHandler_.GetCurrentTick();
+}
+
 void IocpConnectionHandler::InternalCleanup()
 {
+    // Close all of our threads
+    timeoutHandler_.Stop();
+
     for(auto& t : workerThreads_)
         if(t.joinable()) t.join();
     workerThreads_.clear();
@@ -543,8 +590,10 @@ void IocpConnectionHandler::InternalCleanup()
         if(t.joinable()) t.join();
     offloadThreads_.clear();
 
+    // Kill our AcceptExManager
     acceptManager_.DeInitialize();
 
+    // Cleanup entire Windows socket system
     if(listenSocket_ != WFX_INVALID_SOCKET) {
         closesocket(listenSocket_);
         listenSocket_ = WFX_INVALID_SOCKET;

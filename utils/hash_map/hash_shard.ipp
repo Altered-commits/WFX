@@ -110,6 +110,8 @@ bool HashShard<K, V>::BackwardShiftErase(std::size_t pos)
     }
 
     // Explicitly destroy final slot's value and key by constructing a new value lmao
+    entries_[j].key          = K{};
+    entries_[j].value        = V{};
     entries_[j].occupied     = false;
     entries_[j].probe_length = 0;
 
@@ -319,7 +321,7 @@ void HashShard<K, V>::ForEachEraseIf(Fn&& cb)
 
         // Right now i'm doing a naive erase, in future this can be changed
         // Hopefully this gets changed lmao
-        if(cb(entry.value)) {
+        if(cb(entry.key, entry.value)) {
             shouldShrink = BackwardShiftErase(i);
             continue;
         }

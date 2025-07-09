@@ -30,12 +30,12 @@ void TickScheduler::Stop()
     if(worker_.joinable()) worker_.join();
 }
 
-constexpr TickScheduler::TickType TickScheduler::GetCurrentTick() const
+TickScheduler::TickType TickScheduler::GetCurrentTick() const
 {
     return tick_.load(std::memory_order_relaxed);
 }
 
-constexpr bool TickScheduler::IsExpired(TickType now, TickType then, TickType timeout) const
+bool TickScheduler::IsExpired(TickType now, TickType then, TickType timeout) const
 {
     return static_cast<TickType>(now - then) >= timeout;
 }

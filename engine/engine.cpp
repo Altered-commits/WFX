@@ -36,8 +36,7 @@ void Engine::Stop()
 void Engine::HandleConnection(WFXSocket socket)
 {
     connHandler_->SetReceiveCallback(socket, [this, socket](ConnectionContext& ctx) {
-        logger_.Info("Connected IP Address: ", ctx.connInfo.GetIpStr(),
-            " of type: ", ctx.connInfo.GetIpType());
+        logger_.Info("Request on IP: ", ctx.connInfo.GetIpStr(), ':', socket);
 
         this->HandleRequest(socket, ctx);
     });
@@ -71,6 +70,8 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
         case HttpParseState::PARSE_INCOMPLETE_BODY:
         {
+            // Set the current tick to ensure timeout handler doesnt kill the context
+            ctx.timeoutTick = connHandler_->GetCurrentTick();
             connHandler_->ResumeReceive(socket);
             return;
         }
@@ -78,7 +79,9 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
         case HttpParseState::PARSE_EXPECT_100:
         {
             // We want to wait for the request so we won't be closing connection
+            // also update timeoutTick so timeout handler doesnt kill the context
             ctx.shouldClose = false;
+            ctx.timeoutTick = connHandler_->GetCurrentTick();
             connHandler_->Write(socket, "HTTP/1.1 100 Continue\r\n\r\n");
             return;
         }
@@ -98,8 +101,13 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
 
             if(ctx.shouldClose)
                 res.Set("Connection", "close");
-            else
+            else {
                 res.Set("Connection", "keep-alive");
+                // Because we want the connection to be alive, switch the state to being idle
+                // Also the timeoutTick, DO NOT FORGET
+                ctx.parseState  = static_cast<std::uint8_t>(HttpParseState::PARSE_IDLE);
+                ctx.timeoutTick = connHandler_->GetCurrentTick();
+            }
 
             res.Status(HttpStatus::OK)
                 .Set("X-Powered-By", "WFX")
@@ -137,7 +145,6 @@ void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionConte
 
     // vvv Cleanup vvv
     ctx.shouldClose = 0;
-    ctx.parseState  = 0;
     ctx.trackBytes  = 0;
     ctx.dataLength  = 0;
     ctx.expectedBodyLength = 0;

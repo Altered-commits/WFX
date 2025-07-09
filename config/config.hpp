@@ -16,6 +16,10 @@ struct NetworkConfig {
     std::uint32_t maxRecvBufferSize  = 16 * 1024;
     std::uint32_t bufferIncrSize     = 4 * 1024;
 
+    std::uint16_t headerTimeout = 15;
+    std::uint16_t bodyTimeout   = 20;
+    std::uint16_t idleTimeout   = 60;
+
     std::uint16_t headerReserveHintSize = 512;
     std::uint32_t maxHeaderTotalSize    = 8 * 1024;
     std::uint32_t maxHeaderTotalCount   = 64;

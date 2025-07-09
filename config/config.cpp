@@ -49,6 +49,9 @@ void Config::LoadFromFile(const std::string_view& path)
         TOML_GET(tbl, logger_, "Network", "max_header_size",             networkConfig.maxHeaderTotalSize);
         TOML_GET(tbl, logger_, "Network", "max_header_count",            networkConfig.maxHeaderTotalCount);
         TOML_GET(tbl, logger_, "Network", "max_body_size",               networkConfig.maxBodyTotalSize);
+        TOML_GET(tbl, logger_, "Network", "header_timeout",              networkConfig.headerTimeout);
+        TOML_GET(tbl, logger_, "Network", "body_timeout",                networkConfig.bodyTimeout);
+        TOML_GET(tbl, logger_, "Network", "idle_timeout",                networkConfig.idleTimeout);
         TOML_GET(tbl, logger_, "Network", "max_connections",             networkConfig.maxConnections);
         TOML_GET(tbl, logger_, "Network", "max_connections_per_ip",      networkConfig.maxConnectionsPerIp);
         TOML_GET(tbl, logger_, "Network", "max_request_burst_per_ip",    networkConfig.maxRequestBurstSize);

@@ -14,7 +14,7 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
     std::uint32_t maxBufferSize = Config::GetInstance().networkConfig.maxRecvBufferSize;
     std::uint32_t maxBodySize   = Config::GetInstance().networkConfig.maxBodyTotalSize;
 
-    // Ctx variabled
+    // Connection Context variables
     std::uint8_t&  state      = ctx.parseState;
     std::uint32_t& trackBytes = ctx.trackBytes;
     const char*    data       = ctx.buffer;
@@ -29,10 +29,16 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
     // Our very cool State Machine handling different states of parser
     switch(static_cast<HttpParseState>(state))
     {
+        // In the case of it being idle, and some data arrives, we can safely fallthrough
+        // As this only gets called if any data exists or arrives
+        case HttpParseState::PARSE_IDLE:
+            state = static_cast<std::uint8_t>(HttpParseState::PARSE_INCOMPLETE_HEADERS);
+            [[fallthrough]];
+
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
         {
             std::size_t headerEnd = 0;
-            // Even if we werent able to fin header end, update trackBytes so we don't start reading-
+            // Even if we werent able to find header end, update trackBytes so we don't start reading-
             // -from beginning everytime.
             if(!SafeFindHeaderEnd(data, size, trackBytes, headerEnd)) {
                 trackBytes = size;

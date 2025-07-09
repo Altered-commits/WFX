@@ -2,6 +2,7 @@
 #define WFX_HTTP_TIMEOUT_LIMITER_HPP
 
 #include "utils/hash_map/concurrent_hash_map.hpp"
+#include "utils/backport/move_only_function.hpp"
 
 #include <cstdint>
 #include <thread>
@@ -22,8 +23,8 @@ public:
     void Start(MoveOnlyFunction<void(TickType)> fn);
     void Stop();
     
-    constexpr TickType GetCurrentTick() const;
-    constexpr bool IsExpired(TickType now, TickType then, TickType timeout) const;
+    TickType GetCurrentTick() const;
+    bool     IsExpired(TickType now, TickType then, TickType timeout) const;
 
 private:
     void Run();
