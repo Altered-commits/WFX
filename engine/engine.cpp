@@ -36,7 +36,7 @@ void Engine::Stop()
 void Engine::HandleConnection(WFXSocket socket)
 {
     connHandler_->SetReceiveCallback(socket, [this, socket](ConnectionContext& ctx) {
-        logger_.Info("Request on IP: ", ctx.connInfo.GetIpStr(), ':', socket);
+        logger_.Info("[Engine]: Request on IP: ", ctx.connInfo.GetIpStr(), ':', socket);
 
         this->HandleRequest(socket, ctx);
     });

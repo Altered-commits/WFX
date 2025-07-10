@@ -85,11 +85,10 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
                                     timeoutHandler_.GetCurrentTick(), value->timeoutTick, timeoutTicks
                                 );
 
-            // Debugging
             if(shouldExpire) {
                 // Close the connection and let it get erased automatically
-                Close(socket);
-                logger_.Info("[IOCP-Debugging]: Timeout expired the following connection: ", value->connInfo.GetIpStr(), ':', socket);
+                Close(socket, false);
+                logger_.Info("[IOCP]: Timeout expired the following connection: ", value->connInfo.GetIpStr(), ':', socket);
             }
 
             return shouldExpire;
