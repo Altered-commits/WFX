@@ -1,17 +1,16 @@
 #ifndef WFX_HTTP_ROUTE_SEGMENT_HPP
 #define WFX_HTTP_ROUTE_SEGMENT_HPP
 
-#include <cstdint>
-#include <string>
-#include <variant>
-
+#include "route_common.hpp"
+#include "http/request/http_request.hpp"
+#include "http/response/http_response.hpp"
+#include "utils/backport/move_only_function.hpp"
 #include "utils/uuid/uuid.hpp"
 
-// Forward declaration to avoid circular inclusion
-struct TrieNode;
+#include <memory>
 
-using DynamicSegment         = std::variant<std::uint64_t, std::int64_t, std::string_view, WFX::Utils::UUID>;
-using StaticOrDynamicSegment = std::variant<std::string_view, DynamicSegment>;
+// Used throughout the entire program, hopefully
+using HttpCallbackType = WFX::Utils::MoveOnlyFunction<void(WFX::Http::HttpRequest&, WFX::Http::HttpResponse&)>;
 
 namespace WFX::Http {
 
@@ -23,12 +22,31 @@ enum class ParamType : std::uint8_t {
     UNKNOWN
 };
 
+// Forward declare so TrieNode doesn't cry
+struct RouteSegment;
+
+struct TrieNode {
+    // Child segments
+    std::vector<RouteSegment> children;
+
+    // Callback for GET or POST methods
+    HttpCallbackType callback;
+};
+
 struct RouteSegment {
     StaticOrDynamicSegment routeValue;
-    TrieNode* child = nullptr;
+    std::unique_ptr<TrieNode> child = nullptr;
 
-    RouteSegment(std::string_view key, TrieNode* c);
-    RouteSegment(DynamicSegment p, TrieNode* c);
+    RouteSegment(std::string_view key, std::unique_ptr<TrieNode> c);
+    RouteSegment(DynamicSegment p, std::unique_ptr<TrieNode> c);
+
+    // Delete copy constructor and assignment operator
+    RouteSegment(const RouteSegment&) = delete;
+    RouteSegment& operator=(const RouteSegment&) = delete;
+
+    // Allow move constructor and move assignment
+    RouteSegment(RouteSegment&&) noexcept = default;
+    RouteSegment& operator=(RouteSegment&&) noexcept = default;
 
     // vvv Type Checks vvv
     bool IsStatic() const;
@@ -37,6 +55,7 @@ struct RouteSegment {
     // vvv Accessors vvv
     const std::string_view* GetStaticKey() const;
     const DynamicSegment*   GetParam()     const;
+          TrieNode*         GetChild()     const;
 
     // vvv Utilities vvv
     bool             MatchesStatic(std::string_view candidate) const;

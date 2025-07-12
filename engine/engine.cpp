@@ -11,6 +11,23 @@ Engine::Engine()
 {
     // Load stuff from wfx.toml if it exists, else we use default configuration
     config_.LoadFromFile("wfx.toml");
+
+    // Dummy register routes so we know stuffs working
+    router_.RegisterRoute(HttpMethod::GET, "/", [](HttpRequest& req, HttpResponse& res) {
+        res.Status(HttpStatus::OK)
+            .Set("X-Powered-By", "WFX")
+            .Set("Server", "WFX/1.0")
+            .Set("Cache-Control", "no-store")
+            .SendText("Hello from WFX!!!!");
+    });
+    
+    router_.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>/<index:uint>/<id:uuid>", [this](HttpRequest& req, HttpResponse& res) {
+        res.Status(HttpStatus::OK)
+            .Set("X-Powered-By", "WFX")
+            .Set("Server", "WFX/1.0")
+            .Set("Cache-Control", "no-store")
+            .SendFile("test.html");
+    });
 }
 
 void Engine::Listen(const std::string& host, int port)
@@ -109,11 +126,14 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                 ctx.timeoutTick = connHandler_->GetCurrentTick();
             }
 
-            res.Status(HttpStatus::OK)
-                .Set("X-Powered-By", "WFX")
-                .Set("Server", "WFX/1.0")
-                .Set("Cache-Control", "no-store")
-                .SendFile("test.html");
+            const HttpCallbackType* callback = 
+                router_.MatchRoute(ctx.requestInfo->method, ctx.requestInfo->path, ctx.requestInfo->pathSegments);
+
+            if(callback)
+                (*callback)(*ctx.requestInfo, res);
+            else
+                res.Status(HttpStatus::NOT_FOUND)
+                    .SendText("Route not found");
 
             HandleResponse(socket, res, ctx);
             break;

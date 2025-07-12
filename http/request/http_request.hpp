@@ -3,6 +3,7 @@
 
 #include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
+#include "http/routing/route_common.hpp"
 
 #include <string>
 
@@ -13,6 +14,7 @@ struct HttpRequest {
     HttpMethod       method;
     HttpVersion      version;
     RequestHeaders   headers;
+    PathSegments     pathSegments;
     std::string_view path;
     std::string_view body;
 };

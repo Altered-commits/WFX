@@ -15,7 +15,7 @@ std::string HttpSerializer::Serialize(HttpResponse& res)
     out.push_back(res.version == HttpVersion::HTTP_1_1 ? '1' : '0');
     out.append(" ");
 
-    uint8_t code = static_cast<uint8_t>(res.status);
+    std::uint16_t code = static_cast<std::uint16_t>(res.status);
     
     // Codes are 3 digits, so we can just push_back 3 times the 3 digits lmao
     // This is actually faster than doing snprintf or std::to_string

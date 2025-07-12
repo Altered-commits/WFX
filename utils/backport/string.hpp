@@ -63,6 +63,41 @@ inline constexpr bool StrToUInt64(std::string_view str, std::uint64_t& out) noex
     return true;
 }
 
+inline constexpr bool StrToInt64(std::string_view str, std::int64_t& out) noexcept
+{
+    if(str.empty())
+        return false;
+
+    std::size_t i = 0;
+    bool negative = (str[0] == '-');
+    
+    if(negative) {
+        if(str.size() == 1) return false; // Just "-"
+        i = 1;
+    }
+
+    constexpr std::uint64_t kMaxDiv10 = static_cast<std::uint64_t>(INT64_MAX) / 10;
+    constexpr std::uint64_t kMaxMod10 = static_cast<std::uint64_t>(INT64_MAX) % 10;
+
+    std::uint64_t result = 0;
+    for(; i < str.size(); ++i) {
+        char c = str[i];
+        if (c < '0' || c > '9')
+            return false;
+
+        std::uint64_t digit = static_cast<std::uint64_t>(c - '0');
+
+        if(result > kMaxDiv10 || (result == kMaxDiv10 && digit > (kMaxMod10 + static_cast<std::uint64_t>(negative))))
+            return false;
+
+        result = result * 10 + digit;
+    }
+
+    out = negative ? -static_cast<std::int64_t>(result) : static_cast<std::int64_t>(result);
+
+    return true;
+}
+
 inline constexpr std::uint8_t UInt8FromHexChar(std::uint8_t uc) noexcept
 {
     // Convert ASCII '0'-'9', 'a'-'f', 'A'-'F' to 0-15. Invalid chars return 0xFF

@@ -6,13 +6,14 @@
 #include "http/connection/http_connection_factory.hpp"
 #include "http/formatters/parser/http_parser.hpp"
 #include "http/formatters/serializer/http_serializer.hpp"
+#include "http/routing/router.hpp"
 
 #include <string>
 
 namespace WFX::Core {
 
 using namespace WFX::Utils; // For 'Logger'
-using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpRequest'
+using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpRequest', 'Router'
 
 class Engine {
 public:
@@ -27,6 +28,7 @@ private:
 
     Logger& logger_ = Logger::GetInstance();
     Config& config_ = Config::GetInstance();
+    Router& router_ = Router::GetInstance();
 
     std::unique_ptr<HttpConnectionHandler> connHandler_;
 };

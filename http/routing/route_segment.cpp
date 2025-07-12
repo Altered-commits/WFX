@@ -2,11 +2,11 @@
 
 namespace WFX::Http {
 
-RouteSegment::RouteSegment(std::string_view key, TrieNode* c)
-    : routeValue(key), child(c) {}
+RouteSegment::RouteSegment(std::string_view key, std::unique_ptr<TrieNode> c)
+    : routeValue(key), child(std::move(c)) {}
 
-RouteSegment::RouteSegment(DynamicSegment p, TrieNode* c)
-    : routeValue(std::move(p)), child(c) {}
+RouteSegment::RouteSegment(DynamicSegment p, std::unique_ptr<TrieNode> c)
+    : routeValue(std::move(p)), child(std::move(c)) {}
 
 // vvv Type checks vvv
 bool RouteSegment::IsStatic() const
@@ -28,6 +28,11 @@ const std::string_view* RouteSegment::GetStaticKey() const
 const DynamicSegment* RouteSegment::GetParam() const
 {
     return std::get_if<DynamicSegment>(&routeValue);
+}
+
+TrieNode* RouteSegment::GetChild() const
+{
+    return child.get();
 }
 
 // vvv Utilities vvv
@@ -53,7 +58,7 @@ ParamType RouteSegment::GetParamType() const
 std::string_view RouteSegment::ToString() const
 {
     if(auto key = GetStaticKey())
-        return *key;
+        return "<static>";
     else {
         switch(GetParamType())
         {

@@ -16,7 +16,7 @@ struct UUID {
     // Operators
     bool operator==(const UUID& other) const;
 
-    std::uint8_t bytes[16];;
+    std::uint8_t bytes[16];
 };
 
 } // namespace WFX::Utils
