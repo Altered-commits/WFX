@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "commands/cmd_new/new.hpp"
+#include "commands/cmd_doctor/doctor.hpp"
 #include "commands/cmd_dev/dev.hpp"
 #include "utils/argument_parser/argument_parser.hpp"
 
@@ -25,6 +26,12 @@ int WFXEntryPoint(int argc, char* argv[]) {
                 Logger::GetInstance().Fatal("[WFX]: Project name required. Usage: wfx new <project-name>");
 
             return CLI::CreateProject(positionalArgs[0]);
+        });
+
+    // --- Command: doctor ---
+    parser.AddCommand("doctor", "Verify system requirements",
+        [](auto&& _, auto&& __) -> int {
+            return CLI::WFXDoctor();
         });
 
     // --- Command: dev ---

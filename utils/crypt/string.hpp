@@ -1,23 +1,28 @@
 #ifndef WFX_UTILS_STRING_HPP
 #define WFX_UTILS_STRING_HPP
 
+#include "include/export_signature.hpp"
 #include <string_view>
 
 namespace WFX::Utils {
 
-// Some ASCII utilities
-std::uint8_t ToLowerAscii(std::uint8_t c);
+class WFX_API StringGuard {
+public:
+    static std::uint8_t ToLowerAscii(std::uint8_t c);
 
-// Constant time comparisions
-bool CTStringCompare(std::string_view lhs, std::string_view rhs);
-bool CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs);
+    // Constant time comparisions
+    static bool CTStringCompare(std::string_view lhs, std::string_view rhs);
+    static bool CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs);
 
-// Case insensitive comparision
-bool CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs);
+    static bool CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs);
 
-// URI path normalization
-/* NOTE: 'path' buffer must be a valid writable buffer */
-bool NormalizeURIPathInplace(std::string_view& path);
+    /* NOTE: 'path' buffer must be a valid writable buffer */
+    static bool NormalizeURIPathInplace(std::string_view& path);
+
+private:
+    StringGuard()  = delete;
+    ~StringGuard() = delete;
+};
 
 } // namespace WFX::Utils
 

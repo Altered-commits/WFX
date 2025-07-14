@@ -21,7 +21,7 @@ namespace WFX::Http {
 using namespace WFX::Core; // For 'Config'
 
 // Being used as a namespace rn, fun
-class HttpParser {
+class HttpParser final {
 public:
     static HttpParseState Parse(ConnectionContext& ctx);
 
@@ -34,6 +34,10 @@ private: // Helpers
     static bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from, std::size_t& outNextPos, std::string_view& outLine);
     static bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos);
     static std::string_view Trim(std::string_view sv);
+
+private:
+    HttpParser()  = delete;
+    ~HttpParser() = delete;
 };
 
 } // namespace WFX::Http

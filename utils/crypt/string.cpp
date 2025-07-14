@@ -5,13 +5,13 @@
 namespace WFX::Utils {
 
 // Char Utilities
-std::uint8_t ToLowerAscii(std::uint8_t c)
+std::uint8_t StringGuard::ToLowerAscii(std::uint8_t c)
 {
     return (c >= 'A' && c <= 'Z') ? (c | 0x20) : c;
 }
 
 // String Utilties
-bool CTStringCompare(std::string_view lhs, std::string_view rhs)
+bool StringGuard::CTStringCompare(std::string_view lhs, std::string_view rhs)
 {
     if(lhs.size() != rhs.size()) return false;
 
@@ -22,7 +22,7 @@ bool CTStringCompare(std::string_view lhs, std::string_view rhs)
     return result == 0;
 }
 
-bool CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs)
+bool StringGuard::CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs)
 {
     if(lhs.size() != rhs.size()) return false;
 
@@ -38,7 +38,7 @@ bool CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs)
     return result == 0;
 }
 
-bool CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs)
+bool StringGuard::CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs)
 {
     if(lhs.size() != rhs.size())
         return false;
@@ -51,7 +51,7 @@ bool CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs)
 }
 
 // Path normalization
-bool NormalizeURIPathInplace(std::string_view& path)
+bool StringGuard::NormalizeURIPathInplace(std::string_view& path)
 {
     // Sanity check
     if(path.size() == 0 || path.data() == nullptr)

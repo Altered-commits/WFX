@@ -3,3 +3,6 @@
 
 # Build files
 BuildMinGW/
+BuildMSVC/
+Debug/
+Release/

@@ -3,7 +3,7 @@
 namespace WFX::Utils {
 
 // vvv HASHERS vvv
-std::size_t SipHash24(const std::uint8_t* data, std::size_t len, const std::uint8_t key[16])
+std::size_t Hasher::SipHash24(const std::uint8_t* data, std::size_t len, const std::uint8_t key[16])
 {
     std::uint64_t k0, k1;
     memcpy(&k0, key, 8);
@@ -57,12 +57,12 @@ std::size_t SipHash24(const std::uint8_t* data, std::size_t len, const std::uint
     return v0 ^ v1 ^ v2 ^ v3;
 }
 
-std::size_t SipHash24(std::string_view str, const std::uint8_t key[16])
+std::size_t Hasher::SipHash24(std::string_view str, const std::uint8_t key[16])
 {
     return SipHash24(reinterpret_cast<const std::uint8_t*>(str.data()), str.size(), key);
 }
 
-std::size_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::size_t len)
+std::size_t Hasher::Fnv1aCaseInsensitive(const std::uint8_t* data, std::size_t len)
 {
     constexpr std::uint64_t fnvPrime       = 1099511628211ULL;
     constexpr std::uint64_t fnvOffsetBasis = 14695981039346656037ULL;
@@ -71,14 +71,14 @@ std::size_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::size_t len)
 
     const std::uint8_t* end = data + len;
     while(data < end) {
-        hash ^= static_cast<std::uint8_t>(ToLowerAscii(static_cast<unsigned char>(*data++)));
+        hash ^= static_cast<std::uint8_t>(StringGuard::ToLowerAscii(static_cast<unsigned char>(*data++)));
         hash *= fnvPrime;
     }
 
     return hash;
 }
 
-std::uint64_t Fnv1aCaseInsensitive(std::string_view str)
+std::uint64_t Hasher::Fnv1aCaseInsensitive(std::string_view str)
 {
     return Fnv1aCaseInsensitive(reinterpret_cast<const std::uint8_t*>(str.data()), str.size());
 }

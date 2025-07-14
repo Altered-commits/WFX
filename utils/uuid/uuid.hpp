@@ -1,13 +1,15 @@
 #ifndef WFX_UTILS_UUID_HPP
 #define WFX_UTILS_UUID_HPP
 
+#include "include/export_signature.hpp"
+
 #include <cstdint>
 #include <cstring>
 #include <string>
 
 namespace WFX::Utils {
 
-struct UUID {
+struct WFX_API UUID {
     UUID() { std::memset(bytes, 0, 16); }
     
     static bool FromString(std::string_view str, UUID& out);

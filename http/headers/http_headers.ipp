@@ -9,7 +9,7 @@ std::size_t CaseInsensitiveHash::operator()(const T& key) const
         std::is_same_v<std::decay_t<T>, std::string_view>,
         "CaseInsensitiveHash: key must be std::string or std::string_view"
     );
-    return WFX::Utils::Fnv1aCaseInsensitive(key);
+    return WFX::Utils::Hasher::Fnv1aCaseInsensitive(key);
 }
 
 template<typename T1, typename T2>
@@ -20,7 +20,7 @@ bool CaseInsensitiveEqual::operator()(const T1& lhs, const T2& rhs) const
         (std::is_same_v<std::decay_t<T2>, std::string> || std::is_same_v<std::decay_t<T2>, std::string_view>),
         "CaseInsensitiveEqual: both operands must be std::string or std::string_view"
     );
-    return WFX::Utils::CTInsensitiveStringCompare(lhs, rhs);
+    return WFX::Utils::StringGuard::CTInsensitiveStringCompare(lhs, rhs);
 }
 
 template<typename K, typename V>

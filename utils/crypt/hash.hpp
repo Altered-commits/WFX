@@ -1,6 +1,7 @@
 #ifndef WFX_UTILS_HASHERS_HPP
 #define WFX_UTILS_HASHERS_HPP
 
+#include "include/export_signature.hpp"
 #include "utils/logger/logger.hpp"
 #include "./string.hpp"
 
@@ -28,16 +29,21 @@
 namespace WFX::Utils {
 
 // vvv HASHERS vvv
-// SipHash
-std::size_t SipHash24(const std::uint8_t* data, std::size_t len, const std::uint8_t key[16]);
-std::size_t SipHash24(std::string_view data, const std::uint8_t key[16]);
+class WFX_API Hasher {
+public:
+    static std::size_t SipHash24(const std::uint8_t* data, std::size_t len, const std::uint8_t key[16]);
+    static std::size_t SipHash24(std::string_view data, const std::uint8_t key[16]);
 
-// FNV-1A
-std::size_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::size_t len);
-std::size_t Fnv1aCaseInsensitive(std::string_view data);
+    static std::size_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::size_t len);
+    static std::size_t Fnv1aCaseInsensitive(std::string_view data);
+
+private:
+    Hasher()  = delete;
+    ~Hasher() = delete;
+};
 
 // vvv TRUE RANDOMIZER vvv
-class RandomPool {
+class WFX_API RandomPool {
     static constexpr std::size_t BUFFER_SIZE = 1024 * 1024; // Stores 1MB worth of random bytes
     static constexpr std::size_t MAX_RETRIES = 32; // Retries for GetBytes function
 

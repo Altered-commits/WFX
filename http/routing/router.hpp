@@ -3,11 +3,12 @@
 
 #include "route_trie.hpp"
 
+#include "include/export_signature.hpp"
 #include "http/constants/http_constants.hpp"
 
 namespace WFX::Http {
 
-class Router {
+class WFX_API Router {
 public:
     static Router& GetInstance();
 

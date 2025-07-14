@@ -1,6 +1,8 @@
 #ifndef WFX_UTILS_LOGGER_HPP
 #define WFX_UTILS_LOGGER_HPP
 
+#include "include/export_signature.hpp"
+
 #include <string>
 #include <mutex>
 #include <iostream>
@@ -17,7 +19,7 @@
 
 namespace WFX::Utils {
 
-class Logger {
+class WFX_API Logger {
 public:
     using LevelMask = uint32_t;
 

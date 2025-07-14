@@ -10,9 +10,13 @@
 namespace WFX::Http {
 
 // Being used as a namespace rn, fun again
-class HttpSerializer {
+class HttpSerializer final {
 public:
     static std::string Serialize(HttpResponse& res);
+
+private:
+    HttpSerializer()  = delete;
+    ~HttpSerializer() = delete;
 };
 
 } // namespace WFX::Http

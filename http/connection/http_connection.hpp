@@ -196,7 +196,7 @@ namespace std {
                 }
             } _initOnce;
 
-            return SipHash24(
+            return Hasher::SipHash24(
                 addr.ip.raw,
                 addr.ipType == AF_INET ? sizeof(in_addr) : sizeof(in6_addr),
                 sipKey

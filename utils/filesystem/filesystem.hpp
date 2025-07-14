@@ -26,8 +26,13 @@ public:
 
 // MAIN SHIT: Returns singleton reference to stuff needed for File / Directory manipulation
 // Also using this as namespace lmao
-struct FileSystem {
+class FileSystem {
+public:
     static BaseFileSystem& GetFileSystem();
+
+private:
+    FileSystem()  = delete;
+    ~FileSystem() = delete;
 };
 
 } // namespace WFX::Utils
