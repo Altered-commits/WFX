@@ -3,8 +3,6 @@
 
 #include <string>
 
-#include "utils/logger/logger.hpp"
-
 namespace WFX::CLI {
 
 int RunDevServer(const std::string& host, int port);

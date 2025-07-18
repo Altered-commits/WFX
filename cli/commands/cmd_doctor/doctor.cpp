@@ -3,12 +3,7 @@
 #include "utils/logger/logger.hpp"
 #include <vector>
 #include <fstream>
-#include <sstream>
-#include <cstdio>
-#include <cstdlib>
-#include <string>
 #include <filesystem>
-#include <algorithm>
 
 #ifdef _WIN32
     #define DETECT_CMD "where "
@@ -27,14 +22,15 @@ struct CompilerInfo {
     std::string_view extraArgs;
 };
 
+// More flags to be added later for more optimization
 static std::vector<CompilerInfo> compilers = {
 #ifdef _WIN32
-    {"msvc", "cl", "MSVC", "/LD /EHsc"},
-    {"clang", "clang++", "Clang", "-std=c++17 -O2 -shared"},
-    {"gcc", "g++", "GCC", "-std=c++17 -O2 -shared"},
+    {"msvc", "cl", "MSVC", "/LD /O2 /EHsc /I WFX"},
+    {"clang", "clang++", "Clang", "-std=c++17 -O2 -shared -I./WFX"},
+    {"gcc", "g++", "GCC", "-std=c++17 -O2 -shared -I./WFX"},
 #else
-    {"gcc", "g++", "GCC", "-std=c++17 -O2 -shared"},
-    {"clang", "clang++", "Clang", "-std=c++17 -O2 -shared"},
+    {"gcc", "g++", "GCC", "-std=c++17 -O2 -shared -fPIC -I./WFX"},
+    {"clang", "clang++", "Clang", "-std=c++17 -O2 -shared -fPIC -I./WFX"},
 #endif
 };
 

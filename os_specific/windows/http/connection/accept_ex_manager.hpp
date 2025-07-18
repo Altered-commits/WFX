@@ -15,7 +15,6 @@
 #include <mswsock.h>
 #include <vector>
 #include <mutex>
-#include <functional>
 
 namespace WFX::OSSpecific {
 

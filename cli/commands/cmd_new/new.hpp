@@ -1,8 +1,6 @@
 #ifndef WFX_CLI_COMMANDS_NEW_HPP
 #define WFX_CLI_COMMANDS_NEW_HPP
 
-#include "utils/logger/logger.hpp"
-
 #include <string>
 
 namespace WFX::CLI {

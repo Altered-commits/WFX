@@ -1,5 +1,8 @@
 #include "engine.hpp"
 
+#include "http/routing/router.hpp"
+#include "shared/apis/master_api.hpp"
+
 #include <iostream>
 #include <string>
 #include <thread>
@@ -12,30 +15,8 @@ Engine::Engine()
     // Load stuff from wfx.toml if it exists, else we use default configuration
     config_.LoadFromFile("wfx.toml");
 
-    // Dummy register routes so we know stuffs working
-    router_.RegisterRoute(HttpMethod::GET, "/", [](HttpRequest& req, HttpResponse& res) {
-        res.Status(HttpStatus::OK)
-            .Set("X-Powered-By", "WFX")
-            .Set("Server", "WFX/1.0")
-            .Set("Cache-Control", "no-store")
-            .SendText("Hello from WFX!!!!");
-    });
-
-    router_.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>/<index:uint>", [this](HttpRequest& req, HttpResponse& res) {
-        res.Status(HttpStatus::OK)
-            .Set("X-Powered-By", "WFX")
-            .Set("Server", "WFX/1.0")
-            .Set("Cache-Control", "no-store")
-            .SendText("Yooooooooooooooooooooooooooooo!!!!!!!!!");
-    });
-    
-    router_.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>/<index:uint>/<id:string>", [this](HttpRequest& req, HttpResponse& res) {
-        res.Status(HttpStatus::OK)
-            .Set("X-Powered-By", "WFX")
-            .Set("Server", "WFX/1.0")
-            .Set("Cache-Control", "no-store")
-            .SendFile("test.html");
-    });
+    // Load user's DLL file which we compiled above
+    HandlerUserDLLInjection("api_entry.dll");
 }
 
 void Engine::Listen(const std::string& host, int port)
@@ -134,15 +115,6 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                 ctx.timeoutTick = connHandler_->GetCurrentTick();
             }
 
-            const HttpCallbackType* callback = 
-                router_.MatchRoute(ctx.requestInfo->method, ctx.requestInfo->path, ctx.requestInfo->pathSegments);
-
-            if(callback)
-                (*callback)(*ctx.requestInfo, res);
-            else
-                res.Status(HttpStatus::NOT_FOUND)
-                    .SendText("Route not found");
-
             HandleResponse(socket, res, ctx);
             break;
         }
@@ -176,6 +148,27 @@ void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionConte
     ctx.trackBytes  = 0;
     ctx.dataLength  = 0;
     ctx.expectedBodyLength = 0;
+}
+
+// vvv USER DLL STUFF vvv
+void Engine::HandlerUserDLLInjection(const char* path)
+{
+    HMODULE userModule = LoadLibraryA(path);
+    if(!userModule)
+        logger_.Fatal("[Engine]: User side 'api_entry.dll' not found.");
+
+    // Resolve the exported function
+    auto registerFn = reinterpret_cast<WFX::Shared::RegisterMasterAPIFn>(
+        GetProcAddress(userModule, "RegisterMasterAPI")
+    );
+
+    if(!registerFn)
+        logger_.Fatal("[Engine]: Failed to find RegisterWFXAPI() in user DLL.");
+    
+    // Inject API
+    registerFn(WFX::Shared::GetMasterAPI());
+
+    logger_.Info("[Engine]: Successfully injected API and initialized user module.");
 }
 
 } // namespace WFX

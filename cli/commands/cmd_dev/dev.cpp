@@ -1,12 +1,13 @@
 #include "dev.hpp"
 
+#include "engine/Engine.hpp"
+#include "utils/logger/logger.hpp"
+
 #include <csignal>
 #include <atomic>
 #include <iostream>
 #include <thread>
 #include <chrono>
-
-#include "engine/Engine.hpp"
 
 namespace WFX::CLI {
 

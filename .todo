@@ -1,93 +1,11 @@
-wfx/
-├── cli/                          # 🚀 CLI binary (`wfx`) source
-│   ├── main.cpp                  # CLI entrypoint
-│   ├── parser.hpp                # Command parser
-│   └── commands/                 # CLI subcommands
-│       ├── new.cpp
-│       ├── serve.cpp
-│       ├── build.cpp
-│       └── ...
-
-├── engine/                       # 💡 Core of WFX (framework engine)
-│   ├── Engine.hpp                # Bootstraps entire system (singleton)
-│   ├── Engine.cpp
-
-│
-├── http/                         # 🌐 HTTP layer
-│   ├── Request.hpp
-│   ├── Request.cpp
-│   ├── Response.hpp
-│   ├── Response.cpp
-│   ├── Router.hpp                # Route matching logic
-│   ├── Router.cpp
-│   ├── Server.hpp                # HTTP listener (gunicorn/nginx like)
-│   └── Server.cpp
-
-├── template/                     # 📝 HTML templating system
-│   ├── TemplateEngine.hpp
-│   ├── TemplateEngine.cpp
-│   ├── TemplateParser.hpp
-│   └── TemplateParser.cpp
-
-├── middleware/                   # 🧩 Middleware support
-│   ├── BaseMiddleware.hpp
-│   ├── LoggerMiddleware.hpp
-│   ├── StaticMiddleware.hpp
-│   └── ...
-
-├── security/                     # 🔐 Security systems
-│   ├── Headers.hpp               # HSTS, XFO, CSP, etc.
-│   ├── CORS.hpp
-│   ├── CSRF.hpp
-│   ├── Honeypot.hpp
-│   └── Validator.hpp
-
-├── db/                           # 🛢 Built-in DB engine (e.g. SQLite3)
-│   ├── Database.hpp
-│   ├── Database.cpp
-│   └── ORM.hpp                   # Future lightweight ORM support
-
-├── cache/                        # ⚡ Cache support (Redis / In-memory)
-│   ├── Cache.hpp
-│   ├── Cache.cpp
-│   ├── MemoryCache.hpp
-│   └── RedisCache.hpp
-
-├── lifecycle/                    # 🔁 Auto-restart and lifecycle control
-│   ├── Watcher.hpp               # File watching
-│   ├── Watcher.cpp
-│   ├── Lifecycle.hpp             # Handles init/reload/exit
-│   └── Lifecycle.cpp
-
-├── net/                          # 🌍 Networking utilities (reverse proxy etc.)
-│   ├── Balancer.hpp              # Load balancer
-│   ├── Proxy.hpp                 # Nginx-like functionality
-│   └── IPUtil.hpp
-
-├── include/                      # 🧾 Public API for user code
-│   └── wfx/
-│       ├── app.hpp               # GET(), POST(), etc
-│       ├── request.hpp
-│       ├── response.hpp
-│       ├── render.hpp
-│       ├── middleware.hpp
-│       ├── security.hpp
-│       ├── db.hpp
-│       ├── cache.hpp
-│       └── ...
-
-├── lib/                          # 📦 Compiled static libs (libwfx.a)
-│   └── libwfx.a
-
-├── config/                       # ⚙️ Defaults / settings
-│   └── default_config.toml       # Default values
-
-├── CMakeLists.txt                # 🔧 Build system
-└── README.md
-
-
 # SERVICES
 wfx new	    Scaffold new project
 wfx dev	    Start dev server (auto-reload)
-wfx build	Build the binary (with --release)
-wfx serve	Start production server
+wfx build	Build the binary
+wfx doctor	Check requirements for WFX
+
+To implement:
+1. Middleware
+2. Hot Reload
+3. HTML Templating (SSR)
+4. DB support

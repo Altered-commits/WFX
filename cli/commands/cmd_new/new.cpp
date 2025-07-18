@@ -1,8 +1,9 @@
 #include "new.hpp"
 
+#include "utils/logger/logger.hpp"
+
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 
 namespace fs = std::filesystem;
 
@@ -56,12 +57,43 @@ request_threads    = "all"   # Threads executing user handlers
 worker_connections = 4096    # Max simultaneous epoll-based worker connections
 )");
 
-    CreateFile(projBase / "main.cpp", R"(#include <wfx/app.hpp>
+    // Default route
+    CreateFile(projBase / "src/api_entry.cpp", R"(#include <wfx/shared/apis/master_api.hpp>
+#include <wfx/shared/utils/deferred_init_vector.hpp>
+#include <wfx/shared/utils/export_macro.hpp>
 
-GET("/", [](const Request& req, Response& res) {
-    res.Text("Hello, WFX!");
-});
-)");
+// WARNING: DO NOT TOUCH THIS SYMBOL
+// __wfx_api is reserved for WFX internal API injection
+// Modifying or redefining it will break route registration
+const WFX::Shared::MASTER_API_TABLE* __wfx_api = nullptr;
+
+// To prevent name mangling 
+extern "C" {
+    WFX_EXPORT void RegisterMasterAPI(const WFX::Shared::MASTER_API_TABLE* api)
+    {
+        static bool registered = false;
+        if(registered)
+            return;
+
+        if(api) {
+            __wfx_api = api;
+
+            auto& routes = WFX::Shared::__wfx_deferred_routes();
+
+            // Run all deferred route registrations
+            for(auto& fn : routes)
+                fn();
+
+            // Clean up memory
+            routes.clear();
+            routes.shrink_to_fit();
+
+            registered = true;
+
+            std::cout << "[API Entry]: Registered from user's side as well.\n";
+        }
+    }
+})");
 
     // 3. Create example template and static asset
     CreateFile(projBase / "templates/index.html", R"(<html><body><h1>Hello from WFX Template</h1></body></html>)");

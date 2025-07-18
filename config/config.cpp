@@ -70,7 +70,7 @@ void Config::LoadFromFile(const std::string_view& path)
         TOML_GET(tbl, logger_, "Linux", "worker_connections", osSpecificConfig.workerConnections);
     #endif
     }
-    catch (const toml::parse_error& err) {
+    catch(const toml::parse_error& err) {
         logger_.Warn("[Config]: '", path, "' ", err.what(), ". Using default configuration.");
     }
 }

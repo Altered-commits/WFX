@@ -1,13 +1,7 @@
 #ifndef WFX_HTTP_ROUTE_SEGMENT_HPP
 #define WFX_HTTP_ROUTE_SEGMENT_HPP
 
-#include "route_common.hpp"
-#include "http/request/http_request.hpp"
-#include "http/response/http_response.hpp"
-#include "utils/backport/move_only_function.hpp"
-
-// Used throughout the entire program, hopefully
-using HttpCallbackType = WFX::Utils::MoveOnlyFunction<void(WFX::Http::HttpRequest&, WFX::Http::HttpResponse&)>;
+#include "http/common/route_common.hpp"
 
 namespace WFX::Http {
 
