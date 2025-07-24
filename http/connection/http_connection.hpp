@@ -8,6 +8,7 @@
 
 #include <string>
 #include <memory>
+#include <atomic>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -38,72 +39,13 @@ struct WFXIpAddress {
     uint8_t ipType; // AF_INET or AF_INET6
 
     // Necessary operations
-    inline WFXIpAddress& operator=(const WFXIpAddress& other)
-    {
-        ipType = other.ipType;
-
-        switch(ipType)
-        {
-            case AF_INET:
-                memcpy(&ip.v4, &other.ip.v4, sizeof(in_addr));
-                break;
-            
-            case AF_INET6:
-                memcpy(&ip.v6, &other.ip.v6, sizeof(in6_addr));
-                break;
-
-            default:
-                memset(&ip, 0, sizeof(ip)); // To be safe on invalid type
-                break;
-        }
-
-        return *this;
-    }
-
-    inline bool operator==(const WFXIpAddress& other) const
-    {
-        if(ipType != other.ipType)
-            return false;
-
-        return memcmp(ip.raw, other.ip.raw, ipType == AF_INET ? 4 : 16) == 0;
-    }
+    WFXIpAddress& operator=(const WFXIpAddress& other);
+    bool          operator==(const WFXIpAddress& other) const;
 
     // Helper functions
-    std::string_view GetIpStr() const
-    {
-        // Use thread-local static buffer to avoid heap allocation
-        thread_local char ipStrBuf[INET6_ADDRSTRLEN] = {};
-
-        const void* addr = (ipType == AF_INET)
-            ? static_cast<const void*>(&ip.v4)
-            : static_cast<const void*>(&ip.v6);
-
-        // Convert to printable form
-        if(inet_ntop(ipType, addr, ipStrBuf, sizeof(ipStrBuf)))
-            return std::string_view(ipStrBuf);
-
-        return std::string_view("ip-malformed");
-    }
-
-    const char* GetIpType() const
-    {
-        return ipType == AF_INET ? "IPv4" : "IPv6";
-    }
+    std::string_view GetIpStr()  const;
+    const char*      GetIpType() const;
 };
-
-// Forward declare it so compilers won't cry
-struct ConnectionContext;
-
-// For 'MoveOnlyFunction'
-using WFX::Utils::MoveOnlyFunction;
-
-using ReceiveCallback            = MoveOnlyFunction<void(ConnectionContext&)>;
-using AcceptedConnectionCallback = MoveOnlyFunction<void(WFXSocket)>;
-using HttpRequestPtr             = std::unique_ptr<HttpRequest>;
-
-// Honestly, while it would've been easier to include tick_scheduler.hpp for TickScheduler::TickType
-// Eh, idk cluttering this file just for a type, i'm just going to redefine it here for no absolute reason
-using HttpTickType = std::uint16_t;
 
 // Might be weird to define it here but its important, these states are further used in-
 // -both connection backend and parser so yeah
@@ -117,8 +59,31 @@ enum class HttpParseState : std::uint8_t {
     PARSE_EXPECT_417,         // It was a Expect: 100-continue header, REJECT IT
     PARSE_SUCCESS,            // Successfully received and parsed all data
     PARSE_ERROR,              // Malformed request
+    PARSE_DATA_OCCUPIED,      // Data which parser 'parsed' is now being used in Request-Response cycle
     PARSE_IDLE                // After Request-Response cycle, waiting for another request
 };
+
+enum class HttpConnectionState : std::uint8_t {
+    ACTIVE,            // Connection is actively running
+    OCCUPIED,          // Connection is being processed by some callback and should not be closed
+    CLOSING_DEFAULT,   // Connection will be closed shortly after processing request
+    CLOSING_IMMEDIATE  // Connection must be closed immediately
+};
+
+// Forward declare it so compilers won't cry
+struct ConnectionContext;
+
+// For 'MoveOnlyFunction'
+using WFX::Utils::MoveOnlyFunction;
+
+using ReceiveCallback            = MoveOnlyFunction<void(ConnectionContext&)>;
+using AcceptedConnectionCallback = MoveOnlyFunction<void(WFXSocket)>;
+using HttpRequestPtr             = std::unique_ptr<HttpRequest>;
+using ConnectionState            = std::atomic<HttpConnectionState>;
+
+// Honestly, while it would've been easier to include tick_scheduler.hpp for TickScheduler::TickType
+// Eh, idk cluttering this file just for a type, i'm just going to redefine it here for no absolute reason
+using HttpTickType = std::uint16_t;
 
 // Quite important, has to be 64 bytes and IS 64 BYTES, THIS CANNOT CHANGE NOW
 struct ConnectionContext {
@@ -134,10 +99,15 @@ struct ConnectionContext {
     ReceiveCallback onReceive;
 
     // Used by HttpParser mostly
-    std::uint8_t  parseState   = 0;     // Interpreted by HttpParser as internal state enum
-    bool          shouldClose  = false; // Whether we should close connection after HttpResponse
-    std::uint16_t timeoutTick  = 0;     // Used to track timeouts for various stuff like 'header' timeout or 'body' timeout
-    std::uint32_t trackBytes   = 0;     // Misc, tracking of bytes wherever necessary
+    std::uint8_t    parseState  = 0; // Interpreted by HttpParser as internal state enum
+    ConnectionState connState   = HttpConnectionState::ACTIVE; // Track state to prevent race conditions
+    std::uint16_t   timeoutTick = 0; // Used to track timeouts for various stuff like 'header' timeout or 'body' timeout
+    std::uint32_t   trackBytes  = 0; // Misc. Tracking of bytes wherever necessary
+
+public: // Core functions
+    HttpConnectionState GetState();
+    void                SetState(HttpConnectionState state);
+    bool                TransitionTo(HttpConnectionState state);
 };
 
 // Abstraction for Windows and Linux impl
@@ -161,7 +131,7 @@ public:
     virtual int WriteFile(WFXSocket socket, std::string&& header, std::string_view path) = 0;
 
     // Close a client socket
-    virtual void Close(WFXSocket socket, bool reserved = true) = 0;
+    virtual void Close(WFXSocket socket) = 0;
 
     // Run the main connection loop (can be used by dev/serve mode)
     virtual void Run(AcceptedConnectionCallback) = 0;

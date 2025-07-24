@@ -60,7 +60,9 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
 
     // All the networking stuff has been initialized, time to initialize the timeout handler now
     timeoutHandler_.Start([this](TickScheduler::TickType currentTick) -> void {
-        connections_.ForEachEraseIf([this](WFXSocket socket, ConnectionContextPtr& value) -> bool {
+        std::size_t elements = 0;
+        connections_.ForEachEraseIf([this, &elements](WFXSocket socket, ConnectionContextPtr& value) -> bool {
+            elements += 1;
             std::uint16_t timeoutTicks = 0;
 
             switch(value->parseState)
@@ -84,15 +86,21 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
             bool shouldExpire = timeoutHandler_.IsExpired(
                                     timeoutHandler_.GetCurrentTick(), value->timeoutTick, timeoutTicks
                                 );
-
+            
             if(shouldExpire) {
-                // Close the connection and let it get erased automatically
-                Close(socket, false);
-                logger_.Info("[IOCP]: Timeout expired the following connection: ", value->connInfo.GetIpStr(), ':', socket);
+                // We only cleanup if the state is ACTIVE
+                // If its CLOSING_DEFAULT or CLOSING_IMMEDIATE, another thread is handling it already
+                if(value->TransitionTo(HttpConnectionState::CLOSING_IMMEDIATE)) {
+                    InternalSocketCleanup(socket);
+                    // Signal to 'ForEachEraseIf' that it should now erase entry from map
+                    return true;
+                }
             }
-
-            return shouldExpire;
+            // Don't erase if not expired or if another thread has control
+            return false;
         });
+
+        logger_.Info("[IOCP-Debug]: Total elements: ", elements);
     });
 
     return true;
@@ -108,7 +116,7 @@ void IocpConnectionHandler::SetReceiveCallback(WFXSocket socket, ReceiveCallback
     auto* ctx = connections_.Get(socket);
     if(!ctx || !(*ctx)) {
         logger_.Error("[IOCP]: No Connection Context found for socket: ", socket);
-        Close(socket);
+        InternalSocketCleanup(socket);
         return;
     }
 
@@ -155,20 +163,22 @@ int IocpConnectionHandler::Write(WFXSocket socket, std::string_view buffer_)
     DWORD bytesSent;
     int ret = WSASend(socket, &ioData->wsaBuf, 1, &bytesSent, 0, &ioData->overlapped, nullptr);
     if(ret == SOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING) {
+        logger_.Error("[IOCP]: WSASend failed immediately with error code: ", WSAGetLastError(), " on socket: ", socket);
         SafeDeleteIoData(ioData);
         return -1;
     }
 
-    return static_cast<int>(length);
+    return 1;
 }
 
 int IocpConnectionHandler::WriteFile(WFXSocket socket, std::string&& header, std::string_view path)
 {
+    // Because its fixed size alloc, we use alloc pool for efficiency
     void* rawMem = allocPool_.Allocate(sizeof(PerTransmitFileContext));
     if(!rawMem) return -1;
 
-    // Because its fixed size alloc, we use alloc pool for efficiency
-    PerTransmitFileContext* fileData = new (rawMem) PerTransmitFileContext(); // Placement new for construction
+    // Placement new for construction
+    PerTransmitFileContext* fileData = new (rawMem) PerTransmitFileContext();
 
     // Open the file for sending
     HANDLE file = CreateFileA(
@@ -209,20 +219,27 @@ int IocpConnectionHandler::WriteFile(WFXSocket socket, std::string&& header, std
         return -1;
     }
 
-    return static_cast<int>(fileData->header.length());
+    return 1;
 }
 
-void IocpConnectionHandler::Close(WFXSocket socket, bool shouldEraseSocket)
+void IocpConnectionHandler::Close(WFXSocket socket)
 {
-    CancelIoEx((HANDLE)socket, NULL);
-    shutdown(socket, SD_BOTH);
-    closesocket(socket);
-
-    if(!shouldEraseSocket)
+    auto* ctxPtr = connections_.Get(socket);
+    if(!ctxPtr || !(*ctxPtr))
         return;
 
+    ConnectionContext& ctx = *(*ctxPtr);
+
+    // Atomically try to seize control
+    if(!ctx.TransitionTo(HttpConnectionState::CLOSING_IMMEDIATE))
+        return;
+    
+    // We got the control. Call the helper for socket operations
+    InternalSocketCleanup(socket);
+
+    //Erase the context from the map
     if(!connections_.Erase(socket))
-        logger_.Warn("[IOCP]: Failed to erase Connection Context for socket: ", socket);
+        logger_.Warn("[IOCP]: Erase failed for a socket that was just closed: ", socket);
 }
 
 void IocpConnectionHandler::Run(AcceptedConnectionCallback onAccepted)
@@ -259,7 +276,7 @@ void IocpConnectionHandler::PostReceive(WFXSocket socket)
     auto* ctxPtr = connections_.Get(socket);
     if(!ctxPtr || !(*ctxPtr)) {
         logger_.Error("[IOCP]: PostReceive failed - no Connection Context for socket: ", socket);
-        Close(socket);
+        InternalSocketCleanup(socket);
         return;
     }
 
@@ -335,8 +352,8 @@ void IocpConnectionHandler::PostReceive(WFXSocket socket)
     DWORD flags = 0, bytesRecv = 0;
     int ret = WSARecv(socket, &ioData->wsaBuf, 1, &bytesRecv, &flags, &ioData->overlapped, nullptr);
     if(ret == SOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING) {
-        logger_.Error("[IOCP]: WSARecv immediate failure: ", WSAGetLastError());
-        SafeDeleteIoData(ioData);
+        logger_.Error("[IOCP]: WSARecv failed immediately with error code: ", WSAGetLastError(), " on socket: ", socket);
+        SafeDeleteIoData(ioData, false);
         Close(socket);
         return;
     }
@@ -374,7 +391,9 @@ void IocpConnectionHandler::WorkerLoop()
 
                 // We do not need buffer to be released as ioData does not own the buffer, ConnectionContext does
                 // Hence the 'false' in the PerIoDataDeleter
-                std::unique_ptr<PerIoData, PerIoDataDeleter> ioData(static_cast<PerIoData*>(base), PerIoDataDeleter{this, false});
+                std::unique_ptr<PerIoData, PerIoDataDeleter> ioData(
+                    static_cast<PerIoData*>(base), PerIoDataDeleter{this, false}
+                );
                 SOCKET socket = ioData->socket;
 
                 if(bytesTransferred <= 0) {
@@ -383,11 +402,9 @@ void IocpConnectionHandler::WorkerLoop()
                 }
 
                 auto* ctxPtr = connections_.Get(socket);
-                if(!ctxPtr || !(*ctxPtr)) {
-                    logger_.Error("[IOCP]: No Connection Context found for RECV socket: ", socket);
-                    Close(socket);
+                // This can happen if closed by timeout handler. Not an error
+                if(!ctxPtr || !(*ctxPtr))
                     break;
-                }
 
                 ConnectionContext& ctx = *(*ctxPtr);
 
@@ -408,7 +425,7 @@ void IocpConnectionHandler::WorkerLoop()
                         "\r\n";
 
                     // Mark this socket for closure on next SEND call. No need to handle further
-                    ctx.shouldClose = true;
+                    ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
 
                     // Not going to bother checking for return value. This is just for response
                     Write(socket, std::string_view(kRateLimitResponse));
@@ -423,7 +440,8 @@ void IocpConnectionHandler::WorkerLoop()
 
                 // Just call the callback from within the offload thread without moving it
                 offloadCallbacks_.enqueue([&ctx]() mutable {
-                    ctx.onReceive(ctx);
+                    if(ctx.TransitionTo(HttpConnectionState::OCCUPIED))
+                        ctx.onReceive(ctx);
                 });
 
                 WFX_PROFILE_BLOCK_END(RECV_Handle);
@@ -436,19 +454,24 @@ void IocpConnectionHandler::WorkerLoop()
                     static_cast<PerIoData*>(base), PerIoDataDeleter{this}
                 );
 
-                // Close if client wants to, by checking ctx.shouldClose
-                // Also Get is quite fast so no issue calling it in hot path
                 auto* ctx = connections_.Get(ioData->socket);
-                if(!ctx || !(*ctx)) {
-                    logger_.Warn("[IOCP]: SEND complete but no context for socket: ", ioData->socket);
+                // Context could've been cleaned up, likely by an immediate close
+                if(!ctx || !(*ctx))
                     break;
+
+                switch((*ctx)->GetState())
+                {
+                    case HttpConnectionState::CLOSING_DEFAULT:
+                        Close(ioData->socket);
+                        break;
+                    
+                    case HttpConnectionState::ACTIVE:
+                        ResumeReceive(ioData->socket);
+                        break;
+
+                    // For CLOSING_IMMEDIATE, we do nothing. The thread that set-
+                    // -that state is responsible for the full cleanup
                 }
-
-                if((*ctx)->shouldClose)
-                    Close(ioData->socket);
-                else
-                    ResumeReceive(ioData->socket);
-
                 break;
             }
 
@@ -458,19 +481,24 @@ void IocpConnectionHandler::WorkerLoop()
                     static_cast<PerTransmitFileContext*>(base), PerTransmitFileCtxDeleter{this}
                 );
 
-                // Close if client wants to, by checking ctx.shouldClose
-                // Also Get is quite fast so no issue calling it in hot path
                 auto* ctx = connections_.Get(transmitFileCtx->socket);
-                if(!ctx || !(*ctx)) {
-                    logger_.Warn("[IOCP]: SEND complete but no context for socket: ", transmitFileCtx->socket);
+                // Context could've been cleaned up, likely by an immediate close
+                if(!ctx || !(*ctx))
                     break;
-                }
 
-                if((*ctx)->shouldClose)
-                    Close(transmitFileCtx->socket);
-                else
-                    ResumeReceive(transmitFileCtx->socket);
-                
+                switch((*ctx)->GetState())
+                {
+                    case HttpConnectionState::CLOSING_DEFAULT:
+                        Close(transmitFileCtx->socket);
+                        break;
+                    
+                    case HttpConnectionState::ACTIVE:
+                        ResumeReceive(transmitFileCtx->socket);
+                        break;
+
+                    // For CLOSING_IMMEDIATE, we do nothing. The thread that set-
+                    // -that state is responsible for the full cleanup
+                }
                 break;
             }
 
@@ -534,7 +562,7 @@ bool IocpConnectionHandler::CreateWorkerThreads(unsigned int iocpThreads, unsign
         offloadThreads_.emplace_back([this]() {
             while(running_) {
                 std::function<void(void)> cb;
-                if(offloadCallbacks_.wait_dequeue_timed(cb, std::chrono::milliseconds(10)))
+                if(offloadCallbacks_.wait_dequeue_timed(cb, std::chrono::milliseconds(2)))
                     cb();
             }
         });
@@ -605,6 +633,13 @@ void IocpConnectionHandler::InternalCleanup()
 
     WSACleanup();
     logger_.Info("[IOCP]: Cleaned up Socket resources.");
+}
+
+void IocpConnectionHandler::InternalSocketCleanup(WFXSocket socket)
+{
+    CancelIoEx((HANDLE)socket, NULL);
+    shutdown(socket, SD_BOTH);
+    closesocket(socket);
 }
 
 } // namespace WFX::OSSpecific

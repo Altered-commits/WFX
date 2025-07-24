@@ -5,7 +5,7 @@
 
 #include <cstddef>
 #include <mutex>
-#include <vector>
+#include <memory>
 #include <functional>
 
 namespace WFX::Utils {
@@ -15,34 +15,37 @@ class BufferPool {
 public:
     using ResizeCallback = std::function<std::size_t(std::size_t)>;
 
-    BufferPool(std::size_t initialSize, ResizeCallback resizeCb = nullptr);
+    BufferPool(std::uint16_t shardCount, std::size_t initialSize, ResizeCallback resizeCb = nullptr);
     ~BufferPool();
 
     void* Lease(std::size_t size);
     void  Release(void* ptr);
 
-    std::size_t PoolSize() const;
+private:
+    // Cuz moving / copying pool makes 0 sense
+    BufferPool(const BufferPool&)            = delete;
+    BufferPool& operator=(const BufferPool&) = delete;
+    BufferPool(BufferPool&&)                 = delete;
+    BufferPool& operator=(BufferPool&&)      = delete;
 
 private:
-    void* AddPool(std::size_t size);
+    // Forward declare the private implementation struct for a single shard
+    struct Shard;
+
+    Shard& GetShardForThread(std::uint16_t& outShardIndex);
+
+    // Platform-specific memory alignment functions
     void* AlignedMalloc(std::size_t size, std::size_t alignment);
     void  AlignedFree(void* ptr);
 
 private:
-    struct Pool {
-        void* memory;
-        void* handle;
-
-        Pool(void* mem, void* poolHandle) : memory(mem), handle(poolHandle) {}
-    };
-
     Logger& logger_ = Logger::GetInstance();
 
-    std::vector<Pool>    pools_;
-    void*                tlsfAllocator_;
-    std::size_t          poolSize_;
-    ResizeCallback       resizeCallback_;
-    std::recursive_mutex poolMutex_;
+    // The vector of memory pool shards. Each thread is assigned a shard
+    std::unique_ptr<Shard[]> shards_;
+    std::uint16_t            shardCount_;
+    std::size_t              initialSize_;
+    ResizeCallback           resizeCallback_;
 };
 
 } // namespace WFX::Utils

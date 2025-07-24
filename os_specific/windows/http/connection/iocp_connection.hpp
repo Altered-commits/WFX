@@ -41,7 +41,7 @@ public:
     void ResumeReceive(WFXSocket socket) override;
     int  Write(WFXSocket socket, std::string_view buffer) override;
     int  WriteFile(WFXSocket socket, std::string&& header, std::string_view path) override;
-    void Close(WFXSocket socket, bool shouldEraseContext = true) override;
+    void Close(WFXSocket socket) override;
 
     // Getter function
     TickScheduler::TickType GetCurrentTick() override;
@@ -58,6 +58,7 @@ private:
     void SafeDeleteTransmitFileCtx(PerTransmitFileContext* transmitFileCtx);
     void PostReceive(WFXSocket socket);
     void InternalCleanup();
+    void InternalSocketCleanup(WFXSocket socket);
 
 private: // Helper structs / functions used in unique_ptr deleter
     struct PerIoDataDeleter {
@@ -113,7 +114,7 @@ private:
     Config&    config_  = Config::GetInstance();
 
     TickScheduler timeoutHandler_;
-    BufferPool bufferPool_{1024 * 1024, [](std::size_t curSize){ return curSize * 2; }}; // For variable size allocs
+    BufferPool bufferPool_{8, 1024 * 1024, [](std::size_t curSize){ return curSize * 2; }}; // For variable size allocs
     ConfigurableFixedAllocPool allocPool_{{32, 64, 128}};                                // For fixed size small allocs
     BlockingConcurrentQueue<std::function<void(void)>> offloadCallbacks_;
     ConcurrentHashMap<SOCKET, ConnectionContextPtr> connections_{ 1024 * 1024 };

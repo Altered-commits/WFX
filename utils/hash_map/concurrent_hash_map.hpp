@@ -14,7 +14,7 @@ class ConcurrentHashMap {
 
 public:
     explicit ConcurrentHashMap(std::size_t poolSize = 512 * 1024)
-        : bufferPool_(poolSize, [](std::size_t cur){ return cur * 1.5; })
+        : bufferPool_(1, poolSize, [](std::size_t cur){ return cur * 1.5; })
     {
         for(std::size_t i = 0; i < SHARD_COUNT; ++i) {
             auto shard = std::make_unique<Shard>(bufferPool_);

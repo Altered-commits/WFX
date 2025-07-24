@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
+#include <thread>
+#include <functional> // For std::hash
 
 #if defined(_WIN32)
     #include <malloc.h>
@@ -14,54 +16,135 @@ extern "C" {
 
 namespace WFX::Utils {
 
-BufferPool::BufferPool(std::size_t initialSize, ResizeCallback resizeCb)
-    : poolSize_(initialSize), resizeCallback_(resizeCb)
+// This small header will be placed immediately before the memory block
+struct alignas(std::max_align_t) AllocationHeader {
+    std::uint16_t shardIndex;
+};
+
+// Each shard is a self-contained memory pool with its own lock
+struct alignas(64) BufferPool::Shard {
+    std::mutex           mutex;
+    std::size_t          poolSize      = 0;
+    tlsf_t               tlsfAllocator = nullptr;
+    std::vector<void*>   memorySegments;
+};
+
+BufferPool::BufferPool(std::uint16_t shardCount, std::size_t initialSize, ResizeCallback resizeCb)
+    : resizeCallback_(resizeCb), shardCount_(shardCount)
 {
-    void* memory = AlignedMalloc(poolSize_, tlsf_align_size());
-    if(!memory)
-        logger_.Fatal("[BufferPool]: Initial malloc failed");
+    // Shard count must be a power of two
+    if(((shardCount_) & (shardCount_ - 1)))
+        logger_.Fatal("[BufferPool]: Shard count must be a power of 2, got: ", shardCount);
 
-    tlsfAllocator_ = tlsf_create_with_pool(memory, poolSize_);
-    if(!tlsfAllocator_) {
-        AlignedFree(memory);
-        logger_.Fatal("[BufferPool]: Failed to initialize TLSF with pool");
+    shards_ = std::make_unique<Shard[]>(shardCount);
+    if(!shards_)
+        logger_.Fatal("[BufferPool]: Failed to allocate memory for pool shards.");
+
+    // Calculate initial size per shard. Ensure a reasonable minimum size
+    std::size_t sizePerShard = initialSize / shardCount_;
+    if(sizePerShard < 64 * 1024)
+        sizePerShard = 64 * 1024;
+
+    for(unsigned int i = 0; i < shardCount_; ++i) {
+        void* memory = AlignedMalloc(sizePerShard, tlsf_align_size());
+        if(!memory)
+            logger_.Fatal("[BufferPool]: Initial malloc failed for shard ", i);
+
+        shards_[i].tlsfAllocator = tlsf_create_with_pool(memory, sizePerShard);
+        if(!shards_[i].tlsfAllocator)
+            logger_.Fatal("[BufferPool]: Failed to initialize TLSF for shard ", i);
+
+        shards_[i].poolSize = sizePerShard;
+        shards_[i].memorySegments.push_back(memory);
     }
-
-    // The first pool itself has no handle, so its nullptr
-    pools_.emplace_back(memory, nullptr);
-    logger_.Info("[BufferPool]: Created initial pool with size ", poolSize_, " bytes at ", reinterpret_cast<uintptr_t>(memory));
+    logger_.Info("[BufferPool]: Created ", shardCount_, " shards, each with initial size ", sizePerShard, " bytes.");
 }
 
 BufferPool::~BufferPool()
 {
-    logger_.Info("[BufferPool]: Freeing ", pools_.size(), pools_.size() > 1 ? " pools:" : " master pool:");
-    std::lock_guard<std::recursive_mutex> lock(poolMutex_);
+    logger_.Info("[BufferPool]: Destroying ", shardCount_, shardCount_ > 1 ? " shards." : " shard.");
+    for(unsigned int i = 0; i < shardCount_; ++i) {
+        std::lock_guard<std::mutex> lock(shards_[i].mutex);
 
-    // Free additional pools (1 to N)
-    for(std::size_t i = 1; i < pools_.size(); ++i) {
-        auto& pool = pools_[i];
-        if(pool.handle) {
-            tlsf_remove_pool(tlsfAllocator_, pool.handle);
-            logger_.Info("[BufferPool]: Removed TLSF pool at ", reinterpret_cast<uintptr_t>(pool.memory));
-        }
+        if(shards_[i].tlsfAllocator)
+            tlsf_destroy(shards_[i].tlsfAllocator);
 
-        AlignedFree(pool.memory);
-        logger_.Info("[BufferPool]: Freed memory pool at ", reinterpret_cast<uintptr_t>(pool.memory));
+        for(void* segment : shards_[i].memorySegments)
+            AlignedFree(segment);
     }
-
-    // Destroy allocator BEFORE freeing initial pool's memory
-    tlsf_destroy(tlsfAllocator_);
-    logger_.Info("[BufferPool]: Destroyed TLSF allocator");
-
-    if(!pools_.empty()) {
-        void* memory = pools_[0].memory;
-        AlignedFree(memory);
-        logger_.Info("[BufferPool]: Freed initial memory pool at ", reinterpret_cast<uintptr_t>(memory));
-    }
-
-    pools_.clear();
+    logger_.Info("[BufferPool]: Cleanup complete.");
 }
 
+// This function is needed for allocation
+BufferPool::Shard& BufferPool::GetShardForThread(std::uint16_t& outShardIndex)
+{
+    static thread_local std::size_t threadIdHash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    outShardIndex = static_cast<std::uint16_t>(threadIdHash & (shardCount_ - 1));
+    return shards_[outShardIndex];
+}
+
+void* BufferPool::Lease(std::size_t size)
+{
+    std::uint16_t shardIndex;
+    Shard& shard = GetShardForThread(shardIndex);
+    std::lock_guard<std::mutex> lock(shard.mutex);
+
+    // Request enough memory for our header plus the user's requested size.
+    const std::size_t totalSize = sizeof(AllocationHeader) + size;
+    void* rawBlock = tlsf_malloc(shard.tlsfAllocator, totalSize);
+    
+    // Allocation failed. We need to add more memory to the shard
+    if(!rawBlock) {
+        std::size_t newSegmentSize = resizeCallback_ ? resizeCallback_(shard.poolSize) : shard.poolSize * 2;
+        shard.poolSize += newSegmentSize;
+
+        void* newMemory = AlignedMalloc(newSegmentSize, tlsf_align_size());
+        if(!newMemory)
+            logger_.Fatal("[BufferPool]: Failed to allocate new memory segment for shard.");
+
+        if(!tlsf_add_pool(shard.tlsfAllocator, newMemory, newSegmentSize))
+            logger_.Fatal("[BufferPool]: Failed to add new memory pool to TLSF shard.");
+
+        shard.memorySegments.push_back(newMemory);
+        logger_.Debug("[BufferPool]: Added new memory segment of size ", newSegmentSize, " to a shard.");
+
+        rawBlock = tlsf_malloc(shard.tlsfAllocator, totalSize);
+        if(!rawBlock)
+            logger_.Fatal("[BufferPool]: Allocation failed even after adding a new pool segment.");
+    }
+
+    // Place the shard index in the header at the beginning of the block
+    AllocationHeader* header = static_cast<AllocationHeader*>(rawBlock);
+    header->shardIndex = shardIndex;
+
+    return static_cast<void*>(reinterpret_cast<char*>(rawBlock) + sizeof(AllocationHeader));
+}
+
+void BufferPool::Release(void* ptr)
+{
+    if(!ptr) return;
+
+    // Calculate the address of the original block by moving the pointer backwards
+    void* rawBlock = static_cast<void*>(reinterpret_cast<char*>(ptr) - sizeof(AllocationHeader));
+    
+    // Read the shard index from the header
+    AllocationHeader* header = static_cast<AllocationHeader*>(rawBlock);
+    std::uint16_t shardIndex = header->shardIndex;
+
+    if(shardIndex >= shardCount_) {
+        logger_.Error("[BufferPool]: Corruption detected! Invalid shard index (", shardIndex, ") found in allocation header.");
+        return;
+    }
+
+    // Get the correct shard and lock it
+    Shard& shard = shards_[shardIndex];
+    std::lock_guard<std::mutex> lock(shard.mutex);
+    
+    // Free the entire original block
+    tlsf_free(shard.tlsfAllocator, rawBlock);
+}
+
+// AlignedMalloc and AlignedFree remain the same.
 void* BufferPool::AlignedMalloc(std::size_t size, std::size_t alignment)
 {
 #if defined(_WIN32)
@@ -73,69 +156,13 @@ void* BufferPool::AlignedMalloc(std::size_t size, std::size_t alignment)
 #endif
 }
 
-void  BufferPool::AlignedFree(void* ptr)
+void BufferPool::AlignedFree(void* ptr)
 {
 #if defined(_WIN32)
     _aligned_free(ptr);
 #else
     free(ptr);
 #endif
-}
-
-void* BufferPool::AddPool(std::size_t size)
-{
-    void* memory = AlignedMalloc(size, tlsf_align_size());
-    if(!memory)
-        logger_.Fatal("[BufferPool]: malloc failed for ", size, " bytes");
-
-    void* poolHandle = tlsf_add_pool(tlsfAllocator_, memory, size);
-    if(!poolHandle) {
-        AlignedFree(memory);
-        logger_.Fatal("[BufferPool]: Failed to add TLSF pool");
-    }
-
-    pools_.emplace_back(memory, poolHandle);
-    logger_.Info("[BufferPool]: Added new pool of size ", size, " bytes at ", reinterpret_cast<uintptr_t>(memory));
-
-    return poolHandle;
-}
-
-void* BufferPool::Lease(std::size_t size)
-{
-    std::lock_guard<std::recursive_mutex> lock(poolMutex_);
-
-    void* ptr = tlsf_malloc(tlsfAllocator_, size);
-    if(ptr)
-    {
-        logger_.Debug("[BufferPool]: Allocated ", size, " bytes at ", reinterpret_cast<uintptr_t>(ptr));
-        return ptr;
-    }
-
-    std::size_t newSize = resizeCallback_ ? resizeCallback_(poolSize_) : poolSize_;
-    newSize             = std::max(newSize, poolSize_);
-    poolSize_           = newSize;
-
-    AddPool(newSize);
-    ptr = tlsf_malloc(tlsfAllocator_, size);
-    if(!ptr)
-        logger_.Fatal("[BufferPool]: Allocation failed after adding new pool");
-
-    logger_.Debug("[BufferPool]: Allocated ", size, " bytes from new pool at ", reinterpret_cast<uintptr_t>(ptr));
-    return ptr;
-}
-
-void BufferPool::Release(void* ptr)
-{
-    if(!ptr) return;
-
-    std::lock_guard<std::recursive_mutex> lock(poolMutex_);
-    tlsf_free(tlsfAllocator_, ptr);
-    logger_.Debug("[BufferPool]: Freed memory at ", reinterpret_cast<uintptr_t>(ptr));
-}
-
-std::size_t BufferPool::PoolSize() const
-{
-    return poolSize_;
 }
 
 } // namespace WFX::Utils

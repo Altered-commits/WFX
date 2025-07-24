@@ -26,7 +26,7 @@ SerializedHttpResponse HttpSerializer::Serialize(HttpResponse& res)
     // 1. HTTP version and status
     out.append("HTTP/1.");
     out.push_back(res.version == HttpVersion::HTTP_1_1 ? '1' : '0');
-    out.append(" ");
+    out.push_back(' ');
 
     std::uint16_t code = static_cast<std::uint16_t>(res.status);
     
@@ -36,7 +36,7 @@ SerializedHttpResponse HttpSerializer::Serialize(HttpResponse& res)
     out.push_back('0' + (code / 10) % 10);
     out.push_back('0' + code % 10);
 
-    out.append(" ");
+    out.push_back(' ');
     out.append(HttpStatusToReason(res.status));
     out.append("\r\n");
 

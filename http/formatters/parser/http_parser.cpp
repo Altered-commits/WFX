@@ -60,12 +60,6 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
 
             if(!ParseHeaders(data, size, pos, request.headers))
                 return HttpParseState::PARSE_ERROR;
-
-            // We also need to update connection alive status
-            // If we do not find the header, we will assume client wants to close
-            auto conn = request.headers.GetHeader("Connection");
-            if(conn.empty() || StringGuard::CaseInsensitiveCompare(conn, "close"))
-                ctx.shouldClose = true;
             
             // Now we check the type, whether its streaming data or all at once kinda stuff or expect header
             auto expectHeader        = request.headers.GetHeader("Expect");

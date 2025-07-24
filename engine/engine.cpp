@@ -43,8 +43,6 @@ void Engine::Stop()
 void Engine::HandleConnection(WFXSocket socket)
 {
     connHandler_->SetReceiveCallback(socket, [this, socket](ConnectionContext& ctx) {
-        logger_.Info("[Engine]: Request on IP: ", ctx.connInfo.GetIpStr(), ':', socket);
-
         this->HandleRequest(socket, ctx);
     });
 }
@@ -58,29 +56,17 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
     // Parse (The most obvious fucking comment i could write, i'm just sleepy rn cut me some slack)
     HttpParseState state = HttpParser::Parse(ctx);
 
+    // Version is important for Serializer to properly create a response
+    // HTTP/1.1 and HTTP/2 have different formats duh
+    res.version = ctx.requestInfo->version;
+
     switch(state)
-    {
-        case HttpParseState::PARSE_ERROR:
-        {
-            const char* badResp =
-                "HTTP/1.1 400 Bad Request\r\n"
-                "Content-Type: text/plain\r\n"
-                "Connection: close\r\n"
-                "Content-Length: 11\r\n"
-                "\r\n"
-                "Bad Request";
-
-            connHandler_->Write(socket, badResp);
-
-            // Mark the connection to be closed after write completes
-            ctx.shouldClose = true;
-            return;
-        }
-        
+    {        
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
         case HttpParseState::PARSE_INCOMPLETE_BODY:
         {
             // Set the current tick to ensure timeout handler doesnt kill the context
+            ctx.SetState(HttpConnectionState::ACTIVE);
             ctx.timeoutTick = connHandler_->GetCurrentTick();
             connHandler_->ResumeReceive(socket);
             return;
@@ -90,7 +76,7 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
         {
             // We want to wait for the request so we won't be closing connection
             // also update timeoutTick so timeout handler doesnt kill the context
-            ctx.shouldClose = false;
+            ctx.SetState(HttpConnectionState::ACTIVE);
             ctx.timeoutTick = connHandler_->GetCurrentTick();
             connHandler_->Write(socket, "HTTP/1.1 100 Continue\r\n\r\n");
             return;
@@ -99,42 +85,63 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
         case HttpParseState::PARSE_EXPECT_417:
         {
             // Close the connection whether client wants to or not
-            ctx.shouldClose = true;
+            ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
             connHandler_->Write(socket, "HTTP/1.1 417 Expectation Failed\r\n\r\n");
             return;
         }
 
         case HttpParseState::PARSE_SUCCESS:
         {
-            // Response stage
-            res.version = ctx.requestInfo->version;
+            // So timeout handler doesn't do some weird stuff
+            ctx.parseState  = static_cast<std::uint8_t>(HttpParseState::PARSE_DATA_OCCUPIED);
+            
+            // logger_.Info("[Engine]: ", ctx.connInfo.GetIpStr(), ':', socket, " on route '", ctx.requestInfo->path, "'");
+            
+            auto conn        = ctx.requestInfo->headers.GetHeader("Connection");
+            bool shouldClose = true;
 
-            if(ctx.shouldClose)
-                res.Set("Connection", "close");
-            else {
-                res.Set("Connection", "keep-alive");
-                // Because we want the connection to be alive, switch the state to being idle
-                // Also the timeoutTick, DO NOT FORGET
-                ctx.parseState  = static_cast<std::uint8_t>(HttpParseState::PARSE_IDLE);
-                ctx.timeoutTick = connHandler_->GetCurrentTick();
+            if(!conn.empty()) {
+                res.Set("Connection", std::string{conn});
+                shouldClose = StringGuard::CaseInsensitiveCompare(conn, "close");
             }
+            else
+                res.Set("Connection", "close");
 
             // Get the callback for the route we got, if it doesn't exist, we display error
-            PathSegments segments;
-            auto callback = 
-                Router::GetInstance().MatchRoute(ctx.requestInfo->method, ctx.requestInfo->path, segments);
+            auto callback = Router::GetInstance().MatchRoute(
+                                ctx.requestInfo->method,
+                                ctx.requestInfo->path,
+                                ctx.requestInfo->pathSegments
+                            );
 
             if(!callback)
                 res.SendText("404: Route not found :(");
             else
-            {
-                // Move the path segments into request object
-                ctx.requestInfo->pathSegments = std::move(segments);
                 (*callback)(*ctx.requestInfo, userRes);
-            }
+
+            // Set the 'connState' to whatever the status of Connection header is
+            ctx.SetState(
+                shouldClose
+                    ? HttpConnectionState::CLOSING_DEFAULT
+                    : HttpConnectionState::ACTIVE
+                );
+            ctx.parseState  = static_cast<std::uint8_t>(HttpParseState::PARSE_IDLE);
+            ctx.timeoutTick = connHandler_->GetCurrentTick();
 
             HandleResponse(socket, res, ctx);
-            break;
+            return;
+        }
+
+        case HttpParseState::PARSE_ERROR:
+        {   
+            res.Status(HttpStatus::BAD_REQUEST)
+                .Set("Connection", "close")
+                .SendText("Bad Request");
+                
+            // Mark the connection to be closed after write completes
+            ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
+            HandleResponse(socket, res, ctx);
+            return;
         }
 
         case HttpParseState::PARSE_STREAMING_BODY:
@@ -144,28 +151,41 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                 .Set("Connection", "close")
                 .SendText("Not Implemented");
             
-            ctx.shouldClose = true;
+            ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
             HandleResponse(socket, res, ctx);
-            break;
+            return;
     }
 }
 
 void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx)
-{   
+{
     auto&& [serializedContent, bodyView] = HttpSerializer::Serialize(res);
-    
-    // File operation via TransmitFile, res.body contains the file path
+
+    int writeStatus = 0;
+
+    // File operation via TransmitFile / sendfile, res.body contains the file path
     if(res.IsFileOperation())
-        connHandler_->WriteFile(socket, std::move(serializedContent), bodyView);
+        writeStatus = connHandler_->WriteFile(socket, std::move(serializedContent), bodyView);
     // Regular WSASend write (text, JSON, etc)
     else
-        connHandler_->Write(socket, serializedContent);
+        writeStatus = connHandler_->Write(socket, serializedContent);
 
-    // vvv Cleanup vvv
-    ctx.shouldClose = 0;
-    ctx.trackBytes  = 0;
-    ctx.dataLength  = 0;
-    ctx.expectedBodyLength = 0;
+    // Status < 0 is an error, no GQCS event is generated in WorkerLoop, Close connections ourselves
+    if(writeStatus < 0)
+    {
+        ctx.SetState(HttpConnectionState::CLOSING_IMMEDIATE);
+        connHandler_->Close(socket);
+        return;
+    }
+
+    // If the connection is marked for closure, we DO NOT touch the context here
+    // The backend connection handler will handle the final cleanup after the write completes
+    if(ctx.GetState() != HttpConnectionState::CLOSING_DEFAULT) {
+        ctx.dataLength         = 0;
+        ctx.expectedBodyLength = 0;
+        ctx.trackBytes         = 0;
+        // The state correctly remains ACTIVE
+    }
 }
 
 // vvv USER DLL STUFF vvv
