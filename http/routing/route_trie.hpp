@@ -9,14 +9,22 @@ namespace WFX::Http {
 
 using namespace WFX::Utils; // For 'MoveOnlyFunction', 'Logger'
 
-struct RouteTrie {
-    TrieNode root;
-
-    // To register a new route ("/path/<id:int>", etc)
-    void Insert(std::string_view fullRoute, HttpCallbackType handler);
-
-    // To match a full route string and extract any parameters
+class RouteTrie {
+public:    
+    void                    Insert(std::string_view fullRoute, HttpCallbackType handler);
     const HttpCallbackType* Match(std::string_view requestPath, PathSegments& outParams) const;
+
+    void PushGroup(std::string_view prefix);
+    void PopGroup();
+
+private: // Helper functions
+    TrieNode* InsertRoute(std::string_view route);
+    static std::string_view StripRoute(std::string_view route);
+
+private:
+    TrieNode root_;
+    TrieNode* insertCursor_ = &root_;     // Current node where routes get inserted to
+    std::vector<TrieNode*> cursorStack_; // For nesting
 };
 
 } // namespace WFX::Http

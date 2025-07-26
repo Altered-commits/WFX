@@ -14,6 +14,9 @@ public:
     void                    RegisterRoute(HttpMethod method, std::string_view path, HttpCallbackType handler);
     const HttpCallbackType* MatchRoute(HttpMethod method, std::string_view path, PathSegments& outParams) const;
 
+    void PushRouteGroup(std::string_view prefix);
+    void PopRouteGroup();
+
 private:
     RouteTrie getRoutes_;
     RouteTrie postRoutes_;

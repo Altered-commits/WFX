@@ -9,13 +9,19 @@ const HTTP_API_TABLE* GetHttpAPIV1()
 {
     static HTTP_API_TABLE __GlobalHttpAPIV1 = {
         // Routing
-        [](HttpMethod method, std::string_view path, HttpCallbackType cb) {
+        [](HttpMethod method, std::string_view path, HttpCallbackType cb) {  // RegisterRoute
             WFX::Http::Router::GetInstance().RegisterRoute(method, path, std::move(cb));
+        },
+        [](std::string_view prefix) {  // PushRoutePrefix
+            WFX::Http::Router::GetInstance().PushRouteGroup(prefix);
+        },
+        [](void) {  // PopRoutePrefix
+            WFX::Http::Router::GetInstance().PopRouteGroup();
         },
         
         // Response handling
         [](HttpResponse* backend, HttpStatus code) {  // SetStatusFn
-        backend->Status(code);
+            backend->Status(code);
         },
         [](HttpResponse* backend, std::string key, std::string value) {  // SetHeaderFn
             backend->Set(std::move(key), std::move(value));

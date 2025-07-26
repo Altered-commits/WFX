@@ -6,7 +6,7 @@
 
 namespace WFX::Shared {
 
-inline std::vector<std::function<void()>>& __wfx_deferred_routes()
+inline std::vector<std::function<void()>>& __WFXDeferredRoutes()
 {
     static std::vector<std::function<void()>> routesReg;
     return routesReg;

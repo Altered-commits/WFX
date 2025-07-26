@@ -78,7 +78,7 @@ extern "C" {
         if(api) {
             __wfx_api = api;
 
-            auto& routes = WFX::Shared::__wfx_deferred_routes();
+            auto& routes = WFX::Shared::__WFXDeferredRoutes();
 
             // Run all deferred route registrations
             for(auto& fn : routes)

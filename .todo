@@ -5,7 +5,12 @@ wfx build	Build the binary
 wfx doctor	Check requirements for WFX
 
 To implement:
-1. Middleware
-2. Hot Reload
-3. HTML Templating (SSR)
-4. DB support
+1. Auto user code compiling into dll
+2. Middleware
+3. Hot Reload
+4. HTML Templating (SSR)
+5. DB support
+
+To Fix:
+1. Latency issues (Need more Requests per second to be handled)
+2. Crashing issue. Anything using 'ctx' inside of engine is bound to crash wfx, idk why

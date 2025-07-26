@@ -52,4 +52,16 @@ const HttpCallbackType* Router::MatchRoute(HttpMethod method, std::string_view p
     }
 }
 
+void Router::PushRouteGroup(std::string_view prefix)
+{
+    getRoutes_.PushGroup(prefix);
+    postRoutes_.PushGroup(prefix);
+}
+
+void Router::PopRouteGroup()
+{
+    getRoutes_.PopGroup();
+    postRoutes_.PopGroup();
+}
+
 } // namespace WFX::Http

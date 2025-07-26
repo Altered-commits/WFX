@@ -20,8 +20,10 @@ enum class HttpAPIVersion : std::uint8_t {
 };
 
 // vvv All aliases for clarity vvv
-// Route registering
+// Routing
 using RegisterRouteFn         = void (*)(HttpMethod method, std::string_view path, HttpCallbackType callback);
+using PushRoutePrefixFn       = void (*)(std::string_view prefix);
+using PopRoutePrefixFn        = void (*)();
 
 // Response control
 using SetStatusFn             = void (*)(HttpResponse* backend, HttpStatus status);
@@ -50,6 +52,8 @@ using IsFileOperationFn       = bool (*)(const HttpResponse* backend);
 struct HTTP_API_TABLE {
     // Routing
     RegisterRouteFn         RegisterRoute;
+    PushRoutePrefixFn       PushRoutePrefix;
+    PopRoutePrefixFn        PopRoutePrefix;
 
     // Response manipulation
     SetStatusFn             SetStatus;
