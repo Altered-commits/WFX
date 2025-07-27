@@ -1,7 +1,6 @@
 #ifndef WFX_UTILS_HASHERS_HPP
 #define WFX_UTILS_HASHERS_HPP
 
-#include "utils/logger/logger.hpp"
 #include "./string.hpp"
 
 #include <cstdint>
@@ -67,8 +66,6 @@ private:
     alignas(64) std::uint8_t randomPool_[BUFFER_SIZE];
     std::atomic<std::size_t> cursor_{0};
     std::mutex refillMutex_;
-
-    Logger& logger_ = Logger::GetInstance();
 };
 
 } // namespace WFX::Utils

@@ -1,180 +1,186 @@
 #include "doctor.hpp"
-
 #include "utils/logger/logger.hpp"
-#include <vector>
+
 #include <fstream>
+#include <cstdlib>
+#include <string>
 #include <filesystem>
+#include <algorithm>
 
 #ifdef _WIN32
-    #define DETECT_CMD "where "
     #define NULL_DEVICE " >nul 2>&1"
 #else
-    #define DETECT_CMD "which "
     #define NULL_DEVICE " >/dev/null 2>&1"
 #endif
 
 namespace WFX::CLI {
 
-struct CompilerInfo {
-    std::string_view id;
-    std::string_view command;
-    std::string_view displayName;
-    std::string_view extraArgs;
-};
-
-// More flags to be added later for more optimization
-static std::vector<CompilerInfo> compilers = {
-#ifdef _WIN32
-    {"msvc", "cl", "MSVC", "/LD /O2 /EHsc /I WFX"},
-    {"clang", "clang++", "Clang", "-std=c++17 -O2 -shared -I./WFX"},
-    {"gcc", "g++", "GCC", "-std=c++17 -O2 -shared -I./WFX"},
+// --- Detect which compiler this binary was built with ---
+#if defined(_MSC_VER)
+    constexpr const char* COMPILER_ID       = "msvc";
+    constexpr const char* COMPILER_COMMAND  = "cl";
+    constexpr const char* COMPILER_DISPLAY  = "MSVC";
+    constexpr const char* COMPILER_CARGS    = "/c /O2 /EHsc /I WFX";
+    constexpr const char* COMPILER_LARGS    = "/LD";
+#elif defined(__MINGW32__) || defined(__MINGW64__)
+    constexpr const char* COMPILER_ID       = "g++-mingw";
+    constexpr const char* COMPILER_COMMAND  = "g++";
+    constexpr const char* COMPILER_DISPLAY  = "G++ (MinGW)";
+    constexpr const char* COMPILER_CARGS    =
+        "-std=c++17 -O2 -flto -ffunction-sections -fdata-sections "
+        "-fno-rtti -fno-exceptions "
+        "-fvisibility=hidden -fvisibility-inlines-hidden "
+        "-I. -Iinclude -Iwfx -c";
+    constexpr const char* COMPILER_LARGS    =
+        "-shared -flto -Wl,--gc-sections -Wl,--strip-all";
+#elif defined(__clang__)
+    constexpr const char* COMPILER_ID       = "clang++";
+    constexpr const char* COMPILER_COMMAND  = "clang++";
+    constexpr const char* COMPILER_DISPLAY  = "Clang++";
+    constexpr const char* COMPILER_CARGS    =
+        "-std=c++17 -O2 -flto -fvisibility=hidden -fvisibility-inlines-hidden "
+        "-fno-rtti -fno-exceptions "
+        "-ffunction-sections -fdata-sections "
+        "-I. -Iinclude -Iwfx -c";
+    constexpr const char* COMPILER_LARGS    =
+        "-shared -fPIC -flto -Wl,--gc-sections -Wl,--strip-all";
+#elif defined(__GNUC__)
+    constexpr const char* COMPILER_ID       = "g++";
+    constexpr const char* COMPILER_COMMAND  = "g++";
+    constexpr const char* COMPILER_DISPLAY  = "G++";
+    constexpr const char* COMPILER_CARGS    =
+        "-std=c++17 -O2 -flto -fvisibility=hidden -fvisibility-inlines-hidden "
+        "-fno-rtti -fno-exceptions "
+        "-ffunction-sections -fdata-sections "
+        "-I. -Iinclude -Iwfx -c";
+    constexpr const char* COMPILER_LARGS    =
+        "-shared -fPIC -flto -Wl,--gc-sections -Wl,--strip-all";
 #else
-    {"gcc", "g++", "GCC", "-std=c++17 -O2 -shared -fPIC -I./WFX"},
-    {"clang", "clang++", "Clang", "-std=c++17 -O2 -shared -fPIC -I./WFX"},
+    #error "[wfx doctor]: Unsupported compiler. (__VERSION__: " __VERSION__ ") Please update doctor.cpp to add support."
 #endif
-};
 
-static std::string RunCommand(std::string_view cmd)
+static std::string RunCommand(const std::string& cmd)
 {
     std::string result;
     FILE* pipe =
-#ifdef _WIN32
-        _popen(std::string(cmd).c_str(), "r");
-#else
-        popen(std::string(cmd).c_str(), "r");
-#endif
+    #ifdef _WIN32
+        _popen(cmd.c_str(), "r");
+    #else
+        popen(cmd.c_str(), "r");
+    #endif
+
     if(!pipe) return result;
 
     char buffer[256];
-    while(fgets(buffer, sizeof(buffer), pipe) != nullptr)
+    while(fgets(buffer, sizeof(buffer), pipe))
         result += buffer;
 
-#ifdef _WIN32
-    _pclose(pipe);
-#else
-    pclose(pipe);
-#endif
+    #ifdef _WIN32
+        _pclose(pipe);
+    #else
+        pclose(pipe);
+    #endif
+
     return result;
 }
 
-static bool IsExecutableAvailable(std::string_view bin)
+static bool IsCompilerAvailable(const std::string& binary)
 {
-    std::string check = std::string(DETECT_CMD) + std::string(bin) + NULL_DEVICE;
+    std::string check =
+    #ifdef _WIN32
+        "where " + binary + NULL_DEVICE;
+    #else
+        "which " + binary + NULL_DEVICE;
+    #endif
     return std::system(check.c_str()) == 0;
 }
 
-static bool LooksLikeMinGW(std::string_view compilerCmd)
-{
-    std::string target = RunCommand(std::string(compilerCmd) + " -dumpmachine");
-    return target.find("mingw") != std::string::npos;
-}
-
-static bool LooksLikeMSVC(std::string_view versionOutput)
-{
-    return versionOutput.find("Microsoft") != std::string_view::npos &&
-           versionOutput.find("Compiler Version") != std::string_view::npos;
-}
-
+#ifdef _WIN32
 static std::string TryMSVCViaVsWhere()
 {
-    constexpr std::string_view vswherePath = R"("C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe")";
-    std::string installPath = RunCommand(std::string(vswherePath) +
+    constexpr const char* vswhere = R"("C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe")";
+    std::string output = RunCommand(std::string(vswhere) +
         " -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath");
 
-    installPath.erase(std::remove(installPath.begin(), installPath.end(), '\r'), installPath.end());
-    installPath.erase(std::remove(installPath.begin(), installPath.end(), '\n'), installPath.end());
-    if(installPath.empty()) return "";
+    output.erase(std::remove(output.begin(), output.end(), '\r'), output.end());
+    output.erase(std::remove(output.begin(), output.end(), '\n'), output.end());
 
-    std::filesystem::path toolsPath = std::filesystem::path(installPath) / "VC" / "Tools" / "MSVC";
-    if(!std::filesystem::exists(toolsPath)) return "";
+    if(output.empty()) return "";
 
-    for(const auto& entry : std::filesystem::directory_iterator(toolsPath)) {
-        if(!entry.is_directory()) continue;
+    std::filesystem::path base = output;
+    base /= "VC/Tools/MSVC";
 
-        auto clPath = entry.path() / "bin" / "Hostx64" / "x64" / "cl.exe";
-        if(std::filesystem::exists(clPath))
-            return clPath.string();
+    if(!std::filesystem::exists(base)) return "";
+
+    for(const auto& entry : std::filesystem::directory_iterator(base)) {
+        auto cl = entry.path() / "bin/Hostx64/x64/cl.exe";
+        if(std::filesystem::exists(cl))
+            return cl.string();
     }
-
     return "";
 }
+#endif
 
 int WFXDoctor()
 {
-    WFX::Utils::Logger& logger = WFX::Utils::Logger::GetInstance();
-    logger.Info("--------------------------------------------");
-    logger.Info("[Doctor]: Checking for compatible compilers.");
-    logger.Info("--------------------------------------------");
+    auto& logger = WFX::Utils::Logger::GetInstance();
+    logger.Info("-----------------------------------------------");
+    logger.Info("[Doctor]: Checking for build compiler presence.");
+    logger.Info("-----------------------------------------------");
 
-    bool found       = false;
-    bool msvcHandled = false;
-    std::string msvcResolvedPath;
+    std::string compiler = COMPILER_COMMAND;
 
-    for(auto& compiler : compilers) {
 #ifdef _WIN32
-        if(compiler.id == "msvc") {
-            if(!IsExecutableAvailable(compiler.command)) {
-                logger.Warn("[-] MSVC (cl.exe) not found in PATH. Trying to locate via vswhere...");
+    if(std::string(COMPILER_ID) == "msvc") {
+        if(!IsCompilerAvailable(compiler)) {
+            logger.Warn("[-] MSVC (cl.exe) not found in PATH. Trying to locate via vswhere...");
+            std::string resolved = TryMSVCViaVsWhere();
 
-                msvcResolvedPath = TryMSVCViaVsWhere();
-                if(msvcResolvedPath.empty()) {
-                    logger.Warn("[-] vswhere failed to locate MSVC.");
-                    logger.Info("[!] If you have Visual Studio installed, open Developer Command Prompt or add MSVC to your PATH.");
-                    continue;
-                }
-
-                logger.Info("[+] MSVC found at: ", msvcResolvedPath);
-                compiler.command = msvcResolvedPath;
-                msvcHandled = true;
+            if(resolved.empty()) {
+                logger.Error("[X] Failed to locate MSVC. Please open Developer Command Prompt or add MSVC to PATH.");
+                return 1;
             }
+
+            compiler = resolved;
+            logger.Info("[+] MSVC found at: ", compiler);
         }
-#endif
-        if(!msvcHandled && !IsExecutableAvailable(compiler.command)) {
-            logger.Warn("[-] ", compiler.displayName, " not found in PATH");
-            continue;
-        }
-
-        std::string version;
-        if(compiler.id == "msvc")
-            version = RunCommand("\"" + std::string(compiler.command) + "\"");
-        else
-            version = RunCommand("\"" + std::string(compiler.command) + "\" --version");
-
-        if(version.empty()) {
-            logger.Warn("[-] ", compiler.displayName, " exists but version check failed");
-            continue;
-        }
-
-        logger.Info("[+] ", compiler.displayName, " detected: ", version.substr(0, version.find('\n')));
-
-#ifdef _WIN32
-        if(compiler.id == "msvc" && !msvcHandled && !LooksLikeMSVC(version)) {
-            logger.Warn("[-] Found `cl`, but it does not appear to be genuine MSVC");
-            continue;
-        }
-
-        if(compiler.id == "gcc" && LooksLikeMinGW(compiler.command))
-            logger.Info("[+] Detected as MinGW variant");
+    }
 #endif
 
-        std::ofstream out("toolchain.toml");
-        out << "[Compiler]\n";
-        out << "name    = \"" << compiler.id << "\"\n";
-        out << "command = \"" << compiler.command << "\"\n";
-        out << "args    = \"" << compiler.extraArgs << "\"\n";
-        out.close();
+    // Detect absolute or relative paths (e.g., "C:/...", "./cl.exe")
+    bool isPath = compiler.find('/') != std::string::npos || compiler.find('\\') != std::string::npos;
+    bool exists = isPath && std::filesystem::exists(compiler);
 
-        logger.Info("[Doctor]: Saved toolchain config to toolchain.toml");
-        found = true;
-        break;
+    // Only run IsCompilerAvailable if it's not already resolved by a valid path
+    if(!exists && !IsCompilerAvailable(compiler)) {
+        logger.Error("[X] Compiler '", COMPILER_ID, "' not found on this system.");
+        logger.Info("[!] Please install it or adjust your PATH.");
+        return 1;
     }
 
-    if(!found) {
-        logger.Error("[X] No supported compilers found in PATH.");
-        logger.Info("[!] Please install GCC, Clang, or MSVC and try again.");
-        logger.Info("[!] Or manually create toolchain.toml with your compiler config.");
-    }
+    // Always quote compiler for command execution (in case path contains spaces)
+    std::string quotedCompiler = "\"" + compiler + "\"";
 
+    // Run version command appropriately
+    std::string version;
+    if(std::string(COMPILER_ID) == "msvc")
+        version = RunCommand(quotedCompiler);  // cl.exe shows version on no args
+    else
+        version = RunCommand(quotedCompiler + " --version");
+
+    // Extract and print only the first line of version info
+    std::string versionLine = version.substr(0, version.find('\n'));
+    logger.Info("[+] Detected: ", COMPILER_DISPLAY, ": ", versionLine);
+
+    std::ofstream out("toolchain.toml");
+    out << "[Compiler]\n";
+    out << "name    = \"" << COMPILER_ID    << "\"\n";
+    out << "command = \"" << compiler       << "\"\n";
+    out << "cargs   = \"" << COMPILER_CARGS << "\"\n";
+    out << "largs   = \"" << COMPILER_LARGS << "\"\n";
+    out.close();
+
+    logger.Info("[Doctor]: Saved toolchain config to toolchain.toml");
     return 0;
 }
 

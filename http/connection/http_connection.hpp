@@ -4,6 +4,7 @@
 #include "http/request/http_request.hpp"
 
 #include "utils/backport/move_only_function.hpp"
+#include "utils/logger/logger.hpp"
 #include "utils/crypt/hash.hpp"
 
 #include <string>

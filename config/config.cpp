@@ -9,6 +9,12 @@
         logger.Warn("[Config]: Missing or invalid entry: [", section, "] ", field,      \
                     ". Using default value: ", target)
 
+#define TOML_GET_OR_FATAL(tbl, logger, section, field, target)                            \
+    if(auto val = tbl[section][field].value<decltype(target)>())                          \
+        target = *val;                                                                    \
+    else                                                                                  \
+        logger.Fatal("[Config]: Missing or invalid entry: [", section, "] ", field, '.')
+
 #define TOML_GET_AUTO_OR_ALL(tbl, logger, section, field, target, autoValue, allValue)          \
     if(auto node = tbl[section][field]) {                                                       \
         if(auto val = node.value<decltype(target)>())                                           \
@@ -36,12 +42,14 @@ Config& Config::GetInstance()
     return config;
 }
 
-void Config::LoadFromFile(const std::string_view& path)
+void Config::LoadCoreSettings(std::string_view path)
 {
     unsigned int cores = std::thread::hardware_concurrency();
 
     try {
-        auto tbl = toml::parse_file(std::string(path));
+        auto tbl = toml::parse_file(path);
+
+        TOML_GET_OR_FATAL(tbl, logger_, "Project", "project_name", projectConfig.projectName);
 
         TOML_GET(tbl, logger_, "Network", "recv_buffer_max",             networkConfig.maxRecvBufferSize);
         TOML_GET(tbl, logger_, "Network", "recv_buffer_incr",            networkConfig.bufferIncrSize);
@@ -71,7 +79,21 @@ void Config::LoadFromFile(const std::string_view& path)
     #endif
     }
     catch(const toml::parse_error& err) {
-        logger_.Warn("[Config]: '", path, "' ", err.what(), ". Using default configuration.");
+        logger_.Fatal("[Config]: '", path, "' ", err.what(), ". 'wfx.toml' should be present for the framework to 'w o r k'.");
+    }
+}
+
+void Config::LoadToolchainSettings(std::string_view path)
+{
+    try {
+        auto tbl = toml::parse_file(path);
+
+        TOML_GET_OR_FATAL(tbl, logger_, "Compiler", "command", toolchainConfig.command);
+        TOML_GET_OR_FATAL(tbl, logger_, "Compiler", "cargs", toolchainConfig.cargs);
+        TOML_GET_OR_FATAL(tbl, logger_, "Compiler", "largs", toolchainConfig.largs);
+    }
+    catch(const toml::parse_error& err) {
+        logger_.Fatal("[Config]: '", path, "' ", err.what(), ". Run 'wfx doctor' to generate ", path);
     }
 }
 

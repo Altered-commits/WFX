@@ -33,7 +33,10 @@ static void ScaffoldProject(const std::string& projectName)
     fs::create_directories(projBase / "templates");
 
     // 2. Create essential config
-    CreateFile(base / "wfx.toml", R"([Network]
+    CreateFile(base / "wfx.toml", R"([Project]
+project_name = ")" + projectName + R"("
+
+[Network]
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
 header_reserve_hint          = 512     # Initial header allocation hint size

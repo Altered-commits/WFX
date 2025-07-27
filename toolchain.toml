@@ -1,4 +1,5 @@
 [Compiler]
-name    = "msvc"
-command = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.42.34433\bin\Hostx64\x64\cl.exe"
-args    = "/LD /O2 /EHsc /I WFX"
+name    = "g++-mingw"
+command = "g++"
+cargs   = "-std=c++17 -O2 -flto -ffunction-sections -fdata-sections -fno-rtti -fno-exceptions -fvisibility=hidden -fvisibility-inlines-hidden -I. -Iinclude -Iwfx -c"
+largs   = "-shared -flto -Wl,--gc-sections -Wl,--strip-all"

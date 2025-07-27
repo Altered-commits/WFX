@@ -1,8 +1,13 @@
 #include "engine.hpp"
 
 #include "include/http/response.hpp" // For 'Response'
+#include "http/formatters/parser/http_parser.hpp"
+#include "http/formatters/serializer/http_serializer.hpp"
 #include "http/routing/router.hpp"
 #include "shared/apis/master_api.hpp"
+#include "utils/backport/string.hpp"
+#include "utils/filesystem/filesystem.hpp"
+#include "utils/process/process.hpp"
 
 #include <iostream>
 #include <string>
@@ -13,11 +18,18 @@ namespace WFX::Core {
 Engine::Engine()
     : connHandler_(CreateConnectionHandler())
 {
-    // Load stuff from wfx.toml if it exists, else we use default configuration
-    config_.LoadFromFile("wfx.toml");
+    config_.LoadCoreSettings("wfx.toml");
+    config_.LoadToolchainSettings("toolchain.toml");
+
+    // This will be used in both compiling and injecting of dll
+    const std::string dllDir  = config_.projectConfig.projectName + "/build/dlls/";
+    const std::string dllPath = dllDir + "user_entry.dll";
+
+    // Compile user code (in 'src' directory) into dll which will be loaded below
+    HandleUserSrcCompilation(dllDir.c_str(), dllPath.c_str());
 
     // Load user's DLL file which we compiled above
-    HandlerUserDLLInjection("api_entry.dll");
+    HandleUserDLLInjection(dllPath.c_str());
 }
 
 void Engine::Listen(const std::string& host, int port)
@@ -189,11 +201,74 @@ void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionConte
 }
 
 // vvv USER DLL STUFF vvv
-void Engine::HandlerUserDLLInjection(const char* path)
+void Engine::HandleUserSrcCompilation(const char* dllDir, const char* dllPath)
 {
-    HMODULE userModule = LoadLibraryA(path);
+    const std::string& projName  = config_.projectConfig.projectName;
+    const auto&        toolchain = config_.toolchainConfig;
+    const std::string  srcDir    = projName + "/src";
+    const std::string  objDir    = projName + "/build/objs";
+
+    auto& fs   = WFX::Utils::FileSystem::GetFileSystem();
+    auto& proc = WFX::Utils::ProcessUtils::GetInstance();
+
+    if(!fs.DirectoryExists(srcDir))
+        logger_.Fatal("[Engine]: Failed to locate 'src' directory inside of '", projName, "\' directory.");
+
+    if(!fs.CreateDirectory(objDir))
+        logger_.Fatal("[Engine]: Failed to create '", objDir, "'. Error code: ", GetLastError());
+
+    if(!fs.CreateDirectory(dllDir))
+        logger_.Fatal("[Engine]: Failed to create '", dllDir, "'. Error code: ", GetLastError());
+
+    // Caching frequently used stuff
+    std::string linkCmd = toolchain.command + " ";
+    std::string compCmd = linkCmd + toolchain.cargs + " \"";
+
+    // Recurse through the 'src' directory and compile each cpp into obj file
+    fs.ListDirectory(srcDir, true, [&](std::string entry) {
+        if(EndsWith(entry.c_str(), ".cpp") || EndsWith(entry.c_str(), ".cxx") || EndsWith(entry.c_str(), ".cc")) {
+            const std::string& cppFile = entry;
+
+            std::string relativePath = cppFile.substr(srcDir.size());
+            if(!relativePath.empty() && (relativePath[0] == '/' || relativePath[0] == '\\'))
+                relativePath = relativePath.substr(1);
+
+            std::string objFile = objDir + "/" + relativePath;
+            objFile.replace(objFile.size() - 4, 4, ".obj");
+
+            std::size_t lastSlash = objFile.find_last_of("/\\");
+            if(lastSlash != std::string::npos) {
+                std::string dir = objFile.substr(0, lastSlash);
+                if(!fs.DirectoryExists(dir))
+                    fs.CreateDirectory(dir);
+            }
+
+            std::string cmd = compCmd + cppFile + "\" -o \"" + objFile + "\"";
+            auto result = proc.RunProcess(cmd);
+            if(result.exitCode < 0)
+                logger_.Fatal("[Engine]: Compilation failed for: ", cppFile, ". Error code: ", result.osCode);
+            else
+                logger_.Info("[Engine]: Compiled file: ", cppFile);
+
+            linkCmd += "\"" + objFile + "\" ";
+        }
+    });
+
+    // Finally, link all the objs into dll
+    linkCmd += toolchain.largs + " -o \"" + dllPath + '"';
+
+    auto linkResult = proc.RunProcess(linkCmd);
+    if(linkResult.exitCode < 0)
+        logger_.Fatal("[Engine]: Linking failed. DLL was not created. Error code: ", linkResult.osCode);
+
+    logger_.Info("[Engine]: User project successfully compiled to ", dllDir);
+}
+
+void Engine::HandleUserDLLInjection(const char* dllDir)
+{
+    HMODULE userModule = LoadLibraryA(dllDir);
     if(!userModule)
-        logger_.Fatal("[Engine]: User side 'api_entry.dll' not found.");
+        logger_.Fatal("[Engine]: ", dllDir, " was not found.");
 
     // Resolve the exported function
     auto registerFn = reinterpret_cast<WFX::Shared::RegisterMasterAPIFn>(
@@ -201,7 +276,7 @@ void Engine::HandlerUserDLLInjection(const char* path)
     );
 
     if(!registerFn)
-        logger_.Fatal("[Engine]: Failed to find RegisterWFXAPI() in user DLL.");
+        logger_.Fatal("[Engine]: Failed to find RegisterMasterAPI() in user DLL.");
     
     // Inject API
     registerFn(WFX::Shared::GetMasterAPI());

@@ -2,10 +2,7 @@
 #define WFX_ENGINE_HPP
 
 #include "config/config.hpp"
-
 #include "http/connection/http_connection_factory.hpp"
-#include "http/formatters/parser/http_parser.hpp"
-#include "http/formatters/serializer/http_serializer.hpp"
 
 #include <string>
 
@@ -26,7 +23,8 @@ private:
     void HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx);
 
 private:
-    void HandlerUserDLLInjection(const char* path);
+    void HandleUserSrcCompilation(const char* dllDir, const char* dllPath);
+    void HandleUserDLLInjection(const char* dllDir);
 
     Logger& logger_ = Logger::GetInstance();
     Config& config_ = Config::GetInstance();

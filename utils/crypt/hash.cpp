@@ -1,4 +1,5 @@
 #include "hash.hpp"
+#include "utils/logger/logger.hpp"
 
 namespace WFX::Utils {
 
@@ -87,7 +88,7 @@ std::uint64_t Hasher::Fnv1aCaseInsensitive(std::string_view str)
 RandomPool::RandomPool()
 {
     if(!RefillBytes())
-        logger_.Fatal("[RandomPool]: Failed to construct randomized byte pool");
+        Logger::GetInstance().Fatal("[RandomPool]: Failed to construct randomized byte pool.");
 }
 
 RandomPool& RandomPool::GetInstance()

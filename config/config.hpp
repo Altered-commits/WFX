@@ -12,6 +12,10 @@ namespace WFX::Core {
 using namespace WFX::Utils; // For 'Logger'
 
 // Every struct represents a section of configuration
+struct ProjectConfig {
+    std::string projectName;
+};
+
 struct NetworkConfig {
     std::uint32_t maxRecvBufferSize  = 16 * 1024;
     std::uint32_t bufferIncrSize     = 4 * 1024;
@@ -41,18 +45,27 @@ struct OSSpecificConfig {
 #endif
 };
 
+struct ToolchainConfig {
+    std::string command;
+    std::string cargs;
+    std::string largs;
+};
+
 // Main Config loader
 // TODO: Add checks for maxRecvBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
 class Config {
 public:
+    ProjectConfig    projectConfig;
     NetworkConfig    networkConfig;
     OSSpecificConfig osSpecificConfig;
+    ToolchainConfig  toolchainConfig;
 
     // vvv Access vvv
     static Config& GetInstance();
 
     // vvv Load from TOML vvv
-    void LoadFromFile(const std::string_view& path);
+    void LoadCoreSettings(std::string_view path);
+    void LoadToolchainSettings(std::string_view path);
 
 private:
     Config() = default;
