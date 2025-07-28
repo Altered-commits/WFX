@@ -5,7 +5,7 @@ wfx build	Build the binary
 wfx doctor	Check requirements for WFX
 
 To implement:
-1. Auto user code compiling into dll
+1. Auto user code compiling into dll (Done)
 2. Middleware
 3. Hot Reload
 4. HTML Templating (SSR)

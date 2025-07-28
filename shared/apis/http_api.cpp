@@ -29,9 +29,6 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         [](HttpResponse* backend, const char* cstr) {  // SendTextCStrFn
             backend->SendText(cstr);
         },
-        [](HttpResponse* backend, std::string_view vstr) {  // SendTextViewFn
-            backend->SendText(vstr);
-        },
         SendTextRvalueFn{[](HttpResponse* backend, std::string&& text) {  // SendTextRvalueFn
             backend->SendText(std::move(text));
         }},
@@ -41,18 +38,12 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         SendJsonRvalueFn{[](HttpResponse* backend, Json&& json) {  // SendJsonRvalueFn
             backend->SendJson(std::move(json));
         }},
-        [](HttpResponse* backend, const char* cstr) {  // SendFileCStrFn
-            backend->SendFile(cstr);
+        [](HttpResponse* backend, const char* cstr, bool autoHandle404) {  // SendFileCStrFn
+            backend->SendFile(cstr, autoHandle404);
         },
-        [](HttpResponse* backend, std::string_view view) {  // SendFileViewFn
-            backend->SendFile(view);
-        },
-        SendFileRvalueFn{[](HttpResponse* backend, std::string&& path) {  // SendFileRvalueFn
-            backend->SendFile(std::move(path));
+        SendFileRvalueFn{[](HttpResponse* backend, std::string&& path, bool autoHandle404) {  // SendFileRvalueFn
+            backend->SendFile(std::move(path), autoHandle404);
         }},
-        [](const HttpResponse* backend) {  // IsFileOperationFn
-            return backend->IsFileOperation();
-        },
 
         // Version
         HttpAPIVersion::V1

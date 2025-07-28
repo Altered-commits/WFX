@@ -58,5 +58,4 @@ struct RouteSegment {
 
 } // namespace WFX::Http
 
-
 #endif // WFX_HTTP_ROUTE_SEGMENT_HPP

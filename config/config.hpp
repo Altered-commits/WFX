@@ -1,19 +1,16 @@
 #ifndef WFX_CONFIG_HPP
 #define WFX_CONFIG_HPP
 
-#include <string_view>
+#include <string>
 #include <cstdint>
-#include <thread>
-
-#include "utils/logger/logger.hpp"
 
 namespace WFX::Core {
-
-using namespace WFX::Utils; // For 'Logger'
 
 // Every struct represents a section of configuration
 struct ProjectConfig {
     std::string projectName;
+    std::string publicDir;
+    std::string templateDir;
 };
 
 struct NetworkConfig {
@@ -75,9 +72,6 @@ private:
     Config& operator=(const Config&) = delete;
     Config(Config&&)                 = delete;
     Config& operator=(Config&&)      = delete;
-
-private:
-    Logger& logger_ = Logger::GetInstance();
 };
 
 } // namespace WFX::Core

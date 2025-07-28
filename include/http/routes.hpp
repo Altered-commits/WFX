@@ -23,11 +23,10 @@ extern const WFX::Shared::MASTER_API_TABLE* __wfx_api;
 #define WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, callback, uniq)  \
     struct WFX_ROUTE_CLASS(method, uniq) {                              \
         WFX_ROUTE_CLASS(method, uniq)() {                               \
-            WFX::Shared::__WFXDeferredRoutes().emplace_back([] {      \
-                if(__wfx_api->GetHttpAPIV1())                           \
-                    __wfx_api->GetHttpAPIV1()->RegisterRoute(           \
-                        WFX::Http::HttpMethod::method, path, callback   \
-                    );                                                  \
+            WFX::Shared::__WFXDeferredRoutes().emplace_back([] {        \
+                __wfx_api->GetHttpAPIV1()->RegisterRoute(               \
+                    WFX::Http::HttpMethod::method, path, callback       \
+                );                                                      \
             });                                                         \
         }                                                               \
     } WFX_ROUTE_INSTANCE(uniq);
@@ -43,9 +42,8 @@ extern const WFX::Shared::MASTER_API_TABLE* __wfx_api;
 #define WFX_GROUP_START_IMPL(path, id)                                \
     static struct WFX_CONCAT(WFXGroupStart_, id) {                    \
         WFX_CONCAT(WFXGroupStart_, id)() {                            \
-            WFX::Shared::__WFXDeferredRoutes().emplace_back([] {    \
-                if(__wfx_api->GetHttpAPIV1())                         \
-                    __wfx_api->GetHttpAPIV1()->PushRoutePrefix(path); \
+            WFX::Shared::__WFXDeferredRoutes().emplace_back([] {      \
+                __wfx_api->GetHttpAPIV1()->PushRoutePrefix(path);     \
             });                                                       \
         }                                                             \
     } WFX_CONCAT(WFXGroupStartInst_, id);
@@ -53,9 +51,8 @@ extern const WFX::Shared::MASTER_API_TABLE* __wfx_api;
 #define WFX_GROUP_END_IMPL(id)                                        \
     static struct WFX_CONCAT(WFXGroupEnd_, id) {                      \
         WFX_CONCAT(WFXGroupEnd_, id)() {                              \
-            WFX::Shared::__WFXDeferredRoutes().emplace_back([] {    \
-                if(__wfx_api->GetHttpAPIV1())                         \
-                    __wfx_api->GetHttpAPIV1()->PopRoutePrefix();      \
+            WFX::Shared::__WFXDeferredRoutes().emplace_back([] {      \
+                __wfx_api->GetHttpAPIV1()->PopRoutePrefix();          \
             });                                                       \
         }                                                             \
     } WFX_CONCAT(WFXGroupEndInst_, id);

@@ -1,12 +1,9 @@
 #ifndef WFX_SHARED_HTTP_API_HPP
 #define WFX_SHARED_HTTP_API_HPP
 
-#include "shared/utils/export_macro.hpp"
 #include "http/constants/http_constants.hpp"
 #include "http/common/route_common.hpp"
 #include "third_party/nlohmann/json_fwd.hpp"
-
-#include <string_view>
 
 // To be consistent with naming
 using Json = nlohmann::json;
@@ -31,19 +28,17 @@ using SetHeaderFn             = void (*)(HttpResponse* backend, std::string key,
 
 // SendText
 using SendTextCStrFn          = void (*)(HttpResponse* backend, const char* cstr);
-using SendTextViewFn          = void (*)(HttpResponse* backend, std::string_view view);
 
 // SendJson
 using SendJsonConstRefFn      = void (*)(HttpResponse* backend, const Json* json);
 
 // SendFile
-using SendFileCStrFn          = void (*)(HttpResponse* backend, const char* cstr);
-using SendFileViewFn          = void (*)(HttpResponse* backend, std::string_view view);
+using SendFileCStrFn          = void (*)(HttpResponse* backend, const char* cstr, bool);
 
 // Special rvalue overload
 using SendTextRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&)>;
 using SendJsonRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, Json&&)>;
-using SendFileRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&)>;
+using SendFileRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&, bool)>;
 
 // Query
 using IsFileOperationFn       = bool (*)(const HttpResponse* backend);
@@ -61,7 +56,6 @@ struct HTTP_API_TABLE {
 
     // SendText overloads
     SendTextCStrFn          SendTextCStr;
-    SendTextViewFn          SendTextView;
     SendTextRvalueFn        SendTextMove;
 
     // SendJson overloads
@@ -70,11 +64,7 @@ struct HTTP_API_TABLE {
 
     // SendFile overloads
     SendFileCStrFn          SendFileCStr;
-    SendFileViewFn          SendFileView;
     SendFileRvalueFn        SendFileMove;
-
-    // Query
-    IsFileOperationFn       IsFileOperation;
 
     // Metadata
     HttpAPIVersion          apiVersion;

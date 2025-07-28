@@ -38,11 +38,6 @@ bool HttpResponse::IsFileOperation() const
 // vvv TEXT vvv
 void HttpResponse::SendText(const char* cstr)
 {
-    SendText(std::string_view{cstr});
-}
-
-void HttpResponse::SendText(std::string_view view)
-{
     auto& logger = Logger::GetInstance();
     
     if(!std::holds_alternative<std::monostate>(body))
@@ -50,6 +45,8 @@ void HttpResponse::SendText(std::string_view view)
     
     if(isFileOperation_)
         logger.Fatal("[HttpResponse]: Cannot call SendText() after SendFile()");
+
+    auto view = std::string_view{cstr};
 
     body = view;
     headers.SetHeader("Content-Length", UInt64ToStr(view.size()));
@@ -73,21 +70,22 @@ void HttpResponse::SendJson(Json&& j)
 }
 
 // vvv FILE vvv
-void HttpResponse::SendFile(const char* cstr)
+void HttpResponse::SendFile(const char* cstr, bool autoHandle404)
 {
-    SendFile(std::string_view{cstr});
+    auto view = std::string_view{cstr};
+
+    if(!ValidateFileSend(view, autoHandle404))
+        return;
+
+    body = view;
+    PrepareFileHeaders(view);
 }
 
-void HttpResponse::SendFile(std::string_view path)
+void HttpResponse::SendFile(std::string&& path, bool autoHandle404)
 {
-    ValidateFileSend(path);
-    body = path;
-    PrepareFileHeaders(path);
-}
+    if(!ValidateFileSend(path, autoHandle404))
+        return;
 
-void HttpResponse::SendFile(std::string&& path)
-{
-    ValidateFileSend(path);
     body = std::move(path);
     PrepareFileHeaders(std::get<std::string>(body));
 }
@@ -108,7 +106,7 @@ void HttpResponse::SetTextBody(std::string&& text, const char* contentType)
     headers.SetHeader("Content-Type", contentType);
 }
 
-void HttpResponse::ValidateFileSend(std::string_view path)
+bool HttpResponse::ValidateFileSend(std::string_view path, bool autoHandle404)
 {
     auto& logger = Logger::GetInstance();
     auto& fs     = FileSystem::GetFileSystem();
@@ -116,8 +114,13 @@ void HttpResponse::ValidateFileSend(std::string_view path)
     if(!std::holds_alternative<std::monostate>(body))
         logger.Fatal("[HttpResponse]: SendFile() called after body already set");
 
-    if(!fs.FileExists(path))
-        logger.Fatal("[HttpResponse]: File not found: ", path);
+    if(autoHandle404 && !fs.FileExists(path)) {
+        Status(HttpStatus::NOT_FOUND)
+        .SendText("File not found");
+        return false;
+    }
+
+    return true;
 }
 
 void HttpResponse::PrepareFileHeaders(std::string_view path)

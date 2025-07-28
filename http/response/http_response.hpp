@@ -26,20 +26,18 @@ struct HttpResponse {
     bool IsFileOperation() const;
 
     void SendText(const char* cstr);
-    void SendText(std::string_view view);
     void SendText(std::string&& str);
 
     void SendJson(const Json& j);
     void SendJson(Json&& j);
 
-    void SendFile(const char* cstr);
-    void SendFile(std::string_view path);
-    void SendFile(std::string&& path);
+    void SendFile(const char* cstr, bool autoHandle404);
+    void SendFile(std::string&& path, bool autoHandle404);
 
 private:
     void SetTextBody(std::string&& text, const char* contentType);
     void PrepareFileHeaders(std::string_view path);
-    void ValidateFileSend(std::string_view path);
+    bool ValidateFileSend(std::string_view path, bool autoHandle404);
 
 private:
     bool isFileOperation_ = false;

@@ -27,9 +27,28 @@ const HttpCallbackType* RouteTrie::Match(std::string_view requestPath, PathSegme
         DynamicSegment  paramCandidate;
 
         for(const auto& child : current->children) {
-            if(child.IsStatic() && child.MatchesStatic(segment)) {
-                next = child.GetChild();
-                break;
+            if(child.IsStatic()) {
+                // Special Case: Wildcard '*' match, we copy the whole thing into DynamicSegment STRING type
+                if(child.MatchesStatic("*")) {
+                    std::size_t len = segment.size();
+                    
+                    if(!requestPath.empty())
+                        len += 1 + requestPath.size(); // include '/' and rest of path
+                    
+                    std::string_view captured(segment.data(), len);
+                    outParams.emplace_back(captured);
+
+                    // Signal that wildcard consumed all the remaining path
+                    requestPath = std::string_view{};
+                    next = child.GetChild();
+                    break;
+                }
+
+                // Normal static match
+                if(child.MatchesStatic(segment)) {
+                    next = child.GetChild();
+                    break;
+                }
             }
             else if(child.IsParam()) {
                 ParamType type = child.GetParamType();
@@ -174,9 +193,22 @@ TrieNode* RouteTrie::InsertRoute(std::string_view route)
                 }
             }
             if(!found) {
+                // Insert current segment as static node
                 auto nextNode = std::make_unique<TrieNode>();
                 next = nextNode.get();
                 current->children.emplace_back(segment, std::move(nextNode));
+
+                // Special Case: We have wildcard '*'
+                // It will be the last thing in the route. Any other stuff following it will lead to an error
+                if(segment == "*") {
+                    if(!route.empty())
+                        Logger::GetInstance().Fatal(
+                            "[Route-Formatter]: Wildcard '*' must be the last segment in a route."
+                        );
+
+                    current = next;
+                    break;
+                }
             }
         }
 

@@ -25,6 +25,10 @@ Engine::Engine()
     const std::string dllDir  = config_.projectConfig.projectName + "/build/dlls/";
     const std::string dllPath = dllDir + "user_entry.dll";
 
+    // Handle the public/ directory routing automatically
+    // To serve stuff like css, js and so on
+    HandlePublicRoute();
+
     // Compile user code (in 'src' directory) into dll which will be loaded below
     HandleUserSrcCompilation(dllDir.c_str(), dllPath.c_str());
 
@@ -63,7 +67,7 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
 {
     // This will be transmitted through all the layers (from here to middleware to user)
     HttpResponse res;
-    Response userRes{&res, WFX::Shared::GetHttpAPIV1()};
+    Response userRes{&res, WFX::Shared::GetHttpAPIV1(), WFX::Shared::GetConfigAPIV1()};
 
     // Parse (The most obvious fucking comment i could write, i'm just sleepy rn cut me some slack)
     HttpParseState state = HttpParser::Parse(ctx);
@@ -127,7 +131,8 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                             );
 
             if(!callback)
-                res.SendText("404: Route not found :(");
+                res.Status(HttpStatus::NOT_FOUND)
+                    .SendText("404: Route not found :(");
             else
                 (*callback)(*ctx.requestInfo, userRes);
 
@@ -200,7 +205,24 @@ void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionConte
     }
 }
 
-// vvv USER DLL STUFF vvv
+// vvv HELPER STUFF vvv
+void Engine::HandlePublicRoute()
+{
+    Router::GetInstance().RegisterRoute(
+        HttpMethod::GET, "/public/*",
+        [this](HttpRequest& req, Response& res) {
+            // The route is pre normalised before it reaches here, so we can safely use the-
+            // -wildcard which we get, no issue of dir traversal attacks and such
+            auto wildcardPath = std::get<std::string_view>(req.pathSegments[0]);
+            std::string fullRoute = config_.projectConfig.publicDir + wildcardPath.data();
+
+            // Send the file
+            res.Status(HttpStatus::OK)
+                .SendFile(std::move(fullRoute));
+        }
+    );
+}
+
 void Engine::HandleUserSrcCompilation(const char* dllDir, const char* dllPath)
 {
     const std::string& projName  = config_.projectConfig.projectName;
@@ -208,8 +230,8 @@ void Engine::HandleUserSrcCompilation(const char* dllDir, const char* dllPath)
     const std::string  srcDir    = projName + "/src";
     const std::string  objDir    = projName + "/build/objs";
 
-    auto& fs   = WFX::Utils::FileSystem::GetFileSystem();
-    auto& proc = WFX::Utils::ProcessUtils::GetInstance();
+    auto& fs   = FileSystem::GetFileSystem();
+    auto& proc = ProcessUtils::GetInstance();
 
     if(!fs.DirectoryExists(srcDir))
         logger_.Fatal("[Engine]: Failed to locate 'src' directory inside of '", projName, "\' directory.");

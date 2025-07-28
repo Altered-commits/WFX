@@ -23,7 +23,7 @@ private: // Helper functions
 
 private:
     TrieNode root_;
-    TrieNode* insertCursor_ = &root_;     // Current node where routes get inserted to
+    TrieNode* insertCursor_ = &root_;    // Current node where routes get inserted to
     std::vector<TrieNode*> cursorStack_; // For nesting
 };
 

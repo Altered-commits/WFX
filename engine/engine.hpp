@@ -8,7 +8,7 @@
 
 namespace WFX::Core {
 
-using namespace WFX::Utils; // For 'Logger'
+using namespace WFX::Utils; // For 'Logger', 'FileSystem', 'ProcessUtils'
 using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpRequest'
 
 class Engine {
@@ -23,6 +23,7 @@ private:
     void HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx);
 
 private:
+    void HandlePublicRoute();
     void HandleUserSrcCompilation(const char* dllDir, const char* dllPath);
     void HandleUserDLLInjection(const char* dllDir);
 
