@@ -24,6 +24,7 @@ using StaticOrDynamicSegment = std::variant<std::string_view, DynamicSegment>;
 using PathSegments           = std::vector<DynamicSegment>;
 
 // Used throughout the entire program, hopefully
-using HttpCallbackType = WFX::Utils::MoveOnlyFunction<void(WFX::Http::HttpRequest&, Response&)>;
+using MiddlewareCallbackType = WFX::Utils::MoveOnlyFunction<bool(WFX::Http::HttpRequest&, Response&)>;
+using HttpCallbackType       = WFX::Utils::MoveOnlyFunction<void(WFX::Http::HttpRequest&, Response&)>;
 
 #endif // WFX_HTTP_ROUTE_COMMON_HPP

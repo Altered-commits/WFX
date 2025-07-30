@@ -6,7 +6,7 @@ wfx doctor	Check requirements for WFX
 
 To implement:
 1. Auto user code compiling into dll (Done)
-2. Middleware
+2. Middleware (Done) 
 3. Hot Reload
 4. HTML Templating (SSR)
 5. DB support
@@ -14,3 +14,4 @@ To implement:
 To Fix:
 1. Latency issues (Need more Requests per second to be handled)
 2. Crashing issue. Anything using 'ctx' inside of engine is bound to crash wfx, idk why
+3. Cache files < 4KB, don't use TransmitFile on every single file

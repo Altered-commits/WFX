@@ -34,6 +34,9 @@ Engine::Engine()
 
     // Load user's DLL file which we compiled above
     HandleUserDLLInjection(dllPath.c_str());
+
+    // Now that user code is available to us, load middleware in proper order
+    HandleMiddlewareLoading();
 }
 
 void Engine::Listen(const std::string& host, int port)
@@ -133,8 +136,10 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
             if(!callback)
                 res.Status(HttpStatus::NOT_FOUND)
                     .SendText("404: Route not found :(");
-            else
+            else {
+                middleware_.ExecuteMiddleware(*ctx.requestInfo, userRes);
                 (*callback)(*ctx.requestInfo, userRes);
+            }
 
             // Set the 'connState' to whatever the status of Connection header is
             ctx.SetState(
@@ -304,6 +309,23 @@ void Engine::HandleUserDLLInjection(const char* dllDir)
     registerFn(WFX::Shared::GetMasterAPI());
 
     logger_.Info("[Engine]: Successfully injected API and initialized user module.");
+}
+
+void Engine::HandleMiddlewareLoading()
+{
+    // Just for testing, let me register simple middleware
+    middleware_.RegisterMiddleware("Logger", [this](HttpRequest& req, Response& res) {
+        logger_.Info("[Logger-Middleware]: Request on path: ", req.path);
+        return true;
+    });
+
+    middleware_.LoadMiddlewareFromConfig(config_.projectConfig.middlewareList);
+
+    // After we load the middleware, we no longer need the map thingy as all the stuff is properly loaded-
+    // -inside of middlewareCallbacks_ stack
+    // K I L L
+    // I T
+    middleware_.DiscardFactoryMap();
 }
 
 } // namespace WFX

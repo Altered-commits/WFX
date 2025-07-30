@@ -51,7 +51,7 @@ public:
     void SendTemplate(std::string&& path, bool autoHandle404 = true)
     {
         auto& templateDir = configApi_->GetConfig().projectConfig.templateDir;
-        SendFile(templateDir + path);
+        SendFile(templateDir + path, autoHandle404);
     }
 
 private:

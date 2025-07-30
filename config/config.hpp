@@ -2,7 +2,7 @@
 #define WFX_CONFIG_HPP
 
 #include <string>
-#include <cstdint>
+#include <vector>
 
 namespace WFX::Core {
 
@@ -11,6 +11,7 @@ struct ProjectConfig {
     std::string projectName;
     std::string publicDir;
     std::string templateDir;
+    std::vector<std::string> middlewareList;
 };
 
 struct NetworkConfig {
@@ -65,7 +66,7 @@ public:
     void LoadToolchainSettings(std::string_view path);
 
 private:
-    Config() = default;
+    Config()  = default;
     ~Config() = default;
 
     Config(const Config&)            = delete;
