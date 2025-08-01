@@ -558,14 +558,29 @@ bool IocpConnectionHandler::CreateWorkerThreads(unsigned int iocpThreads, unsign
         workerThreads_.emplace_back(&IocpConnectionHandler::WorkerLoop, this);
 
     // Launch offload callback threads
-    for(unsigned int i = 0; i < offloadThreads; ++i)
+    for(unsigned int i = 0; i < offloadThreads; ++i) {
         offloadThreads_.emplace_back([this]() {
+            size_t idleCount = 0;
+
             while(running_) {
                 std::function<void(void)> cb;
-                if(offloadCallbacks_.wait_dequeue_timed(cb, std::chrono::milliseconds(2)))
+                if(offloadCallbacks_.try_dequeue(cb)) {
                     cb();
+                    idleCount = 0; // Reset backoff
+                }
+                else {
+                    // Smart backoff: spin -> yield -> sleep
+                    ++idleCount;
+                    if(idleCount < 64)
+                        _mm_pause();
+                    else if(idleCount < 256)
+                        std::this_thread::yield();
+                    else
+                        std::this_thread::sleep_for(std::chrono::microseconds(50));
+                }
             }
         });
+    }
 
     return true;
 }

@@ -4,7 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include "accept_ex_manager.hpp"
-#include "third_party/concurrent_queue/blockingconcurrentqueue.h"
+#include "third_party/concurrent_queue/concurrentqueue.h"
 #include "http/connection/http_connection.hpp"
 #include "http/limits/tick_scheduler/tick_scheduler.hpp"
 #include "utils/fixed_pool/fixed_pool.hpp"
@@ -28,8 +28,16 @@
 namespace WFX::OSSpecific {
 
 using namespace WFX::Utils; // For 'Logger', 'BufferPool' and 'ConcurrentHashMap'
-using namespace moodycamel; // For BlockingConcurrentQueue
+using namespace moodycamel; // For ConcurrentQueue
 using WFX::Http::HttpConnectionHandler;
+
+// // Alternative to std::function<void(void)>, specifically for callback queue
+// struct CallbackTask {
+//     void (*fn)(void*);
+//     void* ctx;
+
+//     void Execute() const noexcept { fn(ctx); }
+// };
 
 class IocpConnectionHandler : public HttpConnectionHandler {
 public:
@@ -116,7 +124,7 @@ private:
     TickScheduler timeoutHandler_;
     BufferPool bufferPool_{8, 1024 * 1024, [](std::size_t curSize){ return curSize * 2; }}; // For variable size allocs
     ConfigurableFixedAllocPool allocPool_{{32, 64, 128}};                                // For fixed size small allocs
-    BlockingConcurrentQueue<std::function<void(void)>> offloadCallbacks_;
+    ConcurrentQueue<std::function<void(void)>> offloadCallbacks_;
     ConcurrentHashMap<SOCKET, ConnectionContextPtr> connections_{ 1024 * 1024 };
 
     // Main shit

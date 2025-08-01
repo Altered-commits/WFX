@@ -4,5 +4,6 @@
 # Build files
 BuildMinGW/
 BuildMSVC/
+BuildMSVCProf/
 Debug/
 Release/

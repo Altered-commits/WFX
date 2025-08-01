@@ -29,3 +29,11 @@ target_include_directories(wfx PRIVATE ${CMAKE_SOURCE_DIR})
 
 # Link required libraries
 target_link_libraries(wfx PRIVATE Ws2_32 mswsock bcrypt)
+
+# Enable PDB generation in Release if PERF_PROF is defined
+if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(PERF_PROF)
+        target_compile_options(wfx PRIVATE /Zi /Zo)
+        target_link_options(wfx PRIVATE /DEBUG)
+    endif()
+endif()

@@ -50,7 +50,7 @@ ProcessResult WinProcessUtils::RunProcess(std::string& cmd, const std::string& w
 
     DWORD exitCode = 0;
     if(!GetExitCodeProcess(processHandle.handle_, &exitCode))
-        return ProcessResult{-1, GetLastError()};
+        return ProcessResult{-2, GetLastError()};
 
     return ProcessResult{1, exitCode};
 }

@@ -10,9 +10,9 @@
  * NOTE: PURELY FOR DEBUGGING HOT PATHS IN CODE
  */
 
-#define _DEBUG 0
+#define WFX_DEBUG 0
 
-#if _DEBUG
+#if WFX_DEBUG
 
 #define WFX_PROFILE_BLOCK_START(name) \
     auto __profile_start_##name = std::chrono::high_resolution_clock::now();

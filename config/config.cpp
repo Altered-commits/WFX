@@ -75,9 +75,12 @@ void Config::LoadToolchainSettings(std::string_view path) {
     try {
         auto tbl = toml::parse_file(path);
 
-        ExtractValueOrFatal(tbl, logger, "Compiler", "command", toolchainConfig.command);
+        ExtractValueOrFatal(tbl, logger, "Compiler", "ccmd",    toolchainConfig.ccmd);
+        ExtractValueOrFatal(tbl, logger, "Compiler", "lcmd",    toolchainConfig.lcmd);
         ExtractValueOrFatal(tbl, logger, "Compiler", "cargs",   toolchainConfig.cargs);
         ExtractValueOrFatal(tbl, logger, "Compiler", "largs",   toolchainConfig.largs);
+        ExtractValueOrFatal(tbl, logger, "Compiler", "objflag", toolchainConfig.objFlag);
+        ExtractValueOrFatal(tbl, logger, "Compiler", "dllflag", toolchainConfig.dllFlag);
     }
     catch(const toml::parse_error& err) {
         logger.Fatal("[Config]: '", path, "' ", err.what(),

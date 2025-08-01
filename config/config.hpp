@@ -44,14 +44,17 @@ struct OSSpecificConfig {
 };
 
 struct ToolchainConfig {
-    std::string command;
+    std::string ccmd;
+    std::string lcmd;
     std::string cargs;
     std::string largs;
+    std::string objFlag;
+    std::string dllFlag;
 };
 
 // Main Config loader
 // TODO: Add checks for maxRecvBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
-class Config {
+class Config final {
 public:
     ProjectConfig    projectConfig;
     NetworkConfig    networkConfig;

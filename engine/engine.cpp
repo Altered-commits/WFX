@@ -114,8 +114,6 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
             // So timeout handler doesn't do some weird stuff
             ctx.parseState  = static_cast<std::uint8_t>(HttpParseState::PARSE_DATA_OCCUPIED);
             
-            // logger_.Info("[Engine]: ", ctx.connInfo.GetIpStr(), ':', socket, " on route '", ctx.requestInfo->path, "'");
-            
             auto conn        = ctx.requestInfo->headers.GetHeader("Connection");
             bool shouldClose = true;
 
@@ -137,7 +135,7 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                 res.Status(HttpStatus::NOT_FOUND)
                     .SendText("404: Route not found :(");
             else {
-                middleware_.ExecuteMiddleware(*ctx.requestInfo, userRes);
+                // middleware_.ExecuteMiddleware(*ctx.requestInfo, userRes);
                 (*callback)(*ctx.requestInfo, userRes);
             }
 
@@ -149,9 +147,7 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                 );
             ctx.parseState  = static_cast<std::uint8_t>(HttpParseState::PARSE_IDLE);
             ctx.timeoutTick = connHandler_->GetCurrentTick();
-
-            HandleResponse(socket, res, ctx);
-            return;
+            break;
         }
 
         case HttpParseState::PARSE_ERROR:
@@ -162,8 +158,7 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                 
             // Mark the connection to be closed after write completes
             ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
-            HandleResponse(socket, res, ctx);
-            return;
+            break;
         }
 
         case HttpParseState::PARSE_STREAMING_BODY:
@@ -174,9 +169,10 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                 .SendText("Not Implemented");
             
             ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
-            HandleResponse(socket, res, ctx);
-            return;
+            break;
     }
+
+    HandleResponse(socket, res, ctx);
 }
 
 void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx)
@@ -239,54 +235,62 @@ void Engine::HandleUserSrcCompilation(const char* dllDir, const char* dllPath)
     auto& proc = ProcessUtils::GetInstance();
 
     if(!fs.DirectoryExists(srcDir))
-        logger_.Fatal("[Engine]: Failed to locate 'src' directory inside of '", projName, "\' directory.");
+        logger_.Fatal("[Engine]: Failed to locate 'src' directory inside of '", projName, "/src'.");
 
     if(!fs.CreateDirectory(objDir))
-        logger_.Fatal("[Engine]: Failed to create '", objDir, "'. Error code: ", GetLastError());
+        logger_.Fatal("[Engine]: Failed to create obj dir: ", objDir, ". Error: ", GetLastError());
 
     if(!fs.CreateDirectory(dllDir))
-        logger_.Fatal("[Engine]: Failed to create '", dllDir, "'. Error code: ", GetLastError());
+        logger_.Fatal("[Engine]: Failed to create dll dir: ", dllDir, ". Error: ", GetLastError());
 
-    // Caching frequently used stuff
-    std::string linkCmd = toolchain.command + " ";
-    std::string compCmd = linkCmd + toolchain.cargs + " \"";
+    // Prebuild fixed portions of compiler and linker commands
+    const std::string compilerBase = toolchain.ccmd + " " + toolchain.cargs + " ";
+    const std::string objPrefix    = toolchain.objFlag + "\"";
+    const std::string dllLinkTail  = toolchain.largs + " " + toolchain.dllFlag + "\"" + dllPath + '"';
 
-    // Recurse through the 'src' directory and compile each cpp into obj file
-    fs.ListDirectory(srcDir, true, [&](std::string entry) {
-        if(EndsWith(entry.c_str(), ".cpp") || EndsWith(entry.c_str(), ".cxx") || EndsWith(entry.c_str(), ".cc")) {
-            const std::string& cppFile = entry;
+    std::string linkCmd = toolchain.lcmd + " ";
 
-            std::string relativePath = cppFile.substr(srcDir.size());
-            if(!relativePath.empty() && (relativePath[0] == '/' || relativePath[0] == '\\'))
-                relativePath = relativePath.substr(1);
+    // Recurse through src/ files
+    fs.ListDirectory(srcDir, true, [&](const std::string& cppFile) {
+        if(!EndsWith(cppFile.c_str(), ".cpp") &&
+            !EndsWith(cppFile.c_str(), ".cxx") &&
+            !EndsWith(cppFile.c_str(), ".cc")) return;
 
-            std::string objFile = objDir + "/" + relativePath;
-            objFile.replace(objFile.size() - 4, 4, ".obj");
+        logger_.Info("[Engine]: Compiling src/ file: ", cppFile);
 
-            std::size_t lastSlash = objFile.find_last_of("/\\");
-            if(lastSlash != std::string::npos) {
-                std::string dir = objFile.substr(0, lastSlash);
-                if(!fs.DirectoryExists(dir))
-                    fs.CreateDirectory(dir);
-            }
+        // Construct relative path
+        std::string relPath = cppFile.substr(srcDir.size());
+        if(!relPath.empty() && (relPath[0] == '/' || relPath[0] == '\\'))
+            relPath.erase(0, 1);
 
-            std::string cmd = compCmd + cppFile + "\" -o \"" + objFile + "\"";
-            auto result = proc.RunProcess(cmd);
-            if(result.exitCode < 0)
-                logger_.Fatal("[Engine]: Compilation failed for: ", cppFile, ". Error code: ", result.osCode);
-            else
-                logger_.Info("[Engine]: Compiled file: ", cppFile);
+        // Replace .cpp with .obj
+        std::string objFile = objDir + "/" + relPath;
+        objFile.replace(objFile.size() - 4, 4, ".obj");
 
-            linkCmd += "\"" + objFile + "\" ";
+        // Ensure obj subdir exists
+        std::size_t slash = objFile.find_last_of("/\\");
+        if(slash != std::string::npos) {
+            std::string dir = objFile.substr(0, slash);
+            if(!fs.DirectoryExists(dir) && !fs.CreateDirectory(dir))
+                logger_.Fatal("[Engine]: Failed to create obj subdirectory: ", dir);
         }
+
+        // Construct compile command
+        std::string compileCmd = compilerBase + "\"" + cppFile + "\" " + objPrefix + objFile + "\"";
+        auto result = proc.RunProcess(compileCmd);
+        if(result.exitCode < 0)
+            logger_.Fatal("[Engine]: Compilation failed for: ", cppFile,
+                ". Engine code: ", result.exitCode, ", OS code: ", result.osCode);
+
+        // Append obj to link command
+        linkCmd += "\"" + objFile + "\" ";
     });
 
-    // Finally, link all the objs into dll
-    linkCmd += toolchain.largs + " -o \"" + dllPath + '"';
-
+    // Final linking
+    linkCmd += dllLinkTail;
     auto linkResult = proc.RunProcess(linkCmd);
     if(linkResult.exitCode < 0)
-        logger_.Fatal("[Engine]: Linking failed. DLL was not created. Error code: ", linkResult.osCode);
+        logger_.Fatal("[Engine]: Linking failed. DLL not created. Error: ", linkResult.osCode);
 
     logger_.Info("[Engine]: User project successfully compiled to ", dllDir);
 }
