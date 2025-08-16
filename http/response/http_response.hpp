@@ -4,7 +4,7 @@
 #include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
 
-#include "third_party/nlohmann/json_fwd.hpp"
+#include <nlohmann/json_fwd.hpp>
 
 #include <variant>
 #include <string>

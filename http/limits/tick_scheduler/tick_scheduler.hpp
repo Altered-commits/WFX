@@ -1,7 +1,6 @@
 #ifndef WFX_HTTP_TIMEOUT_LIMITER_HPP
 #define WFX_HTTP_TIMEOUT_LIMITER_HPP
 
-#include "utils/hash_map/concurrent_hash_map.hpp"
 #include "utils/backport/move_only_function.hpp"
 
 #include <cstdint>

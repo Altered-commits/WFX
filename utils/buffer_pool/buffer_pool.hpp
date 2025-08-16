@@ -18,8 +18,17 @@ public:
     BufferPool(std::uint16_t shardCount, std::size_t initialSize, ResizeCallback resizeCb = nullptr);
     ~BufferPool();
 
+private:
+    // Forward declare the private implementation struct for a single shard
+    struct Shard;
+
+public:
     void* Lease(std::size_t size);
+    void* Reacquire(void* ptr, std::size_t newSize);
     void  Release(void* ptr);
+
+private:
+    void* AllocateFromShard(Shard& shard, std::size_t totalSize);
 
 private:
     // Cuz moving / copying pool makes 0 sense
@@ -29,9 +38,6 @@ private:
     BufferPool& operator=(BufferPool&&)      = delete;
 
 private:
-    // Forward declare the private implementation struct for a single shard
-    struct Shard;
-
     Shard& GetShardForThread(std::uint16_t& outShardIndex);
 
     // Platform-specific memory alignment functions

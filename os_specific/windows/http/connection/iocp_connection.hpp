@@ -4,14 +4,14 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include "accept_ex_manager.hpp"
-#include "third_party/concurrent_queue/concurrentqueue.h"
 #include "http/connection/http_connection.hpp"
 #include "http/limits/tick_scheduler/tick_scheduler.hpp"
 #include "utils/fixed_pool/fixed_pool.hpp"
-#include "utils/hash_map/concurrent_hash_map.hpp"
+#include "utils/hash_map/concurrent_map/concurrent_hash_map.hpp"
 #include "utils/logger/logger.hpp"
 #include "utils/perf_timer/perf_timer.hpp" // For debugging
 
+#include <concurrentqueue.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mswsock.h>

@@ -31,7 +31,7 @@ using ConnMap = WFX::Utils::ConcurrentHashMap<uint64_t, ConnectionContext>;
 
 size_t LinearSweepAndErase(ConnMap& map) {
     size_t expired = 0;
-    map.ForEachEraseIf([&](ConnectionContext& ctx) -> bool {
+    map.ForEachEraseIf([&](std::uint64_t _, ConnectionContext& ctx) -> bool {
         uint16_t elapsed = static_cast<uint16_t>(GlobalTick.load() - ctx.timeoutTick);
 
         switch (ctx.parseState) {

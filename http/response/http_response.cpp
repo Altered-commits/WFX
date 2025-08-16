@@ -5,7 +5,7 @@
 #include "utils/backport/string.hpp"
 #include "utils/logger/logger.hpp"
 
-#include "third_party/nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
 
 #include <type_traits>
 #include <charconv>

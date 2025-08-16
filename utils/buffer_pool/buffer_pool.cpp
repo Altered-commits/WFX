@@ -11,13 +11,13 @@
 #endif
 
 extern "C" {
-    #include "third_party/tlsf/tlsf.h"
+    #include <tlsf.h>
 }
 
 namespace WFX::Utils {
 
 // This small header will be placed immediately before the memory block
-struct alignas(std::max_align_t) AllocationHeader {
+struct AllocationHeader {
     std::uint16_t shardIndex;
 };
 
@@ -89,35 +89,54 @@ void* BufferPool::Lease(std::size_t size)
     Shard& shard = GetShardForThread(shardIndex);
     std::lock_guard<std::mutex> lock(shard.mutex);
 
-    // Request enough memory for our header plus the user's requested size.
+    // Allocate enough memory to store AllocationHeader as well
     const std::size_t totalSize = sizeof(AllocationHeader) + size;
-    void* rawBlock = tlsf_malloc(shard.tlsfAllocator, totalSize);
-    
-    // Allocation failed. We need to add more memory to the shard
-    if(!rawBlock) {
-        std::size_t newSegmentSize = resizeCallback_ ? resizeCallback_(shard.poolSize) : shard.poolSize * 2;
-        shard.poolSize += newSegmentSize;
-
-        void* newMemory = AlignedMalloc(newSegmentSize, tlsf_align_size());
-        if(!newMemory)
-            logger_.Fatal("[BufferPool]: Failed to allocate new memory segment for shard.");
-
-        if(!tlsf_add_pool(shard.tlsfAllocator, newMemory, newSegmentSize))
-            logger_.Fatal("[BufferPool]: Failed to add new memory pool to TLSF shard.");
-
-        shard.memorySegments.push_back(newMemory);
-        logger_.Debug("[BufferPool]: Added new memory segment of size ", newSegmentSize, " to a shard.");
-
-        rawBlock = tlsf_malloc(shard.tlsfAllocator, totalSize);
-        if(!rawBlock)
-            logger_.Fatal("[BufferPool]: Allocation failed even after adding a new pool segment.");
-    }
+    void* rawBlock = AllocateFromShard(shard, totalSize);
 
     // Place the shard index in the header at the beginning of the block
     AllocationHeader* header = static_cast<AllocationHeader*>(rawBlock);
     header->shardIndex = shardIndex;
 
     return static_cast<void*>(reinterpret_cast<char*>(rawBlock) + sizeof(AllocationHeader));
+}
+
+void* BufferPool::Reacquire(void* ptr, std::size_t newSize)
+{
+    if(!ptr) return nullptr;
+
+    void* rawBlock = static_cast<char*>(ptr) - sizeof(AllocationHeader);
+    AllocationHeader* header = static_cast<AllocationHeader*>(rawBlock);
+    std::uint16_t shardIndex = header->shardIndex;
+
+    if(shardIndex >= shardCount_) {
+        logger_.Error("[BufferPool]: Corruption detected! Invalid shard index (", shardIndex, ") found in [Re]allocation header.");
+        return nullptr;
+    }
+
+    Shard& shard = shards_[shardIndex];
+    std::lock_guard<std::mutex> lock(shard.mutex);
+
+    const std::size_t totalSize = sizeof(AllocationHeader) + newSize;
+    
+    // Pass the real TLSF pointer, not the shifted one
+    void* newRawBlock = tlsf_realloc(shard.tlsfAllocator, rawBlock, totalSize);
+
+    if(!newRawBlock) {
+        // allocate manually
+        newRawBlock = AllocateFromShard(shard, totalSize);
+
+        // copy only min(oldSize, totalSize) bytes
+        std::size_t copySize = std::min(tlsf_block_size(rawBlock), totalSize);
+        std::memcpy(newRawBlock, rawBlock, copySize);
+
+        tlsf_free(shard.tlsfAllocator, rawBlock);
+    }
+
+    // update header
+    header = static_cast<AllocationHeader*>(newRawBlock);
+    header->shardIndex = shardIndex;
+
+    return static_cast<char*>(newRawBlock) + sizeof(AllocationHeader);
 }
 
 void BufferPool::Release(void* ptr)
@@ -142,6 +161,35 @@ void BufferPool::Release(void* ptr)
     
     // Free the entire original block
     tlsf_free(shard.tlsfAllocator, rawBlock);
+}
+
+// vvv Helper functions vvv
+void* BufferPool::AllocateFromShard(Shard& shard, std::size_t totalSize)
+{
+    void* rawBlock = tlsf_malloc(shard.tlsfAllocator, totalSize);
+    if(rawBlock) return rawBlock;
+
+    // Allocation failed: expand
+    std::size_t newSegmentSize = resizeCallback_
+        ? resizeCallback_(shard.poolSize)
+        : shard.poolSize * 2;
+    shard.poolSize += newSegmentSize;
+
+    void* newMemory = AlignedMalloc(newSegmentSize, tlsf_align_size());
+    if(!newMemory)
+        logger_.Fatal("[BufferPool]: Failed to allocate new memory segment for shard.");
+
+    if(!tlsf_add_pool(shard.tlsfAllocator, newMemory, newSegmentSize))
+        logger_.Fatal("[BufferPool]: Failed to add new memory pool to TLSF shard.");
+
+    shard.memorySegments.push_back(newMemory);
+    logger_.Debug("[BufferPool]: Added new memory segment of size ", newSegmentSize, " to a shard.");
+
+    rawBlock = tlsf_malloc(shard.tlsfAllocator, totalSize);
+    if(!rawBlock)
+        logger_.Fatal("[BufferPool]: Allocation failed even after adding a new pool segment.");
+
+    return rawBlock;
 }
 
 // AlignedMalloc and AlignedFree remain the same.

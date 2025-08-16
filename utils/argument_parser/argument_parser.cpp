@@ -79,9 +79,20 @@ int ArgumentParser::Parse(int argc, char* argv[])
 
 void ArgumentParser::PrintUsage() const
 {
-    std::cout << "[Usage]: <program> <command> [options]\n\nAvailable commands:\n";
+    std::cout << "==================================================\n"
+                 "\t__        __  ______  __    __\n"
+                 "\t\\ \\      / / |  ____| \\ \\  / /\n"
+                 "\t \\ \\ /\\ / /  | |__     \\ \\/ /\n"
+                 "\t  \\ V  V /   |  __|    / /\\ \\\n"
+                 "\t   \\_/\\_/    |_|      /_/  \\_\\\n\n"
+                 "\t Weird Framework? eXactly (._.)\n"
+                 "    Written in C++. Because we hate ourselves.\n"
+                 "==================================================\n\n";
+                 
+    std::cout << "[Usage]\n"
+                "./wfx <command> [options]\n\n[Available Commands]\n";
     for(const auto& [name, cmd] : commands_)
-        std::cout << " " << name << '\t' << cmd.description << '\n';
+        std::cout << " * " << name << "  \t" << cmd.description << '\n';
 }
 
 } // namespace WFX::Utils

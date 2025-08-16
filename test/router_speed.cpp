@@ -18,17 +18,17 @@ void RegisterBenchmarkRoutes() {
     Router& router = Router::GetInstance();
 
     // GET routes
-    router.RegisterRoute(HttpMethod::GET, "/", [](HttpRequest&, HttpResponse&) {});
-    router.RegisterRoute(HttpMethod::GET, "/about", [](HttpRequest&, HttpResponse&) {});
-    router.RegisterRoute(HttpMethod::GET, "/docs/api", [](HttpRequest&, HttpResponse&) {});
-    router.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>", [](HttpRequest&, HttpResponse&) {});
-    router.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>/<index:uint>", [](HttpRequest&, HttpResponse&) {});
-    router.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>/<index:uint>/<id:uuid>", [](HttpRequest&, HttpResponse&) {});
+    router.RegisterRoute(HttpMethod::GET, "/", [](HttpRequest&, Response&) {});
+    router.RegisterRoute(HttpMethod::GET, "/about", [](HttpRequest&, Response&) {});
+    router.RegisterRoute(HttpMethod::GET, "/docs/api", [](HttpRequest&, Response&) {});
+    router.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>", [](HttpRequest&, Response&) {});
+    router.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>/<index:uint>", [](HttpRequest&, Response&) {});
+    router.RegisterRoute(HttpMethod::GET, "/send-file/<genre:string>/<index:uint>/<id:uuid>", [](HttpRequest&, Response&) {});
 
     // POST routes
-    router.RegisterRoute(HttpMethod::POST, "/upload", [](HttpRequest&, HttpResponse&) {});
-    router.RegisterRoute(HttpMethod::POST, "/submit/<formId:uint>", [](HttpRequest&, HttpResponse&) {});
-    router.RegisterRoute(HttpMethod::POST, "/submit/<formId:uint>/<token:uuid>", [](HttpRequest&, HttpResponse&) {});
+    router.RegisterRoute(HttpMethod::POST, "/upload", [](HttpRequest&, Response&) {});
+    router.RegisterRoute(HttpMethod::POST, "/submit/<formId:uint>", [](HttpRequest&, Response&) {});
+    router.RegisterRoute(HttpMethod::POST, "/submit/<formId:uint>/<token:uuid>", [](HttpRequest&, Response&) {});
 }
 
 std::string GenerateRandomUUID(std::mt19937& rng) {

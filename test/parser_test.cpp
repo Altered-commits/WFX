@@ -4,6 +4,12 @@
           htpp/headers/http_headers.cpp
  */
 
+/*
+
+    DEPRECATED, NO LONGER VALID
+
+*/
+
 #include <cassert>
 #include <cstring>
 #include <iostream>

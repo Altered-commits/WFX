@@ -1,8 +1,8 @@
 #ifndef WFX_CONFIG_HELPERS_HPP
 #define WFX_CONFIG_HELPERS_HPP
 
-#include "third_party/tomlplusplus/toml.hpp"
 #include "utils/logger/logger.hpp"
+#include <toml++/toml.hpp>
 #include <string>
 #include <vector>
 

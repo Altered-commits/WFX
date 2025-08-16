@@ -35,6 +35,7 @@ static void ScaffoldProject(const std::string& projectName)
     // 2. Create essential config
     CreateFile(base / "wfx.toml", R"([Project]
 project_name = ")" + projectName + R"("
+middleware_list = ["Logger"]    # Order of middleware registered by either User or Engine
 
 [Network]
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)

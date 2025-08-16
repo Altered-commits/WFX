@@ -2,7 +2,7 @@
 #define WFX_HTTP_IP_LIMITER_HPP
 
 #include "../base_limiter.hpp"
-#include "utils/hash_map/concurrent_hash_map.hpp"
+#include "utils/hash_map/concurrent_map/concurrent_hash_map.hpp"
 
 #include <string>
 #include <chrono>

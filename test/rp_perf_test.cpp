@@ -1,5 +1,5 @@
 /*
- * Build: g++ -O3 -s -I. test/rp_perf_test.cpp utils/crypt/hashers.cpp utils/logger/logger.cpp [-lbcrypt]
+ * Build: g++ -O3 -s -I. test/rp_perf_test.cpp utils/crypt/hash.cpp utils/crypt/string.cpp utils/logger/logger.cpp [-lbcrypt]
  */
 
 #include <iostream>
@@ -11,6 +11,7 @@
 
 // Include your RandomPool implementation here
 #include "utils/crypt/hash.hpp"
+#include "utils/logger/logger.hpp"
 
 using namespace WFX::Utils;
 

@@ -560,7 +560,7 @@ bool IocpConnectionHandler::CreateWorkerThreads(unsigned int iocpThreads, unsign
     // Launch offload callback threads
     for(unsigned int i = 0; i < offloadThreads; ++i) {
         offloadThreads_.emplace_back([this]() {
-            size_t idleCount = 0;
+            std::size_t idleCount = 0;
 
             while(running_) {
                 std::function<void(void)> cb;

@@ -58,7 +58,7 @@ int main() {
             auto buf = std::make_unique<char[]>(BUF_SIZE);
             auto str = std::make_unique<std::string>("Callback " + std::to_string(i));
 
-            Callback fn = [socket, buf = std::move(buf), str = std::move(str)]() mutable {
+            Callback fn = [socket, buf = std::move(buf), str = std::move(str)]() {
                 if (socket >= 0) {
                     std::memset(buf.get(), 'A', BUF_SIZE);
                     (*str) += " processed";
