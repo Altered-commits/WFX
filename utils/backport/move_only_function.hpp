@@ -13,8 +13,8 @@ class MoveOnlyFunction;
 template<typename R, typename... Args>
 class MoveOnlyFunction<R(Args...)> {
     struct Base {
-        virtual R invoke(Args&&...) = 0;
-        virtual R invokeConst(Args&&...) const = 0;
+        virtual R Invoke(Args&&...) = 0;
+        virtual R InvokeConst(Args&&...) const = 0;
         virtual ~Base() = default;
     };
 
@@ -24,12 +24,12 @@ class MoveOnlyFunction<R(Args...)> {
         explicit Impl(F&& func) noexcept(std::is_nothrow_move_constructible_v<F>)
             : f(std::move(func)) {}
 
-        R invoke(Args&&... args) override
+        R Invoke(Args&&... args) override
         {
             return f(std::forward<Args>(args)...);
         }
 
-        R invokeConst(Args&&... args) const override
+        R InvokeConst(Args&&... args) const override
         {
             return f(std::forward<Args>(args)...);
         }
@@ -53,13 +53,13 @@ public:
 
     R operator()(Args... args)
     {
-        return impl_->invoke(std::forward<Args>(args)...);
+        return impl_->Invoke(std::forward<Args>(args)...);
     }
 
     // Const call overload
     R operator()(Args... args) const
     {
-        return impl_->invokeConst(std::forward<Args>(args)...);
+        return impl_->InvokeConst(std::forward<Args>(args)...);
     }
 
     operator bool() const noexcept {

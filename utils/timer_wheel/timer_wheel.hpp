@@ -3,44 +3,62 @@
 
 #include <cstdint>
 #include <vector>
-#include <mutex>
-#include <atomic>
+#include <functional>
 
 namespace WFX::Utils {
 
-class TimerWheel {
-    static constexpr std::uint32_t NIL = 0xFFFFFFFFu;
+static constexpr std::uint32_t NIL = 0xFFFFFFFFu;
 
+enum class TimeUnit : std::uint8_t {
+    Seconds,
+    Milliseconds,
+    Microseconds
+};
+
+struct SlotMeta {
+    std::uint32_t next   = NIL;
+    std::uint32_t prev   = NIL;
+    std::uint16_t bucket = 0;
+    std::uint8_t  rounds = 0;
+    std::uint8_t  flags  = 0;
+};
+
+class TimerWheel {
 public:
     TimerWheel()  = default;
     ~TimerWheel() = default;
 
 public:
-    void Init(std::uint32_t capacity, std::uint32_t wheel_slots, std::uint32_t tick_ms);
-    void Reinit(std::uint32_t capacity);
-    void SetTickMs(std::uint32_t ms) { tick_ms_ = ms; }
-    void Schedule(std::uint32_t pos, std::uint32_t timeout_ms);
-    void Cancel(std::uint32_t pos);
-    void OnMove(std::uint32_t from, std::uint32_t to);
-    void OnErase(std::uint32_t pos);
-    template<class F> void Tick(std::uint32_t now_tick, F&& onExpire);
+    void          Init(std::uint32_t capacity,
+                       std::uint32_t wheelSlots,
+                       std::uint32_t tickVal,
+                       TimeUnit unit = TimeUnit::Milliseconds);
+    void          Reinit(std::uint32_t capacity);
+    void          SetTick(std::uint32_t val, TimeUnit unit);
+    std::uint64_t GetTick();
+    void          Schedule(std::uint32_t pos, std::uint64_t timeout);
+    void          Cancel(std::uint32_t pos);
+    void          Tick(std::uint64_t nowTick, std::function<void(std::uint32_t)> onExpire);
 
 private:
-    void Unlink(std::uint32_t pos);
-    void ClearSlot(std::uint32_t pos);
+    void          Unlink(std::uint32_t pos);
+    void          ClearSlot(std::uint32_t pos);
+    std::uint64_t ToTicks(std::uint64_t duration) const;
 
-    std::uint32_t cap_ = 0;
-    std::uint32_t slots_ = 4096;
-    std::uint32_t mask_ = slots_ - 1;
-    std::uint32_t shift_ = 12;
-    std::uint32_t tick_ms_ = 1;
-    std::uint32_t now_tick_ = 0;
+private:
+    std::uint32_t cap_      = 0;
+    std::uint32_t slots_    = 0;
+    std::uint32_t mask_     = 0;
+    std::uint16_t shift_    = 0;
+    std::uint16_t tickVal_  = 1;     // tick size in unit
+    std::uint64_t nowTick_  = 0;     // current tick counter
+    TimeUnit      unit_     = TimeUnit::Milliseconds;
 
-    std::vector<std::uint32_t> tw_next_, tw_prev_;
-    std::vector<std::uint16_t> tw_bucket_;
-    std::vector<std::uint8_t>  tw_rounds_, tw_flags_;
-    std::vector<std::uint32_t> wheel_heads_;
+    std::vector<SlotMeta>      meta_;
+    std::vector<std::uint32_t> wheelHeads_;
 };
+
+static_assert(sizeof(TimerWheel) <= 80, "TimerWheel must be <= 80 bytes.");
 
 } // namespace WFX::Utils
 

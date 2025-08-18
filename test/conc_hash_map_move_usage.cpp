@@ -6,7 +6,7 @@
                 -o conc_bench
  */
 
-#include "utils/hash_map/concurrent_hash_map.hpp"
+#include "utils/hash_map/concurrent_map/concurrent_hash_map.hpp"
 #include "utils/backport/move_only_function.hpp"
 
 #include <memory>

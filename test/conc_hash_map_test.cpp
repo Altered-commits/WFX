@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <atomic>
 
-#include "utils/hash_map/concurrent_hash_map.hpp"
+#include "utils/hash_map/concurrent_map/concurrent_hash_map.hpp"
 #include "utils/logger/logger.hpp"
 
 using namespace WFX::Utils;

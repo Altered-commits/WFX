@@ -7,7 +7,7 @@
 #include <vector>
 #include <mutex>
 
-#include "utils/hash_map/concurrent_hash_map.hpp"
+#include "utils/hash_map/concurrent_map/concurrent_hash_map.hpp"
 #include "utils/logger/logger.hpp"
 
 enum class ParseState : uint8_t {
