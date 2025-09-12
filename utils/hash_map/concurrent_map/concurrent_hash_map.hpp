@@ -107,6 +107,16 @@ public:
 
     // Looping
     template<typename Fn>
+    void ForEach(Fn&& cb) const
+    {
+        for(const auto& shard : shards_) {
+            if(!shard) continue;
+            shard->UniqueLock();
+            shard->ForEach(std::forward<Fn>(cb));
+        }
+    }
+
+    template<typename Fn>
     void ForEachEraseIf(Fn&& cb)
     {
         for(const auto& shard : shards_) {

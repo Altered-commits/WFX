@@ -3,6 +3,7 @@
 
 # Build files
 BuildMinGW/
+BuildGCC/
 BuildMSVC/
 BuildMSVCProf/
 Debug/

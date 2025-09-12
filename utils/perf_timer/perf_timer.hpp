@@ -2,7 +2,6 @@
 #define WFX_UTILS_PERF_TIMER_HPP
 
 #include <chrono>
-#include <iostream>
 
 #include "utils/logger/logger.hpp"
 

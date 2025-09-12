@@ -1,4 +1,5 @@
 [Network]
+send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
 header_reserve_hint          = 512     # Initial header allocation hint size

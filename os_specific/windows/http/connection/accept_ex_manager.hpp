@@ -49,8 +49,6 @@ struct PerIoContext : PerIoBase {
 };
 
 struct PerTransmitFileContext : PerIoBase {
-    // This struct is exactly 128 bytes, which is what i needed for allocPool_ to function properly
-    std::string header;
     HANDLE fileHandle         = INVALID_HANDLE_VALUE;
     TRANSMIT_FILE_BUFFERS tfb = { 0 };
 };

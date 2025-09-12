@@ -1,8 +1,5 @@
 #include "argument_parser.hpp"
 
-#include <iostream>
-#include <sstream>
-
 namespace WFX::Utils {
 
 void ArgumentParser::AddCommand(const std::string& name, const std::string& description, CommandHandler handler)
@@ -79,20 +76,25 @@ int ArgumentParser::Parse(int argc, char* argv[])
 
 void ArgumentParser::PrintUsage() const
 {
-    std::cout << "==================================================\n"
-                 "\t__        __  ______  __    __\n"
-                 "\t\\ \\      / / |  ____| \\ \\  / /\n"
-                 "\t \\ \\ /\\ / /  | |__     \\ \\/ /\n"
-                 "\t  \\ V  V /   |  __|    / /\\ \\\n"
-                 "\t   \\_/\\_/    |_|      /_/  \\_\\\n\n"
-                 "\t Weird Framework? eXactly (._.)\n"
-                 "    Written in C++. Because we hate ourselves.\n"
-                 "==================================================\n\n";
+    logger_.Print(
+                "==================================================\n"
+                "\t__        __  ______  __    __\n"
+                "\t\\ \\      / / |  ____| \\ \\  / /\n"
+                "\t \\ \\ /\\ / /  | |__     \\ \\/ /\n"
+                "\t  \\ V  V /   |  __|    / /\\ \\\n"
+                "\t   \\_/\\_/    |_|      /_/  \\_\\\n\n"
+                "\t Weird Framework? eXactly (._.)\n"
+                "    Written in C++. Because we hate ourselves.\n"
+                "==================================================\n"
+            );
                  
-    std::cout << "[Usage]\n"
-                "./wfx <command> [options]\n\n[Available Commands]\n";
+    logger_.Print(
+                "[Usage]\n"
+                "./wfx <command> [options]\n\n[Available Commands]"
+            );
+
     for(const auto& [name, cmd] : commands_)
-        std::cout << " * " << name << "  \t" << cmd.description << '\n';
+        logger_.Print(" * ", name, "  \t", cmd.description);
 }
 
 } // namespace WFX::Utils

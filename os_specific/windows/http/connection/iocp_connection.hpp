@@ -28,43 +28,44 @@
 namespace WFX::OSSpecific {
 
 using namespace WFX::Utils; // For 'Logger', 'BufferPool' and 'ConcurrentHashMap'
+using namespace WFX::Http;  // For 'ReceiveResult', 'HttpConnectionHandler', 'ReceiveDirective'
 using namespace moodycamel; // For ConcurrentQueue
-using WFX::Http::HttpConnectionHandler;
-
-// // Alternative to std::function<void(void)>, specifically for callback queue
-// struct CallbackTask {
-//     void (*fn)(void*);
-//     void* ctx;
-
-//     void Execute() const noexcept { fn(ctx); }
-// };
 
 class IocpConnectionHandler : public HttpConnectionHandler {
 public:
     IocpConnectionHandler();
     ~IocpConnectionHandler();
 
+public:
     // Socket functions
-    void SetReceiveCallback(WFXSocket socket, ReceiveCallback onData) override;
-    void ResumeReceive(WFXSocket socket) override;
-    int  Write(WFXSocket socket, std::string_view buffer) override;
-    int  WriteFile(WFXSocket socket, std::string&& header, std::string_view path) override;
-    void Close(WFXSocket socket) override;
+    void SetReceiveCallback(WFXSocket socket, ReceiveCallback onData)  override;
+    void ResumeReceive(WFXSocket socket)                               override;
+    int  Write(WFXSocket socket, std::string_view fastPathString = {}) override;
+    int  WriteFile(WFXSocket socket, std::string_view path)            override;
+    void MarkConnectionDirty(WFXSocket socket)                         override;
+    void Close(WFXSocket socket)                                       override;
 
     // Getter function
     TickScheduler::TickType GetCurrentTick() override;
-    
-    // Main functions
-    bool Initialize(const std::string& host, int port) override;
-    void Run(AcceptedConnectionCallback) override;
-    void Stop() override;
+    HANDLE                  GetIOCPHandle()  const;
 
-private:
-    bool CreateWorkerThreads(unsigned int iocpThreads, unsigned int offloadThreads);
+    // Control functions
+    bool Initialize(const std::string& host, int port) override;
+    void Run(AcceptedConnectionCallback)               override;
+    void Stop()                                        override;
+
+private: // Helper functions
+    void CreateWorkerThreads(unsigned int iocpThreads, unsigned int offloadThreads);
+    void CreateFlushTimer();
+    void FlushWriteBuffers();
     void WorkerLoop();
+    void PostReceive(WFXSocket socket);
+    void HandleReceive(ConnectionContext& ctx, ReceiveDirective data, WFXSocket socket);
+    
+private: // Cleanup functions
     void SafeDeleteIoData(PerIoData* data, bool shouldCleanBuffer = true);
     void SafeDeleteTransmitFileCtx(PerTransmitFileContext* transmitFileCtx);
-    void PostReceive(WFXSocket socket);
+    void DeleteFlushTimer();
     void InternalCleanup();
     void InternalSocketCleanup(WFXSocket socket);
 
@@ -90,13 +91,6 @@ private: // Helper structs / functions used in unique_ptr deleter
         IocpConnectionHandler* handler;
 
         void operator()(ConnectionContext* ctx) {
-            if(ctx->buffer) {
-                handler->bufferPool_.Release(ctx->buffer);
-                ctx->buffer = nullptr;
-                ctx->bufferSize = 0;
-                ctx->dataLength = 0;
-            }
-
             // Release IP limiter state
             handler->limiter_.ReleaseConnection(ctx->connInfo);
             
@@ -108,7 +102,7 @@ private: // Helper structs / functions used in unique_ptr deleter
     // Just for ease
     using ConnectionContextPtr = std::unique_ptr<ConnectionContext, ConnectionContextDeleter>;
 
-private:
+private: // Main shit
     SOCKET                     listenSocket_ = INVALID_SOCKET;
     HANDLE                     iocp_         = nullptr;
     std::mutex                 connectionMutex_;
@@ -117,6 +111,17 @@ private:
     std::vector<std::thread>   offloadThreads_;
     AcceptedConnectionCallback acceptCallback_;
 
+public: // Write Buffer flushing stuff
+    static constexpr ULONG_PTR FLUSH_KEY = 0xF1u; // Unique key for flush events
+    std::vector<WFXSocket> dirtyFlush_;           // Sockets to flush on next tick
+    std::mutex             dirtyMutex_;
+
+    // Timer queue for ms-level flush
+    HANDLE timerQueue_    = nullptr;
+    HANDLE flushTimer_    = nullptr;
+    DWORD  flushPeriodMs_ = 5;
+
+public:
     Logger&    logger_  = Logger::GetInstance();
     IpLimiter& limiter_ = IpLimiter::GetInstance();
     Config&    config_  = Config::GetInstance();

@@ -55,6 +55,9 @@ public:
 
     // Looping
     template<typename Fn>
+    void ForEach(Fn&& cb) const;
+    
+    template<typename Fn>
     void ForEachEraseIf(Fn&& cb);
 
     std::unique_lock<std::shared_mutex> UniqueLock() const;

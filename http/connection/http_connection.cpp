@@ -55,24 +55,36 @@ const char* WFXIpAddress::GetIpType() const
     return ipType == AF_INET ? "IPv4" : "IPv6";
 }
 
-// vvv Connection Context methods vvv
-HttpConnectionState ConnectionContext::GetState()
+// vvv Connection State methods vvv
+HttpConnectionState ConnectionContext::GetState() const noexcept
 {
-    return connState.load(std::memory_order_acquire);
+    std::uint8_t val = connState.load(std::memory_order_acquire);
+    // Mask out the write bit
+    return static_cast<HttpConnectionState>(val & CONN_STATE_MASK);
 }
 
-void ConnectionContext::SetState(HttpConnectionState newState)
+void ConnectionContext::SetState(HttpConnectionState newState) noexcept
 {
-    HttpConnectionState cur = connState.load(std::memory_order_acquire);
-    while(true)
-        if(connState.compare_exchange_strong(cur, newState, std::memory_order_acq_rel))
+    std::uint8_t cur = connState.load(std::memory_order_acquire);
+    std::uint8_t desired;
+    
+    while(true) {
+        // Preserve the write bit
+        std::uint8_t writeBit = cur & WRITE_IN_PROGRESS;
+        desired = static_cast<std::uint8_t>(newState) | writeBit;
+        
+        if(connState.compare_exchange_strong(cur, desired, std::memory_order_acq_rel))
             return;
+    }
 }
 
-bool ConnectionContext::TransitionTo(HttpConnectionState newState) {
-    HttpConnectionState currentState = connState.load(std::memory_order_acquire);
+bool ConnectionContext::TransitionTo(HttpConnectionState newState) noexcept
+{
+    std::uint8_t cur = connState.load(std::memory_order_acquire);
 
     while(true) {
+        auto currentState = static_cast<HttpConnectionState>(cur & CONN_STATE_MASK);
+
         // Transitions from OCCUPIED / CLOSING_IMMEDIATE -> ANYTHING are forbidden
         if(currentState == HttpConnectionState::CLOSING_IMMEDIATE
             || currentState == HttpConnectionState::OCCUPIED)
@@ -83,8 +95,38 @@ bool ConnectionContext::TransitionTo(HttpConnectionState newState) {
             && newState != HttpConnectionState::CLOSING_IMMEDIATE)
             return false;
 
-        if(connState.compare_exchange_strong(currentState, newState, std::memory_order_acq_rel))
+        std::uint8_t desired = static_cast<std::uint8_t>(newState) | (cur & WRITE_IN_PROGRESS);
+        if(connState.compare_exchange_strong(cur, desired, std::memory_order_acq_rel))
             return true;
+    }
+}
+
+// vvv Write Progress Methods vvv
+bool ConnectionContext::IsWriteInProgress() const noexcept
+{
+    return (connState.load(std::memory_order_acquire) & WRITE_IN_PROGRESS) != 0;
+}
+
+bool ConnectionContext::SetWriteInProgress() noexcept
+{
+    std::uint8_t cur = connState.load(std::memory_order_acquire);
+    while(true) {
+        if(cur & WRITE_IN_PROGRESS)
+            return false;
+
+        std::uint8_t desired = cur | WRITE_IN_PROGRESS;
+        if(connState.compare_exchange_strong(cur, desired, std::memory_order_acq_rel))
+            return true;
+    }
+}
+
+void ConnectionContext::ClearWriteInProgress() noexcept
+{
+    std::uint8_t cur = connState.load(std::memory_order_acquire);
+    while(true) {
+        std::uint8_t desired = cur & static_cast<std::uint8_t>(~WRITE_IN_PROGRESS);
+        if(connState.compare_exchange_strong(cur, desired, std::memory_order_acq_rel))
+            return;
     }
 }
 

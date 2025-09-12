@@ -6,6 +6,7 @@
 #include "utils/backport/move_only_function.hpp"
 #include "utils/logger/logger.hpp"
 #include "utils/crypt/hash.hpp"
+#include "utils/rw_buffer/rw_buffer.hpp"
 
 #include <string>
 #include <memory>
@@ -65,22 +66,41 @@ enum class HttpParseState : std::uint8_t {
 };
 
 enum class HttpConnectionState : std::uint8_t {
-    ACTIVE,            // Connection is actively running
-    OCCUPIED,          // Connection is being processed by some callback and should not be closed
-    CLOSING_DEFAULT,   // Connection will be closed shortly after processing request
-    CLOSING_IMMEDIATE  // Connection must be closed immediately
+    ACTIVE            = 0b00000010, // Connection is actively running
+    OCCUPIED          = 0b00000100, // Connection is being processed by some callback and should not be closed
+    CLOSING_DEFAULT   = 0b00001000, // Connection will be closed shortly after processing request
+    CLOSING_IMMEDIATE = 0b00010000  // Connection must be closed immediately
 };
+// Reserve bit0 for "write in progress"
+static constexpr std::uint8_t WRITE_IN_PROGRESS = 0b00000001;
+static constexpr std::uint8_t CONN_STATE_MASK   = static_cast<std::uint8_t>(~WRITE_IN_PROGRESS);
 
 // Forward declare it so compilers won't cry
 struct ConnectionContext;
 
-// For 'MoveOnlyFunction'
 using WFX::Utils::MoveOnlyFunction;
 
-using ReceiveCallback            = MoveOnlyFunction<void(ConnectionContext&)>;
+// This is used for ReceiveCallback so Engine internally doesn't have to call-
+// -backend functions like Close or Write internally. It stops engine from-
+// -(example: closing the connection) before callback can finish
+enum class ReceiveResult : std::uint8_t {
+    RESUME,
+    WRITE,
+    WRITE_FILE,
+    WRITE_DEFERRED,
+    CLOSE
+};
+
+struct ReceiveDirective {
+    ReceiveResult       action;
+    HttpConnectionState state;
+    std::string_view    staticBody;
+};
+
+using ReceiveCallback            = MoveOnlyFunction<ReceiveDirective(ConnectionContext&)>;
 using AcceptedConnectionCallback = MoveOnlyFunction<void(WFXSocket)>;
 using HttpRequestPtr             = std::unique_ptr<HttpRequest>;
-using ConnectionState            = std::atomic<HttpConnectionState>;
+using ConnectionState            = std::atomic<std::uint8_t>; // bits[7:1] -> HttpConnectionState, bit[0] -> write flag
 
 // Honestly, while it would've been easier to include tick_scheduler.hpp for TickScheduler::TickType
 // Eh, idk cluttering this file just for a type, i'm just going to redefine it here for no absolute reason
@@ -88,9 +108,8 @@ using HttpTickType = std::uint16_t;
 
 // Quite important, has to be 64 bytes and IS 64 BYTES, THIS CANNOT CHANGE NOW
 struct ConnectionContext {
-    char*         buffer     = nullptr;
-    std::uint32_t bufferSize = 0;
-    std::uint32_t dataLength = 0;
+    // 16 byte buffer supporting both read and write operations
+    WFX::Utils::RWBuffer rwBuffer;
     
     // Also used by HttpParser
     std::uint32_t expectedBodyLength = 0;
@@ -101,15 +120,20 @@ struct ConnectionContext {
 
     // Used by HttpParser mostly
     std::uint8_t    parseState  = 0; // Interpreted by HttpParser as internal state enum
-    ConnectionState connState   = HttpConnectionState::ACTIVE; // Track state to prevent race conditions
+    ConnectionState connState   = 0; // Track state to prevent race conditions + track write call progress
     std::uint16_t   timeoutTick = 0; // Used to track timeouts for various stuff like 'header' timeout or 'body' timeout
     std::uint32_t   trackBytes  = 0; // Misc. Tracking of bytes wherever necessary
 
 public: // Core functions
-    HttpConnectionState GetState();
-    void                SetState(HttpConnectionState state);
-    bool                TransitionTo(HttpConnectionState state);
+    HttpConnectionState GetState()                        const noexcept;
+    void                SetState(HttpConnectionState state)     noexcept;
+    bool                TransitionTo(HttpConnectionState state) noexcept;
+
+    bool                IsWriteInProgress() const noexcept;
+    bool                SetWriteInProgress()      noexcept;
+    void                ClearWriteInProgress()    noexcept;
 };
+static_assert(sizeof(ConnectionContext) <= 64, "ConnectionContext must STRICTLY be less than or equal to 64 bytes.");
 
 // Abstraction for Windows and Linux impl
 class HttpConnectionHandler {
@@ -126,10 +150,13 @@ public:
     virtual void ResumeReceive(WFXSocket socket) = 0;
 
     // Write data to socket (Async)
-    virtual int Write(WFXSocket socket, std::string_view buffer) = 0;
+    virtual int Write(WFXSocket socket, std::string_view buffer = {}) = 0;
 
     // Write file directly to sockets (Async)
-    virtual int WriteFile(WFXSocket socket, std::string&& header, std::string_view path) = 0;
+    virtual int WriteFile(WFXSocket socket, std::string_view path) = 0;
+
+    // Mark connections as dirty to flush their data in the next tick
+    virtual void MarkConnectionDirty(WFXSocket socket) = 0;
 
     // Close a client socket
     virtual void Close(WFXSocket socket) = 0;

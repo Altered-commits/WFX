@@ -37,6 +37,7 @@ void Config::LoadCoreSettings(std::string_view path) {
         projectConfig.publicDir   = projectConfig.projectName + "/public/";
         projectConfig.templateDir = projectConfig.projectName + "/templates/";
 
+        ExtractValue(tbl, logger, "Network", "send_buffer_max",             networkConfig.maxSendBufferSize);
         ExtractValue(tbl, logger, "Network", "recv_buffer_max",             networkConfig.maxRecvBufferSize);
         ExtractValue(tbl, logger, "Network", "recv_buffer_incr",            networkConfig.bufferIncrSize);
         ExtractValue(tbl, logger, "Network", "header_reserve_hint",         networkConfig.headerReserveHintSize);

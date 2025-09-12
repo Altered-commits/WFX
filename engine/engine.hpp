@@ -14,14 +14,14 @@ using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpR
 
 class Engine {
 public:
-    Engine();
+    Engine(bool noCache);
     void Listen(const std::string& host, int port);
     void Stop();
 
 private:
-    void HandleConnection(WFXSocket client);
-    void HandleRequest(WFXSocket socket, ConnectionContext& ctx);
-    void HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx);
+    void             HandleConnection(WFXSocket client);
+    ReceiveDirective HandleRequest(WFXSocket socket, ConnectionContext& ctx);
+    ReceiveDirective HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx, bool shouldClose);
 
 private:
     void HandlePublicRoute();

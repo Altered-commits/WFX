@@ -31,12 +31,13 @@ add_executable(wfx
 )
 
 # Include directories for WFX
-target_include_directories(wfx PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(wfx PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
 
 # Link required libraries (system + third_party)
 target_link_libraries(wfx
     PRIVATE
         Ws2_32
+        Dbghelp
         mswsock
         bcrypt
         tlsf

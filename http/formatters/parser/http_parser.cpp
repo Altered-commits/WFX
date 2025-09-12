@@ -11,8 +11,11 @@ using namespace WFX::Core; // For 'Config'
 
 HttpParseState HttpParser::Parse(ConnectionContext& ctx)
 {
+    ReadMetadata* readMeta = ctx.rwBuffer.GetReadMeta();
+    const char*   data     = ctx.rwBuffer.GetReadData();
+    
     // Sanity checks
-    if(!ctx.buffer || ctx.dataLength == 0)
+    if(!data || readMeta->dataLength == 0)
         return HttpParseState::PARSE_ERROR;
 
     // Config variables
@@ -22,8 +25,7 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
     // Connection Context variables
     std::uint8_t&  state      = ctx.parseState;
     std::uint32_t& trackBytes = ctx.trackBytes;
-    const char*    data       = ctx.buffer;
-    std::size_t    size       = ctx.dataLength;
+    std::size_t    size       = readMeta->dataLength;
 
     // Ensure requestInfo is allocated. If not, lazy initialize it
     if(!ctx.requestInfo)
@@ -154,7 +156,7 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
         
         case HttpParseState::PARSE_INCOMPLETE_BODY:
         {
-            if(ctx.dataLength < trackBytes)
+            if(readMeta->dataLength < trackBytes)
                 return HttpParseState::PARSE_INCOMPLETE_BODY;
 
             HttpRequest& request = *ctx.requestInfo;

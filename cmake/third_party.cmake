@@ -22,8 +22,15 @@ FetchContent_Declare(
   GIT_TAG        v3.12.0
 )
 FetchContent_MakeAvailable(nlohmann_json)
-# note: this repo *already defines* a target called nlohmann_json,
-# so nothing else is needed.
+
+# Copy json.hpp to include/third_party/json directory for users ease of access
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/include/third_party/json)
+file(
+  COPY
+    ${nlohmann_json_SOURCE_DIR}/single_include/nlohmann/json.hpp
+    ${nlohmann_json_SOURCE_DIR}/single_include/nlohmann/json_fwd.hpp
+  DESTINATION ${CMAKE_SOURCE_DIR}/include/third_party/json
+)
 
 # ---------------- TLSF ----------------
 FetchContent_Declare(
@@ -54,3 +61,9 @@ if (NOT TARGET tomlplusplus)
       ${tomlplusplus_SOURCE_DIR}/include
   )
 endif()
+
+# Copy toml++ headers to include/third_party/toml++ directory for users ease of access
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/include/third_party/toml++)
+file(GLOB tomlplusplus_HEADERS ${tomlplusplus_SOURCE_DIR}/include/toml++/*.hpp)
+file(COPY ${tomlplusplus_HEADERS}
+     DESTINATION ${CMAKE_SOURCE_DIR}/include/third_party/toml++)

@@ -19,7 +19,7 @@ static void CreateFile(const fs::path& path, const std::string& content)
         Logger::GetInstance().Fatal("[WFX]: Failed to create file: ", path);
 
     outFile << content;
-    Logger::GetInstance().Info("[WFX]: Created: ", path);
+    Logger::GetInstance().Info("[WFX]: Created: ", path.c_str());
 }
 
 static void ScaffoldProject(const std::string& projectName)
@@ -38,6 +38,7 @@ project_name = ")" + projectName + R"("
 middleware_list = ["Logger"]    # Order of middleware registered by either User or Engine
 
 [Network]
+send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
 header_reserve_hint          = 512     # Initial header allocation hint size

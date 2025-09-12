@@ -1,7 +1,6 @@
 #ifndef WFX_CLI_MAIN_HPP
 #define WFX_CLI_MAIN_HPP
 
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -38,18 +37,20 @@ int WFXEntryPoint(int argc, char* argv[]) {
     parser.AddCommand("dev", "Start WFX dev server",
         [](const std::unordered_map<std::string, std::string>& options,
            const std::vector<std::string>&) -> int {
-            int port = 8000;
+            int port = 8080;
 
             try {
                 port = std::stoi(options.at("--port"));
-            } catch (...) {
+            }
+            catch (...) {
                 Logger::GetInstance().Fatal("[WFX]: Invalid port: ", options.at("--port"));
             }
 
-            return CLI::RunDevServer(options.at("--host"), port);
+            return CLI::RunDevServer(options.at("--host"), port, options.count("--no-cache") > 0);
         });
     parser.AddOption("dev", "--host", "Host to bind", false, "127.0.0.1", false);
     parser.AddOption("dev", "--port", "Port to bind", false, "8080", false);
+    parser.AddOption("dev", "--no-cache", "Disable caching", true, "", false);
 
     return parser.Parse(argc, argv);
 }

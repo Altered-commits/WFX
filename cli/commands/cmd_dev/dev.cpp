@@ -5,7 +5,6 @@
 
 #include <csignal>
 #include <atomic>
-#include <iostream>
 #include <thread>
 #include <chrono>
 
@@ -18,6 +17,10 @@ static std::atomic<bool> shouldStop = false;
 
 #ifdef _WIN32
 #include <Windows.h>
+#include <Dbghelp.h>
+
+#pragma comment(lib, "Dbghelp.lib")
+
 BOOL WINAPI ConsoleHandler(DWORD signal)
 {
     if(signal == CTRL_C_EVENT) {
@@ -26,6 +29,22 @@ BOOL WINAPI ConsoleHandler(DWORD signal)
         return TRUE;
     }
     return FALSE;
+}
+
+LONG WINAPI ExceptionFilter(EXCEPTION_POINTERS* ep) {
+    HANDLE file = CreateFileA("crash.dmp", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    
+    if(file != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION mei{};
+        mei.ThreadId = GetCurrentThreadId();
+        mei.ExceptionPointers = ep;
+        mei.ClientPointers = FALSE;
+        
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, MiniDumpWithFullMemory, &mei, nullptr, nullptr);
+        CloseHandle(file);
+    }
+
+    return EXCEPTION_EXECUTE_HANDLER;
 }
 #else
 void SignalHandler(int signal)
@@ -37,16 +56,17 @@ void SignalHandler(int signal)
 }
 #endif
 
-int RunDevServer(const std::string& host, int port)
+int RunDevServer(const std::string& host, int port, bool noCache)
 {
 #ifdef _WIN32
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
+    SetUnhandledExceptionFilter(ExceptionFilter);
 #else
     std::signal(SIGINT, SignalHandler);
 #endif
     Logger::GetInstance().SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
 
-    WFX::Core::Engine engine;
+    WFX::Core::Engine engine{noCache};
     engine.Listen(host, port);
 
     Logger::GetInstance().Info("[WFX]: Dev server running at http://", host, ':', port);

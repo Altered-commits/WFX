@@ -22,7 +22,7 @@ namespace WFX::CLI {
     constexpr const char* COMPILER_COMMAND  = "cl";
     constexpr const char* LINKER_COMMAND    = "link";
     constexpr const char* COMPILER_DISPLAY  = "MSVC";
-    constexpr const char* COMPILER_CARGS    = "/std:c++17 /O2 /GL /GS- /GR- /EHsc /MD /I. /Iinclude /Iwfx /c";
+    constexpr const char* COMPILER_CARGS    = "/std:c++17 /O2 /GL /GS- /GR- /EHsc /MD /I. /Iwfx/include /Iwfx /c";
     constexpr const char* COMPILER_LARGS    = "/DLL /LTCG /OPT:REF /DEBUG:NONE";
 #elif defined(__MINGW32__) || defined(__MINGW64__)
     constexpr const char* COMPILER_ID       = "g++-mingw";
@@ -33,7 +33,7 @@ namespace WFX::CLI {
         "-std=c++17 -O2 -flto -ffunction-sections -fdata-sections "
         "-fno-rtti -fno-exceptions "
         "-fvisibility=hidden -fvisibility-inlines-hidden "
-        "-I. -Iinclude -Iwfx -c";
+        "-I. -Iwfx/include -Iwfx -c";
     constexpr const char* COMPILER_LARGS    =
         "-shared -flto -Wl,--gc-sections -Wl,--strip-all";
 #elif defined(__clang__)
@@ -45,7 +45,7 @@ namespace WFX::CLI {
         "-std=c++17 -O2 -flto -fvisibility=hidden -fvisibility-inlines-hidden "
         "-fno-rtti -fno-exceptions "
         "-ffunction-sections -fdata-sections "
-        "-I. -Iinclude -Iwfx -c";
+        "-I. -Iwfx/include -Iwfx -c";
     constexpr const char* COMPILER_LARGS    =
         "-shared -fPIC -flto -Wl,--gc-sections -Wl,--strip-all";
 #elif defined(__GNUC__)
@@ -57,7 +57,7 @@ namespace WFX::CLI {
         "-std=c++17 -O2 -flto -fvisibility=hidden -fvisibility-inlines-hidden "
         "-fno-rtti -fno-exceptions "
         "-ffunction-sections -fdata-sections "
-        "-I. -Iinclude -Iwfx -c";
+        "-I. -Iwfx/include -Iwfx -c";
     constexpr const char* COMPILER_LARGS    =
         "-shared -fPIC -flto -Wl,--gc-sections -Wl,--strip-all";
 #else

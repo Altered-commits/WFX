@@ -9,13 +9,12 @@
 #include "utils/filesystem/filesystem.hpp"
 #include "utils/process/process.hpp"
 
-#include <iostream>
 #include <string>
 #include <thread>
 
 namespace WFX::Core {
 
-Engine::Engine()
+Engine::Engine(bool noCache)
     : connHandler_(CreateConnectionHandler())
 {
     config_.LoadCoreSettings("wfx.toml");
@@ -29,10 +28,15 @@ Engine::Engine()
     // To serve stuff like css, js and so on
     HandlePublicRoute();
 
-    // Compile user code (in 'src' directory) into dll which will be loaded below
-    HandleUserSrcCompilation(dllDir.c_str(), dllPath.c_str());
+    // Let's do this cuz its getting annoying for me, if flag isn't there, we compile it
+    auto& fs = FileSystem::GetFileSystem();
+    
+    if(!noCache && !fs.FileExists(dllPath))
+        HandleUserSrcCompilation(dllDir.c_str(), dllPath.c_str());
+    else
+        logger_.Info("[Engine]: --no-cache flag detected, skipping user code compilation");
 
-    // Load user's DLL file which we compiled above
+    // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath.c_str());
 
     // Now that user code is available to us, load middleware in proper order
@@ -62,17 +66,16 @@ void Engine::Stop()
 void Engine::HandleConnection(WFXSocket socket)
 {
     connHandler_->SetReceiveCallback(socket, [this, socket](ConnectionContext& ctx) {
-        this->HandleRequest(socket, ctx);
+        return this->HandleRequest(socket, ctx);
     });
 }
 
-void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
+ReceiveDirective Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
 {
     // This will be transmitted through all the layers (from here to middleware to user)
     HttpResponse res;
     Response userRes{&res, WFX::Shared::GetHttpAPIV1(), WFX::Shared::GetConfigAPIV1()};
 
-    // Parse (The most obvious fucking comment i could write, i'm just sleepy rn cut me some slack)
     HttpParseState state = HttpParser::Parse(ctx);
 
     // Version is important for Serializer to properly create a response
@@ -85,28 +88,33 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
         case HttpParseState::PARSE_INCOMPLETE_BODY:
         {
             // Set the current tick to ensure timeout handler doesnt kill the context
-            ctx.SetState(HttpConnectionState::ACTIVE);
             ctx.timeoutTick = connHandler_->GetCurrentTick();
-            connHandler_->ResumeReceive(socket);
-            return;
+            return {
+                ReceiveResult::RESUME,
+                HttpConnectionState::ACTIVE,
+                std::string_view{}
+            };
         }
         
         case HttpParseState::PARSE_EXPECT_100:
         {
             // We want to wait for the request so we won't be closing connection
             // also update timeoutTick so timeout handler doesnt kill the context
-            ctx.SetState(HttpConnectionState::ACTIVE);
             ctx.timeoutTick = connHandler_->GetCurrentTick();
-            connHandler_->Write(socket, "HTTP/1.1 100 Continue\r\n\r\n");
-            return;
+            return {
+                ReceiveResult::WRITE,
+                HttpConnectionState::ACTIVE,
+                "HTTP/1.1 100 Continue\r\n\r\n"
+            };
         }
         
         case HttpParseState::PARSE_EXPECT_417:
         {
-            // Close the connection whether client wants to or not
-            ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
-            connHandler_->Write(socket, "HTTP/1.1 417 Expectation Failed\r\n\r\n");
-            return;
+            return {
+                ReceiveResult::WRITE,
+                HttpConnectionState::CLOSING_DEFAULT,
+                "HTTP/1.1 417 Expectation Failed\r\n\r\n"
+            };
         }
 
         case HttpParseState::PARSE_SUCCESS:
@@ -139,70 +147,96 @@ void Engine::HandleRequest(WFXSocket socket, ConnectionContext& ctx)
                 (*callback)(*ctx.requestInfo, userRes);
             }
 
-            // Set the 'connState' to whatever the status of Connection header is
-            ctx.SetState(
-                shouldClose
-                    ? HttpConnectionState::CLOSING_DEFAULT
-                    : HttpConnectionState::ACTIVE
-                );
             ctx.parseState  = static_cast<std::uint8_t>(HttpParseState::PARSE_IDLE);
             ctx.timeoutTick = connHandler_->GetCurrentTick();
-            break;
+
+            return HandleResponse(socket, res, ctx, shouldClose);
         }
 
         case HttpParseState::PARSE_ERROR:
         {   
-            res.Status(HttpStatus::BAD_REQUEST)
-                .Set("Connection", "close")
-                .SendText("Bad Request");
-                
-            // Mark the connection to be closed after write completes
-            ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
-            break;
+            return {
+                ReceiveResult::WRITE,
+                HttpConnectionState::CLOSING_DEFAULT,
+                "HTTP/1.1 400 Bad Request\r\n"
+                "Connection: close\r\n"
+                "Content-Length: 11\r\n"
+                "Content-Type: text/plain\r\n"
+                "\r\n"
+                "Bad Request"
+            };
         }
 
         case HttpParseState::PARSE_STREAMING_BODY:
         default:
-            logger_.Info("[Engine]: No Impl");
-            res.Status(HttpStatus::NOT_IMPLEMENTED)
-                .Set("Connection", "close")
-                .SendText("Not Implemented");
-            
-            ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
-            break;
+        {
+            return {
+                ReceiveResult::WRITE,
+                HttpConnectionState::CLOSING_DEFAULT,
+                "HTTP/1.1 501 Not Implemented\r\n"
+                "Connection: close\r\n"
+                "Content-Length: 15\r\n"
+                "Content-Type: text/plain\r\n"
+                "\r\n"
+                "Not Implemented"
+            };
+        }
     }
-
-    HandleResponse(socket, res, ctx);
 }
 
-void Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx)
+ReceiveDirective Engine::HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx, bool shouldClose)
 {
-    auto&& [serializedContent, bodyView] = HttpSerializer::Serialize(res);
+    auto&& [serializeResult, bodyView] = HttpSerializer::SerializeToBuffer(res, ctx.rwBuffer);
 
-    int writeStatus = 0;
+    HttpConnectionState afterWriteState = shouldClose ?
+        HttpConnectionState::CLOSING_DEFAULT :
+        HttpConnectionState::ACTIVE;
 
-    // File operation via TransmitFile / sendfile, res.body contains the file path
-    if(res.IsFileOperation())
-        writeStatus = connHandler_->WriteFile(socket, std::move(serializedContent), bodyView);
-    // Regular WSASend write (text, JSON, etc)
-    else
-        writeStatus = connHandler_->Write(socket, serializedContent);
-
-    // Status < 0 is an error, no GQCS event is generated in WorkerLoop, Close connections ourselves
-    if(writeStatus < 0)
+    switch(serializeResult)
     {
-        ctx.SetState(HttpConnectionState::CLOSING_IMMEDIATE);
-        connHandler_->Close(socket);
-        return;
-    }
+        case SerializeResult::SERIALIZE_SUCCESS:
+        {
+            if(res.IsFileOperation())
+                return {
+                    ReceiveResult::WRITE_FILE,
+                    afterWriteState,
+                    bodyView
+                };
+            
+            if(shouldClose)
+                return {
+                    ReceiveResult::WRITE,
+                    afterWriteState,
+                    std::string_view{}
+                };
+            
+            return {
+                ReceiveResult::WRITE_DEFERRED,
+                afterWriteState,
+                std::string_view{}
+            };
+        }
+        case SerializeResult::SERIALIZE_BUFFER_INSUFFICIENT:
+        {
+            // Flush current buffer and just ignore the rest of the data for now :)
+            return {
+                ReceiveResult::WRITE,
+                afterWriteState,
+                std::string_view{}
+            };
+        }
 
-    // If the connection is marked for closure, we DO NOT touch the context here
-    // The backend connection handler will handle the final cleanup after the write completes
-    if(ctx.GetState() != HttpConnectionState::CLOSING_DEFAULT) {
-        ctx.dataLength         = 0;
-        ctx.expectedBodyLength = 0;
-        ctx.trackBytes         = 0;
-        // The state correctly remains ACTIVE
+        case SerializeResult::SERIALIZE_BUFFER_FAILED:
+        case SerializeResult::SERIALIZE_BUFFER_TOO_SMALL:
+        default:
+        {
+            logger_.Error("[Engine]: Failed to serialize response, buffer failed or too small");
+            return {
+                ReceiveResult::CLOSE,
+                HttpConnectionState::CLOSING_IMMEDIATE,
+                std::string_view{}
+            };
+        }
     }
 }
 
@@ -213,7 +247,7 @@ void Engine::HandlePublicRoute()
         HttpMethod::GET, "/public/*",
         [this](HttpRequest& req, Response& res) {
             // The route is pre normalised before it reaches here, so we can safely use the-
-            // -wildcard which we get, no issue of dir traversal attacks and such
+            // -wildcard which we get, no issue of directory traversal attacks and such
             auto wildcardPath = std::get<std::string_view>(req.pathSegments[0]);
             std::string fullRoute = config_.projectConfig.publicDir + wildcardPath.data();
 

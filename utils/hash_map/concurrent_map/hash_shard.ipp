@@ -301,6 +301,24 @@ bool HashShard<K, V>::Erase(const K& key)
 // Looping
 template<typename K, typename V>
 template<typename Fn>
+void HashShard<K, V>::ForEach(Fn&& cb) const
+{
+    if(!entries_ || capacity_ <= 0 || size_.load(std::memory_order_relaxed) == 0) return;
+
+    std::size_t i = 0;
+
+    while(i < capacity_) {
+        Entry& entry = entries_[i];
+
+        if(entry.occupied)
+            cb(entry.key, entry.value);
+
+        ++i;
+    }
+}
+
+template<typename K, typename V>
+template<typename Fn>
 void HashShard<K, V>::ForEachEraseIf(Fn&& cb)
 {
     if(!entries_ || capacity_ <= 0 || size_.load(std::memory_order_relaxed) == 0) return;

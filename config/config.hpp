@@ -15,6 +15,7 @@ struct ProjectConfig {
 };
 
 struct NetworkConfig {
+    std::uint32_t maxSendBufferSize  = 2 * 1024;
     std::uint32_t maxRecvBufferSize  = 16 * 1024;
     std::uint32_t bufferIncrSize     = 4 * 1024;
 

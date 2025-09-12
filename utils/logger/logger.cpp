@@ -1,5 +1,7 @@
 #include "logger.hpp"
-#include <iomanip>
+
+#include <ctime>
+#include <chrono>
 
 namespace WFX::Utils {
 
@@ -9,47 +11,34 @@ Logger& Logger::GetInstance()
     return loggerInstance;
 }
 
-void Logger::SetLevelMask(LevelMask mask)
-{
-    levelMask_ = mask;
-}
-
-void Logger::EnableTimestamps(bool enabled)
-{
-    useTimestamps_ = enabled;
-}
-
 const char* Logger::LevelToString(Level level) const
 {
-    switch(level) {
+    switch (level) {
         case Level::TRACE: return "TRACE";
         case Level::DEBUG: return "DEBUG";
         case Level::INFO:  return "INFO";
         case Level::WARN:  return "WARN";
-        case Level::ERR:   return "ERR";
+        case Level::ERR:   return "ERROR";
         case Level::FATAL: return "FATAL";
         default:           return "UNKNOWN";
     }
 }
 
-std::string Logger::CurrentTimestamp() const
+void Logger::CurrentTimestamp(char* buf, size_t len) const
 {
     using namespace std::chrono;
-
-    auto now  = system_clock::now();
-    auto time = system_clock::to_time_t(now);
-    auto ms   = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+    auto now = system_clock::now();
+    auto t   = system_clock::to_time_t(now);
+    auto ms  = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
 
     std::tm tm;
 #if defined(_WIN32)
-    localtime_s(&tm, &time);
+    localtime_s(&tm, &t);
 #else
-    localtime_r(&time, &tm);
+    localtime_r(&t, &tm);
 #endif
-
-    std::ostringstream oss;
-    oss << std::put_time(&tm, "%H:%M:%S") << '.' << std::setw(3) << std::setfill('0') << ms.count();
-    return oss.str();
+    std::snprintf(buf, len, "%02d:%02d:%02d.%03d",
+                  tm.tm_hour, tm.tm_min, tm.tm_sec, (int)ms.count());
 }
 
 } // namespace WFX::Utils

@@ -3,7 +3,7 @@
 
 #include "http/constants/http_constants.hpp"
 #include "http/common/route_common.hpp"
-#include <nlohmann/json_fwd.hpp>
+#include "third_party/json/json_fwd.hpp"
 
 // To be consistent with naming
 using Json = nlohmann::json;
