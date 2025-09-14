@@ -8,6 +8,53 @@ namespace WFX::Utils {
 // vvv Destructor vvv
 RWBuffer::~RWBuffer()
 {
+    ResetBuffer();
+}
+
+// vvv Initializer / Destructor Functions vvv
+bool RWBuffer::InitReadBuffer(BufferPool& pool, std::uint32_t size)
+{
+    // Already initialized
+    if(readBuffer_) return true;
+
+    std::uint32_t allocSize = sizeof(ReadMetadata) + size;
+    readBuffer_ = static_cast<char*>(pool.Lease(allocSize));
+    if(!readBuffer_) return false;
+
+    auto* readMeta = reinterpret_cast<ReadMetadata*>(readBuffer_);
+    readMeta->bufferSize = size;
+    readMeta->dataLength = 0;
+    readMeta->poolPtr    = &pool;
+
+    return true;
+}
+
+bool RWBuffer::InitWriteBuffer(std::uint32_t size)
+{
+    // To further enforce existence of readBuffer_, we won't be taking in BufferPool-
+    // -as a parameter, we will use the readBuffer_ metadata instead
+    
+    // Already initialized
+    if(writeBuffer_)
+        return true;
+    
+    if(!readBuffer_)
+        Logger::GetInstance().Fatal("[RWBuffer]: writeBuffer_ initializing before readBuffer_");
+
+    std::size_t allocSize = sizeof(WriteMetadata) + size;
+    writeBuffer_ = static_cast<char*>(GetReadMeta()->poolPtr->Lease(allocSize));
+    if(!writeBuffer_) return false;
+
+    auto* writeMeta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
+    writeMeta->bufferSize    = size;
+    writeMeta->dataLength    = 0;
+    writeMeta->writtenLength = 0;
+
+    return true;
+}
+
+void RWBuffer::ResetBuffer()
+{
     // Few assumptions i make:
     // 1) Without readBuffer_, writeBuffer_ cannot exist but the opposite scenario is possible
     // 2) In the case writeBuffer_ does exist without read, we crash the server, its an invalid
@@ -35,72 +82,40 @@ RWBuffer::~RWBuffer()
     readBuffer_ = nullptr;
 }
 
-// vvv Initializer Functions vvv
-bool RWBuffer::InitReadBuffer(BufferPool& pool, std::uint32_t size) {
-    // Already initialized
-    if(readBuffer_) return true;
-
-    std::uint32_t allocSize = sizeof(ReadMetadata) + size;
-    readBuffer_ = static_cast<char*>(pool.Lease(allocSize));
-    if(!readBuffer_) return false;
-
-    auto* readMeta = reinterpret_cast<ReadMetadata*>(readBuffer_);
-    readMeta->bufferSize = size;
-    readMeta->dataLength = 0;
-    readMeta->poolPtr    = &pool;
-
-    return true;
-}
-
-bool RWBuffer::InitWriteBuffer(std::uint32_t size) {
-    // To further enforce existence of readBuffer_, we won't be taking in BufferPool-
-    // -as a parameter, we will use the readBuffer_ metadata instead
-    
-    // Already initialized
-    if(writeBuffer_)
-        return true;
-    
-    if(!readBuffer_)
-        Logger::GetInstance().Fatal("[RWBuffer]: writeBuffer_ initializing before readBuffer_");
-
-    std::size_t allocSize = sizeof(WriteMetadata) + size;
-    writeBuffer_ = static_cast<char*>(GetReadMeta()->poolPtr->Lease(allocSize));
-    if(!writeBuffer_) return false;
-
-    auto* writeMeta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
-    writeMeta->bufferSize = size;
-    writeMeta->dataLength = 0;
-
-    return true;
-}
-
 // vvv Getter Functions vvv
-char* RWBuffer::GetWriteData() const noexcept {
+char* RWBuffer::GetWriteData() const noexcept
+{
     return writeBuffer_ ? writeBuffer_ + sizeof(WriteMetadata) : nullptr;
 }
 
-char* RWBuffer::GetReadData() const noexcept {
+char* RWBuffer::GetReadData() const noexcept
+{
     return readBuffer_ ? readBuffer_ + sizeof(ReadMetadata) : nullptr;
 }
 
-WriteMetadata* RWBuffer::GetWriteMeta() const noexcept {
+WriteMetadata* RWBuffer::GetWriteMeta() const noexcept
+{
     return reinterpret_cast<WriteMetadata*>(writeBuffer_);
 }
 
-ReadMetadata* RWBuffer::GetReadMeta() const noexcept {
+ReadMetadata* RWBuffer::GetReadMeta() const noexcept
+{
     return reinterpret_cast<ReadMetadata*>(readBuffer_);
 }
 
-bool RWBuffer::IsReadInitialized() const noexcept {
+bool RWBuffer::IsReadInitialized() const noexcept
+{
     return (!!readBuffer_);
 }
 
-bool RWBuffer::IsWriteInitialized() const noexcept {
+bool RWBuffer::IsWriteInitialized() const noexcept
+{
     return (!!writeBuffer_);
 }
 
 // vvv Read Buffer Management vvv
-bool RWBuffer::GrowReadBuffer(std::uint32_t defaultSize, std::uint32_t maxSize) {
+bool RWBuffer::GrowReadBuffer(std::uint32_t defaultSize, std::uint32_t maxSize)
+{
     if(!readBuffer_) return false;
 
     auto* readMeta = reinterpret_cast<ReadMetadata*>(readBuffer_);
@@ -127,7 +142,8 @@ bool RWBuffer::GrowReadBuffer(std::uint32_t defaultSize, std::uint32_t maxSize) 
     return true;
 }
 
-ValidRegion RWBuffer::GetWritableReadRegion() const noexcept {
+ValidRegion RWBuffer::GetWritableReadRegion() const noexcept
+{
     if(!readBuffer_) return {nullptr, 0};
 
     auto* readMeta = reinterpret_cast<ReadMetadata*>(readBuffer_);
@@ -137,7 +153,8 @@ ValidRegion RWBuffer::GetWritableReadRegion() const noexcept {
     };
 }
 
-ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept {
+ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept
+{
     if(!writeBuffer_) return {nullptr, 0};
 
     auto* writeMeta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
@@ -147,11 +164,20 @@ ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept {
     };
 }
 
-void RWBuffer::AdvanceReadLength(std::uint32_t n) noexcept {
+void RWBuffer::AdvanceReadLength(std::uint32_t n) noexcept
+{
     if(!readBuffer_) return;
 
     auto* meta = reinterpret_cast<ReadMetadata*>(readBuffer_);
     meta->dataLength = std::clamp(meta->dataLength + n, 0u, meta->bufferSize);
+}
+
+void RWBuffer::AdvanceWriteLength(std::uint32_t n) noexcept
+{
+    if(!writeBuffer_) return;
+
+    auto* meta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
+    meta->writtenLength += std::clamp(meta->writtenLength + n, 0u, meta->dataLength);
 }
 
 // vvv Write Buffer Management vvv

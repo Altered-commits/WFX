@@ -1,5 +1,8 @@
 [Compiler]
-name    = "g++-mingw"
-command = "g++"
-cargs   = "-std=c++17 -O2 -flto -ffunction-sections -fdata-sections -fno-rtti -fno-exceptions -fvisibility=hidden -fvisibility-inlines-hidden -I. -Iinclude -Iwfx -c"
-largs   = "-shared -flto -Wl,--gc-sections -Wl,--strip-all"
+name    = "g++"
+ccmd    = "g++"
+lcmd    = "g++"
+cargs   = "-std=c++17 -O2 -flto -fvisibility=hidden -fvisibility-inlines-hidden -fno-rtti -fno-exceptions -ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c"
+largs   = "-shared -fPIC -flto -Wl,--gc-sections -Wl,--strip-all"
+objflag = "-o "
+dllflag = "-o "

@@ -19,9 +19,8 @@ public:
     void Stop();
 
 private:
-    void             HandleConnection(WFXSocket client);
-    ReceiveDirective HandleRequest(WFXSocket socket, ConnectionContext& ctx);
-    ReceiveDirective HandleResponse(WFXSocket socket, HttpResponse& res, ConnectionContext& ctx, bool shouldClose);
+    void HandleRequest(ConnectionContext* ctx);
+    void HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shouldClose);
 
 private:
     void HandlePublicRoute();

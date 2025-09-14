@@ -15,19 +15,23 @@
 namespace WFX::Utils {
 
 // Ease of writing C++
-using ValidRegion = std::pair<char*, std::size_t>;
+struct alignas(8) ValidRegion {
+    char*       ptr = nullptr;
+    std::size_t len = 0;
+};
 
 // For write buffer: 8-byte aligned, minimal
 struct alignas(8) WriteMetadata {
-    std::uint32_t bufferSize = 0;
-    std::uint32_t dataLength = 0;
+    std::uint32_t bufferSize    = 0;
+    std::uint32_t dataLength    = 0;
+    std::uint32_t writtenLength = 0;
 };
 
 // For read buffer: includes buffer pool pointer
 struct alignas(8) ReadMetadata {
     std::uint32_t bufferSize = 0;
     std::uint32_t dataLength = 0;
-    BufferPool*   poolPtr    = nullptr; // Sacrifices 8 bytes from payload space
+    BufferPool*   poolPtr    = nullptr;
 };
 
 class alignas(16) RWBuffer {
@@ -35,9 +39,11 @@ public:
     RWBuffer() = default;
     ~RWBuffer();
 
-public: // Init
+public: // Init / Reset
     bool InitWriteBuffer(std::uint32_t size);
     bool InitReadBuffer(BufferPool& pool, std::uint32_t size);
+
+    void ResetBuffer();
 
 public: // Getter functions
     char*          GetWriteData()        const noexcept;
@@ -51,9 +57,10 @@ public: // Getter functions
 
 public: // Read buffer management
     bool        GrowReadBuffer(std::uint32_t defaultSize, std::uint32_t maxSize);
-    ValidRegion GetWritableReadRegion()      const noexcept;
-    ValidRegion GetWritableWriteRegion()     const noexcept;
-    void        AdvanceReadLength(std::uint32_t n) noexcept;
+    ValidRegion GetWritableReadRegion()       const noexcept;
+    ValidRegion GetWritableWriteRegion()      const noexcept;
+    void        AdvanceReadLength(std::uint32_t n)  noexcept;
+    void        AdvanceWriteLength(std::uint32_t n) noexcept;
 
 public: // Write buffer management
     bool AppendData(const char* data, std::uint32_t size);

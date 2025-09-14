@@ -1,6 +1,6 @@
 #include "dev.hpp"
 
-#include "engine/Engine.hpp"
+#include "engine/engine.hpp"
 #include "utils/logger/logger.hpp"
 
 #include <csignal>
@@ -58,21 +58,16 @@ void SignalHandler(int signal)
 
 int RunDevServer(const std::string& host, int port, bool noCache)
 {
+    Logger::GetInstance().SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
+
 #ifdef _WIN32
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
     SetUnhandledExceptionFilter(ExceptionFilter);
 #else
     std::signal(SIGINT, SignalHandler);
 #endif
-    Logger::GetInstance().SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
-
     WFX::Core::Engine engine{noCache};
     engine.Listen(host, port);
-
-    Logger::GetInstance().Info("[WFX]: Dev server running at http://", host, ':', port);
-    Logger::GetInstance().Info("[WFX]: Press Ctrl+C to stop.");
-
-    // Logger::GetInstance().SetLevelMask(WFX_LOG_NONE);
     
     while(!shouldStop)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

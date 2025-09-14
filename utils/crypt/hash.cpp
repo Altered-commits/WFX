@@ -1,5 +1,7 @@
 #include "hash.hpp"
+
 #include "utils/logger/logger.hpp"
+#include <cstring>
 
 namespace WFX::Utils {
 

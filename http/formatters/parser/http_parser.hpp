@@ -13,7 +13,7 @@ namespace WFX::Http {
 // Being used as a namespace rn, fun
 class HttpParser final {
 public:
-    static HttpParseState Parse(ConnectionContext& ctx);
+    static HttpParseState Parse(ConnectionContext* ctx);
 
 private: // Parse helpers
     static bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);

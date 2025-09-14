@@ -9,10 +9,10 @@ namespace WFX::Http {
 using namespace WFX::Utils; // For 'I have no idea'
 using namespace WFX::Core; // For 'Config'
 
-HttpParseState HttpParser::Parse(ConnectionContext& ctx)
+HttpParseState HttpParser::Parse(ConnectionContext* ctx)
 {
-    ReadMetadata* readMeta = ctx.rwBuffer.GetReadMeta();
-    const char*   data     = ctx.rwBuffer.GetReadData();
+    ReadMetadata* readMeta = ctx->rwBuffer.GetReadMeta();
+    const char*   data     = ctx->rwBuffer.GetReadData();
     
     // Sanity checks
     if(!data || readMeta->dataLength == 0)
@@ -23,23 +23,22 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
     std::uint32_t maxBodySize   = Config::GetInstance().networkConfig.maxBodyTotalSize;
 
     // Connection Context variables
-    std::uint8_t&  state      = ctx.parseState;
-    std::uint32_t& trackBytes = ctx.trackBytes;
+    std::uint32_t& trackBytes = ctx->trackBytes;
     std::size_t    size       = readMeta->dataLength;
 
     // Ensure requestInfo is allocated. If not, lazy initialize it
-    if(!ctx.requestInfo)
-        ctx.requestInfo = std::make_unique<HttpRequest>();
+    if(!ctx->requestInfo)
+        ctx->requestInfo = std::make_unique<HttpRequest>();
 
-    HttpRequest& request = *ctx.requestInfo;
+    HttpRequest& request = *ctx->requestInfo;
 
     // Our very cool State Machine handling different states of parser
-    switch(static_cast<HttpParseState>(state))
+    switch(static_cast<HttpParseState>(ctx->GetParseState()))
     {
         // In the case of it being idle, and some data arrives, we can safely fallthrough
         // As this only gets called if any data exists or arrives
         case HttpParseState::PARSE_IDLE:
-            state = static_cast<std::uint8_t>(HttpParseState::PARSE_INCOMPLETE_HEADERS);
+            ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_HEADERS);
             [[fallthrough]];
 
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
@@ -92,7 +91,7 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
                         return HttpParseState::PARSE_EXPECT_417;
 
                     // Set the state so the next time parser returns to this, it knows to parse body not header
-                    state = static_cast<std::uint8_t>(HttpParseState::PARSE_INCOMPLETE_BODY);
+                    ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
                     return HttpParseState::PARSE_EXPECT_100;
                 }
 
@@ -109,8 +108,8 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
                     if(availableBody < contentLen) {
                         // In INCOMPLETE_BODY, this means: wait until ctx.dataLength >= trackBytes
                         trackBytes = headerEnd + contentLen;
-                        ctx.expectedBodyLength = contentLen;
-                        state = static_cast<std::uint8_t>(HttpParseState::PARSE_INCOMPLETE_BODY);
+                        ctx->expectedBodyLength = contentLen;
+                        ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
                         return HttpParseState::PARSE_INCOMPLETE_BODY;
                     }
                     
@@ -118,12 +117,12 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
                     if(!ParseBody(data, size, pos, contentLen, request))
                         return HttpParseState::PARSE_ERROR;
 
-                    state = static_cast<std::uint8_t>(HttpParseState::PARSE_SUCCESS);
+                    ctx->SetParseState(HttpParseState::PARSE_SUCCESS);
                     return HttpParseState::PARSE_SUCCESS;
                 }
                 // No body, only header
                 else {
-                    state = static_cast<std::uint8_t>(HttpParseState::PARSE_SUCCESS);
+                    ctx->SetParseState(HttpParseState::PARSE_SUCCESS);
                     return HttpParseState::PARSE_SUCCESS;
                 }
             }
@@ -135,7 +134,7 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
                     return HttpParseState::PARSE_ERROR;
 
                 // Parser will not try to buffer the full body – instead user will handle chunks
-                state = static_cast<std::uint8_t>(HttpParseState::PARSE_STREAMING_BODY);
+                ctx->SetParseState(HttpParseState::PARSE_STREAMING_BODY);
                 
                 if(hasExpectHeader)
                     return HttpParseState::PARSE_EXPECT_100;
@@ -150,7 +149,7 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
                 return HttpParseState::PARSE_ERROR;
             
             // We just assume it's a header only request
-            state = static_cast<std::uint8_t>(HttpParseState::PARSE_SUCCESS);
+            ctx->SetParseState(HttpParseState::PARSE_SUCCESS);
             return HttpParseState::PARSE_SUCCESS;
         }
         
@@ -159,13 +158,13 @@ HttpParseState HttpParser::Parse(ConnectionContext& ctx)
             if(readMeta->dataLength < trackBytes)
                 return HttpParseState::PARSE_INCOMPLETE_BODY;
 
-            HttpRequest& request = *ctx.requestInfo;
-            std::size_t pos = trackBytes - ctx.expectedBodyLength;
+            HttpRequest& request = *ctx->requestInfo;
+            std::size_t pos = trackBytes - ctx->expectedBodyLength;
 
-            if(!ParseBody(data, size, pos, ctx.expectedBodyLength, request))
+            if(!ParseBody(data, size, pos, ctx->expectedBodyLength, request))
                 return HttpParseState::PARSE_ERROR;
 
-            state = static_cast<std::uint8_t>(HttpParseState::PARSE_SUCCESS);
+            ctx->SetParseState(HttpParseState::PARSE_SUCCESS);
             return HttpParseState::PARSE_SUCCESS;
         }
         

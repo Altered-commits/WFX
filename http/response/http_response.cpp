@@ -114,7 +114,7 @@ bool HttpResponse::ValidateFileSend(std::string_view path, bool autoHandle404)
     if(!std::holds_alternative<std::monostate>(body))
         logger.Fatal("[HttpResponse]: SendFile() called after body already set");
 
-    if(autoHandle404 && !fs.FileExists(path)) {
+    if(autoHandle404 && !fs.FileExists(path.data())) {
         Status(HttpStatus::NOT_FOUND)
         .SendText("File not found");
         return false;
@@ -129,7 +129,7 @@ void HttpResponse::PrepareFileHeaders(std::string_view path)
 
     isFileOperation_ = true;
 
-    std::uint64_t    fileSize = fs.GetFileSize(path);
+    std::uint64_t    fileSize = fs.GetFileSize(path.data());
     std::string_view mime     = MimeDetector::DetectMimeFromExt(path);
 
     headers.SetHeader("Content-Length", UInt64ToStr(fileSize));

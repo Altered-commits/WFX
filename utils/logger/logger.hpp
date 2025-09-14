@@ -96,6 +96,9 @@ void Logger::PrintArg(FILE* out, T&& arg) {
     else if constexpr(std::is_same_v<U, std::string>)
         std::fprintf(out, "%s", arg.c_str());
 
+    else if constexpr(std::is_same_v<U, std::string_view>)
+        std::fprintf(out, "%.*s", static_cast<int>(arg.size()), arg.data());
+
     else if constexpr(std::is_same_v<U, char> || std::is_same_v<U, std::int8_t> || std::is_same_v<U, std::uint8_t>)
         std::fputc(arg, out);
 

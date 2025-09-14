@@ -2,15 +2,11 @@
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
 #include "http/request/http_request.hpp"
-
 #include "utils/backport/move_only_function.hpp"
-#include "utils/logger/logger.hpp"
 #include "utils/crypt/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
 
 #include <string>
-#include <memory>
-#include <atomic>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -38,7 +34,7 @@ struct WFXIpAddress {
         uint8_t  raw[16]; // For hashing
     } ip;
 
-    uint8_t ipType; // AF_INET or AF_INET6
+    uint8_t ipType = 255; // AF_INET or AF_INET6
 
     // Necessary operations
     WFXIpAddress& operator=(const WFXIpAddress& other);
@@ -61,79 +57,65 @@ enum class HttpParseState : std::uint8_t {
     PARSE_EXPECT_417,         // It was a Expect: 100-continue header, REJECT IT
     PARSE_SUCCESS,            // Successfully received and parsed all data
     PARSE_ERROR,              // Malformed request
-    PARSE_DATA_OCCUPIED,      // Data which parser 'parsed' is now being used in Request-Response cycle
     PARSE_IDLE                // After Request-Response cycle, waiting for another request
 };
 
-enum class HttpConnectionState : std::uint8_t {
-    ACTIVE            = 0b00000010, // Connection is actively running
-    OCCUPIED          = 0b00000100, // Connection is being processed by some callback and should not be closed
-    CLOSING_DEFAULT   = 0b00001000, // Connection will be closed shortly after processing request
-    CLOSING_IMMEDIATE = 0b00010000  // Connection must be closed immediately
+enum class EventType : std::uint8_t {
+    EVENT_ACCEPT,
+    EVENT_RECV,
+    EVENT_SEND,
+    EVENT_SEND_FILE
 };
-// Reserve bit0 for "write in progress"
-static constexpr std::uint8_t WRITE_IN_PROGRESS = 0b00000001;
-static constexpr std::uint8_t CONN_STATE_MASK   = static_cast<std::uint8_t>(~WRITE_IN_PROGRESS);
+
+enum class ConnectionState : std::uint8_t {
+    CONNECTION_ALIVE,
+    CONNECTION_CLOSE
+};
 
 // Forward declare it so compilers won't cry
 struct ConnectionContext;
 
 using WFX::Utils::MoveOnlyFunction;
 
-// This is used for ReceiveCallback so Engine internally doesn't have to call-
-// -backend functions like Close or Write internally. It stops engine from-
-// -(example: closing the connection) before callback can finish
-enum class ReceiveResult : std::uint8_t {
-    RESUME,
-    WRITE,
-    WRITE_FILE,
-    WRITE_DEFERRED,
-    CLOSE
-};
-
-struct ReceiveDirective {
-    ReceiveResult       action;
-    HttpConnectionState state;
-    std::string_view    staticBody;
-};
-
-using ReceiveCallback            = MoveOnlyFunction<ReceiveDirective(ConnectionContext&)>;
-using AcceptedConnectionCallback = MoveOnlyFunction<void(WFXSocket)>;
+using ReceiveCallback            = MoveOnlyFunction<void(ConnectionContext*)>;
+using AcceptedConnectionCallback = MoveOnlyFunction<void()>;
 using HttpRequestPtr             = std::unique_ptr<HttpRequest>;
-using ConnectionState            = std::atomic<std::uint8_t>; // bits[7:1] -> HttpConnectionState, bit[0] -> write flag
 
 // Honestly, while it would've been easier to include tick_scheduler.hpp for TickScheduler::TickType
 // Eh, idk cluttering this file just for a type, i'm just going to redefine it here for no absolute reason
 using HttpTickType = std::uint16_t;
 
-// Quite important, has to be 64 bytes and IS 64 BYTES, THIS CANNOT CHANGE NOW
 struct ConnectionContext {
-    // 16 byte buffer supporting both read and write operations
+    // First 8 bytes, eventType must strictly be at offset of 0
+    EventType eventType = EventType::EVENT_ACCEPT;        // 1 byte
+
+    struct {
+        std::uint8_t parseState      : 4; // 0–15 (Enough for HttpParseState)
+        std::uint8_t connectionState : 4; // 0–15 (Enough for ConnectionState)
+    };                                                   // 1 byte
+
+    std::uint16_t timeoutTick = 0;                       // 2 bytes
+    std::uint32_t trackBytes  = 0;                       // 4 bytes
+
+    // 16-byte buffer
     WFX::Utils::RWBuffer rwBuffer;
-    
-    // Also used by HttpParser
-    std::uint32_t expectedBodyLength = 0;
-    
-    WFXIpAddress    connInfo;
-    HttpRequestPtr  requestInfo;
-    ReceiveCallback onReceive;
 
-    // Used by HttpParser mostly
-    std::uint8_t    parseState  = 0; // Interpreted by HttpParser as internal state enum
-    ConnectionState connState   = 0; // Track state to prevent race conditions + track write call progress
-    std::uint16_t   timeoutTick = 0; // Used to track timeouts for various stuff like 'header' timeout or 'body' timeout
-    std::uint32_t   trackBytes  = 0; // Misc. Tracking of bytes wherever necessary
+    HttpRequestPtr requestInfo;                        // 8 bytes
+    WFXSocket      socket;                             // 4 bytes
+    std::uint32_t  expectedBodyLength = 0;             // 4 bytes
+    WFXIpAddress   connInfo;                           // 20 bytes
 
-public: // Core functions
-    HttpConnectionState GetState()                        const noexcept;
-    void                SetState(HttpConnectionState state)     noexcept;
-    bool                TransitionTo(HttpConnectionState state) noexcept;
+public: // Helper functions
+    void ResetContext();
 
-    bool                IsWriteInProgress() const noexcept;
-    bool                SetWriteInProgress()      noexcept;
-    void                ClearWriteInProgress()    noexcept;
+    void SetParseState(HttpParseState newState);
+    void SetConnectionState(ConnectionState newState);
+
+    HttpParseState  GetParseState()      const;
+    ConnectionState GetConnectionState() const;
 };
-static_assert(sizeof(ConnectionContext) <= 64, "ConnectionContext must STRICTLY be less than or equal to 64 bytes.");
+static_assert(offsetof(ConnectionContext, eventType) == 0, "[ConnectionContext] 'eventType' must strictly be at an offset of 0.");
+static_assert(sizeof(ConnectionContext) <= 80, "ConnectionContext must STRICTLY be less than or equal to 80 bytes.");
 
 // Abstraction for Windows and Linux impl
 class HttpConnectionHandler {
@@ -141,28 +123,25 @@ public:
     virtual ~HttpConnectionHandler() = default;
 
     // Initialize sockets, bind and listen on given host:port
-    virtual bool Initialize(const std::string& host, int port) = 0;
+    virtual void Initialize(const std::string& host, int port) = 0;
 
     // Set the receive callback ONCE per socket (can be overwritten if needed)
-    virtual void SetReceiveCallback(WFXSocket socket, ReceiveCallback onData) = 0;
+    virtual void SetReceiveCallback(ReceiveCallback onData) = 0;
 
     // Read more data if required (Async)
-    virtual void ResumeReceive(WFXSocket socket) = 0;
+    virtual void ResumeReceive(ConnectionContext* ctx) = 0;
 
     // Write data to socket (Async)
-    virtual int Write(WFXSocket socket, std::string_view buffer = {}) = 0;
+    virtual void Write(ConnectionContext* ctx, std::string_view buffer = {}) = 0;
 
     // Write file directly to sockets (Async)
-    virtual int WriteFile(WFXSocket socket, std::string_view path) = 0;
-
-    // Mark connections as dirty to flush their data in the next tick
-    virtual void MarkConnectionDirty(WFXSocket socket) = 0;
+    virtual void WriteFile(ConnectionContext* ctx, std::string_view path) = 0;
 
     // Close a client socket
-    virtual void Close(WFXSocket socket) = 0;
+    virtual void Close(ConnectionContext* ctx) = 0;
 
     // Run the main connection loop (can be used by dev/serve mode)
-    virtual void Run(AcceptedConnectionCallback) = 0;
+    virtual void Run() = 0;
 
     // Get the current tick. Each of the connection backend will implement TickScheduler
     virtual HttpTickType GetCurrentTick() = 0;

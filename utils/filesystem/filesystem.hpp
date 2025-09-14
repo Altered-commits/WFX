@@ -20,17 +20,17 @@ public:
     virtual ~BaseFileSystem() = default;
 
     // File Manipulation
-    virtual bool        FileExists(std::string_view path)                      const = 0;
-    virtual bool        DeleteFile(std::string_view path)                      const = 0;
-    virtual bool        RenameFile(std::string_view from, std::string_view to) const = 0;
-    virtual std::size_t GetFileSize(std::string_view path)                     const = 0;
+    virtual bool        FileExists(const char* path)                 const = 0;
+    virtual bool        DeleteFile(const char* path)                 const = 0;
+    virtual bool        RenameFile(const char* from, const char* to) const = 0;
+    virtual std::size_t GetFileSize(const char* path)                const = 0;
 
     // Directory Manipulation
-    virtual bool          DirectoryExists(std::string_view path)                                                const = 0;
-    virtual bool          CreateDirectory(std::string_view path, bool recurseParentDir = true)                  const = 0;
-    virtual bool          DeleteDirectory(std::string_view path)                                                const = 0;
-    virtual DirectoryList ListDirectory(std::string_view path, bool shouldRecurse)                              const = 0;
-    virtual void          ListDirectory(std::string_view path, bool shouldRecurse, const FileCallback& onEntry) const = 0;
+    virtual bool          DirectoryExists(const char* path)                                                const = 0;
+    virtual bool          CreateDirectory(std::string path, bool recurseParentDir = true)                  const = 0;
+    virtual bool          DeleteDirectory(const char* path)                                                const = 0;
+    virtual DirectoryList ListDirectory(std::string path, bool shouldRecurse)                              const = 0;
+    virtual void          ListDirectory(std::string path, bool shouldRecurse, const FileCallback& onEntry) const = 0;
 };
 
 // MAIN SHIT: Returns singleton reference to stuff needed for File / Directory manipulation
