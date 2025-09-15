@@ -59,7 +59,7 @@ connection_threads = "auto"  # IOCP worker thread count
 request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
-worker_connections = 4096    # Max simultaneous epoll-based worker connections
+worker_processes = 4    # Max simultaneous workers (cloned processes)
 )");
 
     // Default route

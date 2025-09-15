@@ -10,9 +10,9 @@ header_timeout               = 15      # Max time limit for entire header to arr
 body_timeout                 = 20      # Max time limit for entire body to arrive. After that the connection closes
 idle_timeout                 = 40      # Max time limit for a connection to stay idle. After that the connection closes
 max_connections              = 10000   # Max total concurrent connections
-max_connections_per_ip       = 10000      # Per-IP connection cap
-max_request_burst_per_ip     = 10000      # Initial request tokens per IP
-max_requests_per_ip_per_sec  = 10000       # Refill rate (tokens per second per IP)
+max_connections_per_ip       = 10000   # Per-IP connection cap
+max_request_burst_per_ip     = 10000   # Initial request tokens per IP
+max_requests_per_ip_per_sec  = 10000   # Refill rate (tokens per second per IP)
 
 [Windows]
 accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts
@@ -20,4 +20,4 @@ connection_threads = "auto"  # IOCP worker thread count
 request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
-worker_connections = 4096    # Max simultaneous epoll-based worker connections
+worker_processes = 6    # Max simultaneous worker connections

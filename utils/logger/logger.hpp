@@ -19,12 +19,12 @@ public:
     using LevelMask = uint32_t;
 
     enum class Level : uint8_t {
-        TRACE,
         DEBUG,
         INFO,
         WARN,
         ERR,
         FATAL,
+        TRACE,
         NONE
     };
 
@@ -46,13 +46,13 @@ public:
     void EnableTimestamps(bool enabled) { useTimestamps_ = enabled; }
 
     // Public variadic logging APIs
-    template <typename... Args> void Print(Args&&... args) { Log<false>(Level::INFO, std::forward<Args>(args)...); }
-    template <typename... Args> void Trace(Args&&... args) { Log(Level::TRACE,       std::forward<Args>(args)...); }
-    template <typename... Args> void Debug(Args&&... args) { Log(Level::DEBUG,       std::forward<Args>(args)...); }
-    template <typename... Args> void Info (Args&&... args) { Log(Level::INFO,        std::forward<Args>(args)...); }
-    template <typename... Args> void Warn (Args&&... args) { Log(Level::WARN,        std::forward<Args>(args)...); }
-    template <typename... Args> void Error(Args&&... args) { Log(Level::ERR,         std::forward<Args>(args)...); }
-    template <typename... Args> void Fatal(Args&&... args) { Log(Level::FATAL,       std::forward<Args>(args)...); 
+    template<typename... Args> void Print(Args&&... args) { Log<false>(Level::TRACE, std::forward<Args>(args)...); }
+    template<typename... Args> void Trace(Args&&... args) { Log(Level::TRACE,        std::forward<Args>(args)...); }
+    template<typename... Args> void Debug(Args&&... args) { Log(Level::DEBUG,        std::forward<Args>(args)...); }
+    template<typename... Args> void Info (Args&&... args) { Log(Level::INFO,         std::forward<Args>(args)...); }
+    template<typename... Args> void Warn (Args&&... args) { Log(Level::WARN,         std::forward<Args>(args)...); }
+    template<typename... Args> void Error(Args&&... args) { Log(Level::ERR,          std::forward<Args>(args)...); }
+    template<typename... Args> void Fatal(Args&&... args) { Log(Level::FATAL,        std::forward<Args>(args)...); 
                                                                                      std::fflush(stderr);
                                                                                      std::exit(EXIT_FAILURE); }
 

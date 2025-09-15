@@ -40,7 +40,7 @@ struct OSSpecificConfig {
     std::uint16_t workerThreadCount   = 2;
     std::uint16_t callbackThreadCount = 4;
 #else
-    std::uint32_t workerConnections = 4 * 1024;
+    std::uint32_t workerProcesses = 4;
 #endif
 };
 

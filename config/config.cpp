@@ -16,17 +16,6 @@ Config& Config::GetInstance() {
 
 void Config::LoadCoreSettings(std::string_view path) {
     Logger& logger = Logger::GetInstance();
-    unsigned int cores = std::thread::hardware_concurrency();
-
-    // Sanity checks
-    if(cores == 0 || cores > std::numeric_limits<std::uint16_t>::max()) {
-        // Fallback
-        cores = 2; 
-        logger.Warn("[Config]: Invalid hardware_concurrency() result. Using fallback = ", cores);
-    }
-
-    std::uint16_t threadCount = static_cast<std::uint16_t>(cores);
-    logger.Info("[Config]: Detected hardware concurrency = ", threadCount);
 
     try {
         auto tbl = toml::parse_file(path);
@@ -53,6 +42,18 @@ void Config::LoadCoreSettings(std::string_view path) {
         ExtractValue(tbl, logger, "Network", "max_requests_per_ip_per_sec", networkConfig.maxTokensPerSecond);
 
     #ifdef _WIN32
+        unsigned int cores = std::thread::hardware_concurrency();
+
+        // Sanity checks
+        if(cores == 0 || cores > std::numeric_limits<std::uint16_t>::max()) {
+            // Fallback
+            cores = 2; 
+            logger.Warn("[Config]: Invalid hardware_concurrency() result. Using fallback = ", cores);
+        }
+
+        std::uint16_t threadCount = static_cast<std::uint16_t>(cores);
+        logger.Info("[Config]: Detected hardware concurrency = ", threadCount);
+
         std::uint16_t defaultIOCP = std::max(2, threadCount / 2);
         std::uint16_t defaultUser = std::max(2, threadCount - defaultIOCP);
 
@@ -62,7 +63,7 @@ void Config::LoadCoreSettings(std::string_view path) {
         ExtractAutoOrAll(tbl, logger, "Windows", "request_threads",
                          osSpecificConfig.callbackThreadCount, defaultUser, threadCount);
     #else
-        ExtractValue(tbl, logger, "Linux", "worker_connections", osSpecificConfig.workerConnections);
+        ExtractValue(tbl, logger, "Linux", "worker_processes", osSpecificConfig.workerProcesses);
     #endif
     }
     catch(const toml::parse_error& err) {

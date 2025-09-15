@@ -83,7 +83,6 @@ void IoUringConnectionHandler::Run()
             if(errno == EINTR)
                 continue;
 
-            logger_.Error("[IoUring]: io_uring_wait_cqe error: ", strerror(errno));
             break;
         }
 

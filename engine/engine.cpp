@@ -18,9 +18,6 @@ namespace WFX::Core {
 Engine::Engine(bool noCache)
     : connHandler_(CreateConnectionHandler())
 {
-    config_.LoadCoreSettings("wfx.toml");
-    config_.LoadToolchainSettings("toolchain.toml");
-
     // This will be used in both compiling and injecting of dll
     const std::string dllDir  = config_.projectConfig.projectName + "/build/dlls/";
 #if defined(_WIN32)
@@ -54,9 +51,6 @@ Engine::Engine(bool noCache)
 void Engine::Listen(const std::string& host, int port)
 {
     connHandler_->Initialize(host, port);
-    
-    logger_.Info("[Engine]: Dev server running at http://", host, ':', port);
-    logger_.Info("[Engine]: Press Ctrl+C to stop ");
 
     connHandler_->SetReceiveCallback([this](ConnectionContext* ctx){
         this->HandleRequest(ctx);

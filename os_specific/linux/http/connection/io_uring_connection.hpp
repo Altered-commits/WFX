@@ -19,7 +19,7 @@
 
 #define BACKLOG          (1 * 1024)
 #define QUEUE_DEPTH      (4096)
-#define BATCH_SIZE       (64)
+#define BATCH_SIZE       (32)
 
 namespace WFX::OSSpecific {
 
