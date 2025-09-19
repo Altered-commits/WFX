@@ -62,11 +62,11 @@ private:
 
 private:
     // Epoll
-    int listenFd_ = -1;
-    int epollFd_  = -1;
+    int           listenFd_  = -1;
+    int           epollFd_   = -1;
+    std::uint16_t maxEvents_ = config_.osSpecificConfig.maxEvents;
 
-    constexpr static std::uint32_t MAX_EPOLL_EVENTS = 1024;
-    epoll_event events[MAX_EPOLL_EVENTS] = { 0 };
+    std::unique_ptr<epoll_event[]> events_ = nullptr;
 
 private:
     // Connection Context

@@ -64,13 +64,18 @@ void Config::LoadCoreSettings(std::string_view path) {
                          osSpecificConfig.callbackThreadCount, defaultUser, threadCount);
     #else
         ExtractValue(tbl, logger, "Linux", "worker_processes", osSpecificConfig.workerProcesses);
-        ExtractValue(tbl, logger, "Linux", "accept_slots",     osSpecificConfig.acceptSlots);
         ExtractValue(tbl, logger, "Linux", "backlog",          osSpecificConfig.backlog);
-        ExtractValue(tbl, logger, "Linux", "queue_depth",      osSpecificConfig.queueDepth);
-        ExtractValue(tbl, logger, "Linux", "batch_size",       osSpecificConfig.batchSize);
         ExtractValue(tbl, logger, "Linux", "file_cache_size",  osSpecificConfig.fileCacheSize);
-        ExtractValue(tbl, logger, "Linux", "file_chunk_size",  osSpecificConfig.fileChunkSize);
-    #endif
+        
+        #ifdef WFX_LINUX_USE_IO_URING
+            ExtractValue(tbl, logger, "Linux.IoUring", "accept_slots",    osSpecificConfig.acceptSlots);
+            ExtractValue(tbl, logger, "Linux.IoUring", "queue_depth",     osSpecificConfig.queueDepth);
+            ExtractValue(tbl, logger, "Linux.IoUring", "batch_size",      osSpecificConfig.batchSize);
+            ExtractValue(tbl, logger, "Linux.IoUring", "file_chunk_size", osSpecificConfig.fileChunkSize);
+        #else
+            ExtractValue(tbl, logger, "Linux.Epoll", "max_events", osSpecificConfig.maxEvents);
+        #endif // WFX_LINUX_USE_IO_URING
+    #endif // _WIN32
     }
     catch(const toml::parse_error& err) {
         logger.Fatal("[Config]: '", path, "' ", err.what(),

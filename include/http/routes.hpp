@@ -21,7 +21,7 @@ extern const WFX::Shared::MASTER_API_TABLE* __wfx_api;
 
 // Generate once
 #define WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, callback, uniq)  \
-    struct WFX_ROUTE_CLASS(method, uniq) {                              \
+    static struct WFX_ROUTE_CLASS(method, uniq) {                       \
         WFX_ROUTE_CLASS(method, uniq)() {                               \
             WFX::Shared::__WFXDeferredRoutes().emplace_back([] {        \
                 __wfx_api->GetHttpAPIV1()->RegisterRoute(               \

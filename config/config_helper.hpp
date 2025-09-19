@@ -12,10 +12,31 @@ template<typename T>
 bool ExtractValue(const toml::table& tbl, WFX::Utils::Logger& logger,
                   const char* section, const char* field, T& target)
 {
-    if(auto val = tbl[section][field].value<T>()) {
-        target = *val;
-        return true;
+    std::string sec(section);
+    toml::node_view<const toml::node> node{tbl};
+
+    // Check if section is like "Linux.IoUring"
+    auto dotPos = sec.find('.');
+    if(dotPos != std::string::npos) {
+        auto parent = sec.substr(0, dotPos);
+        auto child  = sec.substr(dotPos + 1);
+
+        node = tbl[parent];
+        if(node && node.is_table())
+            node = node[child];
+        else
+            node = {};
     }
+    else
+        node = tbl[sec];
+
+    if(node && node.is_table()) {
+        if(auto val = node[field].value<T>()) {
+            target = *val;
+            return true;
+        }
+    }
+
     logger.Warn("[Config]: Missing or invalid entry: [", section, "] ", field,
                 ". Using default value: ", target);
     return false;

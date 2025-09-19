@@ -26,10 +26,14 @@ void EpollConnectionHandler::Initialize(const std::string& host, int port) {
     auto& osConfig      = config_.osSpecificConfig;
     auto& networkConfig = config_.networkConfig;
 
+    // Connections
     connWords_   = (networkConfig.maxConnections + 63) / 64;
     connections_ = std::make_unique<ConnectionContext[]>(networkConfig.maxConnections);
     connBitmap_  = std::make_unique<std::uint64_t[]>(connWords_);
+    // Events
+    events_      = std::make_unique<epoll_event[]>(maxEvents_);
 
+    // Idk
     std::fill_n(connBitmap_.get(), connWords_, 0);
 
     listenFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -189,7 +193,7 @@ void EpollConnectionHandler::Run()
         logger_.Fatal("[Epoll]: Member 'onReceive_' was not initialized");
 
     while(running_) {
-        int nfds = epoll_wait(epollFd_, events, MAX_EPOLL_EVENTS, -1);
+        int nfds = epoll_wait(epollFd_, events_.get(), maxEvents_, -1);
         if(nfds < 0) {
             // Interrupted by signal
             if(errno == EINTR)
@@ -199,8 +203,8 @@ void EpollConnectionHandler::Run()
         
         // Handle nfds events which epoll gave us
         for(std::uint32_t i = 0; i < nfds; i++) {
-            int  fd = events[i].data.fd;
-            auto ev = events[i].events;
+            int  fd = events_[i].data.fd;
+            auto ev = events_[i].events;
 
             // Accept new connections
             if(fd == listenFd_) {
@@ -252,7 +256,7 @@ void EpollConnectionHandler::Run()
             }
             // Handle existing connections
             else {
-                auto* ctx = reinterpret_cast<ConnectionContext*>(events[i].data.ptr);
+                auto* ctx = reinterpret_cast<ConnectionContext*>(events_[i].data.ptr);
 
                 if(ev & (EPOLLERR | EPOLLHUP)) {
                     Close(ctx);

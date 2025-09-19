@@ -41,12 +41,17 @@ struct OSSpecificConfig {
     std::uint16_t callbackThreadCount = 4;
 #else
     std::uint32_t workerProcesses = 4;
-    std::uint16_t acceptSlots     = 64;
-    std::uint16_t batchSize       = 64;
     std::uint32_t backlog         = 1024;
+    std::uint16_t fileCacheSize   = 20;
+    
+    // Epoll
+    std::uint16_t maxEvents       = 1 * 1024;
+    
+    // IoUring
+    std::uint16_t batchSize       = 64;
+    std::uint16_t acceptSlots     = 64;
     std::uint32_t queueDepth      = 4096;
     std::uint32_t fileChunkSize   = 64 * 1024;
-    std::uint16_t fileCacheSize   = 20;
 #endif
 };
 
