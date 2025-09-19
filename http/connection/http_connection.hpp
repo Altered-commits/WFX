@@ -150,7 +150,7 @@ public:
     virtual void Write(ConnectionContext* ctx, std::string_view buffer = {}) = 0;
 
     // Write file directly to sockets (Async)
-    virtual void WriteFile(ConnectionContext* ctx, std::string_view path) = 0;
+    virtual void WriteFile(ConnectionContext* ctx, std::string path) = 0;
 
     // Close a client socket
     virtual void Close(ConnectionContext* ctx) = 0;

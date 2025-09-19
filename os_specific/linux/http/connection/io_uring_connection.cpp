@@ -81,11 +81,11 @@ void IoUringConnectionHandler::SetReceiveCallback(ReceiveCallback onData)
 void IoUringConnectionHandler::ResumeReceive(ConnectionContext* ctx)                    { AddRecv(ctx); }
 void IoUringConnectionHandler::Write(ConnectionContext* ctx, std::string_view buffer)   { AddSend(ctx, buffer); }
 void IoUringConnectionHandler::Close(ConnectionContext* ctx)                            { ReleaseConnection(ctx); }
-void IoUringConnectionHandler::WriteFile(ConnectionContext *ctx, std::string_view path)
+void IoUringConnectionHandler::WriteFile(ConnectionContext *ctx, std::string path)
 {
     // Ensure that the file exists and our context is ready for sending file
     // If not we 404 error
-    if(!EnsureFileReady(ctx, path)) {
+    if(!EnsureFileReady(ctx, std::move(path))) {
         AddSend(ctx, notFound);
         return;
     }
@@ -405,9 +405,9 @@ void IoUringConnectionHandler::SetNonBlocking(int fd)
         fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-bool IoUringConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string_view path)
+bool IoUringConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string path)
 {
-    auto [fd, size] = fileCache_.GetFileDesc(std::string(path));
+    auto [fd, size] = fileCache_.GetFileDesc(std::move(path));
     if(fd < 0)
         return false;
 

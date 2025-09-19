@@ -34,7 +34,7 @@ public: // Initializing
 public: // I/O Operations
     void ResumeReceive(ConnectionContext* ctx)                       override;
     void Write(ConnectionContext* ctx, std::string_view buffer = {}) override;
-    void WriteFile(ConnectionContext* ctx, std::string_view path)    override;
+    void WriteFile(ConnectionContext* ctx, std::string path)         override;
     void Close(ConnectionContext* ctx)                               override;
     
 public: // Main Functions
@@ -52,7 +52,7 @@ private: // Helper Functions
     void               ReleaseAccept(AcceptSlot* slot);
 
     void               SetNonBlocking(int fd);
-    bool               EnsureFileReady(ConnectionContext* ctx, std::string_view path);
+    bool               EnsureFileReady(ConnectionContext* ctx, std::string path);
     int                ResolveHostToIpv4(const char* host, in_addr* outAddr);
 
     void               AddAccept();

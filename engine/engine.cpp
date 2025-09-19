@@ -160,7 +160,7 @@ void Engine::HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shou
     {
         case SerializeResult::SERIALIZE_SUCCESS:
             if(res.IsFileOperation())
-                connHandler_->WriteFile(ctx, bodyView);
+                connHandler_->WriteFile(ctx, std::string(bodyView));
             else
                 connHandler_->Write(ctx, std::string_view{});
 

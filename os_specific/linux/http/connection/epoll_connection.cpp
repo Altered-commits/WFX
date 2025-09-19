@@ -1,5 +1,6 @@
 #include "epoll_connection.hpp"
 
+#include "http/common/http_error_msgs.hpp"
 #include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <fcntl.h>
@@ -74,6 +75,8 @@ void EpollConnectionHandler::ResumeReceive(ConnectionContext *ctx)
     if(!EnsureReadReady(ctx))
         return;
 
+    ctx->eventType = EventType::EVENT_RECV;
+
     epoll_event ev{};
     ev.events   = EPOLLIN | EPOLLET;
     ev.data.ptr = ctx;
@@ -83,8 +86,6 @@ void EpollConnectionHandler::ResumeReceive(ConnectionContext *ctx)
         Close(ctx);
         return;
     }
-
-    ctx->eventType = EventType::EVENT_RECV;
 }
 
 void EpollConnectionHandler::Write(ConnectionContext * ctx, std::string_view msg)
@@ -93,15 +94,6 @@ void EpollConnectionHandler::Write(ConnectionContext * ctx, std::string_view msg
     // Same for other functions as well
     auto& networkConfig = config_.networkConfig;
     ssize_t n = 0;
-
-    auto pollAgain = [this, ctx]() {
-        ctx->eventType = EventType::EVENT_SEND;
-                
-        epoll_event ev{};
-        ev.events   = EPOLLOUT | EPOLLET;
-        ev.data.ptr = ctx;
-        epoll_ctl(epollFd_, EPOLL_CTL_MOD, ctx->socket, &ev);
-    };
 
     // Case 1: Direct send (used only for static error codes)
     // NOTE: CHANGE OF PLANS, msg is fire and forget, i don't care if they get delivered-
@@ -116,10 +108,14 @@ void EpollConnectionHandler::Write(ConnectionContext * ctx, std::string_view msg
     else {
         auto* writeMeta = ctx->rwBuffer.GetWriteMeta();
         if(!writeMeta || writeMeta->writtenLength >= writeMeta->dataLength)
-            return;
+            goto __CleanupOrRearm;
 
         char* buf = ctx->rwBuffer.GetWriteData() + writeMeta->writtenLength;
         std::uint32_t remaining = writeMeta->dataLength - writeMeta->writtenLength;
+
+        // Early bail out
+        if(remaining == 0)
+            goto __CleanupOrRearm;
 
         n = ::send(ctx->socket, buf, remaining, MSG_NOSIGNAL);
 
@@ -132,23 +128,30 @@ void EpollConnectionHandler::Write(ConnectionContext * ctx, std::string_view msg
 
             // Partial write, must wait for EPOLLOUT
             else
-                pollAgain();
+                PollAgain(ctx, EventType::EVENT_SEND);
         }
         else if(n < 0) {
             // Socket not ready yet, wait for EPOLLOUT
             if(errno == EAGAIN || errno == EWOULDBLOCK)
-                pollAgain();
+                PollAgain(ctx, EventType::EVENT_SEND);
+            
+            // Fatal error
             else {
                 logger_.Warn("[Epoll]: send() failed");
-                Close(ctx);
+                goto __CleanupOrRearm;
             }
         }
 
-        // The only way u can go below is by a goto
         return;
     }
 
 __CleanupOrRearm:
+    // Special case, file operation, send it before anything else
+    if(ctx->isFileOperation) {
+        SendFile(ctx);
+        return;
+    }
+
     if(ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
         Close(ctx);
     else {
@@ -157,8 +160,18 @@ __CleanupOrRearm:
     }
 }
 
-void EpollConnectionHandler::WriteFile(ConnectionContext *ctx, std::string_view path)
+void EpollConnectionHandler::WriteFile(ConnectionContext *ctx, std::string path)
 {
+    // Before we proceed, ensure stuffs ready for file operation
+    if(!EnsureFileReady(ctx, std::move(path))) {
+        Write(ctx, internalError);
+        return;
+    }
+
+    // Cool so for file operation, we first send headers, mark it as file operation
+    // So when 'Write' completes, it should send file without any issue
+    ctx->isFileOperation = 1;
+    Write(ctx, {});
 }
 
 void EpollConnectionHandler::Close(ConnectionContext *ctx)
@@ -173,6 +186,10 @@ void EpollConnectionHandler::Close(ConnectionContext *ctx)
 // vvv Main Functions vvv
 void EpollConnectionHandler::Run()
 {
+    // Just a simple sanity check before we do anything
+    if(!onReceive_)
+        logger_.Fatal("[Epoll]: Member 'onReceive_' was not initialized");
+
     while(running_) {
         int nfds = epoll_wait(epollFd_, events, MAX_EPOLL_EVENTS, -1);
         if(nfds < 0) {
@@ -230,7 +247,7 @@ void EpollConnectionHandler::Run()
                     ctx->connInfo  = tmpIp;
 
                     epoll_event cev{};
-                    cev.events   = EPOLLIN | EPOLLET | EPOLLOUT; // Allow both
+                    cev.events   = EPOLLIN | EPOLLET; // Allow both
                     cev.data.ptr = ctx;
                     epoll_ctl(epollFd_, EPOLL_CTL_ADD, clientFd, &cev);
                 }
@@ -250,8 +267,9 @@ void EpollConnectionHandler::Run()
                 }
                 
                 if(ev & EPOLLOUT) {
+                    logger_.Info("[Epoll-Debug]: I am here: ", (int)ctx->eventType);
                     if(ctx->eventType == EventType::EVENT_SEND_FILE)
-                        WriteFile(ctx, {});
+                        SendFile(ctx);
                     else if(ctx->eventType == EventType::EVENT_SEND)
                         Write(ctx, {});
                 }
@@ -332,9 +350,9 @@ void EpollConnectionHandler::SetNonBlocking(int fd)
         fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-bool EpollConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string_view path)
+bool EpollConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string path)
 {
-    auto [fd, size] = fileCache_.GetFileDesc(std::string(path));
+    auto [fd, size] = fileCache_.GetFileDesc(std::move(path));
     if(fd < 0)
         return false;
 
@@ -432,6 +450,74 @@ void EpollConnectionHandler::Receive(ConnectionContext *ctx)
     // Notify app
     if(gotData)
         onReceive_(ctx);
+}
+
+void EpollConnectionHandler::SendFile(ConnectionContext *ctx)
+{
+    // This is called in this order: WriteFile() -> Write() [Headers sent] -> SendFile()
+    // This expects fileInfo to be constructed and set beforehand
+    // If not, its UB. GG
+    if(!ctx->fileInfo) {
+        logger_.Warn("[Epoll]: SendFile expects ctx->fileInfo to be set, got nullptr");
+        Close(ctx);
+        return;
+    }
+
+    auto* fileInfo = ctx->fileInfo;
+    int fd       = fileInfo->fd;
+    off_t size   = fileInfo->fileSize;
+    off_t offset = fileInfo->offset;
+
+    // Early exit
+    if(offset >= size)
+        goto __CleanupOrRearm;
+
+    else {
+        while(offset < size) {
+            ssize_t n = ::sendfile(ctx->socket, fd, &offset, size - offset);
+
+            if(n > 0) {
+                fileInfo->offset = offset; // Update after successful send
+                continue;                  // Try to push more in same event
+            }
+
+            if(n < 0) {
+                // Partial progress, wait for EPOLLOUT again
+                if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                    fileInfo->offset = offset;
+                    PollAgain(ctx, EventType::EVENT_SEND_FILE);
+                    return;
+                }
+                // Fatal error
+                else {
+                    logger_.Warn("[Epoll]: sendfile() failed (errno=%d)", errno);
+                    Close(ctx);
+                    return;
+                }
+            }
+
+            // n == 0 means nothing was written, break to cleanup
+            goto __CleanupOrRearm;
+        }
+    }
+
+__CleanupOrRearm:
+    if(ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
+        Close(ctx);
+    else {
+        ctx->ClearContext();
+        ResumeReceive(ctx);
+    }
+}
+
+void EpollConnectionHandler::PollAgain(ConnectionContext *ctx, EventType eventType)
+{
+    ctx->eventType = eventType;
+                
+    epoll_event ev{};
+    ev.events   = EPOLLOUT | EPOLLET;
+    ev.data.ptr = ctx;
+    epoll_ctl(epollFd_, EPOLL_CTL_MOD, ctx->socket, &ev);
 }
 
 } // namespace WFX::OSSpecific

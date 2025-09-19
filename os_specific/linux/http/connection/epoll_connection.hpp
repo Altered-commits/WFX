@@ -29,7 +29,7 @@ public: // Initializing
 public: // I/O Operations
     void ResumeReceive(ConnectionContext* ctx)                       override;
     void Write(ConnectionContext* ctx, std::string_view buffer = {}) override;
-    void WriteFile(ConnectionContext* ctx, std::string_view path)    override;
+    void WriteFile(ConnectionContext* ctx, std::string path)         override;
     void Close(ConnectionContext* ctx)                               override;
     
 public: // Main Functions
@@ -43,10 +43,12 @@ private: // Helper Functions
     ConnectionContext* GetConnection();
     void               ReleaseConnection(ConnectionContext* ctx);
     void               SetNonBlocking(int fd);
-    bool               EnsureFileReady(ConnectionContext* ctx, std::string_view path);
+    bool               EnsureFileReady(ConnectionContext* ctx, std::string path);
     bool               EnsureReadReady(ConnectionContext* ctx);
     int                ResolveHostToIpv4(const char* host, in_addr* outAddr);
     void               Receive(ConnectionContext* ctx);
+    void               SendFile(ConnectionContext* ctx);
+    void               PollAgain(ConnectionContext* ctx, EventType eventType);
 
 private:
     // Misc
