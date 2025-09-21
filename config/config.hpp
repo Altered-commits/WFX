@@ -44,15 +44,15 @@ struct OSSpecificConfig {
     std::uint32_t backlog         = 1024;
     std::uint16_t fileCacheSize   = 20;
     
-    // Epoll
-    std::uint16_t maxEvents       = 1 * 1024;
-    
-    // IoUring
-    std::uint16_t batchSize       = 64;
-    std::uint16_t acceptSlots     = 64;
-    std::uint32_t queueDepth      = 4096;
-    std::uint32_t fileChunkSize   = 64 * 1024;
-#endif
+    #ifdef WFX_LINUX_USE_IO_URING
+        std::uint16_t batchSize       = 64;
+        std::uint16_t acceptSlots     = 64;
+        std::uint32_t queueDepth      = 4096;
+        std::uint32_t fileChunkSize   = 64 * 1024;
+    #else
+        std::uint16_t maxEvents       = 1 * 1024;
+    #endif // WFX_LINUX_USE_IO_URING
+#endif // _WIN32
 };
 
 struct ToolchainConfig {

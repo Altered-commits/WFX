@@ -2,21 +2,29 @@
 
 #include "http/response/http_response.hpp"
 #include "http/routing/router.hpp"
+#include "http/middleware/http_middleware.hpp"
 
 namespace WFX::Shared {
+
+using namespace WFX::Http; // For 'Router', 'Middleware'
 
 const HTTP_API_TABLE* GetHttpAPIV1()
 {
     static HTTP_API_TABLE __GlobalHttpAPIV1 = {
         // Routing
         [](HttpMethod method, std::string_view path, HttpCallbackType cb) {  // RegisterRoute
-            WFX::Http::Router::GetInstance().RegisterRoute(method, path, std::move(cb));
+            Router::GetInstance().RegisterRoute(method, path, std::move(cb));
         },
         [](std::string_view prefix) {  // PushRoutePrefix
-            WFX::Http::Router::GetInstance().PushRouteGroup(prefix);
+            Router::GetInstance().PushRouteGroup(prefix);
         },
         [](void) {  // PopRoutePrefix
-            WFX::Http::Router::GetInstance().PopRouteGroup();
+            Router::GetInstance().PopRouteGroup();
+        },
+
+        // Middleware
+        [](std::string_view name, MiddlewareCallbackType cb) { // RegisterMiddleware
+            HttpMiddleware::GetInstance().RegisterMiddleware(name, std::move(cb));
         },
         
         // Response handling

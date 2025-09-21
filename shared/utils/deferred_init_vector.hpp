@@ -6,10 +6,18 @@
 
 namespace WFX::Shared {
 
-inline std::vector<std::function<void()>>& __WFXDeferredRoutes()
+using FunctionVector = std::vector<std::function<void()>>;
+
+inline FunctionVector& __WFXDeferredRoutes()
 {
-    static std::vector<std::function<void()>> routesReg;
+    static FunctionVector routesReg;
     return routesReg;
+}
+
+inline FunctionVector& __WFXDeferredMiddleware()
+{
+    static FunctionVector middlewareReg;
+    return middlewareReg;
 }
 
 } // namespace WFX::Shared

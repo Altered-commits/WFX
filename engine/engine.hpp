@@ -23,7 +23,6 @@ private:
     void HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shouldClose);
 
 private:
-    void HandlePublicRoute();
     void HandleUserDLLInjection(const char* dllDir);
     void HandleMiddlewareLoading();
 

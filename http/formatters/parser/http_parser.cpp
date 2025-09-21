@@ -248,6 +248,13 @@ bool HttpParser::ParseHeaders(const char* data, std::size_t size, std::size_t& p
         std::string_view key = line.substr(0, colon);
         std::string_view val = Trim(line.substr(colon + 1));
 
+        // Null-terminate key and value in-place, so even if we use pointer as is, its harmless
+        char* writableKey = const_cast<char*>(data + (key.data() - data));
+        writableKey[key.size()] = '\0';
+
+        char* writableVal = const_cast<char*>(data + (val.data() - data));
+        writableVal[val.size()] = '\0';
+
         outHeaders.SetHeader(key, val);
 
         if(++headerCount > networkConfig.maxHeaderTotalCount)

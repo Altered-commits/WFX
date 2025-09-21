@@ -16,7 +16,7 @@ public:
     static HttpMiddleware& GetInstance();
 
     void RegisterMiddleware(MiddlewareName name, MiddlewareCallbackType mw);
-    void ExecuteMiddleware(HttpRequest& req, Response& res);
+    bool ExecuteMiddleware(HttpRequest& req, Response& res);
     
     // Using std::string because TOML loader returns vector<string>
     void LoadMiddlewareFromConfig(MiddlewareOrder order);

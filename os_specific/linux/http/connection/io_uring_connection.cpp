@@ -1,3 +1,5 @@
+#ifdef WFX_LINUX_USE_IO_URING
+
 #include "io_uring_connection.hpp"
 
 #include "http/common/http_error_msgs.hpp"
@@ -597,3 +599,5 @@ void IoUringConnectionHandler::SubmitBatch()
 }
 
 } // namespace WFX::OSSpecific
+
+#endif // WFX_LINUX_USE_IO_URING

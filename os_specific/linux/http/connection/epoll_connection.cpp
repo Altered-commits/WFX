@@ -1,3 +1,5 @@
+#ifndef WFX_LINUX_USE_IO_URING
+
 #include "epoll_connection.hpp"
 
 #include "http/common/http_error_msgs.hpp"
@@ -521,3 +523,5 @@ void EpollConnectionHandler::PollAgain(ConnectionContext *ctx, EventType eventTy
 }
 
 } // namespace WFX::OSSpecific
+
+#endif // !WFX_LINUX_USE_IO_URING

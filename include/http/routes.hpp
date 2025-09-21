@@ -3,17 +3,8 @@
 
 #include "aliases.hpp"
 #include "response.hpp"
-
-#include "shared/apis/master_api.hpp"
-#include "shared/utils/export_macro.hpp"
+#include "common/core.hpp"
 #include "shared/utils/deferred_init_vector.hpp"
-
-// Declare the injected API table
-extern const WFX::Shared::MASTER_API_TABLE* __wfx_api;
-
-// vvv MACROS HELPERS vvv
-#define WFX_CONCAT_INNER(a, b) a##b
-#define WFX_CONCAT(a, b) WFX_CONCAT_INNER(a, b)
 
 // Glue suffix to names
 #define WFX_ROUTE_CLASS(prefix, id) WFX_CONCAT(WFXRoute_, WFX_CONCAT(prefix, id))

@@ -1,3 +1,5 @@
+#ifndef WFX_LINUX_USE_IO_URING
+
 #ifndef WFX_LINUX_EPOLL_CONNECTION_HPP
 #define WFX_LINUX_EPOLL_CONNECTION_HPP
 
@@ -78,3 +80,5 @@ private:
 } // namespace WFX::OSSpecific
 
 #endif // WFX_LINUX_EPOLL_CONNECTION_HPP
+
+#endif // !WFX_LINUX_USE_IO_URING

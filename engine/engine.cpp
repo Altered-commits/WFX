@@ -19,10 +19,6 @@ namespace WFX::Core {
 Engine::Engine(const char* dllPath)
     : connHandler_(CreateConnectionHandler())
 {
-    // Handle the public/ directory routing automatically
-    // To serve stuff like css, js and so on
-    HandlePublicRoute();
-
     // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath);
 
@@ -92,19 +88,32 @@ void Engine::HandleRequest(ConnectionContext* ctx)
             }
             else
                 res.Set("Connection", "close");
+            
+            // A bit of shortcut if its public route (starts with '/public/')
+            if(StartsWith(reqInfo->path, "/public/")) {
+                // Skip the '/public' part (7 chars)
+                std::string_view relativePath = reqInfo->path.substr(7); 
+                std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
-            // Get the callback for the route we got, if it doesn't exist, we display error
-            auto callback = Router::GetInstance().MatchRoute(
-                                reqInfo->method,
-                                reqInfo->path,
-                                reqInfo->pathSegments
-                            );
-
-            if(!callback)
-                res.Status(HttpStatus::NOT_FOUND).SendText("404: Route not found :(");
+                // Send the file
+                res.Status(HttpStatus::OK)
+                    .SendFile(std::move(fullRoute), true);
+            }
             else {
-                // middleware_.ExecuteMiddleware(*reqInfo, userRes);
-                (*callback)(*reqInfo, userRes);
+                // Get the callback for the route we got, if it doesn't exist, we display error
+                auto callback = Router::GetInstance().MatchRoute(
+                                    reqInfo->method,
+                                    reqInfo->path,
+                                    reqInfo->pathSegments
+                                );
+    
+                if(!callback)
+                    res.Status(HttpStatus::NOT_FOUND).SendText("404: Route not found :(");
+                else {
+                    // Only execute user callback if middleware chain is successful
+                    if(middleware_.ExecuteMiddleware(*reqInfo, userRes))
+                        (*callback)(*reqInfo, userRes);
+                }
             }
 
             ctx->parseState = static_cast<std::uint8_t>(HttpParseState::PARSE_IDLE);
@@ -159,23 +168,6 @@ void Engine::HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shou
 }
 
 // vvv HELPER STUFF vvv
-void Engine::HandlePublicRoute()
-{
-    Router::GetInstance().RegisterRoute(
-        HttpMethod::GET, "/public/*",
-        [this](HttpRequest& req, Response& res) {
-            // The route is pre normalised before it reaches here, so we can safely use the-
-            // -wildcard which we get, no issue of directory traversal attacks and such
-            auto wildcardPath = std::get<std::string_view>(req.pathSegments[0]);
-            std::string fullRoute = config_.projectConfig.publicDir + wildcardPath.data();
-
-            // Send the file
-            res.Status(HttpStatus::OK)
-                .SendFile(std::move(fullRoute));
-        }
-    );
-}
-
 void Engine::HandleUserDLLInjection(const char* dllPath)
 {
 #if defined(_WIN32)
@@ -222,11 +214,11 @@ void Engine::HandleUserDLLInjection(const char* dllPath)
 
 void Engine::HandleMiddlewareLoading()
 {
-    // Just for testing, let me register simple middleware
-    middleware_.RegisterMiddleware("Logger", [this](HttpRequest& req, Response& res) {
-        logger_.Info("[Logger-Middleware]: Request on path: ", req.path);
-        return true;
-    });
+    // // Just for testing, let me register simple middleware
+    // middleware_.RegisterMiddleware("Logger", [this](HttpRequest& req, Response& res) {
+    //     logger_.Info("[Logger-Middleware]: Request on path: ", req.path);
+    //     return true;
+    // });
 
     middleware_.LoadMiddlewareFromConfig(config_.projectConfig.middlewareList);
 

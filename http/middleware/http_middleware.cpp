@@ -20,11 +20,30 @@ void HttpMiddleware::RegisterMiddleware(MiddlewareName name, MiddlewareCallbackT
     }
 }
 
-void HttpMiddleware::ExecuteMiddleware(HttpRequest &req, Response &res)
+bool HttpMiddleware::ExecuteMiddleware(HttpRequest& req, Response& res)
 {
-    for(auto&& cb : middlewareCallbacks_)
-        if(!cb(req, res))
-            return;
+    for(std::size_t i = 0; i < middlewareCallbacks_.size(); ++i)
+    {
+        MiddlewareAction action = middlewareCallbacks_[i](req, res);
+
+        switch(action)
+        {
+            // Continue to next middleware
+            case MiddlewareAction::CONTINUE:
+                break;
+
+            // Skip the next middleware
+            case MiddlewareAction::SKIP_NEXT:
+                ++i;
+                break;
+
+            // Stop middleware chain
+            case MiddlewareAction::BREAK:
+                return false;
+        }
+    }
+
+    return true;
 }
 
 void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareOrder order)

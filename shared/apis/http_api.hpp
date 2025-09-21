@@ -22,6 +22,9 @@ using RegisterRouteFn         = void (*)(HttpMethod method, std::string_view pat
 using PushRoutePrefixFn       = void (*)(std::string_view prefix);
 using PopRoutePrefixFn        = void (*)();
 
+// Middleware
+using RegisterMiddlewareFn    = void (*)(std::string_view name, MiddlewareCallbackType callback);
+
 // Response control
 using SetStatusFn             = void (*)(HttpResponse* backend, HttpStatus status);
 using SetHeaderFn             = void (*)(HttpResponse* backend, std::string key, std::string value);
@@ -49,6 +52,9 @@ struct HTTP_API_TABLE {
     RegisterRouteFn         RegisterRoute;
     PushRoutePrefixFn       PushRoutePrefix;
     PopRoutePrefixFn        PopRoutePrefix;
+
+    // Middleware
+    RegisterMiddlewareFn    RegisterMiddleware;
 
     // Response manipulation
     SetStatusFn             SetStatus;
