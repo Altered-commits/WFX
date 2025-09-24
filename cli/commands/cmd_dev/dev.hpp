@@ -5,7 +5,7 @@
 
 namespace WFX::CLI {
 
-int RunDevServer(const std::string& host, int port, bool noCache);
+int RunDevServer(const std::string& host, int port, bool noCache, bool useHttps, bool overrideHttpsPort);
 
 }  // namespace WFX::CLI
 

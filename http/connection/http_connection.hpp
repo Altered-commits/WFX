@@ -6,8 +6,6 @@
 #include "utils/crypt/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
 
-#include <string>
-
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <WinSock2.h>
@@ -62,6 +60,7 @@ enum class HttpParseState : std::uint8_t {
 
 enum class EventType : std::uint8_t {
     EVENT_ACCEPT,
+    EVENT_HANDSHAKE, // For SSL
     EVENT_RECV,
     EVENT_SEND,
     EVENT_SEND_FILE
@@ -75,13 +74,7 @@ enum class ConnectionState : std::uint8_t {
 // Forward declare it so compilers won't cry
 struct ConnectionContext;
 
-using WFX::Utils::MoveOnlyFunction;
-using ReceiveCallback            = MoveOnlyFunction<void(ConnectionContext*)>;
-using AcceptedConnectionCallback = MoveOnlyFunction<void()>;
-
-// Honestly, while it would've been easier to include tick_scheduler.hpp for TickScheduler::TickType
-// Eh, idk cluttering this file just for a type, i'm just going to redefine it here for no absolute reason
-using HttpTickType = std::uint16_t;
+using ReceiveCallback = WFX::Utils::MoveOnlyFunction<void(ConnectionContext*)>;
 
 struct FileInfo {
 #if defined(_WIN32)
@@ -103,21 +96,22 @@ struct ConnectionTag {
 
 struct ConnectionContext : public ConnectionTag {
     struct {
-        std::uint8_t parseState      : 4;                // --
-        std::uint8_t connectionState : 3;                //  |
-        std::uint8_t isFileOperation : 1;                //  v
-    };                                                   // 1 byte
+        std::uint8_t parseState      : 4;         // --
+        std::uint8_t connectionState : 3;         //  |
+        std::uint8_t isFileOperation : 1;         //  v
+    };                                            // 1 byte
 
-    std::uint32_t trackBytes  = 0;                       // 4 bytes
+    bool          handshakeDone       = false;    // 1 byte
+    std::uint32_t trackBytes          = 0;        // 4 bytes
+    void*         sslConn             = nullptr;  // 8 bytes
     
-    // 16-byte buffer
-    WFX::Utils::RWBuffer rwBuffer;
+    WFX::Utils::RWBuffer rwBuffer;                // 16 bytes
     
-    HttpRequest*   requestInfo        = nullptr;       // 8 bytes
-    WFXSocket      socket             = -1;            // 4 bytes
-    std::uint32_t  expectedBodyLength = 0;             // 4 bytes
-    FileInfo*      fileInfo           = nullptr;       // 8 bytes
-    WFXIpAddress   connInfo;                           // 20 bytes
+    HttpRequest*   requestInfo        = nullptr;  // 8 bytes
+    WFXSocket      socket             = -1;       // 4 bytes
+    std::uint32_t  expectedBodyLength = 0;        // 4 bytes
+    FileInfo*      fileInfo           = nullptr;  // 8 bytes
+    WFXIpAddress   connInfo;                      // 20 bytes
 
 public: // Helper functions
     void ResetContext();

@@ -34,6 +34,11 @@ struct NetworkConfig {
     std::int16_t  maxTokensPerSecond  = 5;
 };
 
+struct SSLConfig {
+    std::string certPath;
+    std::string keyPath;
+};
+
 struct OSSpecificConfig {
 #ifdef _WIN32
     std::uint32_t maxAcceptSlots      = 1024;
@@ -67,18 +72,19 @@ struct ToolchainConfig {
 // Main Config loader
 // TODO: Add checks for maxRecvBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
 class Config final {
-public:
-    ProjectConfig    projectConfig;
-    NetworkConfig    networkConfig;
-    OSSpecificConfig osSpecificConfig;
-    ToolchainConfig  toolchainConfig;
-
-    // vvv Access vvv
+public: // Access
     static Config& GetInstance();
 
-    // vvv Load from TOML vvv
+public: // Load from TOML
     void LoadCoreSettings(std::string_view path);
     void LoadToolchainSettings(std::string_view path);
+
+public: // Main storage space for configurations
+    ProjectConfig    projectConfig;
+    NetworkConfig    networkConfig;
+    SSLConfig        sslConfig;
+    OSSpecificConfig osSpecificConfig;
+    ToolchainConfig  toolchainConfig;
 
 private:
     Config()  = default;

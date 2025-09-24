@@ -20,9 +20,15 @@ void Config::LoadCoreSettings(std::string_view path) {
     try {
         auto tbl = toml::parse_file(path);
 
+        // vvv Project vvv
         ExtractValueOrFatal(tbl, logger, "Project", "project_name", projectConfig.projectName);
         ExtractStringArrayOrFatal(tbl, logger, "Project", "middleware_list", projectConfig.middlewareList);
 
+        // vvv SSL vvv
+        ExtractValue(tbl, logger, "SSL", "cert_path", sslConfig.certPath);
+        ExtractValue(tbl, logger, "SSL", "key_path",  sslConfig.keyPath);
+
+        // vvv Network vvv
         projectConfig.publicDir   = projectConfig.projectName + "/public/";
         projectConfig.templateDir = projectConfig.projectName + "/templates/";
 
@@ -41,6 +47,7 @@ void Config::LoadCoreSettings(std::string_view path) {
         ExtractValue(tbl, logger, "Network", "max_request_burst_per_ip",    networkConfig.maxRequestBurstSize);
         ExtractValue(tbl, logger, "Network", "max_requests_per_ip_per_sec", networkConfig.maxTokensPerSecond);
 
+        // vvv OS Specific vvv
     #ifdef _WIN32
         unsigned int cores = std::thread::hardware_concurrency();
 

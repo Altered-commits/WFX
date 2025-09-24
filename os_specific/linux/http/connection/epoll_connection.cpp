@@ -15,23 +15,26 @@
 
 namespace WFX::OSSpecific {
 
-// vvv Destructor vvv
-EpollConnectionHandler::~EpollConnectionHandler() {
-    if(listenFd_ > 0) {
-        close(listenFd_);
-        listenFd_ = -1;
-    }
-    
-    if(timerFd_ > 0) {
-        close(timerFd_);
-        timerFd_ = -1;
-    }
+// vvv Constructor & Destructor vvv
+EpollConnectionHandler::EpollConnectionHandler(bool useHttps)
+    : useHttps_(useHttps)
+{
+    if(useHttps)
+        sslHandler_ = CreateSSLHandler();
+}
 
-    logger_.Info("[Epoll]: Cleaned up sockets successfully");
+EpollConnectionHandler::~EpollConnectionHandler()
+{
+    if(listenFd_ > 0) { close(listenFd_); listenFd_ = -1; }
+    if(timerFd_ > 0)  { close(timerFd_); timerFd_ = -1; }
+    if(epollFd_ > 0)  { close(epollFd_); epollFd_ = -1; }
+
+    logger_.Info("[Epoll]: Cleaned up resources successfully");
 }
 
 // vvv Initializing Functions vvv
-void EpollConnectionHandler::Initialize(const std::string& host, int port) {
+void EpollConnectionHandler::Initialize(const std::string& host, int port)
+{
     auto& osConfig      = config_.osSpecificConfig;
     auto& networkConfig = config_.networkConfig;
 
@@ -47,34 +50,39 @@ void EpollConnectionHandler::Initialize(const std::string& host, int port) {
 
     listenFd_ = socket(AF_INET, SOCK_STREAM, 0);
     if(listenFd_ < 0)
-        logger_.Fatal("[Epoll]: Failed to create listening socket");
+        logger_.Fatal("[Epoll]: Failed to create listening socket: ", strerror(errno));
 
     int opt = 1;
-    setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    setsockopt(listenFd_, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
-    SetNonBlocking(listenFd_);
+    if(setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+        logger_.Fatal("[Epoll]: Failed to set SO_REUSEADDR: ", strerror(errno));
+
+    if(setsockopt(listenFd_, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0)
+        logger_.Fatal("[Epoll]: Failed to set SO_REUSEPORT: ", strerror(errno));
+    
+    if(!SetNonBlocking(listenFd_))
+        logger_.Fatal("[Epoll]: Failed to make listening socket non-blocking: ", strerror(errno));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(port);
     if(ResolveHostToIpv4(host.c_str(), &addr.sin_addr) != 0)
-        logger_.Fatal("[Epoll]: Failed to resolve host");
+        logger_.Fatal("[Epoll]: Failed to resolve host '", host, '\'');
 
     if(bind(listenFd_, (sockaddr*)&addr, sizeof(addr)) < 0)
-        logger_.Fatal("[Epoll]: Failed to bind socket");
+        logger_.Fatal("[Epoll]: Failed to bind socket: ", strerror(errno));
 
     if(listen(listenFd_, osConfig.backlog) < 0)
-        logger_.Fatal("[Epoll]: Failed to listen");
+        logger_.Fatal("[Epoll]: Failed to listen: ", strerror(errno));
 
     epollFd_ = epoll_create1(0);
     if(epollFd_ < 0)
-        logger_.Fatal("[Epoll]: Failed to create epoll");
+        logger_.Fatal("[Epoll]: Failed to create epoll: ", strerror(errno));
 
     epoll_event ev{};
     ev.events  = EPOLLIN | EPOLLET;
     ev.data.fd = listenFd_;
     if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, listenFd_, &ev) < 0)
-        logger_.Fatal("[Epoll]: Failed to add listenFd to epoll");
+        logger_.Fatal("[Epoll]: Failed to add listening socket to epoll: ", strerror(errno));
 
     // Initialize timeout handler
     timerWheel_.Init(
@@ -86,7 +94,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, int port) {
     
     timerFd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if(timerFd_ < 0)
-        logger_.Fatal("[Epoll]: Failed to create timerfd");
+        logger_.Fatal("[Epoll]: Failed to create timer: ", strerror(errno));
 
     itimerspec ts{};
     ts.it_interval.tv_sec  = INVOKE_TIMEOUT_COOLDOWN;
@@ -95,13 +103,13 @@ void EpollConnectionHandler::Initialize(const std::string& host, int port) {
     ts.it_value.tv_nsec    = 0;
 
     if(timerfd_settime(timerFd_, 0, &ts, nullptr) < 0)
-        logger_.Fatal("[Epoll]: Failed to set timerfd");
+        logger_.Fatal("[Epoll]: Failed to set timer: ", strerror(errno));
 
     epoll_event tev{};
     tev.events  = EPOLLIN;
     tev.data.fd = timerFd_;
     if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, timerFd_, &tev) < 0)
-        logger_.Fatal("[Epoll]: Failed to add timerfd to epoll");
+        logger_.Fatal("[Epoll]: Failed to add timerfd to epoll: ", strerror(errno));
 }
 
 void EpollConnectionHandler::SetReceiveCallback(ReceiveCallback onData)
@@ -115,17 +123,7 @@ void EpollConnectionHandler::ResumeReceive(ConnectionContext* ctx)
     if(!EnsureReadReady(ctx))
         return;
 
-    ctx->eventType = EventType::EVENT_RECV;
-
-    epoll_event ev{};
-    ev.events   = EPOLLIN | EPOLLET;
-    ev.data.ptr = ctx;
-
-    if(epoll_ctl(epollFd_, EPOLL_CTL_MOD, ctx->socket, &ev) < 0) {
-        logger_.Warn("[Epoll]: Failed to arm EPOLLIN for socket");
-        Close(ctx);
-        return;
-    }
+    PollAgain(ctx, EventType::EVENT_RECV, EPOLLIN | EPOLLET);
 }
 
 void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
@@ -139,7 +137,7 @@ void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
     // NOTE: CHANGE OF PLANS, msg is fire and forget, i don't care if they get delivered-
     // -or not, if u want good error messages u will go the hard route anyways (res.Status().SendText()...)
     if(!msg.empty()) {
-        (void)::send(ctx->socket, msg.data(), msg.size(), MSG_NOSIGNAL);
+        (void)WrapWrite(ctx, msg.data(), msg.size());
         // We ignore result intentionally. If state says close -> close, else -> resume receive
         goto __CleanupOrRearm;
     }
@@ -157,7 +155,7 @@ void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
         if(remaining == 0)
             goto __CleanupOrRearm;
 
-        n = ::send(ctx->socket, buf, remaining, MSG_NOSIGNAL);
+        n = WrapWrite(ctx, buf, remaining);
 
         if(n > 0) {
             writeMeta->writtenLength += n;
@@ -168,12 +166,12 @@ void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
 
             // Partial write, must wait for EPOLLOUT
             else
-                PollAgain(ctx, EventType::EVENT_SEND);
+                PollAgain(ctx, EventType::EVENT_SEND, EPOLLOUT | EPOLLET);
         }
         else if(n < 0) {
             // Socket not ready yet, wait for EPOLLOUT
             if(errno == EAGAIN || errno == EWOULDBLOCK)
-                PollAgain(ctx, EventType::EVENT_SEND);
+                PollAgain(ctx, EventType::EVENT_SEND, EPOLLOUT | EPOLLET);
             
             // Fatal error
             else
@@ -222,6 +220,11 @@ void EpollConnectionHandler::Close(ConnectionContext* ctx)
     std::uint32_t idx = ctx - &connections_[0];
     timerWheel_.Cancel(idx);
     
+    if(ctx->sslConn) {
+        sslHandler_->Shutdown(ctx->sslConn);
+        ctx->sslConn = nullptr;
+    }
+
     epoll_ctl(epollFd_, EPOLL_CTL_DEL, ctx->socket, nullptr);
     ReleaseConnection(ctx);
 }
@@ -231,7 +234,7 @@ void EpollConnectionHandler::Run()
 {
     // Just a simple sanity check before we do anything
     if(!onReceive_)
-        logger_.Fatal("[Epoll]: Member 'onReceive_' was not initialized");
+        logger_.Fatal("[Epoll]: Member 'onReceive_' was not initialized. Call 'SetReceiveCallback' before calling 'Run'");
 
     while(running_) {
         int nfds = epoll_wait(epollFd_, events_.get(), maxEvents_, -1);
@@ -248,15 +251,18 @@ void EpollConnectionHandler::Run()
             auto ev = events_[i].events;
 
             // Handle timeouts
-            if(events_[i].data.fd == timerFd_) {        
-                // Reading from timerFd clears the event, so it doesnt fire a bazillion times
+            if(events_[i].data.fd == timerFd_) {
+                // `expirations` = number of timer intervals that have elapsed since the last read
+                // If the process was delayed or busy, multiple expirations may have accumulated
+                // Reading resets the counter to 0, so we must advance the timer wheel by
+                // (interval * expirations) to stay in sync with real time
                 std::uint64_t expirations = 0;
                 ssize_t s = read(timerFd_, &expirations, sizeof(expirations));
-
+                
                 if(expirations == 0 || s != sizeof(expirations))
                     continue;
-
-                // Advance timerWheel by exactly the number of expirations
+                
+                // Timeout is done by TimerWheel which is O(1) if im not wrong
                 std::uint64_t newTick = timerWheel_.GetTick() + (INVOKE_TIMEOUT_COOLDOWN * expirations);
                 timerWheel_.Tick(newTick, [this](std::uint32_t connId) {
                                             ConnectionContext* ctx = &connections_[connId];
@@ -305,15 +311,10 @@ void EpollConnectionHandler::Run()
 
                     // Set connection info
                     ctx->socket    = clientFd;
-                    ctx->eventType = EventType::EVENT_RECV;
                     ctx->connInfo  = tmpIp;
-
-                    epoll_event cev{};
-                    cev.events   = EPOLLIN | EPOLLET; // Allow both
-                    cev.data.ptr = ctx;
-                    epoll_ctl(epollFd_, EPOLL_CTL_ADD, clientFd, &cev);
-
+                    
                     numConnectionsAlive_++;
+                    WrapAccept(ctx, clientFd);
                 }
                 continue;
             }
@@ -323,6 +324,23 @@ void EpollConnectionHandler::Run()
 
             if(ev & (EPOLLERR | EPOLLHUP)) {
                 Close(ctx);
+                continue;
+            }
+
+            // SSL handshake in progress
+            if(ctx->eventType == EventType::EVENT_HANDSHAKE) {
+                // Handshake complete, switch to normal receive
+                if(sslHandler_->Handshake(ctx->sslConn)) {
+                    PollAgain(ctx, EventType::EVENT_RECV, EPOLLIN | EPOLLET);
+
+                    // Immediately try to read if EPOLLIN was set
+                    if(ev & EPOLLIN)
+                        Receive(ctx);
+                }
+                // Still needs more work, keep waiting on both IN/OUT
+                else
+                    PollAgain(ctx, EventType::EVENT_HANDSHAKE, EPOLLIN | EPOLLOUT | EPOLLET);
+
                 continue;
             }
 
@@ -408,11 +426,13 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx)
 }
 
 //  --- MISC Handlers ---
-void EpollConnectionHandler::SetNonBlocking(int fd)
+bool EpollConnectionHandler::SetNonBlocking(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
-    if(flags != -1)
-        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    if(flags < 0)
+        return false;
+    
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
 bool EpollConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string path)
@@ -463,17 +483,18 @@ int EpollConnectionHandler::ResolveHostToIpv4(const char* host, in_addr* outAddr
         return -1;
 
     // Pick the first IPv4 result
+    int found = -1;
     for(rp = res; rp != NULL; rp = rp->ai_next) {
         if(rp->ai_family == AF_INET) {
             sockaddr_in* addr = (sockaddr_in*)rp->ai_addr;
             *outAddr = addr->sin_addr; // Copy the IPv4 address
-            freeaddrinfo(res);
-            return 0;
+            found = 0;
+            break;
         }
     }
 
     freeaddrinfo(res);
-    return -1;
+    return found; 
 }
 
 void EpollConnectionHandler::Receive(ConnectionContext* ctx)
@@ -498,7 +519,7 @@ void EpollConnectionHandler::Receive(ConnectionContext* ctx)
             region = rwBuffer.GetWritableReadRegion();
         }
 
-        ssize_t res = ::recv(ctx->socket, region.ptr, region.len - 1, 0);
+        ssize_t res = WrapRead(ctx, region.ptr, region.len);
         if(res <= 0) {
             if(res == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
                 Close(ctx);
@@ -550,7 +571,7 @@ void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
                 // Partial progress, wait for EPOLLOUT again
                 if(errno == EAGAIN || errno == EWOULDBLOCK) {
                     fileInfo->offset = offset;
-                    PollAgain(ctx, EventType::EVENT_SEND_FILE);
+                    PollAgain(ctx, EventType::EVENT_SEND_FILE, EPOLLOUT | EPOLLET);
                     return;
                 }
                 // Fatal error
@@ -574,14 +595,97 @@ __CleanupOrRearm:
     }
 }
 
-void EpollConnectionHandler::PollAgain(ConnectionContext* ctx, EventType eventType)
+void EpollConnectionHandler::PollAgain(ConnectionContext* ctx, EventType eventType, std::uint32_t events)
 {
     ctx->eventType = eventType;
-                
+            
     epoll_event ev{};
-    ev.events   = EPOLLOUT | EPOLLET;
+    ev.events   = events;
     ev.data.ptr = ctx;
-    epoll_ctl(epollFd_, EPOLL_CTL_MOD, ctx->socket, &ev);
+    
+    // If epoll fails, close the connection
+    if(epoll_ctl(epollFd_, EPOLL_CTL_MOD, ctx->socket, &ev) < 0)
+        Close(ctx);
+}
+
+void EpollConnectionHandler::WrapAccept(ConnectionContext *ctx, int clientFd)
+{
+    // Base info
+    epoll_event cev{};
+    cev.data.ptr   = ctx;
+    cev.events     = EPOLLIN | EPOLLET;
+    ctx->eventType = EventType::EVENT_RECV;
+
+    if(useHttps_) {
+        // Wrap in SSL
+        ctx->sslConn = sslHandler_->Wrap(clientFd);
+        if(!ctx->sslConn) {
+            Close(ctx);
+            return;
+        }
+    
+        // Try handshake immediately
+        if(sslHandler_->Handshake(ctx->sslConn))
+            goto __PollAdd;
+
+        // Needs more I/O -> track as handshake state
+        ctx->eventType = EventType::EVENT_HANDSHAKE;
+        cev.events   = EPOLLIN | EPOLLOUT | EPOLLET; // Both directions
+    }
+
+__PollAdd:
+    if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, clientFd, &cev) < 0)
+        Close(ctx);
+}
+
+ssize_t EpollConnectionHandler::WrapRead(ConnectionContext* ctx, char* buf, std::size_t len)
+{
+    if(!ctx->sslConn)
+        return ::recv(ctx->socket, buf, len, 0);
+
+    SSLResult result = sslHandler_->Read(ctx->sslConn, buf, static_cast<int>(len));
+
+    switch(result.error) {
+        case SSLError::SUCCESS:
+            return result.res;
+        case SSLError::WANT_READ:
+        case SSLError::WANT_WRITE:
+            errno = EAGAIN;
+            return -1;
+        case SSLError::CLOSED:
+            return 0;
+        case SSLError::SYSCALL:
+            return -1; // errno is already set by SSL
+        case SSLError::FATAL:
+        default:
+            errno = EIO;
+            return -1;
+    }
+}
+
+ssize_t EpollConnectionHandler::WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len)
+{
+    if(!ctx->sslConn)
+        return ::send(ctx->socket, buf, len, MSG_NOSIGNAL);
+
+    SSLResult result = sslHandler_->Write(ctx->sslConn, buf, static_cast<int>(len));
+
+    switch(result.error) {
+        case SSLError::SUCCESS:
+            return result.res;
+        case SSLError::WANT_READ:
+        case SSLError::WANT_WRITE:
+            errno = EAGAIN;
+            return -1;
+        case SSLError::CLOSED:
+            return 0;
+        case SSLError::SYSCALL:
+            return -1; // errno is already set by SSL
+        case SSLError::FATAL:
+        default:
+            errno = EIO;
+            return -1;
+    }
 }
 
 } // namespace WFX::OSSpecific

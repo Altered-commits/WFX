@@ -6,11 +6,13 @@ wfx doctor	Check requirements for WFX
 
 To implement:
 1. Auto user code compiling into dll (Done)
-2. Middleware (Done) 
-3. Per route middleware
-4. Hot Reload
-5. HTML Templating (SSR)
-6. DB support
+2. Middleware (Done)
+3. HTTPS
+4. Per route middleware
+5. Hot-Reload
+6. HTML Templating (SSR)
+7. DB support
+8. HTTP 2 and 3 support
 
 To Fix:
 1. Cache files < 4KB, don't use TransmitFile / sendfile on every single file

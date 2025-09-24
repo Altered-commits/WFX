@@ -14,7 +14,7 @@ using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpR
 
 class Engine {
 public:
-    Engine(const char* dllPath);
+    Engine(const char* dllPath, bool useHttps);
     void Listen(const std::string& host, int port);
     void Stop();
 

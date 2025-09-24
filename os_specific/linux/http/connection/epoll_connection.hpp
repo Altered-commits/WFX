@@ -6,6 +6,7 @@
 #include "config/config.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/limits/ip_limiter/ip_limiter.hpp"
+#include "http/ssl/http_ssl_factory.hpp"
 #include "os_specific/linux/utils/file_cache/file_cache.hpp"
 #include "utils/buffer_pool/buffer_pool.hpp"
 #include "utils/timer_wheel/timer_wheel.hpp"
@@ -25,7 +26,7 @@ static constexpr int INVOKE_TIMEOUT_DELAY    = 1; // In seconds
 
 class EpollConnectionHandler : public HttpConnectionHandler {
 public:
-    EpollConnectionHandler() = default;
+    EpollConnectionHandler(bool useHttps);
     ~EpollConnectionHandler();
 
 public: // Initializing
@@ -48,20 +49,26 @@ private: // Helper Functions
     void               FreeSlot(std::uint64_t* bitmap, int idx);
     ConnectionContext* GetConnection();
     void               ReleaseConnection(ConnectionContext* ctx);
-    void               SetNonBlocking(int fd);
+    
+    bool               SetNonBlocking(int fd);
     bool               EnsureFileReady(ConnectionContext* ctx, std::string path);
     bool               EnsureReadReady(ConnectionContext* ctx);
     int                ResolveHostToIpv4(const char* host, in_addr* outAddr);
+    
     void               Receive(ConnectionContext* ctx);
     void               SendFile(ConnectionContext* ctx);
-    void               PollAgain(ConnectionContext* ctx, EventType eventType);
+    void               PollAgain(ConnectionContext* ctx, EventType eventType, std::uint32_t events);
+    
+    void               WrapAccept(ConnectionContext* ctx, int clientFd);
+    ssize_t            WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
+    ssize_t            WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len);
 
-private:
-    // Misc
+private: // Misc
     IpLimiter&        ipLimiter_  = IpLimiter::GetInstance();
     Config&           config_     = Config::GetInstance();
     Logger&           logger_     = Logger::GetInstance();
     std::atomic<bool> running_    = true;
+    bool              useHttps_   = false;
     ReceiveCallback   onReceive_;
     BufferPool        pool_{1, 1024 * 1024, [](std::size_t currSize){ return currSize * 2; }};
     FileCache         fileCache_{config_.osSpecificConfig.fileCacheSize};
@@ -70,16 +77,15 @@ private: // Timeout handler
     int        timerFd_ = -1;
     TimerWheel timerWheel_;
 
-private:
-    // Epoll
+private: // Epoll + SSL
     int           listenFd_  = -1;
     int           epollFd_   = -1;
     std::uint16_t maxEvents_ = config_.osSpecificConfig.maxEvents;
 
-    std::unique_ptr<epoll_event[]> events_ = nullptr;
+    std::unique_ptr<HttpWFXSSL>    sslHandler_ = nullptr;
+    std::unique_ptr<epoll_event[]> events_     = nullptr;
 
-private:
-    // Connection Context
+private: // Connection Context
     std::unique_ptr<ConnectionContext[]> connections_ = nullptr;
     std::unique_ptr<std::uint64_t[]>     connBitmap_  = nullptr;
     std::uint32_t                        connWords_   = 0;

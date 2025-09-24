@@ -46,11 +46,19 @@ int WFXEntryPoint(int argc, char* argv[]) {
                 Logger::GetInstance().Fatal("[WFX]: Invalid port: ", options.at("--port"));
             }
 
-            return CLI::RunDevServer(options.at("--host"), port, options.count("--no-cache") > 0);
+            return CLI::RunDevServer(
+                options.at("--host"),
+                port,
+                options.count("--no-cache") > 0,
+                options.count("--use-https") > 0,
+                options.count("--https-port-override") > 0
+            );
         });
-    parser.AddOption("dev", "--host", "Host to bind", false, "127.0.0.1", false);
-    parser.AddOption("dev", "--port", "Port to bind", false, "8080", false);
-    parser.AddOption("dev", "--no-cache", "Disable caching", true, "", false);
+    parser.AddOption("dev", "--host",                "Host to bind",                false, "127.0.0.1", false);
+    parser.AddOption("dev", "--port",                "Port to bind",                false, "8080",      false);
+    parser.AddOption("dev", "--no-cache",            "Disable caching",             true,  "",          false);
+    parser.AddOption("dev", "--use-https",           "Use HTTPS connection",        true,  "",          false);
+    parser.AddOption("dev", "--https-port-override", "Override default HTTPS port", true, "",           false);
 
     return parser.Parse(argc, argv);
 }

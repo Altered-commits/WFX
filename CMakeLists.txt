@@ -122,3 +122,25 @@ add_custom_target(build_utils
     DEPENDS wfxutils
     COMMENT "Building utils shared library only"
 )
+
+# -----------------------------
+# SSL backend selection (default: OpenSSL)
+# -----------------------------
+option(WFX_HTTP_USE_OPENSSL "Use OpenSSL as HTTPS backend" ON)
+
+if(WFX_HTTP_USE_OPENSSL)
+    # Find OpenSSL, if not, tell users to install it
+    find_package(OpenSSL REQUIRED)
+    if(NOT OpenSSL_FOUND)
+        message(FATAL_ERROR "OpenSSL not found! Install libssl-dev (Linux) or OpenSSL SDK (Windows)")
+    endif()
+
+    # Apply to main executable-
+    # -and optionally apply to utils if they include SSL headers
+    target_compile_definitions(wfx PRIVATE WFX_HTTP_USE_OPENSSL)
+    target_compile_definitions(wfxutils PRIVATE WFX_HTTP_USE_OPENSSL)
+    
+    # Link OpenSSL libraries
+    target_link_libraries(wfx PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(wfxutils PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()

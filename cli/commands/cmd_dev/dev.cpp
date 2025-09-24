@@ -183,7 +183,7 @@ void PinWorkerToCPU(int workerIndex) {
 }
 #endif // _WIN32
 
-int RunDevServer(const ::std::string& host, int port, bool noCache)
+int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttps, bool overrideHttpsPort)
 {
     auto& logger   = Logger::GetInstance();
     auto& config   = Config::GetInstance();
@@ -219,9 +219,12 @@ int RunDevServer(const ::std::string& host, int port, bool noCache)
     else
         logger.Info("[WFX-Master]: File already exists, skipping user code compilation");
 
-    logger.Info("[WFX-Master]: Dev server running at http://", host, ':', port);
-    logger.Info("[WFX-Master]: Press Ctrl+C to stop");
+    // Switch ports if we enable https and we don't want to override https default port
+    port = useHttps && !overrideHttpsPort ? 443 : port;
+    logger.Info("[WFX-Master]: Dev server running at ",
+                useHttps ? "https://" : "http://", host, ':', port);
 
+    logger.Info("[WFX-Master]: Press Ctrl+C to stop");
     logger.SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
 
     for(int i = 0; i < osConfig.workerProcesses; i++) {
@@ -234,7 +237,7 @@ int RunDevServer(const ::std::string& host, int port, bool noCache)
             else
                 setpgid(0, workerPGID); // Join first worker's group
 
-            WFX::Core::Engine engine{dllPathCStr};
+            WFX::Core::Engine engine{dllPathCStr, useHttps};
             globalEnginePtr = &engine;
 
             signal(SIGTERM, HandleWorkerSignal);

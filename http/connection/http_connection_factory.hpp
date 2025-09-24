@@ -4,6 +4,7 @@
 // This is simply a helper thingy which will abstract the 'selecting'-
 // -of OS specific functionality for connection handling
 #include "http_connection.hpp"
+#include <memory>
 
 #ifdef _WIN32
     #include "os_specific/windows/http/connection/iocp_connection.hpp"
@@ -15,11 +16,9 @@
     #endif
 #endif
 
-#include <memory>
-
 namespace WFX::Http {
     // Factory function that returns the correct handler
-    inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler()
+    inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler(bool useHttps)
     {
     #ifdef _WIN32
         return std::make_unique<WFX::OSSpecific::IocpConnectionHandler>();
@@ -27,10 +26,10 @@ namespace WFX::Http {
         #ifdef WFX_LINUX_USE_IO_URING
             return std::make_unique<WFX::OSSpecific::IoUringConnectionHandler>();
         #else
-            return std::make_unique<WFX::OSSpecific::EpollConnectionHandler>();
+            return std::make_unique<WFX::OSSpecific::EpollConnectionHandler>(useHttps);
         #endif
     #endif
     }
 }
 
-#endif
+#endif // WFX_HTTP_CONNECTION_FACTORY_HPP

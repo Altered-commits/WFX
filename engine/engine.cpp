@@ -16,8 +16,8 @@
 
 namespace WFX::Core {
 
-Engine::Engine(const char* dllPath)
-    : connHandler_(CreateConnectionHandler())
+Engine::Engine(const char* dllPath, bool useHttps)
+    : connHandler_(CreateConnectionHandler(useHttps))
 {
     // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath);
