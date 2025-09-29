@@ -1,21 +1,17 @@
 #include "dev.hpp"
 
 #include "config/config.hpp"
-#include "engine/engine.hpp"
+#include "http/common/http_global_state.hpp"
 #include "utils/logger/logger.hpp"
 #include "utils/filesystem/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/backport/string.hpp"
 
-#include <string>
-#include <atomic>
-
 namespace WFX::CLI {
 
-using namespace WFX::Utils; // For 'Logger'
 using namespace WFX::Core;  // For 'Config'
-
-static ::std::atomic<bool> shouldStop = false;
+using namespace WFX::Http;  // For 'WFXGlobalState'
+using namespace WFX::Utils; // For 'Logger'
 
 // Common functionality used for all OS'es
 void HandleUserSrcCompilation(const char* dllDir, const char* dllPath)
@@ -142,29 +138,26 @@ LONG WINAPI ExceptionFilter(EXCEPTION_POINTERS* ep) {
 #include <wait.h>
 #include <signal.h>
 
-static ::std::vector<pid_t> workerPids;
-static ::WFX::Core::Engine* globalEnginePtr = nullptr;
-static pid_t                workerPGID      = 0; // Process group ID
-
 void HandleMasterSignal(int)
 {
-    Logger::GetInstance().Info("[WFX-Master]: Ctrl+C pressed, shutting down workers...");
+    auto& globalState = GetGlobalState();
+    globalState.shouldStop = true;
     
-    shouldStop = true;
+    Logger::GetInstance().Info("[WFX-Master]: Ctrl+C pressed, shutting down workers...");
 
-    if(workerPGID > 0)
-        kill(-workerPGID, SIGTERM); // Broadcast SIGTERM to all workers
+    if(globalState.workerPGID > 0)
+        kill(-globalState.workerPGID, SIGTERM); // Broadcast SIGTERM to all workers
 }
 
 void HandleWorkerSignal(int)
 {
-    // Wake up master process
-    shouldStop = true;
+    auto& globalState = GetGlobalState();
+    globalState.shouldStop = true;
     
     // Stop is atomic, its safe to call it in signal handler
-    if(globalEnginePtr) {
-        globalEnginePtr->Stop();
-        globalEnginePtr = nullptr;
+    if(globalState.enginePtr) {
+        globalState.enginePtr->Stop();
+        globalState.enginePtr = nullptr;
     }
 }
 
@@ -185,10 +178,11 @@ void PinWorkerToCPU(int workerIndex) {
 
 int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttps, bool overrideHttpsPort)
 {
-    auto& logger   = Logger::GetInstance();
-    auto& config   = Config::GetInstance();
-    auto& fs       = FileSystem::GetFileSystem();
-    auto& osConfig = config.osSpecificConfig;
+    auto& logger      = Logger::GetInstance();
+    auto& config      = Config::GetInstance();
+    auto& fs          = FileSystem::GetFileSystem();
+    auto& globalState = GetGlobalState();
+    auto& osConfig    = config.osSpecificConfig;
 
 #ifdef _WIN32
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
@@ -207,6 +201,10 @@ int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttp
 
     signal(SIGINT, HandleMasterSignal);
     signal(SIGTERM, SIG_IGN);
+    
+    // Handle initialization of SSL key before we do anything else
+    if(!RandomPool::GetInstance().GetBytes(globalState.sslKey.data(), globalState.sslKey.size()))
+        logger.Fatal("[WFX-Master]: Failed to initialize SSL key");
 
     // This will be used in compiling of user dll
     const std::string dllDir      = config.projectConfig.projectName + "/build/dlls/";
@@ -235,10 +233,10 @@ int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttp
             if(i == 0)
                 setpgid(0, 0);          // First worker becomes group leader
             else
-                setpgid(0, workerPGID); // Join first worker's group
+                setpgid(0, globalState.workerPGID); // Join first worker's group
 
             WFX::Core::Engine engine{dllPathCStr, useHttps};
-            globalEnginePtr = &engine;
+            globalState.enginePtr = &engine;
 
             signal(SIGTERM, HandleWorkerSignal);
             signal(SIGINT, SIG_IGN);  // SigTerm will kill it, SigInt handled by master
@@ -253,11 +251,11 @@ int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttp
 
         // --- Master ---
         else if(pid > 0) {
-            workerPids.push_back(pid);
+            globalState.workerPids.push_back(pid);
             if(i == 0)
-                workerPGID = pid; // Store PGID for process group
+                globalState.workerPGID = pid; // Store PGID for process group
             
-            setpgid(pid, workerPGID);
+            setpgid(pid, globalState.workerPGID);
         }
         
         else {
@@ -267,12 +265,12 @@ int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttp
     }
 
     // --- Master ---
-    while(!shouldStop)
+    while(!globalState.shouldStop)
         pause();
 
     // On Ctrl+C
     for(int i = 0; i < osConfig.workerProcesses; i++)
-        waitpid(workerPids[i], nullptr, 0);
+        waitpid(globalState.workerPids[i], nullptr, 0);
 #endif // _WIN32
 
     logger.Info("[WFX-Master]: Shutdown successfully");

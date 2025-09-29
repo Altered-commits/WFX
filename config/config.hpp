@@ -1,6 +1,7 @@
 #ifndef WFX_CONFIG_HPP
 #define WFX_CONFIG_HPP
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,22 @@ struct NetworkConfig {
 struct SSLConfig {
     std::string certPath;
     std::string keyPath;
+
+    std::string tls13Ciphers = 
+        "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
+
+    std::string tls12Ciphers = 
+        "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
+        "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:"
+        "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384";
+
+    std::string curves = "X25519:P-256"; // Elliptic curves preference
+
+    bool         enableSessionCache = true;
+    bool         enableKTLS         = false;
+    std::uint8_t minProtoVersion    = 2;        // 1-> TLSv1.1; 2-> TLSv1.2; 3 -> TLSv1.3
+    int          securityLevel      = 2;        // OpenSSL security level (0-5)
+    std::size_t  sessionCacheSize   = 32 * 1024;
 };
 
 struct OSSpecificConfig {

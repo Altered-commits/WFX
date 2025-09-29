@@ -12,8 +12,6 @@
 #include "utils/timer_wheel/timer_wheel.hpp"
 
 #include <sys/epoll.h>
-#include <atomic>
-#include <cstring>
 
 namespace WFX::OSSpecific {
 

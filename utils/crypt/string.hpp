@@ -1,6 +1,7 @@
 #ifndef WFX_UTILS_STRING_HPP
 #define WFX_UTILS_STRING_HPP
 
+#include <cstdint>
 #include <string_view>
 
 namespace WFX::Utils {

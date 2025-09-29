@@ -95,12 +95,12 @@ bool StringGuard::NormalizeURIPathInplace(std::string_view& path)
             if(c == '%') {
                 if(end - read < 3) return false;
 
-                uint8_t h1 = UInt8FromHexChar(read[1]);
-                uint8_t h2 = UInt8FromHexChar(read[2]);
+                std::uint8_t h1 = UInt8FromHexChar(read[1]);
+                std::uint8_t h2 = UInt8FromHexChar(read[2]);
 
                 if(h1 == 0xFF || h2 == 0xFF) return false;  // Invalid hex
 
-                uint8_t decoded = (h1 << 4) | h2;
+                std::uint8_t decoded = (h1 << 4) | h2;
                 if(decoded <= 0x1F || decoded >= 0x7F)                  return false;  // Ctrl / Non-ASCII
                 if(decoded == '/' || decoded == '\\' || decoded == '.') return false;
                 if(decoded == '%')                                      return false;  // Prevent double-encoding like %252e

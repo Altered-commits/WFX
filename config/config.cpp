@@ -23,15 +23,24 @@ void Config::LoadCoreSettings(std::string_view path) {
         // vvv Project vvv
         ExtractValueOrFatal(tbl, logger, "Project", "project_name", projectConfig.projectName);
         ExtractStringArrayOrFatal(tbl, logger, "Project", "middleware_list", projectConfig.middlewareList);
-
-        // vvv SSL vvv
-        ExtractValue(tbl, logger, "SSL", "cert_path", sslConfig.certPath);
-        ExtractValue(tbl, logger, "SSL", "key_path",  sslConfig.keyPath);
-
-        // vvv Network vvv
+        
         projectConfig.publicDir   = projectConfig.projectName + "/public/";
         projectConfig.templateDir = projectConfig.projectName + "/templates/";
 
+        // vvv SSL vvv
+        ExtractValueOrFatal(tbl, logger, "SSL", "cert_path", sslConfig.certPath);
+        ExtractValueOrFatal(tbl, logger, "SSL", "key_path",  sslConfig.keyPath);
+
+        ExtractValue(tbl, logger, "SSL", "tls13_ciphers",        sslConfig.tls13Ciphers);
+        ExtractValue(tbl, logger, "SSL", "tls12_ciphers",        sslConfig.tls12Ciphers);
+        ExtractValue(tbl, logger, "SSL", "curves",               sslConfig.curves);
+        ExtractValue(tbl, logger, "SSL", "enable_session_cache", sslConfig.enableSessionCache);
+        ExtractValue(tbl, logger, "SSL", "enable_ktls",          sslConfig.enableKTLS);
+        ExtractValue(tbl, logger, "SSL", "session_cache_size",   sslConfig.sessionCacheSize);
+        ExtractValue(tbl, logger, "SSL", "min_proto_version",    sslConfig.minProtoVersion);
+        ExtractValue(tbl, logger, "SSL", "security_level",       sslConfig.securityLevel);
+
+        // vvv Network vvv
         ExtractValue(tbl, logger, "Network", "send_buffer_max",             networkConfig.maxSendBufferSize);
         ExtractValue(tbl, logger, "Network", "recv_buffer_max",             networkConfig.maxRecvBufferSize);
         ExtractValue(tbl, logger, "Network", "recv_buffer_incr",            networkConfig.bufferIncrSize);

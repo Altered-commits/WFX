@@ -15,13 +15,12 @@ include(cmake/third_party.cmake)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # -----------------------------
-# Gather sources
+# Gather sources (exclude utils here)
 # -----------------------------
 file(GLOB_RECURSE WFX_CLI_SOURCES       "${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cpp")
 file(GLOB_RECURSE WFX_CONFIG_SOURCES    "${CMAKE_CURRENT_SOURCE_DIR}/config/*.cpp")
 file(GLOB_RECURSE WFX_ENGINE_SOURCES    "${CMAKE_CURRENT_SOURCE_DIR}/engine/*.cpp")
 file(GLOB_RECURSE WFX_HTTP_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/http/*.cpp")
-file(GLOB_RECURSE WFX_UTILS_SOURCES     "${CMAKE_CURRENT_SOURCE_DIR}/utils/*.cpp")
 file(GLOB_RECURSE WFX_SHARED_SOURCES    "${CMAKE_CURRENT_SOURCE_DIR}/shared/*.cpp")
 
 if(WIN32)
@@ -38,7 +37,6 @@ add_executable(wfx
     ${WFX_CONFIG_SOURCES}
     ${WFX_ENGINE_SOURCES}
     ${WFX_HTTP_SOURCES}
-    ${WFX_UTILS_SOURCES}
     ${WFX_SHARED_SOURCES}
     ${WFX_OS_SPECIFIC_SOURCES}
 )
@@ -47,6 +45,10 @@ target_include_directories(wfx PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/include
 )
+
+# Compile/link optimizations to shrink binary
+target_compile_options(wfx PRIVATE -ffunction-sections -fdata-sections -fvisibility=hidden -g0 -flto)
+target_link_options(wfx PRIVATE -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto)
 
 # OS-specific system libraries
 if(WIN32)
@@ -57,10 +59,11 @@ if(WIN32)
         bcrypt
     )
 elseif(UNIX)
-    target_link_libraries(wfx PRIVATE
-        dl
-        uring
-    )
+    target_link_libraries(wfx PRIVATE dl)
+
+    if(WFX_LINUX_USE_IO_URING)
+        target_link_libraries(wfx PRIVATE uring)
+    endif()
 endif()
 
 # Link third-party libraries
@@ -72,7 +75,7 @@ target_link_libraries(wfx PRIVATE
 )
 
 # -----------------------------
-# Separate utils shared library target
+# Utils shared library target
 # -----------------------------
 file(GLOB_RECURSE WFX_UTILS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/utils/*.cpp")
 
@@ -82,10 +85,8 @@ elseif(UNIX)
     file(GLOB_RECURSE WFX_OS_UTILS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/os_specific/linux/utils/*.cpp")
 endif()
 
-# Merge common and OS-specific utils
 list(APPEND WFX_UTILS_SOURCES ${WFX_OS_UTILS_SOURCES})
 
-# Create the wfxutils library
 add_library(wfxutils SHARED ${WFX_UTILS_SOURCES})
 
 target_include_directories(wfxutils PUBLIC
@@ -93,14 +94,12 @@ target_include_directories(wfxutils PUBLIC
     ${CMAKE_SOURCE_DIR}/include
 )
 
-# OS-specific system libraries
 if(WIN32)
     target_link_libraries(wfxutils PRIVATE bcrypt)
 elseif(UNIX)
     target_link_libraries(wfxutils PRIVATE dl)
 endif()
 
-# Link third-party libraries
 target_link_libraries(wfxutils PRIVATE
     tlsf
     concurrentqueue
@@ -116,7 +115,12 @@ set_target_properties(wfxutils PROPERTIES
 )
 
 # -----------------------------
-# Create a custom target to build utils only
+# Engine links against utils
+# -----------------------------
+target_link_libraries(wfx PRIVATE wfxutils)
+
+# -----------------------------
+# Custom target: build utils only
 # -----------------------------
 add_custom_target(build_utils
     DEPENDS wfxutils
@@ -138,9 +142,9 @@ if(WFX_HTTP_USE_OPENSSL)
     # Apply to main executable-
     # -and optionally apply to utils if they include SSL headers
     target_compile_definitions(wfx PRIVATE WFX_HTTP_USE_OPENSSL)
-    target_compile_definitions(wfxutils PRIVATE WFX_HTTP_USE_OPENSSL)
+    # target_compile_definitions(wfxutils PRIVATE WFX_HTTP_USE_OPENSSL)
     
     # Link OpenSSL libraries
     target_link_libraries(wfx PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-    target_link_libraries(wfxutils PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    # target_link_libraries(wfxutils PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()

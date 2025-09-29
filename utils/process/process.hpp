@@ -1,6 +1,7 @@
 #ifndef WFX_UTILS_PROCESS_HPP
 #define WFX_UTILS_PROCESS_HPP
 
+#include <cstdint>
 #include <string>
 
 namespace WFX::Utils {

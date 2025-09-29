@@ -53,27 +53,19 @@ max_connections_per_ip       = 20      # Per-IP connection cap
 max_request_burst_per_ip     = 10      # Initial request tokens per IP
 max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
 
-[Windows]
-accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts
-connection_threads = "auto"  # IOCP worker thread count
-request_threads    = "all"   # Threads executing user handlers
-
-[Linux]
-[Network]
-send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)
-recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
-recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
-header_reserve_hint          = 512     # Initial header allocation hint size
-max_header_size              = 8192    # Max total size of all headers
-max_header_count             = 64      # Max number of headers allowed
-max_body_size                = 8192    # Max size of request body
-header_timeout               = 15      # Max time limit for entire header to arrive. After that the connection closes
-body_timeout                 = 20      # Max time limit for entire body to arrive. After that the connection closes
-idle_timeout                 = 40      # Max time limit for a connection to stay idle. After that the connection closes
-max_connections              = 10000   # Max total concurrent connections
-max_connections_per_ip       = 10000   # Per-IP connection cap
-max_request_burst_per_ip     = 10000   # Initial request tokens per IP
-max_requests_per_ip_per_sec  = 10000   # Refill rate (tokens per second per IP)
+[SSL]
+cert_path            = "..."           # Path to the server certificate (PEM format)
+key_path             = "..."           # Path to the private key corresponding to the certificate
+tls13_ciphers        = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
+                                    # ^^^ Colon-separated TLSv1.3 ciphers in preference order
+tls12_ciphers        = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+                                    # ^^^ Colon-separated TLSv1.2 ciphers in preference order
+curves               = "X25519:P-256"  # Elliptic curves preference list for ECDHE
+enable_session_cache = true            # Enable server-side session caching
+enable_ktls          = false           # Enable Kernel TLS (KTLS) if supported
+session_cache_size   = 32768           # Max number of cached sessions
+min_proto_version    = 2               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
+security_level       = 2               # SSL security level (0-5)
 
 [Windows]
 accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts

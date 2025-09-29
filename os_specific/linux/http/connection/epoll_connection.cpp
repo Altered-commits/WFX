@@ -3,6 +3,7 @@
 #include "epoll_connection.hpp"
 
 #include "http/common/http_error_msgs.hpp"
+#include "http/common/http_global_state.hpp"
 #include "http/ssl/http_ssl_factory.hpp"
 #include <sys/sendfile.h>
 #include <sys/socket.h>
@@ -203,7 +204,6 @@ void EpollConnectionHandler::Close(ConnectionContext* ctx)
     // Immediately set the flag. This "locks" the connection and prevents any
     // other event from triggering another 'Close' call
     ctx->isShuttingDown = 1;
-    numConnectionsAlive_--;
 
     std::uint32_t idx = ctx - &connections_[0];
     timerWheel_.Cancel(idx);
@@ -448,6 +448,9 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx)
     // Sanity checks
     if(!ctx)
         return;
+
+    // For debugging purposes
+    numConnectionsAlive_--;
 
     if(ctx->socket > 0)
         close(ctx->socket);

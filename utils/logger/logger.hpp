@@ -3,9 +3,10 @@
 
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <mutex>
 #include <atomic>
-#include <type_traits>
 
 #define WFX_LOG_ALL      Logger::ALL_MASK
 #define WFX_LOG_WARNINGS Logger::WARN_MASK | Logger::ERROR_MASK | Logger::FATAL_MASK
@@ -68,7 +69,7 @@ private:
     const char* LevelToString(Level level) const;
     void CurrentTimestamp(char* buf, size_t len) const;
 
-    template <bool LogLevel = true, typename... Args>
+    template <bool PureLog = true, typename... Args>
     void Log(Level level, Args&&... args);
 
     template <typename T>
@@ -117,7 +118,7 @@ void Logger::PrintArg(FILE* out, T&& arg) {
         std::fprintf(out, "%p", (const void*)&arg);
 }
 
-template <bool PureLog = true, typename... Args>
+template <bool PureLog, typename... Args>
 void Logger::Log(Level level, Args&&... args)
 {
     LevelMask mask = 1 << static_cast<int>(level);

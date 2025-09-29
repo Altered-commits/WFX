@@ -2,7 +2,7 @@
 
 #include "http_openssl.hpp"
 #include "config/config.hpp"
-#include "utils/crypt/hash.hpp"
+#include "http/common/http_global_state.hpp"
 #include "utils/logger/logger.hpp"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -47,10 +47,17 @@ HttpOpenSSL::HttpOpenSSL()
         logger.Fatal("[HttpOpenSSL]: Failed to create SSL_CTX");
 
     // Level 2 provides 112-bit security disabling weak ciphers and RSA keys < 2048 bits
-    SSL_CTX_set_security_level(ctx, 2);
+    SSL_CTX_set_security_level(ctx, std::clamp(sslConfig.securityLevel, 0, 5));
 
     // Set the minimum protocol version
-    if(SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) != 1)
+    int protoVersion = TLS1_2_VERSION;
+    switch(sslConfig.minProtoVersion) {
+        case 1:  protoVersion = TLS1_VERSION;   break;
+        case 2:  protoVersion = TLS1_2_VERSION; break;
+        case 3:  protoVersion = TLS1_3_VERSION; break;
+        default: protoVersion = TLS1_2_VERSION;
+    }
+    if(SSL_CTX_set_min_proto_version(ctx, protoVersion) != 1)
         LogOpenSSLErrorAndExit("Failed to set minimum TLS protocol version");
 
     // Load certificate and private key
@@ -63,35 +70,61 @@ HttpOpenSSL::HttpOpenSSL()
     if(!SSL_CTX_check_private_key(ctx))
         LogOpenSSLErrorAndExit("Private key does not match certificate");
 
-    // Enable stateless resumption instead of handshaking everytime
-    unsigned char ticketKey[80];
-    if(!RandomPool::GetInstance().GetBytes(ticketKey, sizeof(ticketKey)))
-        logger.Fatal("[HttpOpenSSL]: Failed to generate session ticket encryption key");
+    // Server side session caching
+    if(sslConfig.enableSessionCache) {
+        SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_SERVER);
+        SSL_CTX_sess_set_cache_size(ctx, sslConfig.sessionCacheSize);
+    }
 
-    if(SSL_CTX_set_tlsext_ticket_keys(ctx, ticketKey, sizeof(ticketKey)) != 1)
+    auto& ticketKey = GetGlobalState().sslKey;
+    if(SSL_CTX_set_tlsext_ticket_keys(ctx, ticketKey.data(), ticketKey.size()) != 1)
         LogOpenSSLErrorAndExit("Failed to set session ticket keys");
     
     // Set modern cipher preferences
-    // This list just defines the order of preference
-    const char* tls13Ciphers = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
-    const char* tls12Ciphers = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384";
-    
-    if(SSL_CTX_set_ciphersuites(ctx, tls13Ciphers) != 1)
+    if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(ctx, sslConfig.tls13Ciphers.c_str()) != 1)
         LogOpenSSLErrorAndExit("Failed to set TLSv1.3 ciphersuites");
 
-    if(SSL_CTX_set_cipher_list(ctx, tls12Ciphers) != 1)
+    if(!sslConfig.tls12Ciphers.empty() && SSL_CTX_set_cipher_list(ctx, sslConfig.tls12Ciphers.c_str()) != 1)
         LogOpenSSLErrorAndExit("Failed to set TLSv1.2 cipher list");
 
     // Set remaining essential options
-    SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION | SSL_OP_CIPHER_SERVER_PREFERENCE);
+    if(!sslConfig.curves.empty())
+        SSL_CTX_set1_curves_list(ctx, sslConfig.curves.c_str());
+
+    SSL_CTX_set_mode(ctx,
+        SSL_MODE_RELEASE_BUFFERS |
+        SSL_MODE_ENABLE_PARTIAL_WRITE |
+        SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER
+    );
+
+#ifdef SSL_OP_ENABLE_KTLS
+    std::uint64_t options = SSL_OP_NO_COMPRESSION | SSL_OP_CIPHER_SERVER_PREFERENCE;
+    if(sslConfig.enableKTLS)
+        options |= SSL_OP_ENABLE_KTLS;
+    
+    std::uint64_t appliedOptions = SSL_CTX_set_options(ctx, options);
+    
+    // Check if KTLS is really enabled
+    if(appliedOptions & SSL_OP_ENABLE_KTLS)
+        logger.Info("[HttpOpenSSL]: KTLS enabled for this SSL_CTX");
+    else if(sslConfig.enableKTLS)
+        logger.Warn("[HttpOpenSSL]: KTLS requested but not enabled (kernel/OpenSSL limitation)");
+#else
+    if(sslConfig.enableKTLS)
+        logger.Warn("[HttpOpenSSL]: KTLS requested but not supported by this OpenSSL build");
+#endif
 
     logger.Info("[HttpOpenSSL]: SSL context initialized successfully");
 }
 
 HttpOpenSSL::~HttpOpenSSL()
 {
-    if(ctx)
+    if(ctx) {
         SSL_CTX_free(ctx);
+        ctx = nullptr;
+    }
+
+    Logger::GetInstance().Info("[HttpOpenSSL]: Successfully cleaned up SSL context");
 }
 
 // vvv Main Functions vvv
@@ -178,6 +211,9 @@ SSLShutdownResult HttpOpenSSL::Shutdown(void* conn)
         SSL_free(ssl);
         return SSLShutdownResult::DONE;
     }
+
+    if(ret == 0)
+        return SSLShutdownResult::WANT_READ;
 
     int err = SSL_get_error(ssl, ret);
     if(err == SSL_ERROR_WANT_READ)
