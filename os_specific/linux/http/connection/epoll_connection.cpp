@@ -67,7 +67,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, int port)
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(port);
-    if(ResolveHostToIpv4(host.c_str(), &addr.sin_addr) != 0)
+    if(!ResolveHostToIpv4(host.c_str(), &addr.sin_addr))
         logger_.Fatal("[Epoll]: Failed to resolve host '", host, '\'');
 
     if(bind(listenFd_, (sockaddr*)&addr, sizeof(addr)) < 0)
@@ -195,32 +195,37 @@ void EpollConnectionHandler::WriteFile(ConnectionContext* ctx, std::string path)
     Write(ctx, {});
 }
 
-void EpollConnectionHandler::Close(ConnectionContext* ctx)
+void EpollConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
 {
     // If a shutdown is already in progress, do nothing
     if(!ctx || ctx->isShuttingDown)
         return;
     
-    // Immediately set the flag. This "locks" the connection and prevents any
-    // other event from triggering another 'Close' call
+    // Force close bypasses any in-progress shutdown or state checks
+    if(!forceClose && ctx->isShuttingDown)
+        return;
+
     ctx->isShuttingDown = 1;
-
-    std::uint32_t idx = ctx - &connections_[0];
-    timerWheel_.Cancel(idx);
     
-    // For SSL, we need to perform an asynchronous shutdown if possible
     if(ctx->sslConn) {
-        auto res = sslHandler_->Shutdown(ctx->sslConn);
-
-        // Shutdown finished or failed immediately. Proceed to synchronous cleanup
-        if(res == SSLShutdownResult::DONE || res == SSLShutdownResult::FAILED)
+        // Skip clean shutdown, nuke it immediately
+        if(forceClose) {
+            sslHandler_->ForceShutdown(ctx->sslConn);
             ctx->sslConn = nullptr;
-        
-        // Wait for the event loop to complete the shutdown
+        }
         else {
-            std::uint32_t events = ((res == SSLShutdownResult::WANT_READ) ? EPOLLIN : EPOLLOUT) | EPOLLET;
-            PollAgain(ctx, EventType::EVENT_SHUTDOWN, events);
-            return;
+            auto res = sslHandler_->Shutdown(ctx->sslConn);
+    
+            // Shutdown finished or failed immediately. Proceed to synchronous cleanup
+            if(res == SSLReturn::SUCCESS || res == SSLReturn::FATAL)
+                ctx->sslConn = nullptr;
+            
+            // Wait for the event loop to complete the shutdown
+            else {
+                std::uint32_t events = ((res == SSLReturn::WANT_READ) ? EPOLLIN : EPOLLOUT) | EPOLLET;
+                PollAgain(ctx, EventType::EVENT_SHUTDOWN, events);
+                return;
+            }
         }
     }
 
@@ -269,7 +274,7 @@ void EpollConnectionHandler::Run()
                 timerWheel_.Tick(newTick, [this](std::uint32_t connId) {
                                             ConnectionContext* ctx = &connections_[connId];
                                             if(ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE)
-                                                Close(ctx);
+                                                Close(ctx, true);
                                         });
                 continue;
             }
@@ -281,8 +286,12 @@ void EpollConnectionHandler::Run()
                     socklen_t len = sizeof(addr);
                     
                     int clientFd = accept4(listenFd_, (sockaddr*)&addr, &len, SOCK_NONBLOCK);
-                    if(clientFd < 0)
-                        break;
+                    if(clientFd < 0) {
+                        if(errno == EAGAIN || errno == EWOULDBLOCK)
+                            break; // Queue drained, stop
+                        else
+                            continue; // Transient error, skip this one
+                    }
                     
                     // // Disable Nagle's algorithm. Send small packets without buffering
                     // int flag = 1;
@@ -334,26 +343,40 @@ void EpollConnectionHandler::Run()
             if(ctx->isShuttingDown && ctx->eventType != EventType::EVENT_SHUTDOWN)
                 continue;
 
-            if(ev & (EPOLLERR | EPOLLHUP)) {
-                Close(ctx);
-                continue;
-            }
-
             // SSL handshake in progress
             if(ctx->eventType == EventType::EVENT_HANDSHAKE) {
-                // Handshake complete, switch to normal receive
-                if(sslHandler_->Handshake(ctx->sslConn)) {
-                    PollAgain(ctx, EventType::EVENT_RECV, EPOLLIN | EPOLLET);
+                SSLReturn hsResult = sslHandler_->Handshake(ctx->sslConn);
 
-                    // Immediately try to read if EPOLLIN was set
-                    if(ev & EPOLLIN)
-                        Receive(ctx);
+                switch(hsResult) {
+                    case SSLReturn::SUCCESS:
+                        // Handshake done, switch to normal receive
+                        PollAgain(ctx, EventType::EVENT_RECV, EPOLLIN | EPOLLET);
+
+                        // Immediately read if EPOLLIN is set
+                        if(ev & EPOLLIN)
+                            Receive(ctx);
+                        break;
+
+                    case SSLReturn::WANT_READ:
+                        // Need more input: wait for EPOLLIN
+                        PollAgain(ctx, EventType::EVENT_HANDSHAKE, EPOLLIN | EPOLLET);
+                        break;
+
+                    case SSLReturn::WANT_WRITE:
+                        // Need to write handshake data: wait for EPOLLOUT
+                        PollAgain(ctx, EventType::EVENT_HANDSHAKE, EPOLLOUT | EPOLLET);
+                        break;
+
+                    case SSLReturn::CLOSED:
+                    case SSLReturn::SYSCALL:
+                    case SSLReturn::FATAL:
+                    default:
+                        // Any error or closed connection
+                        Close(ctx);
+                        break;
                 }
-                // Still needs more work, keep waiting on both IN/OUT
-                else
-                    PollAgain(ctx, EventType::EVENT_HANDSHAKE, EPOLLIN | EPOLLOUT | EPOLLET);
 
-                continue;
+                continue; // Handshake handled, skip further processing
             }
             
             // SSL shutdown is in progress
@@ -361,21 +384,26 @@ void EpollConnectionHandler::Run()
                 auto res = sslHandler_->Shutdown(ctx->sslConn);
 
                 switch(res) {
-                    case SSLShutdownResult::DONE:
-                    case SSLShutdownResult::FAILED:
+                    case SSLReturn::SUCCESS:
+                    case SSLReturn::FATAL:
                         ctx->sslConn = nullptr;
                         epoll_ctl(epollFd_, EPOLL_CTL_DEL, ctx->socket, nullptr);
                         ReleaseConnection(ctx);
                         break;
 
-                    case SSLShutdownResult::WANT_READ:
+                    case SSLReturn::WANT_READ:
                         PollAgain(ctx, EventType::EVENT_SHUTDOWN, EPOLLIN | EPOLLET);
                         break;
 
-                    case SSLShutdownResult::WANT_WRITE:
+                    case SSLReturn::WANT_WRITE:
                         PollAgain(ctx, EventType::EVENT_SHUTDOWN, EPOLLOUT | EPOLLET);
                         break;
                 }
+                continue;
+            }
+
+            if(ev & (EPOLLERR | EPOLLHUP)) {
+                Close(ctx);
                 continue;
             }
 
@@ -408,16 +436,18 @@ void EpollConnectionHandler::Stop()
 
 // vvv Helper Functions vvv
 //  --- Connection Handlers ---
-int EpollConnectionHandler::AllocSlot(std::uint64_t* bitmap, int numWords, int maxSlots)
+std::int64_t EpollConnectionHandler::AllocSlot(
+    std::uint64_t* bitmap, std::uint32_t numWords, std::uint32_t maxSlots
+)
 {
-    for(int w = 0; w < numWords; w++) {
+    for(std::uint32_t w = 0; w < numWords; w++) {
         std::uint64_t bits = bitmap[w];
 
         // If even a single '0' exists in the bitmap, we will take it
         // '0' means free slot
         if(~bits) {
-            int bit = __builtin_ctzll(~bits);
-            int idx = (w << 6) + bit;
+            int          bit = __builtin_ctzll(~bits);
+            std::int64_t idx = (w << 6) + bit;
             if(idx < maxSlots) {
                 bitmap[w] |= (1ULL << bit);
                 return idx;
@@ -427,16 +457,16 @@ int EpollConnectionHandler::AllocSlot(std::uint64_t* bitmap, int numWords, int m
     return -1;
 }
 
-void EpollConnectionHandler::FreeSlot(std::uint64_t* bitmap, int idx)
+void EpollConnectionHandler::FreeSlot(std::uint64_t* bitmap, std::uint32_t idx)
 {
-    int w   = idx >> 6;
-    int bit = idx & 63;
+    std::uint32_t w   = idx >> 6;
+    std::uint32_t bit = idx & 63;
     bitmap[w] &= ~(1ULL << bit);
 }
 
 ConnectionContext* EpollConnectionHandler::GetConnection()
 {
-    int idx = AllocSlot(connBitmap_.get(), connWords_, config_.networkConfig.maxConnections);
+    std::int64_t idx = AllocSlot(connBitmap_.get(), connWords_, config_.networkConfig.maxConnections);
     if(idx < 0)
         return nullptr;
 
@@ -451,6 +481,12 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx)
 
     // For debugging purposes
     numConnectionsAlive_--;
+
+    // Cancelling timer in 'Close' kinda sucks cuz during SSL async shutdown-
+    // -the client might bail, never finish it, and we just be stuck in-
+    // -closing state forever aaand timeout won't do anything cuz... we cancelled it
+    std::uint32_t idx = ctx - &connections_[0];
+    timerWheel_.Cancel(idx);
 
     if(ctx->socket > 0)
         close(ctx->socket);
@@ -506,27 +542,26 @@ bool EpollConnectionHandler::EnsureReadReady(ConnectionContext* ctx)
     return true;
 }
 
-int EpollConnectionHandler::ResolveHostToIpv4(const char* host, in_addr* outAddr)
+bool EpollConnectionHandler::ResolveHostToIpv4(const char* host, in_addr* outAddr)
 {
     addrinfo hints = { 0 };
     addrinfo *res = nullptr, *rp = nullptr;
-    int ret = -1;
 
     hints.ai_family   = AF_INET;       // Force IPv4
     hints.ai_socktype = SOCK_STREAM;   // TCP style (doesn't really matter here)
     hints.ai_flags    = AI_ADDRCONFIG; // Use only configured addr families
 
-    ret = getaddrinfo(host, NULL, &hints, &res);
+    int ret = getaddrinfo(host, NULL, &hints, &res);
     if(ret != 0)
-        return -1;
+        return false;
 
     // Pick the first IPv4 result
-    int found = -1;
+    bool found = false;
     for(rp = res; rp != NULL; rp = rp->ai_next) {
         if(rp->ai_family == AF_INET) {
             sockaddr_in* addr = (sockaddr_in*)rp->ai_addr;
             *outAddr = addr->sin_addr; // Copy the IPv4 address
-            found = 0;
+            found = true;
             break;
         }
     }
@@ -600,7 +635,7 @@ void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
     int   fd       = fileInfo->fd;
 
     while(fileInfo->offset < fileInfo->fileSize) {
-        ssize_t n = ::sendfile(ctx->socket, fd, &fileInfo->offset,
+        ssize_t n = WrapFile(ctx, fd, &fileInfo->offset,
                                fileInfo->fileSize - fileInfo->offset);
         // Try to send more of file
         if(n > 0)
@@ -643,30 +678,46 @@ void EpollConnectionHandler::PollAgain(ConnectionContext* ctx, EventType eventTy
 
 void EpollConnectionHandler::WrapAccept(ConnectionContext *ctx, int clientFd)
 {
-    // Base info
     epoll_event cev{};
-    cev.data.ptr   = ctx;
-    cev.events     = EPOLLIN | EPOLLET;
-    ctx->eventType = EventType::EVENT_RECV;
+    cev.data.ptr = ctx;
 
     if(useHttps_) {
-        // Wrap in SSL
         ctx->sslConn = sslHandler_->Wrap(clientFd);
         if(!ctx->sslConn) {
             Close(ctx);
             return;
         }
-    
-        // Try handshake immediately
-        if(sslHandler_->Handshake(ctx->sslConn))
-            goto __PollAdd;
 
-        // Needs more I/O -> track as handshake state
-        ctx->eventType = EventType::EVENT_HANDSHAKE;
-        cev.events   = EPOLLIN | EPOLLOUT | EPOLLET; // Both directions
+        // Try handshake immediately
+        SSLReturn hsResult = sslHandler_->Handshake(ctx->sslConn);
+
+        // Handshake done, go to normal receive
+        if(hsResult == SSLReturn::SUCCESS) {
+            ctx->eventType = EventType::EVENT_RECV;
+            cev.events = EPOLLIN | EPOLLET;
+        }
+        // Wait for read
+        else if(hsResult == SSLReturn::WANT_READ) {
+            ctx->eventType = EventType::EVENT_HANDSHAKE;
+            cev.events = EPOLLIN | EPOLLET;
+        }
+        // Wait for write
+        else if(hsResult == SSLReturn::WANT_WRITE) {
+            ctx->eventType = EventType::EVENT_HANDSHAKE;
+            cev.events = EPOLLOUT | EPOLLET;
+        } 
+        // Handshake failed or closed
+        else {
+            Close(ctx);
+            return;
+        }
+    }
+    else {
+        // Plain HTTP
+        ctx->eventType = EventType::EVENT_RECV;
+        cev.events = EPOLLIN | EPOLLET;
     }
 
-__PollAdd:
     if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, clientFd, &cev) < 0)
         Close(ctx);
 }
@@ -679,17 +730,17 @@ ssize_t EpollConnectionHandler::WrapRead(ConnectionContext* ctx, char* buf, std:
     SSLResult result = sslHandler_->Read(ctx->sslConn, buf, static_cast<int>(len));
 
     switch(result.error) {
-        case SSLError::SUCCESS:
+        case SSLReturn::SUCCESS:
             return result.res;
-        case SSLError::WANT_READ:
-        case SSLError::WANT_WRITE:
+        case SSLReturn::WANT_READ:
+        case SSLReturn::WANT_WRITE:
             errno = EAGAIN;
             return -1;
-        case SSLError::CLOSED:
+        case SSLReturn::CLOSED:
             return 0;
-        case SSLError::SYSCALL:
+        case SSLReturn::SYSCALL:
             return -1; // errno is already set by SSL
-        case SSLError::FATAL:
+        case SSLReturn::FATAL:
         default:
             errno = EIO;
             return -1;
@@ -704,17 +755,44 @@ ssize_t EpollConnectionHandler::WrapWrite(ConnectionContext* ctx, const char* bu
     SSLResult result = sslHandler_->Write(ctx->sslConn, buf, static_cast<int>(len));
 
     switch(result.error) {
-        case SSLError::SUCCESS:
+        case SSLReturn::SUCCESS:
             return result.res;
-        case SSLError::WANT_READ:
-        case SSLError::WANT_WRITE:
+        case SSLReturn::WANT_READ:
+        case SSLReturn::WANT_WRITE:
             errno = EAGAIN;
             return -1;
-        case SSLError::CLOSED:
+        case SSLReturn::CLOSED:
             return 0;
-        case SSLError::SYSCALL:
+        case SSLReturn::SYSCALL:
             return -1; // errno is already set by SSL
-        case SSLError::FATAL:
+        case SSLReturn::FATAL:
+        default:
+            errno = EIO;
+            return -1;
+    }
+}
+
+ssize_t EpollConnectionHandler::WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count)
+{
+    if(!ctx->sslConn)
+        return ::sendfile(ctx->socket, fd, offset, count);
+
+    SSLResult result = sslHandler_->WriteFile(ctx->sslConn, fd, offset ? *offset : 0, count);
+
+    switch(result.error) {
+        case SSLReturn::SUCCESS:
+            if(offset)
+                *offset += result.res; // Manually track progress
+            return result.res;
+        case SSLReturn::WANT_READ:
+        case SSLReturn::WANT_WRITE:
+            errno = EAGAIN;
+            return -1;
+        case SSLReturn::CLOSED:
+            return 0;
+        case SSLReturn::SYSCALL:
+            return -1; // errno already set by SSL
+        case SSLReturn::FATAL:
         default:
             errno = EIO;
             return -1;

@@ -35,7 +35,7 @@ public: // I/O Operations
     void ResumeReceive(ConnectionContext* ctx)                       override;
     void Write(ConnectionContext* ctx, std::string_view buffer = {}) override;
     void WriteFile(ConnectionContext* ctx, std::string path)         override;
-    void Close(ConnectionContext* ctx)                               override;
+    void Close(ConnectionContext* ctx, bool forceClose = false)      override;
     
 public: // Main Functions
     void Run()                                                               override;
@@ -43,15 +43,15 @@ public: // Main Functions
     void Stop()                                                              override;
 
 private: // Helper Functions
-    int                AllocSlot(std::uint64_t* bitmap, int numWords, int maxSlots);
-    void               FreeSlot(std::uint64_t* bitmap, int idx);
+    std::int64_t       AllocSlot(std::uint64_t* bitmap, std::uint32_t numWords, std::uint32_t maxSlots);
+    void               FreeSlot(std::uint64_t* bitmap, std::uint32_t idx);
     ConnectionContext* GetConnection();
     void               ReleaseConnection(ConnectionContext* ctx);
     
     bool               SetNonBlocking(int fd);
     bool               EnsureFileReady(ConnectionContext* ctx, std::string path);
     bool               EnsureReadReady(ConnectionContext* ctx);
-    int                ResolveHostToIpv4(const char* host, in_addr* outAddr);
+    bool               ResolveHostToIpv4(const char* host, in_addr* outAddr);
     
     void               Receive(ConnectionContext* ctx);
     void               SendFile(ConnectionContext* ctx);
@@ -60,6 +60,7 @@ private: // Helper Functions
     void               WrapAccept(ConnectionContext* ctx, int clientFd);
     ssize_t            WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
     ssize_t            WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len);
+    ssize_t            WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);
 
 private: // Misc
     IpLimiter&        ipLimiter_  = IpLimiter::GetInstance();

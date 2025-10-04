@@ -6,9 +6,14 @@
 // -again, not the best way to do it but, yeah
 #ifdef _WIN32
     #include <winsock2.h>
-    using SSLSocket = SOCKET;
+    using SSLSocket  = SOCKET;
+    using FileOffset = std::int64_t;
+    using ReturnType = std::int64_t;
 #else
+    #include <sys/types.h>
     using SSLSocket = int;
+    using FileOffset = off_t;
+    using ReturnType = ssize_t;
 #endif // _WIN32
 
 #include <cstdint>
@@ -16,7 +21,7 @@
 namespace WFX::Http {
 
 // Common return values for Read / Write errors
-enum class SSLError : std::uint8_t {
+enum class SSLReturn : std::uint8_t {
     SUCCESS,
     WANT_READ,
     WANT_WRITE,
@@ -25,16 +30,9 @@ enum class SSLError : std::uint8_t {
     FATAL
 };
 
-enum class SSLShutdownResult {
-    DONE,
-    WANT_READ,
-    WANT_WRITE,
-    FAILED
-};
-
 struct SSLResult {
-    SSLError error;
-    int      res;
+    SSLReturn  error;
+    ReturnType res;
 };
 
 // Interface around SSL implementations
@@ -46,14 +44,16 @@ public:
     virtual void* Wrap(SSLSocket fd) = 0;
 
     // Handshake; returns true if done
-    virtual bool Handshake(void* conn) = 0;
+    virtual SSLReturn Handshake(void* conn) = 0;
 
     // Read/Write functions
-    virtual SSLResult Read(void* conn, char* buf, int len) = 0;
-    virtual SSLResult Write(void* conn, const char* buf, int len) = 0;
+    virtual SSLResult Read(void* conn, char* buf, int len)                                      = 0;
+    virtual SSLResult Write(void* conn, const char* buf, int len)                               = 0;
+    virtual SSLResult WriteFile(void* conn, SSLSocket fd, FileOffset offset, std::size_t count) = 0;
 
     // Shutdown and Free connection
-    virtual SSLShutdownResult Shutdown(void* conn) = 0;
+    virtual SSLReturn Shutdown(void* conn)      = 0;
+    virtual SSLReturn ForceShutdown(void* conn) = 0;
 };
 
 } // namespace WFX::Http

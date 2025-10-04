@@ -148,7 +148,7 @@ public:
     virtual void WriteFile(ConnectionContext* ctx, std::string path) = 0;
 
     // Close a client socket
-    virtual void Close(ConnectionContext* ctx) = 0;
+    virtual void Close(ConnectionContext* ctx, bool forceClose = false) = 0;
 
     // Run the main connection loop (can be used by dev/serve mode)
     virtual void Run() = 0;

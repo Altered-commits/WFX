@@ -91,27 +91,33 @@ HttpOpenSSL::HttpOpenSSL()
     if(!sslConfig.curves.empty())
         SSL_CTX_set1_curves_list(ctx, sslConfig.curves.c_str());
 
+    // Disable OpenSSL's internal read ahead buffer. We manage our own buffers
+    SSL_CTX_set_read_ahead(ctx, 0);
+
     SSL_CTX_set_mode(ctx,
         SSL_MODE_RELEASE_BUFFERS |
         SSL_MODE_ENABLE_PARTIAL_WRITE |
         SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER
     );
 
-#ifdef SSL_OP_ENABLE_KTLS
     std::uint64_t options = SSL_OP_NO_COMPRESSION | SSL_OP_CIPHER_SERVER_PREFERENCE;
+
+#ifdef SSL_OP_ENABLE_KTLS
     if(sslConfig.enableKTLS)
         options |= SSL_OP_ENABLE_KTLS;
-    
+#else
+    if(sslConfig.enableKTLS)
+        logger.Warn("[HttpOpenSSL]: KTLS requested but not supported by this OpenSSL build");
+#endif
+
     std::uint64_t appliedOptions = SSL_CTX_set_options(ctx, options);
     
+#ifdef SSL_OP_ENABLE_KTLS
     // Check if KTLS is really enabled
     if(appliedOptions & SSL_OP_ENABLE_KTLS)
         logger.Info("[HttpOpenSSL]: KTLS enabled for this SSL_CTX");
     else if(sslConfig.enableKTLS)
         logger.Warn("[HttpOpenSSL]: KTLS requested but not enabled (kernel/OpenSSL limitation)");
-#else
-    if(sslConfig.enableKTLS)
-        logger.Warn("[HttpOpenSSL]: KTLS requested but not supported by this OpenSSL build");
 #endif
 
     logger.Info("[HttpOpenSSL]: SSL context initialized successfully");
@@ -151,55 +157,89 @@ void* HttpOpenSSL::Wrap(SSLSocket sock)
     return ssl;
 }
 
-bool HttpOpenSSL::Handshake(void* conn)
+SSLReturn HttpOpenSSL::Handshake(void* conn)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int r = SSL_accept(ssl);
+    int  ret = SSL_accept(ssl);
 
-    return (r == 1);
+    // Handshake complete
+    if(ret == 1)
+        return SSLReturn::SUCCESS;
+
+    int err = SSL_get_error(ssl, ret);
+    switch(err) {
+        case SSL_ERROR_WANT_READ:   return SSLReturn::WANT_READ;
+        case SSL_ERROR_WANT_WRITE:  return SSLReturn::WANT_WRITE;
+        case SSL_ERROR_ZERO_RETURN: return SSLReturn::CLOSED;
+        case SSL_ERROR_SYSCALL:     return SSLReturn::SYSCALL;
+        default:                    return SSLReturn::FATAL;
+    }
 }
 
 SSLResult HttpOpenSSL::Read(void* conn, char* buf, int len)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int ret = SSL_read(ssl, buf, len);
+    int  ret = SSL_read(ssl, buf, len);
 
     if(ret > 0)
-        return { SSLError::SUCCESS, ret };
+        return { SSLReturn::SUCCESS, ret };
 
     int err = SSL_get_error(ssl, ret);
     switch(err) {
-        case SSL_ERROR_WANT_READ:   return { SSLError::WANT_READ,  0 };
-        case SSL_ERROR_WANT_WRITE:  return { SSLError::WANT_WRITE, 0 };
-        case SSL_ERROR_ZERO_RETURN: return { SSLError::CLOSED,     0 };
-        case SSL_ERROR_SYSCALL:     return { SSLError::SYSCALL,    0 };
-        default:                    return { SSLError::FATAL,      0 };
+        case SSL_ERROR_WANT_READ:   return { SSLReturn::WANT_READ,  0 };
+        case SSL_ERROR_WANT_WRITE:  return { SSLReturn::WANT_WRITE, 0 };
+        case SSL_ERROR_ZERO_RETURN: return { SSLReturn::CLOSED,     0 };
+        case SSL_ERROR_SYSCALL:     return { SSLReturn::SYSCALL,    0 };
+        default:                    return { SSLReturn::FATAL,      0 };
     }
 }
 
 SSLResult HttpOpenSSL::Write(void* conn, const char* buf, int len)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int ret = SSL_write(ssl, buf, len);
+    int  ret = SSL_write(ssl, buf, len);
 
     if(ret > 0)
-        return { SSLError::SUCCESS, ret };
+        return { SSLReturn::SUCCESS, ret };
 
     int err = SSL_get_error(ssl, ret);
     switch(err) {
-        case SSL_ERROR_WANT_READ:   return { SSLError::WANT_READ,  0 };
-        case SSL_ERROR_WANT_WRITE:  return { SSLError::WANT_WRITE, 0 };
-        case SSL_ERROR_ZERO_RETURN: return { SSLError::CLOSED,     0 };
-        case SSL_ERROR_SYSCALL:     return { SSLError::SYSCALL,    0 };
-        default:                    return { SSLError::FATAL,      0 };
+        case SSL_ERROR_WANT_READ:   return { SSLReturn::WANT_READ,  0 };
+        case SSL_ERROR_WANT_WRITE:  return { SSLReturn::WANT_WRITE, 0 };
+        case SSL_ERROR_ZERO_RETURN: return { SSLReturn::CLOSED,     0 };
+        case SSL_ERROR_SYSCALL:     return { SSLReturn::SYSCALL,    0 };
+        default:                    return { SSLReturn::FATAL,      0 };
     }
 }
 
-SSLShutdownResult HttpOpenSSL::Shutdown(void* conn)
+SSLResult HttpOpenSSL::WriteFile(void *conn, SSLSocket fd, FileOffset offset, std::size_t count)
+{
+    // Windows version does not contain SSL_sendfile, we need to use Write to send files
+#ifdef _WIN32
+    static_assert(false, "Implement HttpOpenSSL.WriteFile function for Windows");
+#else
+    SSL*    ssl = static_cast<SSL*>(conn);
+    ssize_t ret = SSL_sendfile(ssl, fd, offset, count, 0);
+
+    if(ret > 0)
+        return { SSLReturn::SUCCESS, ret };
+
+    int err = SSL_get_error(ssl, static_cast<int>(ret));
+    switch(err) {
+        case SSL_ERROR_WANT_READ:   return { SSLReturn::WANT_READ,  0 };
+        case SSL_ERROR_WANT_WRITE:  return { SSLReturn::WANT_WRITE, 0 };
+        case SSL_ERROR_ZERO_RETURN: return { SSLReturn::CLOSED,     0 };
+        case SSL_ERROR_SYSCALL:     return { SSLReturn::SYSCALL,    0 };
+        default:                    return { SSLReturn::FATAL,      0 };
+    }
+#endif
+}
+
+SSLReturn HttpOpenSSL::Shutdown(void* conn)
 {
     SSL* ssl = static_cast<SSL*>(conn);
     if(!ssl)
-        return SSLShutdownResult::DONE;
+        return SSLReturn::SUCCESS;
 
     int ret = SSL_shutdown(ssl);
 
@@ -209,21 +249,35 @@ SSLShutdownResult HttpOpenSSL::Shutdown(void* conn)
     // <0 = error, check SSL_get_error()
     if(ret == 1) {
         SSL_free(ssl);
-        return SSLShutdownResult::DONE;
+        return SSLReturn::SUCCESS;
     }
 
     if(ret == 0)
-        return SSLShutdownResult::WANT_READ;
+        return SSLReturn::WANT_READ;
 
     int err = SSL_get_error(ssl, ret);
     if(err == SSL_ERROR_WANT_READ)
-        return SSLShutdownResult::WANT_READ;
+        return SSLReturn::WANT_READ;
     if(err == SSL_ERROR_WANT_WRITE)
-        return SSLShutdownResult::WANT_WRITE;
+        return SSLReturn::WANT_WRITE;
 
     // Any other fatal error
     SSL_free(ssl);
-    return SSLShutdownResult::FAILED;
+    return SSLReturn::FATAL;
+}
+
+SSLReturn HttpOpenSSL::ForceShutdown(void *conn)
+{
+    SSL* ssl = static_cast<SSL*>(conn);
+    if(!ssl)
+        return SSLReturn::SUCCESS;
+
+    // Skip proper TLS shutdown
+    SSL_set_shutdown(ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+
+    // Free SSL object and indicate abrupt shutdown
+    SSL_free(ssl);
+    return SSLReturn::FATAL;
 }
 
 // vvv Helper functions vvv

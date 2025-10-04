@@ -14,11 +14,15 @@ public:
     ~HttpOpenSSL() override;
 
 public: // Main functions
-    void*             Wrap(SSLSocket fd)                          override;
-    bool              Handshake(void* conn)                       override;
-    SSLResult         Read(void* conn, char* buf, int len)        override;
-    SSLResult         Write(void* conn, const char* buf, int len) override;
-    SSLShutdownResult Shutdown(void* conn)                        override;
+    void*     Wrap(SSLSocket fd)                                                        override;
+    SSLReturn Handshake(void* conn)                                                     override;
+    
+    SSLResult Read(void* conn, char* buf, int len)                                      override;
+    SSLResult Write(void* conn, const char* buf, int len)                               override;
+    SSLResult WriteFile(void* conn, SSLSocket fd, FileOffset offset, std::size_t count) override;
+    
+    SSLReturn Shutdown(void* conn)                                                      override;
+    SSLReturn ForceShutdown(void* conn)                                                 override;
 
 private: // Helper functions
     void GlobalOpenSSLInit();

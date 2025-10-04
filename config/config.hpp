@@ -29,7 +29,7 @@ struct NetworkConfig {
     std::uint32_t maxHeaderTotalCount   = 64;
     std::uint32_t maxBodyTotalSize      = 8 * 1024;
 
-    std::uint64_t maxConnections      = 10000;
+    std::uint32_t maxConnections      = 10000;
     std::int32_t  maxConnectionsPerIp = 20;
     std::int16_t  maxRequestBurstSize = 10;
     std::int16_t  maxTokensPerSecond  = 5;

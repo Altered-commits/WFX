@@ -93,8 +93,8 @@ void Engine::HandleRequest(ConnectionContext* ctx)
             
             // A bit of shortcut if its public route (starts with '/public/')
             if(StartsWith(reqInfo.path, "/public/")) {
-                // Skip the '/public' part (7 chars)
-                std::string_view relativePath = reqInfo.path.substr(7); 
+                // Skip the '/public/' part (8 chars)
+                std::string_view relativePath = reqInfo.path.substr(8); 
                 std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
                 // Send the file

@@ -29,6 +29,9 @@ elseif(UNIX)
     file(GLOB_RECURSE WFX_OS_SPECIFIC_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/os_specific/linux/*.cpp")
 endif()
 
+# Filter out utils folder
+list(FILTER WFX_OS_SPECIFIC_SOURCES EXCLUDE REGEX ".*/utils/.*\\.cpp$")
+
 # -----------------------------
 # Engine executable target
 # -----------------------------
