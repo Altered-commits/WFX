@@ -91,10 +91,10 @@ void ConnectionContext::ClearContext()
         *fileInfo = FileInfo{};
 
     isFileOperation    = 0;
-    connInfo           = WFXIpAddress{};
     expectedBodyLength = 0;
-    eventType          = EventType::EVENT_ACCEPT;
     trackBytes         = 0;
+    // eventType          = EventType::EVENT_ACCEPT;
+    // connInfo           = WFXIpAddress{};
     // timeoutTick        = 0;
     // parseState         = 0;
 }

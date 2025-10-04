@@ -21,25 +21,6 @@ HttpOpenSSL::HttpOpenSSL()
     // Start of pain and suffering :(
     GlobalOpenSSLInit();
 
-    // Helper lambda to log OpenSSL error before exiting
-    auto LogOpenSSLErrorAndExit = [&](const char* message) {
-        std::string allErrors;
-        unsigned long errCode;
-        char errBuf[256];
-
-        while((errCode = ERR_get_error()) != 0) {
-            ERR_error_string_n(errCode, errBuf, sizeof(errBuf));
-            if(!allErrors.empty())
-                allErrors.append("; ");
-            allErrors.append(errBuf);
-        }
-
-        if(allErrors.empty())
-            logger.Fatal("[HttpOpenSSL]: ", message, ". No specific OpenSSL error code available");
-        else
-            logger.Fatal("[HttpOpenSSL]: ", message, ". OpenSSL Reason(s): ", allErrors);
-    };
-
     // Use the default TLS method, which negotiates the highest common version
     const SSL_METHOD* method = TLS_server_method();
     ctx = SSL_CTX_new(method);
@@ -288,6 +269,25 @@ void HttpOpenSSL::GlobalOpenSSLInit()
         if(OPENSSL_init_ssl(OPENSSL_INIT_LOAD_CONFIG, nullptr) != 1)
             Logger::GetInstance().Fatal("[HttpOpenSSL]: Initialization failed");
     });
+}
+
+void HttpOpenSSL::LogOpenSSLErrorAndExit(const char *message)
+{
+    std::string allErrors;
+    unsigned long errCode;
+    char errBuf[256];
+
+    while((errCode = ERR_get_error()) != 0) {
+        ERR_error_string_n(errCode, errBuf, sizeof(errBuf));
+        if(!allErrors.empty())
+            allErrors.append("; ");
+        allErrors.append(errBuf);
+    }
+
+    if(allErrors.empty())
+        Logger::GetInstance().Fatal("[HttpOpenSSL]: ", message, ". No specific OpenSSL error code available");
+    else
+        Logger::GetInstance().Fatal("[HttpOpenSSL]: ", message, ". OpenSSL Reason(s): ", allErrors);
 }
 
 } // namespace WFX::Http

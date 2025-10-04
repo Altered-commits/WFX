@@ -26,6 +26,7 @@ public: // Main functions
 
 private: // Helper functions
     void GlobalOpenSSLInit();
+    void LogOpenSSLErrorAndExit(const char* message);
 
 private:
     SSL_CTX* ctx = nullptr;

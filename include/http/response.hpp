@@ -3,6 +3,7 @@
 
 #include "shared/apis/http_api.hpp"
 #include "shared/apis/config_api.hpp"
+#include <cassert>
 
 // Forward declare HttpResponse
 namespace WFX::Http {

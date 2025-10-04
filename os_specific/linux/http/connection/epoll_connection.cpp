@@ -197,8 +197,8 @@ void EpollConnectionHandler::WriteFile(ConnectionContext* ctx, std::string path)
 
 void EpollConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
 {
-    // If a shutdown is already in progress, do nothing
-    if(!ctx || ctx->isShuttingDown)
+    // Sanity check
+    if(!ctx)
         return;
     
     // Force close bypasses any in-progress shutdown or state checks
@@ -273,6 +273,7 @@ void EpollConnectionHandler::Run()
                 std::uint64_t newTick = timerWheel_.GetTick() + (INVOKE_TIMEOUT_COOLDOWN * expirations);
                 timerWheel_.Tick(newTick, [this](std::uint32_t connId) {
                                             ConnectionContext* ctx = &connections_[connId];
+                                            logger_.Info("[Epoll-Debug]: Closing connection: ", ctx->connInfo.GetIpStr());
                                             if(ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE)
                                                 Close(ctx, true);
                                         });
@@ -336,12 +337,6 @@ void EpollConnectionHandler::Run()
             
             // Handle existing connections
             auto* ctx = reinterpret_cast<ConnectionContext*>(events_[i].data.ptr);
-
-            // If a connection is shutting down, ignore all events except the final SHUTDOWN-
-            // -event itself. This prevents trying to read / write to a connection-
-            // -that is bout to die anyways
-            if(ctx->isShuttingDown && ctx->eventType != EventType::EVENT_SHUTDOWN)
-                continue;
 
             // SSL handshake in progress
             if(ctx->eventType == EventType::EVENT_HANDSHAKE) {
@@ -407,10 +402,8 @@ void EpollConnectionHandler::Run()
                 continue;
             }
 
-            if(ev & EPOLLIN) {
+            if(ev & EPOLLIN)
                 Receive(ctx);
-                continue;
-            }
             
             if(ev & EPOLLOUT) {
                 if(ctx->eventType == EventType::EVENT_SEND_FILE)

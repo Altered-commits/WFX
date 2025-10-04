@@ -80,16 +80,14 @@ void Engine::HandleRequest(ConnectionContext* ctx)
             // HTTP/1.1 and HTTP/2 have different formats dawg
             res.version = ctx->requestInfo->version;
 
-            auto& reqInfo     = *ctx->requestInfo;
-            auto  conn        = reqInfo.headers.GetHeader("Connection");
-            bool  shouldClose = true;
-
-            if(!conn.empty()) {
-                res.Set("Connection", std::string{conn});
-                shouldClose = StringGuard::CaseInsensitiveCompare(conn, "close");
-            }
-            else
-                res.Set("Connection", "close");
+            auto& reqInfo    = *ctx->requestInfo;
+            auto  connHeader = reqInfo.headers.GetHeader("Connection");
+            
+            bool shouldClose = (reqInfo.version == HttpVersion::HTTP_1_0)
+                ? !StringGuard::CaseInsensitiveCompare(connHeader, "keep-alive") // HTTP/1.0: Defaults to close
+                : StringGuard::CaseInsensitiveCompare(connHeader, "close");      // HTTP/1.1: Defaults to keep-alive
+            
+            res.Set("Connection", shouldClose ? "close" : "keep-alive");
             
             // A bit of shortcut if its public route (starts with '/public/')
             if(StartsWith(reqInfo.path, "/public/")) {
@@ -158,6 +156,7 @@ void Engine::HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shou
 
             return;
 
+        // TODO: For insufficient cases, we need to be able to stream the remaining response
         case SerializeResult::SERIALIZE_BUFFER_INSUFFICIENT:
             connHandler_->Write(ctx, std::string_view{});
             return;
