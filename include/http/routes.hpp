@@ -47,6 +47,8 @@
 #define WFX_GET_EX(path, mw, cb)  WFX_INTERNAL_ROUTE_REGISTER_EX(GET, path, mw, cb)
 #define WFX_POST_EX(path, mw, cb) WFX_INTERNAL_ROUTE_REGISTER_EX(POST, path, mw, cb)
 
+#define WFX_MW_EX(...) MakeMiddlewareFromFunctions(__VA_ARGS__)
+
 // vvv ROUTE GROUPING vvv
 #define WFX_GROUP_START_IMPL(path, id)                                \
     static struct WFX_CONCAT(WFXGroupStart_, id) {                    \

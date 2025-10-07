@@ -1,4 +1,4 @@
-#include "engine.hpp"
+#include "core_engine.hpp"
 
 #include "include/http/response.hpp"
 #include "http/common/http_error_msgs.hpp"
@@ -16,7 +16,7 @@
 
 namespace WFX::Core {
 
-Engine::Engine(const char* dllPath, bool useHttps)
+CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
     : connHandler_(CreateConnectionHandler(useHttps))
 {
     // Load user's DLL file which we compiled / is cached
@@ -26,7 +26,7 @@ Engine::Engine(const char* dllPath, bool useHttps)
     HandleMiddlewareLoading();
 }
 
-void Engine::Listen(const std::string& host, int port)
+void CoreEngine::Listen(const std::string& host, int port)
 {
     connHandler_->Initialize(host, port);
 
@@ -36,15 +36,15 @@ void Engine::Listen(const std::string& host, int port)
     connHandler_->Run();
 }
 
-void Engine::Stop()
+void CoreEngine::Stop()
 {
     connHandler_->Stop();
 
-    logger_.Info("[Engine]: Stopped Successfully!");
+    logger_.Info("[CoreEngine]: Stopped Successfully!");
 }
 
 // vvv Internals vvv
-void Engine::HandleRequest(ConnectionContext* ctx)
+void CoreEngine::HandleRequest(ConnectionContext* ctx)
 {
     // This will be transmitted through all the layers (from here to middleware to user)
     HttpResponse res;
@@ -91,8 +91,8 @@ void Engine::HandleRequest(ConnectionContext* ctx)
             
             // A bit of shortcut if its public route (starts with '/public/')
             if(StartsWith(reqInfo.path, "/public/")) {
-                // Skip the '/public/' part (8 chars)
-                std::string_view relativePath = reqInfo.path.substr(8); 
+                // Skip the '/public' part (7 chars)
+                std::string_view relativePath = reqInfo.path.substr(7); 
                 std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
                 // Send the file
@@ -136,7 +136,7 @@ void Engine::HandleRequest(ConnectionContext* ctx)
     }
 }
 
-void Engine::HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shouldClose)
+void CoreEngine::HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shouldClose)
 {
     auto&& [serializeResult, bodyView] = HttpSerializer::SerializeToBuffer(res, ctx->rwBuffer);
 
@@ -162,28 +162,28 @@ void Engine::HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shou
             return;
 
         default:
-            logger_.Error("[Engine]: Failed to serialize response");
+            logger_.Error("[CoreEngine]: Failed to serialize response");
             connHandler_->Close(ctx);
             return;
     }
 }
 
 // vvv HELPER STUFF vvv
-void Engine::HandleUserDLLInjection(const char* dllPath)
+void CoreEngine::HandleUserDLLInjection(const char* dllPath)
 {
 #if defined(_WIN32)
     // Windows
     HMODULE userModule = LoadLibraryA(dllPath);
     if (!userModule) {
         DWORD err = GetLastError();
-        logger_.Fatal("[Engine]: ", dllPath, " was not found. Error: ", err);
+        logger_.Fatal("[CoreEngine]: ", dllPath, " was not found. Error: ", err);
         return; // logger_.Fatal probably terminates — keep for clarity
     }
 
     FARPROC rawProc = GetProcAddress(userModule, "RegisterMasterAPI");
     if (!rawProc) {
         DWORD err = GetLastError();
-        logger_.Fatal("[Engine]: Failed to find RegisterMasterAPI() in user DLL. Error: ", err);
+        logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user DLL. Error: ", err);
         return;
     }
 
@@ -195,7 +195,7 @@ void Engine::HandleUserDLLInjection(const char* dllPath)
     void* handle = dlopen(dllPath, RTLD_NOW | RTLD_GLOBAL);
     if(!handle) {
         const char* err = dlerror();
-        logger_.Fatal("[Engine]: ", dllPath, " dlopen failed: ", (err ? err : "unknown error"));
+        logger_.Fatal("[CoreEngine]: ", dllPath, " dlopen failed: ", (err ? err : "unknown error"));
     }
 
     // Clear any existing error
@@ -203,17 +203,17 @@ void Engine::HandleUserDLLInjection(const char* dllPath)
     void* rawSym = dlsym(handle, "RegisterMasterAPI");
     const char* dlsym_err = dlerror();
     if(!rawSym || dlsym_err)
-        logger_.Fatal("[Engine]: Failed to find RegisterMasterAPI() in user SO: ",
+        logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user SO: ",
                       (dlsym_err ? dlsym_err : "symbol not found"));
 
     auto registerFn = reinterpret_cast<WFX::Shared::RegisterMasterAPIFn>(rawSym);
 #endif
     // Call into the user module to inject the API
     registerFn(WFX::Shared::GetMasterAPI());
-    logger_.Info("[Engine]: Successfully injected API and initialized user module: ", dllPath);
+    logger_.Info("[CoreEngine]: Successfully injected API and initialized user module: ", dllPath);
 }
 
-void Engine::HandleMiddlewareLoading()
+void CoreEngine::HandleMiddlewareLoading()
 {
     // // Just for testing, let me register simple middleware
     // middleware_.RegisterMiddleware("Logger", [this](HttpRequest& req, Response& res) {

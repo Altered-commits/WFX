@@ -5,7 +5,30 @@
 
 namespace WFX::OSSpecific {
 
-using namespace WFX::Utils; // For 'FileSystem'
+using namespace WFX::Utils; // For 'BaseFileSystem', 'BaseFile'
+
+class LinuxFile : public BaseFile {
+public:
+    LinuxFile() = default;
+    ~LinuxFile() override;
+
+public:
+    void         Close()                                      override;
+    std::int64_t Read(void* buffer, std::size_t bytes)        override;
+    std::int64_t Write(const void* buffer, std::size_t bytes) override;
+    bool         Seek(std::size_t offset)                     override;
+    std::int64_t Tell()                                 const override;
+    std::size_t  Size()                                 const override;
+    bool         IsOpen()                               const override;
+
+public: // For internal public use
+    bool OpenRead(const char* path);
+    bool OpenWrite(const char* path);
+
+private:
+    int         fd_   = -1;
+    std::size_t size_ = 0;
+};
 
 class LinuxFileSystem : public BaseFileSystem {
 public:
@@ -14,6 +37,10 @@ public:
     bool        DeleteFile(const char* path)                 const override;
     bool        RenameFile(const char* from, const char* to) const override;
     std::size_t GetFileSize(const char* path)                const override;
+
+    // File Handling
+    BaseFilePtr OpenFileRead(const char* path)  override;
+    BaseFilePtr OpenFileWrite(const char* path) override;
 
     // Directory Manipulation
     bool          DirectoryExists(const char* path)                                                 const override;

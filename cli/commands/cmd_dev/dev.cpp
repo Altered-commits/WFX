@@ -1,182 +1,12 @@
 #include "dev.hpp"
-
-#include "config/config.hpp"
-#include "http/common/http_global_state.hpp"
-#include "utils/logger/logger.hpp"
-#include "utils/filesystem/filesystem.hpp"
-#include "utils/process/process.hpp"
-#include "utils/backport/string.hpp"
+#include "dev_helper.hpp"
 
 namespace WFX::CLI {
 
-using namespace WFX::Core;  // For 'Config'
 using namespace WFX::Http;  // For 'WFXGlobalState'
 using namespace WFX::Utils; // For 'Logger'
 
-// Common functionality used for all OS'es
-void HandleUserSrcCompilation(const char* dllDir, const char* dllPath)
-{
-    auto& fs     = FileSystem::GetFileSystem();
-    auto& proc   = ProcessUtils::GetInstance();
-    auto& logger = Logger::GetInstance();
-    auto& config = Config::GetInstance();
-
-    const std::string& projName  = config.projectConfig.projectName;
-    const auto&        toolchain = config.toolchainConfig;
-    const std::string  srcDir    = projName + "/src";
-    const std::string  objDir    = projName + "/build/objs";
-
-    if(!fs.DirectoryExists(srcDir.c_str()))
-        logger.Fatal("[WFX-Master]: Failed to locate 'src' directory inside of '", projName, "/src'.");
-
-    if(!fs.CreateDirectory(objDir))
-        logger.Fatal("[WFX-Master]: Failed to create obj dir: ", objDir, '.');
-
-    if(!fs.CreateDirectory(dllDir))
-        logger.Fatal("[WFX-Master]: Failed to create dll dir: ", dllDir, '.');
-
-    // Prebuild fixed portions of compiler and linker commands
-    const std::string compilerBase = toolchain.ccmd + " " + toolchain.cargs + " ";
-    const std::string objPrefix    = toolchain.objFlag + "\"";
-    const std::string dllLinkTail  = toolchain.largs + " " + toolchain.dllFlag + "\"" + dllPath + '"';
-
-    std::string linkCmd = toolchain.lcmd + " ";
-
-    // Recurse through src/ files
-    fs.ListDirectory(srcDir, true, [&](const std::string& cppFile) {
-        if(!EndsWith(cppFile.c_str(), ".cpp") &&
-            !EndsWith(cppFile.c_str(), ".cxx") &&
-            !EndsWith(cppFile.c_str(), ".cc")) return;
-
-        logger.Info("[WFX-Master]: Compiling src/ file: ", cppFile);
-
-        // Construct relative path
-        std::string relPath = cppFile.substr(srcDir.size());
-        if(!relPath.empty() && (relPath[0] == '/' || relPath[0] == '\\'))
-            relPath.erase(0, 1);
-
-        // Replace .cpp with .obj
-        std::string objFile = objDir + "/" + relPath;
-        objFile.replace(objFile.size() - 4, 4, ".obj");
-
-        // Ensure obj subdir exists
-        std::size_t slash = objFile.find_last_of("/\\");
-        if(slash != std::string::npos) {
-            std::string dir = objFile.substr(0, slash);
-            if(!fs.DirectoryExists(dir.c_str()) && !fs.CreateDirectory(dir))
-                logger.Fatal("[WFX-Master]: Failed to create obj subdirectory: ", dir);
-        }
-
-        // Construct compile command
-        std::string compileCmd = compilerBase + "\"" + cppFile + "\" " + objPrefix + objFile + "\"";
-        auto result = proc.RunProcess(compileCmd);
-        if(result.exitCode < 0 || result.osCode == 1)
-            logger.Fatal("[WFX-Master]: Compilation failed for: ", cppFile, "OS code: ", result.osCode);
-
-        // Append obj to link command
-        linkCmd += "\"" + objFile + "\" ";
-    });
-
-    // Get any libs which need to be linked to user dll
-    auto libList = fs.ListDirectory("wfx/lib", false);
-
-    // Final linking
-    // If any libraries exist, give linker the path to the libraries
-    if(!libList.empty()) {
-#ifndef _WIN32
-        // POSIX (Linux/macOS), TODO: Don't hardcode this, have some setting inside of toolchain.toml
-        linkCmd += " \"-Wl,-rpath,wfx/lib\" ";
-#endif
-        for(const auto& libPath : libList)
-            linkCmd += " \"" + libPath + "\" ";
-    }
-
-    // Final link command
-    linkCmd += dllLinkTail;
-
-    auto linkResult = proc.RunProcess(linkCmd);
-    if(linkResult.exitCode < 0 || linkResult.osCode == 1)
-        logger.Fatal("[WFX-Master]: Linking failed. DLL not created. Error: ", linkResult.osCode);
-
-    logger.Info("[WFX-Master]: User project successfully compiled to ", dllDir);
-}
-
-#ifdef _WIN32
-#include <Windows.h>
-#include <Dbghelp.h>
-#include <thread>
-#include <chrono>
-
-#pragma comment(lib, "Dbghelp.lib")
-
-BOOL WINAPI ConsoleHandler(DWORD signal)
-{
-    if(signal == CTRL_C_EVENT) {
-        Logger::GetInstance().Info("[WFX]: Shutting down...");
-        shouldStop = true;
-        return TRUE;
-    }
-    return FALSE;
-}
-
-LONG WINAPI ExceptionFilter(EXCEPTION_POINTERS* ep) {
-    HANDLE file = CreateFileA("crash.dmp", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    
-    if(file != INVALID_HANDLE_VALUE) {
-        MINIDUMP_EXCEPTION_INFORMATION mei{};
-        mei.ThreadId = GetCurrentThreadId();
-        mei.ExceptionPointers = ep;
-        mei.ClientPointers = FALSE;
-        
-        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, MiniDumpWithFullMemory, &mei, nullptr, nullptr);
-        CloseHandle(file);
-    }
-
-    return EXCEPTION_EXECUTE_HANDLER;
-}
-#else
-#include <wait.h>
-#include <signal.h>
-
-void HandleMasterSignal(int)
-{
-    auto& globalState = GetGlobalState();
-    globalState.shouldStop = true;
-    
-    Logger::GetInstance().Info("[WFX-Master]: Ctrl+C pressed, shutting down workers...");
-
-    if(globalState.workerPGID > 0)
-        kill(-globalState.workerPGID, SIGTERM); // Broadcast SIGTERM to all workers
-}
-
-void HandleWorkerSignal(int)
-{
-    auto& globalState = GetGlobalState();
-    globalState.shouldStop = true;
-    
-    // Stop is atomic, its safe to call it in signal handler
-    if(globalState.enginePtr) {
-        globalState.enginePtr->Stop();
-        globalState.enginePtr = nullptr;
-    }
-}
-
-void PinWorkerToCPU(int workerIndex) {
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    
-    int cpu = workerIndex % sysconf(_SC_NPROCESSORS_ONLN); // Round-Robin
-    
-    CPU_SET(cpu, &cpuset);
-
-    if(sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0)
-        Logger::GetInstance().Error("[WFX-Master]: Failed to pin worker ", workerIndex, " to CPU");
-
-    Logger::GetInstance().Info("[WFX-Master]: Worker ", workerIndex, " pinned to CPU ", cpu);
-}
-#endif // _WIN32
-
-int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttps, bool overrideHttpsPort)
+int RunDevServer(const ServerConfig& cfg)
 {
     auto& logger      = Logger::GetInstance();
     auto& config      = Config::GetInstance();
@@ -188,7 +18,7 @@ int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttp
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
     SetUnhandledExceptionFilter(ExceptionFilter);
 
-    WFX::Core::Engine engine{noCache};
+    WFX::Core::CoreEngine engine{noCache};
     engine.Listen(host, port);
 
     while(!shouldStop)
@@ -205,22 +35,28 @@ int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttp
     // Handle initialization of SSL key before we do anything else
     if(!RandomPool::GetInstance().GetBytes(globalState.sslKey.data(), globalState.sslKey.size()))
         logger.Fatal("[WFX-Master]: Failed to initialize SSL key");
+    
+    // Handle compilation of templates
+    globalState.templateEnginePtr = &TemplateEngine::GetInstance();
 
     // This will be used in compiling of user dll
     const std::string dllDir      = config.projectConfig.projectName + "/build/dlls/";
+    const char*       dllDirCStr  = dllDir.c_str();
     const std::string dllPath     = dllDir + "user_entry.so";
     const char*       dllPathCStr = dllPath.c_str();
-    const char*       dllDirCStr  = dllDir.c_str();
     
-    if(noCache || !fs.FileExists(dllPathCStr))
+    if(cfg.GetFlag(ServerFlags::NO_BUILD_CACHE) || !fs.FileExists(dllPathCStr))
         HandleUserSrcCompilation(dllDirCStr, dllPathCStr);
     else
         logger.Info("[WFX-Master]: File already exists, skipping user code compilation");
 
     // Switch ports if we enable https and we don't want to override https default port
-    port = useHttps && !overrideHttpsPort ? 443 : port;
+    bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
+    bool ohp      = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
+
+    int port = useHttps && !ohp ? 443 : cfg.port;
     logger.Info("[WFX-Master]: Dev server running at ",
-                useHttps ? "https://" : "http://", host, ':', port);
+                useHttps ? "https://" : "http://", cfg.host, ':', port);
 
     logger.Info("[WFX-Master]: Press Ctrl+C to stop");
     logger.SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
@@ -235,7 +71,7 @@ int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttp
             else
                 setpgid(0, globalState.workerPGID); // Join first worker's group
 
-            WFX::Core::Engine engine{dllPathCStr, useHttps};
+            WFX::Core::CoreEngine engine{dllPathCStr, useHttps};
             globalState.enginePtr = &engine;
 
             signal(SIGTERM, HandleWorkerSignal);
@@ -245,7 +81,7 @@ int RunDevServer(const ::std::string& host, int port, bool noCache, bool useHttp
 
             PinWorkerToCPU(i);
 
-            engine.Listen(host, port);
+            engine.Listen(cfg.host, port);
             return 0;
         }
 

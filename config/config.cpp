@@ -24,8 +24,8 @@ void Config::LoadCoreSettings(std::string_view path) {
         ExtractValueOrFatal(tbl, logger, "Project", "project_name", projectConfig.projectName);
         ExtractStringArrayOrFatal(tbl, logger, "Project", "middleware_list", projectConfig.middlewareList);
         
-        projectConfig.publicDir   = projectConfig.projectName + "/public/";
-        projectConfig.templateDir = projectConfig.projectName + "/templates/";
+        projectConfig.publicDir   = projectConfig.projectName + "/public";
+        projectConfig.templateDir = projectConfig.projectName + "/templates";
 
         // vvv SSL vvv
         ExtractValueOrFatal(tbl, logger, "SSL", "cert_path", sslConfig.certPath);

@@ -1,5 +1,5 @@
-#ifndef WFX_ENGINE_HPP
-#define WFX_ENGINE_HPP
+#ifndef WFX_CORE_ENGINE_HPP
+#define WFX_CORE_ENGINE_HPP
 
 #include "config/config.hpp"
 #include "http/connection/http_connection_factory.hpp"
@@ -12,9 +12,9 @@ namespace WFX::Core {
 using namespace WFX::Utils; // For 'Logger', 'FileSystem', 'ProcessUtils'
 using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpRequest', 'HttpMiddleware'
 
-class Engine {
+class CoreEngine {
 public:
-    Engine(const char* dllPath, bool useHttps);
+    CoreEngine(const char* dllPath, bool useHttps);
     void Listen(const std::string& host, int port);
     void Stop();
 
@@ -36,4 +36,4 @@ private:
 
 } // namespace WFX
 
-#endif // WFX_ENGINE_HPP
+#endif // WFX_CORE_ENGINE_HPP

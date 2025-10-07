@@ -34,13 +34,14 @@ static void ScaffoldProject(const std::string& projectName)
 
     // 2. Create essential config
     CreateFile(base / "wfx.toml", R"([Project]
-project_name = ")" + projectName + R"("
+project_name    = ")" + projectName + R"("
 middleware_list = ["Logger"]    # Order of middleware registered by either User or Engine
 
 [Network]
 send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
+file_cache_size              = 20      # Max number of files kept in memory cache (LFU)
 header_reserve_hint          = 512     # Initial header allocation hint size
 max_header_size              = 8192    # Max total size of all headers
 max_header_count             = 64      # Max number of headers allowed

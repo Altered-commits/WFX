@@ -9,7 +9,7 @@
 #include "http/common/route_common.hpp"
 
 template<typename... MWs>
-inline MiddlewareStack MW_EX(MWs&&... mws)
+inline MiddlewareStack MakeMiddlewareFromFunctions(MWs&&... mws)
 {
     MiddlewareStack stack;
     stack.reserve(sizeof...(mws));

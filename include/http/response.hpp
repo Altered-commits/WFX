@@ -10,7 +10,7 @@ namespace WFX::Http {
     struct HttpResponse;
 }
 
-/* User side implementation of 'Response' class. Engine passes the API */
+/* User side implementation of 'Response' class. CoreEngine passes the API */
 class Response {
 public:
     Response(WFX::Http::HttpResponse* backend,
@@ -50,7 +50,7 @@ public:
     void SendTemplate(std::string&& path, bool autoHandle404 = true)
     {
         auto& templateDir = configApi_->GetConfig().projectConfig.templateDir;
-        SendFile(templateDir + path, autoHandle404);
+        SendFile(templateDir + '/' + path, autoHandle404);
     }
 
 private:

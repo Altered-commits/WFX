@@ -17,19 +17,22 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 # -----------------------------
 # Gather sources (exclude utils here)
 # -----------------------------
-file(GLOB_RECURSE WFX_CLI_SOURCES       "${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cpp")
-file(GLOB_RECURSE WFX_CONFIG_SOURCES    "${CMAKE_CURRENT_SOURCE_DIR}/config/*.cpp")
-file(GLOB_RECURSE WFX_ENGINE_SOURCES    "${CMAKE_CURRENT_SOURCE_DIR}/engine/*.cpp")
-file(GLOB_RECURSE WFX_HTTP_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/http/*.cpp")
-file(GLOB_RECURSE WFX_SHARED_SOURCES    "${CMAKE_CURRENT_SOURCE_DIR}/shared/*.cpp")
+file(GLOB_RECURSE WFX_CLI_SOURCES         "${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cpp")
+file(GLOB_RECURSE WFX_CONFIG_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/config/*.cpp")
+file(GLOB_RECURSE WFX_ENGINE_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/engine/*.cpp")
+file(GLOB_RECURSE WFX_HTTP_SOURCES        "${CMAKE_CURRENT_SOURCE_DIR}/http/*.cpp")
+file(GLOB_RECURSE WFX_SHARED_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/shared/*.cpp")
+file(GLOB_RECURSE WFX_OS_SPECIFIC_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/os_specific/*.cpp")
 
 if(WIN32)
-    file(GLOB_RECURSE WFX_OS_SPECIFIC_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/os_specific/windows/*.cpp")
+    # Exclude all Linux sources when building for Windows
+    list(FILTER WFX_OS_SPECIFIC_SOURCES EXCLUDE REGEX ".*/linux/.*\\.cpp$")
 elseif(UNIX)
-    file(GLOB_RECURSE WFX_OS_SPECIFIC_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/os_specific/linux/*.cpp")
+    # Exclude all Windows sources when building for Linux
+    list(FILTER WFX_OS_SPECIFIC_SOURCES EXCLUDE REGEX ".*/windows/.*\\.cpp$")
 endif()
 
-# Filter out utils folder
+# Filter out utils folder from os_specific/<os_specific_folder>/utils/
 list(FILTER WFX_OS_SPECIFIC_SOURCES EXCLUDE REGEX ".*/utils/.*\\.cpp$")
 
 # -----------------------------

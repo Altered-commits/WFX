@@ -1,22 +1,35 @@
-#include "file_cache.hpp"
+#include "filecache.hpp"
 
+#include "config/config.hpp"
 #include <cassert>
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <fcntl.h>
 #include <unistd.h>
 
+#ifdef _WIN32
+    #define CloseFile(fd) CloseHandle(fd)
+#else
+    #define CloseFile(fd) close(fd)
+#endif
+
 namespace WFX::OSSpecific {
 
-FileCache::FileCache(std::size_t capacity)
+using namespace WFX::Core; // For 'Config'
+
+// vvv Constructor & Destructor vvvv
+FileCache::FileCache()
     : minFreq_(0)
 {
+    std::size_t capacity = Config::GetInstance().osSpecificConfig.fileCacheSize;
+    std::size_t safe     = capacity;
+
+#ifndef _WIN32
+    // Leave room for sockets + other fds on Linux/Unix
     struct rlimit rl;
-    std::size_t safe = capacity;
-    
-    // Leave room for sockets + other fds
     if(getrlimit(RLIMIT_NOFILE, &rl) == 0)
         safe = rl.rlim_cur / 2;
+#endif
     
     capacity_ = std::min(capacity, safe);
 }
@@ -24,10 +37,17 @@ FileCache::FileCache(std::size_t capacity)
 FileCache::~FileCache()
 {
     for(auto &pair : entries_)
-        close(pair.second.fd);
+        CloseFile(pair.second.fd);
 }
 
-std::pair<int, off_t> FileCache::GetFileDesc(const std::string &path)
+// vvv User Functions vvv
+FileCache& FileCache::GetInstance()
+{
+    static FileCache cache;
+    return cache;
+}
+
+std::pair<FileDescriptor, FileSize> FileCache::GetFileDesc(const std::string &path)
 {
     auto it = entries_.find(path);
     if(it != entries_.end()) {
@@ -35,20 +55,46 @@ std::pair<int, off_t> FileCache::GetFileDesc(const std::string &path)
         return {it->second.fd, it->second.fileSize};
     }
 
-    // Not cached, open the file
-    int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    FileDescriptor fd   = 0;
+    FileSize       size = 0;
+
+#ifdef _WIN32
+    fd = CreateFileA(
+        path.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OVERLAPPED,
+        nullptr
+    );
+
+    if(fd == INVALID_HANDLE_VALUE)
+        return {INVALID_HANDLE_VALUE, 0};
+
+    LARGE_INTEGER fsize;
+    if(!GetFileSizeEx(fd, &fsize)) {
+        CloseHandle(fd);
+        return {INVALID_HANDLE_VALUE, 0};
+    }
+
+    size = static_cast<std::uint64_t>(fsize.QuadPart);
+#else
+    fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     if(fd < 0)
         return {-1, 0};
 
-    // Get file size once
     struct stat st;
     if(fstat(fd, &st) < 0 || !S_ISREG(st.st_mode)) {
         close(fd);
         return {-1, 0};
     }
 
-    Insert(path, fd, st.st_size);
-    return {fd, st.st_size};
+    size = st.st_size;
+#endif
+
+    Insert(path, fd, size);
+    return {fd, size};
 }
 
 // vvv Helper Functions vvv
@@ -73,7 +119,7 @@ void FileCache::Touch(const std::string &key)
     entry.bucketIter = freqBuckets_[newFreq].begin();
 }
 
-void FileCache::Insert(const std::string &key, int fd, off_t size)
+void FileCache::Insert(const std::string &key, FileDescriptor fd, FileSize size)
 {
     if(entries_.size() >= capacity_)
         Evict();
@@ -93,8 +139,8 @@ void FileCache::Evict()
     std::string keyToEvict = bucket.back();
     bucket.pop_back();
 
-    int fd = entries_[keyToEvict].fd;
-    close(fd); // Close FD
+    FileDescriptor fd = entries_[keyToEvict].fd;
+    CloseFile(fd); // Close FD
 
     entries_.erase(keyToEvict);
 

@@ -3,7 +3,9 @@
 
 #include <string>
 #include <functional>
+#include <memory>
 #include <vector>
+#include <cstdint>
 
 // Dawg Windows is hurting my brain
 // Like i do not even include stuff related to Windows in this file yet it SOMEHOW picks up the winapi macros
@@ -12,8 +14,31 @@
 
 namespace WFX::Utils {
 
+class BaseFile;
+
 using FileCallback  = std::function<void(std::string)>;
 using DirectoryList = std::vector<std::string>;
+using BaseFilePtr   = std::unique_ptr<BaseFile>;
+
+class BaseFile {
+public:
+    virtual ~BaseFile() = default;
+
+    // Close file (RAII handles this automatically)
+    virtual void Close() = 0;
+
+    // Reading / Writing chunks
+    virtual std::int64_t Read(void* buffer, std::size_t bytes)        = 0;
+    virtual std::int64_t Write(const void* buffer, std::size_t bytes) = 0;
+
+    // Seek / Tell
+    virtual bool         Seek(std::size_t offset) = 0;
+    virtual std::int64_t Tell() const             = 0;
+
+    // Utility
+    virtual std::size_t Size()   const = 0;
+    virtual bool        IsOpen() const = 0;
+};
 
 class BaseFileSystem {
 public:
@@ -24,6 +49,10 @@ public:
     virtual bool        DeleteFile(const char* path)                 const = 0;
     virtual bool        RenameFile(const char* from, const char* to) const = 0;
     virtual std::size_t GetFileSize(const char* path)                const = 0;
+
+    // Open file for reading/writing: returns RAII-wrapped BaseFile
+    virtual BaseFilePtr OpenFileRead(const char* path)  = 0;
+    virtual BaseFilePtr OpenFileWrite(const char* path) = 0;
 
     // Directory Manipulation
     virtual bool          DirectoryExists(const char* path)                                                const = 0;
