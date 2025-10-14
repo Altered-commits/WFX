@@ -41,13 +41,19 @@ bool IpLimiter::AllowRequest(const WFXIpAddress& ip)
 
         TokenBucket& bucket = entry.bucket;
 
-        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - bucket.lastRefill).count();
-        const int refillRate = static_cast<int>(cfg.maxTokensPerSecond);
-        const int burstCap   = static_cast<int>(cfg.maxRequestBurstSize);
-        const int refill     = static_cast<int>(elapsedMs * refillRate / 1000);
+        const std::int64_t elapsedMs  = std::max<std::int64_t>(
+            0, std::chrono::duration_cast<std::chrono::milliseconds>(now - bucket.lastRefill).count()
+        );
+        const std::uint32_t refillRate = cfg.maxTokensPerSecond;
+        const std::uint32_t burstCap   = cfg.maxRequestBurstSize;
+
+        const std::uint64_t refill = (elapsedMs * refillRate) / 1000ULL;
 
         if(refill > 0) {
-            bucket.tokens     = std::min(burstCap, bucket.tokens + refill);
+            bucket.tokens = std::min<std::uint32_t>(
+                burstCap,
+                bucket.tokens + static_cast<std::uint32_t>(refill)
+            );
             bucket.lastRefill = now;
         }
 

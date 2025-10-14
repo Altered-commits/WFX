@@ -36,12 +36,12 @@ private:
 
 private:
     struct TokenBucket {
-        int tokens = 0;
+        std::uint64_t tokens = 0;
         std::chrono::steady_clock::time_point lastRefill = std::chrono::steady_clock::now();
     };
 
     struct IpLimiterEntry {
-        int connectionCount = 0;
+        std::uint32_t connectionCount = 0;
         TokenBucket bucket;
     };
 

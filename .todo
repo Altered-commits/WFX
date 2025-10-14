@@ -4,16 +4,19 @@ wfx dev	    Start dev server (auto-reload)
 wfx build	Build the binary
 wfx doctor	Check requirements for WFX
 
-To implement:
+To implement (In no specific order):
 1. Auto user code compiling into dll (Done)
 2. Middleware (Done)
 3. HTTPS (Done)
 4. Per route middleware (Done)
 5. Hot-Reload
-6. HTML Templating (SSR)
+6. HTML Templating (SSR) ('include' and 'partial' done, need to add more stuff)
 7. DB support
 8. HTTP 2 and 3 support
+9. Rate Limiting (Done: Connection and Request)
+10. Timeout (Done)
 
 To Fix:
 1. Cache files < 4KB, don't use TransmitFile / sendfile on every single file
 2. Batch syscalls (for receving and sending data) instead of spamming them every request
+3. Implement sending file via write call for stuff without sendfile support (Ex: OpenSSL's SSL_sendfile)

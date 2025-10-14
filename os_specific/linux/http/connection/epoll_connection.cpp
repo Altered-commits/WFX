@@ -273,7 +273,6 @@ void EpollConnectionHandler::Run()
                 std::uint64_t newTick = timerWheel_.GetTick() + (INVOKE_TIMEOUT_COOLDOWN * expirations);
                 timerWheel_.Tick(newTick, [this](std::uint32_t connId) {
                                             ConnectionContext* ctx = &connections_[connId];
-                                            logger_.Info("[Epoll-Debug]: Closing connection: ", ctx->connInfo.GetIpStr());
                                             if(ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE)
                                                 Close(ctx, true);
                                         });
@@ -309,18 +308,15 @@ void EpollConnectionHandler::Run()
                         tmpIp.ip.v6  = reinterpret_cast<sockaddr_in6*>(sa)->sin6_addr;
                         tmpIp.ipType = AF_INET6;
                     }
-                    else
-                        tmpIp.ipType = 255;
-
-                    // Check limiter
-                    if(!ipLimiter_.AllowConnection(tmpIp)) {
+                    // Garbage IPs not allowed, close connection
+                    else {
                         close(clientFd);
                         continue;
                     }
 
-                    // Grab a connection slot
-                    ConnectionContext* ctx = GetConnection();
-                    if(!ctx) {
+                    // Check limiter and try to grab a slot if its valid
+                    ConnectionContext* ctx = nullptr;
+                    if(!ipLimiter_.AllowConnection(tmpIp) || !(ctx = GetConnection())) {
                         close(clientFd);
                         continue;
                     }
@@ -402,8 +398,15 @@ void EpollConnectionHandler::Run()
                 continue;
             }
 
-            if(ev & EPOLLIN)
+            if(ev & EPOLLIN) {
+                // Check per ip request rate BEFORE processing anything
+                if(!ipLimiter_.AllowRequest(ctx->connInfo)) {
+                    Write(ctx, tooManyRequests);
+                    Close(ctx);
+                    continue;
+                }
                 Receive(ctx);
+            }
             
             if(ev & EPOLLOUT) {
                 if(ctx->eventType == EventType::EVENT_SEND_FILE)
@@ -711,8 +714,14 @@ void EpollConnectionHandler::WrapAccept(ConnectionContext *ctx, int clientFd)
         cev.events = EPOLLIN | EPOLLET;
     }
 
-    if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, clientFd, &cev) < 0)
+    if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, clientFd, &cev) < 0) {
         Close(ctx);
+        return;
+    }
+
+    // Set an initial timeout for the new connection so they don't connect-
+    // -and stay idle forever
+    RefreshExpiry(ctx, config_.networkConfig.idleTimeout); 
 }
 
 ssize_t EpollConnectionHandler::WrapRead(ConnectionContext* ctx, char* buf, std::size_t len)

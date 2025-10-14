@@ -215,12 +215,6 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
 
 void CoreEngine::HandleMiddlewareLoading()
 {
-    // // Just for testing, let me register simple middleware
-    // middleware_.RegisterMiddleware("Logger", [this](HttpRequest& req, Response& res) {
-    //     logger_.Info("[Logger-Middleware]: Request on path: ", req.path);
-    //     return true;
-    // });
-
     middleware_.LoadMiddlewareFromConfig(config_.projectConfig.middlewareList);
 
     // After we load the middleware, we no longer need the map thingy as all the stuff is properly loaded-

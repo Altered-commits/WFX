@@ -193,7 +193,7 @@ void TemplateEngine::PreCompileTemplates()
     // Traverse the entire template directory looking for .html files
     // Then compile those html files into /build/templates/(static | dynamic)/
     fs.ListDirectory(inputDir, true, [&](std::string inPath) {
-        if(!EndsWith(inPath, ".html") || !EndsWith(inPath, ".htm"))
+        if(!EndsWith(inPath, ".html") && !EndsWith(inPath, ".htm"))
             return;
         
         logger_.Info("[TemplateEngine]: Compiling template: ", inPath);
