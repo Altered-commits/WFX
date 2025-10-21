@@ -3,6 +3,7 @@
 
 #include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
+#include "http/common/http_route_common.hpp"
 
 #include <nlohmann/json_fwd.hpp>
 
@@ -10,20 +11,28 @@
 #include <string>
 
 // To keep naming consistent :)
-using Json     = nlohmann::json;
-using BodyType = std::variant<std::monostate, std::string_view, std::string>;
+using Json = nlohmann::json;
 
 namespace WFX::Http {
 
-struct HttpResponse {
-    HttpVersion     version = HttpVersion::HTTP_1_1;
-    HttpStatus      status  = HttpStatus::OK;
-    ResponseHeaders headers;
-    BodyType        body;
+// Forward declare connection handler here, we will include its impl in .cpp file
+class HttpConnectionHandler;
 
+using BodyType = std::variant<std::monostate, std::string_view, std::string, StreamGenerator>;
+
+enum class OperationType : std::uint8_t {
+    TEXT,
+    FILE,
+    STREAM
+};
+
+struct HttpResponse {
+public:
     HttpResponse& Status(HttpStatus code);
     HttpResponse& Set(std::string&& key, std::string&& value);
-    bool IsFileOperation() const;
+
+    bool IsFileOperation()   const;
+    bool IsStreamOperation() const;
 
     void SendText(const char* cstr);
     void SendText(std::string&& str);
@@ -37,13 +46,24 @@ struct HttpResponse {
     void SendTemplate(const char* cstr, bool autoHandle404);
     void SendTemplate(std::string&& path, bool autoHandle404);
 
+    // Stream API
+    void StreamFile(const char* cstr, bool autoHandle404);
+    void StreamFile(std::string&& path, bool autoHandle404);
+    void Stream(StreamGenerator generator, bool skipChecks = false);
+
 private:
     void SetTextBody(std::string&& text, const char* contentType);
     void PrepareFileHeaders(std::string_view path);
-    bool ValidateFileSend(std::string_view path, bool autoHandle404);
+    bool ValidateFileSend(std::string_view path, bool autoHandle404, const char* funcName = "SendFile()");
+
+public:
+    HttpVersion     version = HttpVersion::HTTP_1_1;
+    HttpStatus      status  = HttpStatus::OK;
+    ResponseHeaders headers;
+    BodyType        body;
 
 private:
-    bool isFileOperation_ = false;
+    OperationType operationType_ = OperationType::TEXT;
 };
 
 } // namespace WFX::Http

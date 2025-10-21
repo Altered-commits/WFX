@@ -2,6 +2,7 @@
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
 #include "http/request/http_request.hpp"
+#include "http/common/http_route_common.hpp"
 #include "utils/backport/move_only_function.hpp"
 #include "utils/crypt/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
@@ -79,9 +80,9 @@ using ReceiveCallback = WFX::Utils::MoveOnlyFunction<void(ConnectionContext*)>;
 
 struct FileInfo {
 #if defined(_WIN32)
-    void* handle;        // HANDLE is pointer-sized
-    uint64_t fileSize;   // 64-bit for large files
-    uint64_t offset;     // current send offset
+    HANDLE        handle{0};     // HANDLE is pointer-sized
+    std::uint64_t fileSize{0};   // 64-bit for large files
+    std::uint64_t offset{0};     // current send offset
 #else
     int   fd       = -1;     // Linux file descriptor
     off_t fileSize = 0;      // File size
@@ -89,18 +90,20 @@ struct FileInfo {
 #endif
 };
 
-// Simply to assert that eventType must exist in anything related to connection
-// And must be the first member as well (offset == 0)
+// Simply to assert that eventType must exist in anything related to connection-
+// -and must be the first member as well (offset == 0)
 struct ConnectionTag {
     EventType eventType = EventType::EVENT_ACCEPT;       // 1 byte
 };
 
 struct ConnectionContext : public ConnectionTag {
+    // ------------------------------------------ // 1 byte from ConnectionTag
     struct {
-        std::uint8_t parseState      : 4;         // --
-        std::uint8_t connectionState : 2;         //  |
-        std::uint8_t isFileOperation : 1;         //  |
-        std::uint8_t isShuttingDown  : 1;         //  v
+        std::uint8_t parseState        : 3;       // --
+        std::uint8_t connectionState   : 2;       //  |
+        std::uint8_t isStreamOperation : 1;       //  |
+        std::uint8_t isFileOperation   : 1;       //  |
+        std::uint8_t isShuttingDown    : 1;       //  v
     };                                            // 1 byte
 
     bool          handshakeDone       = false;    // 1 byte
@@ -109,11 +112,12 @@ struct ConnectionContext : public ConnectionTag {
     
     WFX::Utils::RWBuffer rwBuffer;                // 16 bytes
     
-    HttpRequest*   requestInfo        = nullptr;  // 8 bytes
-    WFXSocket      socket             = -1;       // 4 bytes
-    std::uint32_t  expectedBodyLength = 0;        // 4 bytes
-    FileInfo*      fileInfo           = nullptr;  // 8 bytes
-    WFXIpAddress   connInfo;                      // 20 bytes
+    std::uint32_t   expectedBodyLength = 0;        // 4 bytes
+    WFXSocket       socket             = -1;       // 4 | 8 bytes
+    StreamGenerator streamGenerator    = {};       // 8 | 16 bytes
+    HttpRequest*    requestInfo        = nullptr;  // 8 bytes
+    FileInfo*       fileInfo           = nullptr;  // 8 bytes
+    WFXIpAddress    connInfo;                      // 20 bytes
 
 public: // Helper functions
     void ResetContext();
@@ -125,7 +129,7 @@ public: // Helper functions
     HttpParseState  GetParseState()      const;
     ConnectionState GetConnectionState() const;
 };
-static_assert(sizeof(ConnectionContext) <= 80, "ConnectionContext must STRICTLY be less than or equal to 80 bytes.");
+static_assert(sizeof(ConnectionContext) <= 100, "ConnectionContext must STRICTLY be less than or equal to 100 bytes.");
 
 // Abstraction for Windows and Linux impl
 class HttpConnectionHandler {
@@ -146,6 +150,9 @@ public:
 
     // Write file directly to sockets (Async)
     virtual void WriteFile(ConnectionContext* ctx, std::string path) = 0;
+
+    // Stream data to socket via a generator function (Async)
+    virtual void Stream(ConnectionContext* ctx, StreamGenerator generator) = 0;
 
     // Close a client socket
     virtual void Close(ConnectionContext* ctx, bool forceClose = false) = 0;

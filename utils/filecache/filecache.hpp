@@ -1,5 +1,5 @@
-#ifndef WFX_LINUX_FILE_CACHE_HPP
-#define WFX_LINUX_FILE_CACHE_HPP
+#ifndef WFX_UTILS_FILE_CACHE_HPP
+#define WFX_UTILS_FILE_CACHE_HPP
 
 #include <list>
 #include <string>
@@ -16,7 +16,7 @@
     using FileSize       = off_t;
 #endif
 
-namespace WFX::OSSpecific {
+namespace WFX::Utils {
 
 struct CacheEntry {
     int           fd;                            // Actual file descriptor
@@ -27,13 +27,13 @@ struct CacheEntry {
 
 class FileCache final {
 public:
-    static FileCache&                   GetInstance();
+    FileCache(std::size_t capacity);
+    ~FileCache();
+
+public:
     std::pair<FileDescriptor, FileSize> GetFileDesc(const std::string& path);
 
 private:
-    FileCache();
-    ~FileCache();
-
     // No need for copy / move semantics
     FileCache(const FileCache&)            = delete;
     FileCache(FileCache&&)                 = delete;
@@ -56,6 +56,6 @@ private:
     std::unordered_map<std::uint64_t, std::list<std::string>> freqBuckets_;
 };
 
-} // namespace WFX::OSSpecific
+} // namespace WFX::Utils
 
-#endif // WFX_LINUX_FILE_CACHE_HPP
+#endif // WFX_UTILS_FILE_CACHE_HPP

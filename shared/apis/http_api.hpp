@@ -2,7 +2,7 @@
 #define WFX_SHARED_HTTP_API_HPP
 
 #include "http/constants/http_constants.hpp"
-#include "http/common/route_common.hpp"
+#include "http/common/http_route_common.hpp"
 #include "third_party/json/json_fwd.hpp"
 
 // To be consistent with naming
@@ -48,6 +48,11 @@ using SendFileRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*,
 using SendTemplateCStrFn      = SendFileCStrFn;
 using SendTemplateRvalueFn    = SendFileRvalueFn;
 
+// Stream API
+using StreamFileCStrFn   = SendFileCStrFn;
+using StreamFileRvalueFn = SendFileRvalueFn;
+using StreamFn           = void (*)(HttpResponse* backend, StreamGenerator generator);
+
 // vvv API declarations vvv
 struct HTTP_API_TABLE {
     // Routing
@@ -78,6 +83,11 @@ struct HTTP_API_TABLE {
     // SendTemplate overloads
     SendTemplateCStrFn      SendTemplateCStr;
     SendTemplateRvalueFn    SendTemplateMove;
+
+    // Stream API
+    StreamFileCStrFn        StreamFileCStr;
+    StreamFileRvalueFn      StreamFileMove;
+    StreamFn                Stream;
 
     // Metadata
     HttpAPIVersion          apiVersion;

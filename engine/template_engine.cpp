@@ -291,13 +291,13 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
 
     // Pre declare variables to allow my shitty code (goto __ProcessTag) to compile
     // These are reused and aren't bound to a specific frame so no issue tho
-    const char*      bufStart     = nullptr;
-    std::size_t      remaining    = 0;
-    std::size_t      tagStart     = 0;
-    std::size_t      tagEnd       = 0;
-    std::string_view bodyView     = {};
-    bool             isExtending  = false;
-    bool             skipLiterals = false;
+    bool isExtending  = false;
+    bool skipLiterals = false;
+
+    const char*      bufStart = nullptr;
+    std::size_t      tagStart = 0;
+    std::size_t      tagEnd   = 0;
+    std::string_view bodyView = {};
 
     // Used by either tag [inside of frame.carry or inside of frame.readBuf]
     std::string_view tagView{};
@@ -370,14 +370,15 @@ __ContinueReading:
             frame.readOffset = appendCount;
 
             tagView = frame.carry;
+            ctx.justProcessedTag = true;
+
             goto __ProcessTag;
         }
 
         // CASE 2: Normal reading of data from current frame
         while(frame.readOffset < bufLen) {
             bufStart  = bufPtr + frame.readOffset;
-            remaining = frame.bytesRead - frame.readOffset;
-            bodyView  = {bufStart, remaining};
+            bodyView  = {bufStart, frame.bytesRead - frame.readOffset};
 
             // If we are processing a child template (one that extends a parent)-
             // -or skipUntilFlag is set, we should NOT write any content from it
@@ -389,12 +390,17 @@ __ContinueReading:
             if(tagStart == std::string::npos) {
                 // We only append content to block if we aren't in parent template
                 // For parent template we simply just write out the content if there is no replacement
+                // This condition is helpful when stuffs across boundary (like block statement across two chunks)
                 if(ctx.inBlock && isExtending)
                     ctx.currentBlockContent.append(bodyView.data(), bodyView.size());
 
-                else if(!skipLiterals && !SafeWrite(ctx.io, bodyView.data(), bodyView.size()))
+                else if(
+                        !skipLiterals
+                        && !SafeWrite(ctx.io, bodyView.data(), bodyView.size(), ctx.justProcessedTag)
+                    )
                     return { TemplateType::FAILURE, 0 };
 
+                ctx.justProcessedTag = false;
                 break; // Break inner loop, go to __NextChunk
             }
 
@@ -404,17 +410,18 @@ __ContinueReading:
             else if(
                 tagStart > 0
                 && !skipLiterals
-                && !SafeWrite(ctx.io, bodyView.data(), tagStart)
+                && !SafeWrite(ctx.io, bodyView.data(), tagStart, ctx.justProcessedTag)
             )
-                    return { TemplateType::FAILURE, 0 };
+                return { TemplateType::FAILURE, 0 };
+
+            ctx.justProcessedTag = false;
 
             // Advance offset to the start of the tag
             frame.readOffset += tagStart;
 
             // Recalculate view from the tag start
             bufStart  = bufPtr + frame.readOffset;
-            remaining = frame.bytesRead - frame.readOffset;
-            bodyView  = {bufStart, remaining};
+            bodyView  = {bufStart, frame.bytesRead - frame.readOffset};
 
             // Incomplete tag, carry over for next read
             tagEnd = bodyView.find("%}", 2);
@@ -424,6 +431,7 @@ __ContinueReading:
             }
 
             tagView = {bodyView.data(), tagEnd + 2};
+            ctx.justProcessedTag = true;
 
             // Common functionality for both partial and fully completed tags
         __ProcessTag:
@@ -518,10 +526,10 @@ Tag TemplateEngine::ExtractTag(std::string_view line)
 }
 
 TemplateEngine::TagResult TemplateEngine::ProcessTag(
-    CompilationContext& context, std::string_view line
+    CompilationContext& context, std::string_view tagView
 )
 {
-    auto [tagName, tagArgs] = ExtractTag(line);
+    auto [tagName, tagArgs] = ExtractTag(tagView);
 
     // Empty tags are not allowed
     if(tagName.empty()) {
@@ -679,9 +687,22 @@ bool TemplateEngine::FlushWrite(IOContext& ctx, bool force)
     return true;
 }
 
-bool TemplateEngine::SafeWrite(IOContext& ctx, const void* data, std::size_t size)
+bool TemplateEngine::SafeWrite(IOContext& ctx, const void* data, std::size_t size, bool skipSpaces)
 {
     const char* ptr = static_cast<const char*>(data);
+
+    if(skipSpaces) {
+        std::size_t firstChar = 0;
+        while(firstChar < size && std::isspace(ptr[firstChar]))
+            firstChar++;
+
+        ptr  += firstChar;
+        size -= firstChar;
+    }
+
+    // Nothing to write, move on
+    if(size == 0)
+        return true;
 
     while(size > 0) {
         std::size_t available = ctx.chunkSize - ctx.offset;

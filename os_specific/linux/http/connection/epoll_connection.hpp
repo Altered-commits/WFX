@@ -4,10 +4,11 @@
 #define WFX_LINUX_EPOLL_CONNECTION_HPP
 
 #include "config/config.hpp"
+#include "http/common/http_global_state.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/limits/ip_limiter/ip_limiter.hpp"
 #include "http/ssl/http_ssl.hpp"
-#include "os_specific/common/filecache/filecache.hpp"
+#include "utils/filecache/filecache.hpp"
 #include "utils/buffer_pool/buffer_pool.hpp"
 #include "utils/timer_wheel/timer_wheel.hpp"
 
@@ -35,6 +36,7 @@ public: // I/O Operations
     void ResumeReceive(ConnectionContext* ctx)                       override;
     void Write(ConnectionContext* ctx, std::string_view buffer = {}) override;
     void WriteFile(ConnectionContext* ctx, std::string path)         override;
+    void Stream(ConnectionContext* ctx, StreamGenerator generator)   override;
     void Close(ConnectionContext* ctx, bool forceClose = false)      override;
     
 public: // Main Functions
@@ -55,6 +57,7 @@ private: // Helper Functions
     
     void               Receive(ConnectionContext* ctx);
     void               SendFile(ConnectionContext* ctx);
+    void               ResumeStream(ConnectionContext* ctx);
     void               PollAgain(ConnectionContext* ctx, EventType eventType, std::uint32_t events);
     
     void               WrapAccept(ConnectionContext* ctx, int clientFd);
@@ -66,7 +69,7 @@ private: // Misc
     IpLimiter&        ipLimiter_  = IpLimiter::GetInstance();
     Config&           config_     = Config::GetInstance();
     Logger&           logger_     = Logger::GetInstance();
-    FileCache&        fileCache_  = FileCache::GetInstance();
+    FileCache*        fileCache_  = GetGlobalState().fileCache;
     std::atomic<bool> running_    = true;
     bool              useHttps_   = false;
     ReceiveCallback   onReceive_;

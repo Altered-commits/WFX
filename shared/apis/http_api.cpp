@@ -62,6 +62,15 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         SendTemplateRvalueFn{[](HttpResponse* backend, std::string&& path, bool autoHandle404) {  // SendTemplateRvalueFn
             backend->SendTemplate(std::move(path), autoHandle404);
         }},
+        [](HttpResponse* backend, const char* cstr, bool autoHandle404) {  // StreamFileCStrFn
+            backend->StreamFile(cstr, autoHandle404);
+        },
+        StreamFileRvalueFn{[](HttpResponse* backend, std::string&& path, bool autoHandle404) {  // StreamFileRvalueFn
+            backend->StreamFile(std::move(path), autoHandle404);
+        }},
+        [](HttpResponse* backend, StreamGenerator generator) {
+            backend->Stream(std::move(generator));
+        },
 
         // Version
         HttpAPIVersion::V1

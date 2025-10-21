@@ -2,12 +2,16 @@
 #define WFX_CLI_COMMANDS_DEV_HELPER_HPP
 
 #include "config/config.hpp"
+#include "engine/core_engine.hpp"
+#include "engine/template_engine.hpp"
 #include "http/common/http_global_state.hpp"
 #include "utils/dotenv/dotenv.hpp"
 #include "utils/logger/logger.hpp"
+#include "utils/filecache/filecache.hpp"
 #include "utils/filesystem/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/backport/string.hpp"
+#include "utils/crypt/hash.hpp"
 
 #ifdef _WIN32
     #include <Windows.h>

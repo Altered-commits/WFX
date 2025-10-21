@@ -162,7 +162,7 @@ ValidRegion RWBuffer::GetWritableReadRegion() const noexcept
 
     auto* readMeta = reinterpret_cast<ReadMetadata*>(readBuffer_);
     return {
-        readBuffer_ + sizeof(ReadMetadata),
+        readBuffer_ + sizeof(ReadMetadata) + readMeta->dataLength,
         readMeta->bufferSize - readMeta->dataLength
     };
 }
@@ -173,7 +173,7 @@ ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept
 
     auto* writeMeta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
     return {
-        writeBuffer_ + sizeof(WriteMetadata),
+        writeBuffer_ + sizeof(WriteMetadata) + writeMeta->dataLength,
         writeMeta->bufferSize - writeMeta->dataLength
     };
 }
@@ -183,7 +183,7 @@ void RWBuffer::AdvanceReadLength(std::uint32_t n) noexcept
     if(!readBuffer_) return;
 
     auto* meta = reinterpret_cast<ReadMetadata*>(readBuffer_);
-    meta->dataLength = std::clamp(meta->dataLength + n, 0u, meta->bufferSize);
+    meta->dataLength = std::min(meta->dataLength + n, meta->bufferSize);
 }
 
 void RWBuffer::AdvanceWriteLength(std::uint32_t n) noexcept
@@ -191,7 +191,7 @@ void RWBuffer::AdvanceWriteLength(std::uint32_t n) noexcept
     if(!writeBuffer_) return;
 
     auto* meta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
-    meta->writtenLength += std::clamp(meta->writtenLength + n, 0u, meta->dataLength);
+    meta->writtenLength += std::min(meta->writtenLength + n, meta->dataLength);
 }
 
 // vvv Write Buffer Management vvv

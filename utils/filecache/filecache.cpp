@@ -1,28 +1,27 @@
 #include "filecache.hpp"
+#include "utils/logger/logger.hpp"
 
-#include "config/config.hpp"
-#include <cassert>
-#include <sys/stat.h>
-#include <sys/resource.h>
-#include <fcntl.h>
-#include <unistd.h>
-
+// For windows, filecache.hpp already includes windows.h anyways
 #ifdef _WIN32
     #define CloseFile(fd) CloseHandle(fd)
 #else
+    #include <sys/stat.h>
+    #include <sys/resource.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+
     #define CloseFile(fd) close(fd)
 #endif
 
-namespace WFX::OSSpecific {
+#include <cassert>
 
-using namespace WFX::Core; // For 'Config'
+namespace WFX::Utils {
 
 // vvv Constructor & Destructor vvvv
-FileCache::FileCache()
+FileCache::FileCache(std::size_t capacity)
     : minFreq_(0)
 {
-    std::size_t capacity = Config::GetInstance().miscConfig.fileCacheSize;
-    std::size_t safe     = capacity;
+    std::size_t safe = capacity;
 
 #ifndef _WIN32
     // Leave room for sockets + other fds on Linux/Unix
@@ -38,15 +37,12 @@ FileCache::~FileCache()
 {
     for(auto& pair : entries_)
         CloseFile(pair.second.fd);
+
+    if(!entries_.empty())
+        Logger::GetInstance().Info("[FileCache]: Closed all cached file descriptors successfully");
 }
 
 // vvv User Functions vvv
-FileCache& FileCache::GetInstance()
-{
-    static FileCache cache;
-    return cache;
-}
-
 std::pair<FileDescriptor, FileSize> FileCache::GetFileDesc(const std::string& path)
 {
     auto it = entries_.find(path);
@@ -149,4 +145,4 @@ void FileCache::Evict()
         freqBuckets_.erase(minFreq_);
 }
 
-} // namespace WFX::OSSpecific
+} // namespace WFX::Utils

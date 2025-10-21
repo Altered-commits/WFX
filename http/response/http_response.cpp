@@ -2,6 +2,7 @@
 
 #include "engine/template_engine.hpp"
 #include "http/common/http_detector.hpp"
+#include "http/connection/http_connection.hpp"
 #include "utils/filesystem/filesystem.hpp"
 #include "utils/backport/string.hpp"
 #include "utils/logger/logger.hpp"
@@ -31,10 +32,8 @@ HttpResponse& HttpResponse::Set(std::string&& key, std::string&& value)
     return *this;
 }
 
-bool HttpResponse::IsFileOperation() const
-{
-    return isFileOperation_;
-}
+bool HttpResponse::IsFileOperation()   const { return operationType_ == OperationType::FILE; }
+bool HttpResponse::IsStreamOperation() const { return operationType_ == OperationType::STREAM; }
 
 // vvv MAIN SHIT BELOW vvv
 // vvv TEXT vvv
@@ -49,7 +48,7 @@ void HttpResponse::SendText(const char* cstr)
     if(!std::holds_alternative<std::monostate>(body))
         logger.Fatal("[HttpResponse]: SendText() called after response body already set");
     
-    if(isFileOperation_)
+    if(IsFileOperation())
         logger.Fatal("[HttpResponse]: Cannot call SendText() after SendFile()");
 
     auto view = std::string_view{cstr};
@@ -122,7 +121,7 @@ void HttpResponse::SendTemplate(std::string&& path, bool autoHandle404)
         return;
     }
 
-    isFileOperation_ = true;
+    operationType_ = OperationType::FILE;
 
     // If template meta exists, template file exists as well
     // Rn we just handle 'static' templates which can be served as is
@@ -133,6 +132,66 @@ void HttpResponse::SendTemplate(std::string&& path, bool autoHandle404)
     headers.SetHeader("Content-Type", "text/html");
 }
 
+void HttpResponse::StreamFile(const char* cstr, bool autoHandle404)
+{
+    // Shouldn't happen btw
+    if(!cstr)
+        Logger::GetInstance().Fatal("[HttpResponse]: StreamFile(const char*) received nullptr");
+
+    // Delegate task to std::string&& overload
+    StreamFile(std::string(cstr), autoHandle404);
+}
+
+void HttpResponse::StreamFile(std::string&& path, bool autoHandle404)
+{
+    auto& fs     = FileSystem::GetFileSystem();
+    auto& logger = Logger::GetInstance();
+
+    if(!ValidateFileSend(path, autoHandle404, "StreamFile"))
+        return;
+
+    // Try to open the file for streaming
+    auto file = fs.OpenFileRead(path.c_str());
+    if(!file) {
+        Status(HttpStatus::INTERNAL_SERVER_ERROR)
+            .SendText("File Error");
+        return;
+    }
+
+    // Rest of the important stuff is set by 'Stream'
+    std::string_view mime = MimeDetector::DetectMimeFromExt(path);
+    headers.SetHeader("Content-Type", std::string(mime));
+
+    Stream([
+        file_ = std::move(file)
+    ](StreamBuffer buffer) -> StreamResult
+    {
+        std::int64_t res = file_->Read(buffer.buffer, buffer.size);
+        // Error or EOF
+        if(res <= 0)
+            return { 
+                0, res == 0
+                    ? StreamAction::STOP_AND_ALIVE_CONN
+                    : StreamAction::STOP_AND_CLOSE_CONN
+            };
+
+        // No error
+        return { static_cast<std::size_t>(res), StreamAction::CONTINUE };
+    }, true);
+}
+
+void HttpResponse::Stream(StreamGenerator generator, bool skipChecks)
+{
+    if(!skipChecks && !std::holds_alternative<std::monostate>(body))
+        Logger::GetInstance().Fatal("[HttpResponse]: Stream() called after body already set");
+
+    // Set the streaming-specific header
+    headers.SetHeader("Transfer-Encoding", "chunked");
+
+    operationType_ = OperationType::STREAM;
+    body = std::move(generator);
+}
+
 // vvv HELPER FUNCTIONS vvv
 void HttpResponse::SetTextBody(std::string&& text, const char* contentType)
 {
@@ -141,7 +200,7 @@ void HttpResponse::SetTextBody(std::string&& text, const char* contentType)
     if(!std::holds_alternative<std::monostate>(body))
         logger.Fatal("[HttpResponse]: Text body already set");
 
-    if(isFileOperation_)
+    if(IsFileOperation())
         logger.Fatal("[HttpResponse]: Cannot mix text and file responses");
 
     body = std::move(text);
@@ -149,13 +208,13 @@ void HttpResponse::SetTextBody(std::string&& text, const char* contentType)
     headers.SetHeader("Content-Type", contentType);
 }
 
-bool HttpResponse::ValidateFileSend(std::string_view path, bool autoHandle404)
+bool HttpResponse::ValidateFileSend(std::string_view path, bool autoHandle404, const char* funcName)
 {
     auto& logger = Logger::GetInstance();
     auto& fs     = FileSystem::GetFileSystem();
 
     if(!std::holds_alternative<std::monostate>(body))
-        logger.Fatal("[HttpResponse]: SendFile() called after body already set");
+        logger.Fatal("[HttpResponse]: ", funcName, " called after body already set");
 
     if(autoHandle404 && !fs.FileExists(path.data())) {
         Status(HttpStatus::NOT_FOUND)
@@ -170,7 +229,7 @@ void HttpResponse::PrepareFileHeaders(std::string_view path)
 {
     auto& fs = FileSystem::GetFileSystem();
 
-    isFileOperation_ = true;
+    operationType_ = OperationType::FILE;
 
     std::uint64_t    fileSize = fs.GetFileSize(path.data());
     std::string_view mime     = MimeDetector::DetectMimeFromExt(path);

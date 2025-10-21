@@ -41,8 +41,12 @@ public:
     // Support for Late-Initialization
     MoveOnlyFunction() noexcept = default;
     // Implicit construction from any move-only callable
-    template<typename F>
-    MoveOnlyFunction(F&& f) 
+    template<typename F, typename = std::enable_if_t<
+            !std::is_same_v<std::decay_t<F>, MoveOnlyFunction> &&
+            !std::is_same_v<std::decay_t<F>, std::nullptr_t>
+        >
+    >
+    MoveOnlyFunction(F&& f)
         : impl_(std::make_unique<Impl<std::decay_t<F>>>(std::forward<F>(f))) {}
 
     MoveOnlyFunction(MoveOnlyFunction&&) noexcept = default;

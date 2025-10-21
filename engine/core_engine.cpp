@@ -150,7 +150,9 @@ void CoreEngine::HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool 
     {
         case SerializeResult::SERIALIZE_SUCCESS:
             if(res.IsFileOperation())
-                connHandler_->WriteFile(ctx, std::string(bodyView));
+                connHandler_->WriteFile(ctx, std::move(bodyView));
+            else if(res.IsStreamOperation())
+                connHandler_->Stream(ctx, std::move(std::get<StreamGenerator>(res.body)));
             else
                 connHandler_->Write(ctx, std::string_view{});
 

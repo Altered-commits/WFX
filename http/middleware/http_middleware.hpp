@@ -1,7 +1,7 @@
 #ifndef WFX_HTTP_MIDDLEWARE_HPP
 #define WFX_HTTP_MIDDLEWARE_HPP
 
-#include "http/common/route_common.hpp"
+#include "http/common/http_route_common.hpp"
 #include <unordered_map>
 
 namespace WFX::Http {

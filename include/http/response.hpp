@@ -4,11 +4,6 @@
 #include "shared/apis/http_api.hpp"
 #include <cassert>
 
-// Forward declare HttpResponse
-namespace WFX::Http {
-    struct HttpResponse;
-}
-
 /* User side implementation of 'Response' class. CoreEngine passes the API */
 class Response {
     using ResponsePtr = WFX::Http::HttpResponse*;
@@ -48,6 +43,11 @@ public:
     // SendTemplate overloads
     void SendTemplate(const char* path, bool autoHandle404 = true)   { httpApi_->SendTemplateCStr(backend_, path, autoHandle404); }
     void SendTemplate(std::string&& path, bool autoHandle404 = true) { httpApi_->SendTemplateMove(backend_, std::move(path), autoHandle404); }
+
+    // Stream API
+    void Stream(StreamGenerator generator) { httpApi_->Stream(backend_, std::move(generator)); }
+    void StreamFile(const char* path, bool autoHandle404 = true)   { httpApi_->StreamFileCStr(backend_, path, autoHandle404); }
+    void StreamFile(std::string&& path, bool autoHandle404 = true) { httpApi_->StreamFileMove(backend_, std::move(path), autoHandle404); }
 
 private:
     ResponsePtr backend_;

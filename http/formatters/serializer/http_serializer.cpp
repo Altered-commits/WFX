@@ -14,7 +14,7 @@ SerializedHttpResponseDeprecated HttpSerializer::Serialize(HttpResponse& res)
     const std::string_view bodyView = std::visit([](const auto& val) -> std::string_view {
         using T = std::decay_t<decltype(val)>;
 
-        if constexpr(std::is_same_v<T, std::monostate>)
+        if constexpr(std::is_same_v<T, std::monostate> || std::is_same_v<T, StreamGenerator>)
             return {};
         else
             return val;
@@ -73,13 +73,15 @@ SerializedHttpResponse HttpSerializer::SerializeToBuffer(HttpResponse& res, RWBu
     auto* meta = buffer.GetWriteMeta();
     if(!meta) return {SerializeResult::SERIALIZE_BUFFER_FAILED, {}};
 
-    const std::string_view bodyView = std::visit([](const auto& val) -> std::string_view {
+    std::string bodyView = std::visit([](auto&& val) -> std::string {
         using T = std::decay_t<decltype(val)>;
 
-        if constexpr(std::is_same_v<T, std::monostate>)
+        if constexpr(std::is_same_v<T, std::monostate> || std::is_same_v<T, StreamGenerator>)
             return {};
+        else if constexpr(std::is_same_v<T, std::string>)
+            return std::move(val); 
         else
-            return val;
+            return std::string(val);
     }, res.body);
     
     std::string out;
@@ -111,8 +113,8 @@ SerializedHttpResponse HttpSerializer::SerializeToBuffer(HttpResponse& res, RWBu
     if(!buffer.AppendData(out.data(), static_cast<std::uint32_t>(out.size())))
         return {SerializeResult::SERIALIZE_BUFFER_INSUFFICIENT, {}};
 
-    // File operation: headers only
-    if(res.IsFileOperation())
+    // File / Stream operation: headers only
+    if(res.IsFileOperation() || res.IsStreamOperation())
         return {SerializeResult::SERIALIZE_SUCCESS, bodyView};
 
     // Text operation: append body

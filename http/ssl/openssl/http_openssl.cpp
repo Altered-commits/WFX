@@ -6,6 +6,7 @@
 #include "utils/logger/logger.hpp"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <algorithm>
 
 namespace WFX::Http {
 

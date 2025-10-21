@@ -6,7 +6,6 @@
 #include "config/config.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/limits/ip_limiter/ip_limiter.hpp"
-#include "os_specific/linux/utils/file_cache/file_cache.hpp"
 #include "utils/buffer_pool/buffer_pool.hpp"
 
 #include <liburing.h>
@@ -71,7 +70,7 @@ private:
     std::atomic<bool> running_    = true;
     ReceiveCallback   onReceive_;
     BufferPool        pool_{1, 1024 * 1024, [](std::size_t currSize){ return currSize * 2; }};
-    FileCache         fileCache_{config_.osSpecificConfig.fileCacheSize};
+    FileCache*        fileCache_  = GetGlobalState().fileCache;
 
 private:
     // IoUring

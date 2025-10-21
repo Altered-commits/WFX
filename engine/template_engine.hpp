@@ -78,9 +78,11 @@ private: // Nested helper types for the parser
         IOContext                 io;          // Unified write buffer
         std::deque<TemplateFrame> stack;       // Recursive includes
         std::size_t               chunkSize{0};
-        bool                      foundCompilingCode{false}; // ---
-        bool                      inBlock{false};            //   | -> Imma combine this into bitfields later
-        bool                      skipUntilFlag{false};      // ---
+
+        bool foundCompilingCode{false}; // ---
+        bool inBlock{false};            //   | Aligned to-
+        bool skipUntilFlag{false};      //   | -8 bytes
+        bool justProcessedTag{false};   // ---
 
         // {% extends ... %} stuff
         std::string currentExtendsName;
@@ -100,11 +102,11 @@ private: // Helper functions
     TemplateResult CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate);
     bool           PushFile(CompilationContext& context, const std::string& relPath);
     Tag            ExtractTag(std::string_view line);
-    TagResult      ProcessTag(CompilationContext& context, std::string_view line);
+    TagResult      ProcessTag(CompilationContext& context, std::string_view tagView);
 
 private: // IO Functions
     bool FlushWrite(IOContext& context, bool force = false);
-    bool SafeWrite(IOContext& context, const void* data, std::size_t size);
+    bool SafeWrite(IOContext& context, const void* data, std::size_t size, bool skipSpaces = false);
 
 private:
     TemplateEngine()  = default;

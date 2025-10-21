@@ -16,7 +16,7 @@ enum class SerializeResult : std::uint8_t {
 };
 
 using SerializedHttpResponseDeprecated = std::pair<std::string, std::string_view>;
-using SerializedHttpResponse           = std::pair<SerializeResult, std::string_view>;
+using SerializedHttpResponse           = std::pair<SerializeResult, std::string>;
 
 // Being used as a namespace rn, fun again
 class HttpSerializer final {

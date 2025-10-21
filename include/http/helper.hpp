@@ -6,7 +6,7 @@
  * More to be added here, someday
  */
 
-#include "http/common/route_common.hpp"
+#include "http/common/http_route_common.hpp"
 
 template<typename... MWs>
 inline MiddlewareStack MakeMiddlewareFromFunctions(MWs&&... mws)

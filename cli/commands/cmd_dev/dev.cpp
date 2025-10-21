@@ -26,6 +26,7 @@ int RunDevServer(const ServerConfig& cfg)
 
     engine.Stop();
 #else
+    // -------------------- LOADING PHASE --------------------
     config.LoadCoreSettings("wfx.toml");
     config.LoadToolchainSettings("toolchain.toml");
 
@@ -34,10 +35,11 @@ int RunDevServer(const ServerConfig& cfg)
     envConfig.SetFlag(EnvFlags::REQUIRE_PERMS_600);
 
     if(Dotenv::LoadFromFile(config.envConfig.envPath, envConfig))
-        logger.Info("[WFX-Master]: Loaded env successfully");
+        logger.Info("[WFX-Master]: Loaded .env successfully");
     else
-        logger.Info("[WFX-Master]: Failed to load env");
+        logger.Info("[WFX-Master]: Failed to load .env");
 
+    // -------------------- INITIALIZING PHASE --------------------
     signal(SIGINT, HandleMasterSignal);
     signal(SIGTERM, SIG_IGN);
 
@@ -45,7 +47,12 @@ int RunDevServer(const ServerConfig& cfg)
     if(!RandomPool::GetInstance().GetBytes(globalState.sslKey.data(), globalState.sslKey.size()))
         logger.Fatal("[WFX-Master]: Failed to initialize SSL key");
 
-    // Handle compilation of templates
+    // Create a master FileCache used throught the code
+    // This works because master process ain't gon die before worker processes
+    FileCache masterCache{config.miscConfig.fileCacheSize};
+    globalState.fileCache = &masterCache;
+
+    // -------------------- TEMPLATE COMPILATION PHASE --------------------
     auto& templateEngine = TemplateEngine::GetInstance();
     
     bool recompileViaFlag = cfg.GetFlag(ServerFlags::NO_TEMPLATE_CACHE);
@@ -65,7 +72,7 @@ int RunDevServer(const ServerConfig& cfg)
     // We want to be able to access same data across workers even after COW
     globalState.templateEnginePtr = &templateEngine;
 
-    // This will be used in compiling of user dll
+    // -------------------- USER CODE COMPILATION PHASE --------------------
     const std::string dllDir      = config.projectConfig.projectName + "/build/dlls/";
     const char*       dllDirCStr  = dllDir.c_str();
     const std::string dllPath     = dllDir + "user_entry.so";
@@ -87,6 +94,7 @@ int RunDevServer(const ServerConfig& cfg)
     logger.Info("[WFX-Master]: Press Ctrl+C to stop");
     logger.SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
 
+    // -------------------- WORKERS SPAWNING PHASE --------------------
     for(int i = 0; i < osConfig.workerProcesses; i++) {
         pid_t pid = fork();
 
@@ -130,7 +138,7 @@ int RunDevServer(const ServerConfig& cfg)
     while(!globalState.shouldStop)
         pause();
 
-    // On Ctrl+C
+    // -------------------- SHUTDOWN PHASE --------------------
     for(int i = 0; i < osConfig.workerProcesses; i++)
         waitpid(globalState.workerPids[i], nullptr, 0);
 #endif // _WIN32

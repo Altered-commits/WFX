@@ -1,15 +1,18 @@
 #ifndef WFX_HTTP_GLOBAL_STATE_HPP
 #define WFX_HTTP_GLOBAL_STATE_HPP
 
-#include "engine/core_engine.hpp"
-#include "engine/template_engine.hpp"
 #include <atomic>
 #include <array>
 #include <vector>
 
+// Forward declare to not create dependency hell
+namespace WFX::Core  { class CoreEngine; class TemplateEngine; }
+namespace WFX::Utils { class FileCache; }
+
 namespace WFX::Http {
 
-using namespace WFX::Core; // For 'CoreEngine'
+using namespace WFX::Core;  // For 'CoreEngine', 'TemplateEngine'
+using namespace WFX::Utils; // For 'FileCache'
 
 using SSLKey = std::array<std::uint8_t, 80>;
 
@@ -17,6 +20,7 @@ struct WFXGlobalState {
     std::atomic<bool> shouldStop        = false;
     CoreEngine*       enginePtr         = nullptr;
     TemplateEngine*   templateEnginePtr = nullptr;
+    FileCache*        fileCache         = nullptr;
     SSLKey            sslKey            = { 0 };
 
 #ifdef _WIN32
