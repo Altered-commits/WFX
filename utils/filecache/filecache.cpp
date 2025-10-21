@@ -43,7 +43,7 @@ FileCache::~FileCache()
 }
 
 // vvv User Functions vvv
-std::pair<FileDescriptor, FileSize> FileCache::GetFileDesc(const std::string& path)
+std::pair<WFXFileDescriptor, WFXFileSize> FileCache::GetFileDesc(const std::string& path)
 {
     auto it = entries_.find(path);
     if(it != entries_.end()) {
@@ -51,8 +51,8 @@ std::pair<FileDescriptor, FileSize> FileCache::GetFileDesc(const std::string& pa
         return {it->second.fd, it->second.fileSize};
     }
 
-    FileDescriptor fd   = 0;
-    FileSize       size = 0;
+    WFXFileDescriptor fd   = 0;
+    WFXFileSize       size = 0;
 
 #ifdef _WIN32
     fd = CreateFileA(
@@ -65,25 +65,25 @@ std::pair<FileDescriptor, FileSize> FileCache::GetFileDesc(const std::string& pa
         nullptr
     );
 
-    if(fd == INVALID_HANDLE_VALUE)
-        return {INVALID_HANDLE_VALUE, 0};
+    if(fd == WFX_INVALID_FILE)
+        return {WFX_INVALID_FILE, 0};
 
     LARGE_INTEGER fsize;
     if(!GetFileSizeEx(fd, &fsize)) {
         CloseHandle(fd);
-        return {INVALID_HANDLE_VALUE, 0};
+        return {WFX_INVALID_FILE, 0};
     }
 
     size = static_cast<std::uint64_t>(fsize.QuadPart);
 #else
     fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     if(fd < 0)
-        return {-1, 0};
+        return {WFX_INVALID_FILE, 0};
 
     struct stat st;
     if(fstat(fd, &st) < 0 || !S_ISREG(st.st_mode)) {
         close(fd);
-        return {-1, 0};
+        return {WFX_INVALID_FILE, 0};
     }
 
     size = st.st_size;
@@ -115,7 +115,7 @@ void FileCache::Touch(const std::string& key)
     entry.bucketIter = freqBuckets_[newFreq].begin();
 }
 
-void FileCache::Insert(const std::string& key, FileDescriptor fd, FileSize size)
+void FileCache::Insert(const std::string& key, WFXFileDescriptor fd, WFXFileSize size)
 {
     if(entries_.size() >= capacity_)
         Evict();
@@ -135,7 +135,7 @@ void FileCache::Evict()
     std::string keyToEvict = bucket.back();
     bucket.pop_back();
 
-    FileDescriptor fd = entries_[keyToEvict].fd;
+    WFXFileDescriptor fd = entries_[keyToEvict].fd;
     CloseFile(fd); // Close FD
 
     entries_.erase(keyToEvict);

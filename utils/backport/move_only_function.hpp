@@ -29,9 +29,16 @@ class MoveOnlyFunction<R(Args...)> {
             return f(std::forward<Args>(args)...);
         }
 
+        // This version must NOT call f() if its not const callable
         R InvokeConst(Args&&... args) const override
         {
-            return f(std::forward<Args>(args)...);
+            // Callable supports const operator()
+            if constexpr(std::is_invocable_v<const F&, Args...>)
+                return f(std::forward<Args>(args)...);
+
+            // Fallback for mutable lambdas, cast away const safely
+            else
+                return const_cast<F&>(f)(std::forward<Args>(args)...);
         }
     };
 

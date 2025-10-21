@@ -1,6 +1,7 @@
 #ifndef WFX_UTILS_FILESYSTEM_HPP
 #define WFX_UTILS_FILESYSTEM_HPP
 
+#include "utils/common/file.hpp"
 #include <string>
 #include <functional>
 #include <memory>
@@ -30,6 +31,8 @@ public:
     // Reading / Writing chunks
     virtual std::int64_t Read(void* buffer, std::size_t bytes)        = 0;
     virtual std::int64_t Write(const void* buffer, std::size_t bytes) = 0;
+    virtual std::int64_t ReadAt(void* buffer, std::size_t bytes, std::size_t offset)        = 0;
+    virtual std::int64_t WriteAt(const void* buffer, std::size_t bytes, std::size_t offset) = 0;
 
     // Seek / Tell
     virtual bool         Seek(std::size_t offset) = 0;
@@ -53,6 +56,8 @@ public:
     // Open file for reading/writing: returns RAII-wrapped BaseFile
     virtual BaseFilePtr OpenFileRead(const char* path, bool inBinaryMode = false)  = 0;
     virtual BaseFilePtr OpenFileWrite(const char* path, bool inBinaryMode = false) = 0;
+    virtual BaseFilePtr OpenFileExisting(WFXFileDescriptor fd)                        = 0;
+    virtual BaseFilePtr OpenFileExisting(WFXFileDescriptor fd, std::size_t size)      = 0;
 
     // Directory Manipulation
     virtual bool          DirectoryExists(const char* path)                                                const = 0;

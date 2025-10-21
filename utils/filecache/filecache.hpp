@@ -1,20 +1,11 @@
 #ifndef WFX_UTILS_FILE_CACHE_HPP
 #define WFX_UTILS_FILE_CACHE_HPP
 
+#include "utils/common/file.hpp"
 #include <list>
 #include <string>
 #include <unordered_map>
 #include <cstdint>
-
-#ifdef _WIN32
-    #include <windows.h>
-    using FileDescriptor = HANDLE;
-    using FileSize       = std::uint64_t;
-#else
-    #include <sys/types.h>
-    using FileDescriptor = int;
-    using FileSize       = off_t;
-#endif
 
 namespace WFX::Utils {
 
@@ -31,7 +22,7 @@ public:
     ~FileCache();
 
 public:
-    std::pair<FileDescriptor, FileSize> GetFileDesc(const std::string& path);
+    std::pair<WFXFileDescriptor, WFXFileSize> GetFileDesc(const std::string& path);
 
 private:
     // No need for copy / move semantics
@@ -42,7 +33,7 @@ private:
 
 private: // Helper Functions
     void Touch(const std::string& key);
-    void Insert(const std::string& key, FileDescriptor fd, FileSize size);
+    void Insert(const std::string& key, WFXFileDescriptor fd, WFXFileSize size);
     void Evict();
 
 private:

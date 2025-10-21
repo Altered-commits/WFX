@@ -3,6 +3,8 @@
 #include "engine/template_engine.hpp"
 #include "http/common/http_detector.hpp"
 #include "http/connection/http_connection.hpp"
+#include "http/common/http_global_state.hpp"
+#include "utils/filecache/filecache.hpp"
 #include "utils/filesystem/filesystem.hpp"
 #include "utils/backport/string.hpp"
 #include "utils/logger/logger.hpp"
@@ -147,36 +149,45 @@ void HttpResponse::StreamFile(std::string&& path, bool autoHandle404)
     auto& fs     = FileSystem::GetFileSystem();
     auto& logger = Logger::GetInstance();
 
-    if(!ValidateFileSend(path, autoHandle404, "StreamFile"))
-        return;
+    if(!std::holds_alternative<std::monostate>(body))
+        logger.Fatal("[HttpResponse]: StreamFile() called after body already set");
 
-    // Try to open the file for streaming
-    auto file = fs.OpenFileRead(path.c_str());
-    if(!file) {
-        Status(HttpStatus::INTERNAL_SERVER_ERROR)
-            .SendText("File Error");
+    // Try to open the file from cache for streaming
+    auto&& [fd, size] = GetGlobalState().fileCache->GetFileDesc(path);
+    if(fd == WFX_INVALID_FILE) {
+        Status(HttpStatus::NOT_FOUND)
+            .SendText("File not found");
         return;
     }
 
+    auto file = fs.OpenFileExisting(fd, size);
+    if(!file) {
+        Status(HttpStatus::INTERNAL_SERVER_ERROR)
+            .SendText("File error");
+        return;
+    }
+    
     // Rest of the important stuff is set by 'Stream'
     std::string_view mime = MimeDetector::DetectMimeFromExt(path);
     headers.SetHeader("Content-Type", std::string(mime));
 
     Stream([
-        file_ = std::move(file)
-    ](StreamBuffer buffer) -> StreamResult
+        file_       = std::move(file),
+        readOffset_ = 0
+    ](StreamBuffer buffer) mutable
     {
-        std::int64_t res = file_->Read(buffer.buffer, buffer.size);
+        std::int64_t res = file_->ReadAt(buffer.buffer, buffer.size, readOffset_);
         // Error or EOF
         if(res <= 0)
-            return { 
+            return StreamResult{ 
                 0, res == 0
                     ? StreamAction::STOP_AND_ALIVE_CONN
                     : StreamAction::STOP_AND_CLOSE_CONN
             };
 
         // No error
-        return { static_cast<std::size_t>(res), StreamAction::CONTINUE };
+        readOffset_ += res;
+        return StreamResult{ static_cast<std::size_t>(res), StreamAction::CONTINUE };
     }, true);
 }
 

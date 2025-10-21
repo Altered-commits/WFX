@@ -18,9 +18,11 @@ LinuxFile::~LinuxFile()
 
 void LinuxFile::Close()
 {
-    if(fd_ >= 0) {
+    // If u open from existing, u cannot close it like this
+    if(fd_ >= 0 && !existing_) {
         ::close(fd_);
         fd_ = -1;
+        existing_ = false;
     }
 }
 
@@ -43,6 +45,27 @@ std::int64_t LinuxFile::Write(const void* buffer, std::size_t bytes)
     if(n > 0)
         size_ += n;
     
+    return n < 0 ? -1 : static_cast<std::int64_t>(n);
+}
+
+std::int64_t LinuxFile::ReadAt(void *buffer, std::size_t bytes, std::size_t offset)
+{
+    if(fd_ < 0)
+        return 0;
+
+    ssize_t n = ::pread(fd_, buffer, bytes, static_cast<off_t>(offset));
+    return n < 0 ? -1 : static_cast<std::int64_t>(n);
+}
+
+std::int64_t LinuxFile::WriteAt(const void *buffer, std::size_t bytes, std::size_t offset)
+{
+    if(fd_ < 0)
+        return 0;
+
+    ssize_t n = ::pwrite(fd_, buffer, bytes, static_cast<off_t>(offset));
+    if(n > 0 && (offset + n > size_))
+        size_ = offset + n;  // Update file size if we wrote past previous end
+
     return n < 0 ? -1 : static_cast<std::int64_t>(n);
 }
 
@@ -105,6 +128,13 @@ bool LinuxFile::OpenWrite(const char* path)
     return true;
 }
 
+void LinuxFile::OpenExisting(int fd, std::size_t size)
+{
+    fd_       = fd;
+    existing_ = true;
+    size_     = size;
+}
+
 // vvv File Manipulation vvv
 bool LinuxFileSystem::FileExists(const char* path) const
 {
@@ -152,6 +182,32 @@ BaseFilePtr LinuxFileSystem::OpenFileWrite(const char* path, bool inBinaryMode)
     auto file = std::make_unique<LinuxFile>();
     if(!file->OpenWrite(path))
         return nullptr;
+
+    return file;
+}
+
+BaseFilePtr LinuxFileSystem::OpenFileExisting(WFXFileDescriptor fd)
+{
+    if(fd < 0)
+        return nullptr;
+
+    struct stat st;
+    if(fstat(fd, &st) != 0)
+        return nullptr;
+
+    auto file = std::make_unique<LinuxFile>();
+    file->OpenExisting(fd, st.st_size);
+
+    return file;
+}
+
+BaseFilePtr LinuxFileSystem::OpenFileExisting(WFXFileDescriptor fd, std::size_t size)
+{
+    if(fd < 0 || size == 0)
+        return nullptr;
+
+    auto file = std::make_unique<LinuxFile>();
+    file->OpenExisting(fd, size);
 
     return file;
 }
