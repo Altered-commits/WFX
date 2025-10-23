@@ -4,12 +4,11 @@
 #include "http/common/http_detector.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/common/http_global_state.hpp"
+#include "include/third_party/json/json.hpp"
 #include "utils/filecache/filecache.hpp"
 #include "utils/filesystem/filesystem.hpp"
 #include "utils/backport/string.hpp"
 #include "utils/logger/logger.hpp"
-
-#include <nlohmann/json.hpp>
 
 #include <type_traits>
 #include <charconv>

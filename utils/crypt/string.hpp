@@ -6,7 +6,7 @@
 
 namespace WFX::Utils {
 
-class StringGuard final {
+class StringSanitizer final {
 public:
     static std::uint8_t ToLowerAscii(std::uint8_t c);
 
@@ -17,11 +17,12 @@ public:
     static bool CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs);
 
     /* NOTE: 'path' buffer must be a valid writable buffer */
-    static bool NormalizeURIPathInplace(std::string_view& path);
+    static bool        NormalizeURIPathInplace(std::string_view& path);
+    static std::string NormalizePathToIdentifier(std::string_view path, std::string_view prefix);
 
 private:
-    StringGuard()  = delete;
-    ~StringGuard() = delete;
+    StringSanitizer()  = delete;
+    ~StringSanitizer() = delete;
 };
 
 } // namespace WFX::Utils

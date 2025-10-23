@@ -2,6 +2,7 @@
 
 #include "config/config.hpp"
 #include "utils/backport/string.hpp"
+#include "utils/crypt/string.hpp"
 #include <cstring>
 #include <deque>
 
@@ -176,8 +177,10 @@ void TemplateEngine::PreCompileTemplates()
     auto& config = Config::GetInstance();
 
     std::size_t        errors    = 0;
-    const std::string& inputDir  = config.projectConfig.templateDir;
-    const std::string  outputDir = config.projectConfig.projectName + staticFolder_;
+    const std::string& inputDir            = config.projectConfig.templateDir;
+    const std::string  staticOutputDir     = config.projectConfig.projectName + staticFolder_;
+    const std::string  dynamicCppOutputDir = config.projectConfig.projectName + dynamicCppFolder_;
+    const std::string  dynamicObjOutputDir = config.projectConfig.projectName + dynamicObjFolder_;
 
     // For partial tag checking. If u see it, don't compile the .html file
     // + 1 is redundant btw, but im still keeping it to cover my paranoia
@@ -185,8 +188,15 @@ void TemplateEngine::PreCompileTemplates()
     
     resaveCacheFile_ = true;
 
-    if(!fs.DirectoryExists(outputDir.c_str()) && !fs.CreateDirectory(outputDir, true))
-        logger_.Fatal("[TemplateEngine]: Failed to create base template directory: ", outputDir);
+    if(!fs.DirectoryExists(staticOutputDir.c_str()) && !fs.CreateDirectory(staticOutputDir, true))
+        logger_.Fatal("[TemplateEngine]: Failed to create static directory: ", staticOutputDir);
+
+    // Dynamic templates have 2 folders, their C++ representation in cpp/ and compiled obj files in objs/
+    if(!fs.DirectoryExists(dynamicCppOutputDir.c_str()) && !fs.CreateDirectory(dynamicCppOutputDir, true))
+        logger_.Fatal("[TemplateEngine]: Failed to create dynamic-cpp directory: ", dynamicCppOutputDir);
+
+    if(!fs.DirectoryExists(dynamicObjOutputDir.c_str()) && !fs.CreateDirectory(dynamicObjOutputDir, true))
+        logger_.Fatal("[TemplateEngine]: Failed to create dynamic-obj directory: ", dynamicObjOutputDir);
     
     logger_.Info("[TemplateEngine]: Starting template precompilation from: ", inputDir);
 
@@ -204,12 +214,15 @@ void TemplateEngine::PreCompileTemplates()
         std::string relPath = std::string(inPath.begin() + inputDir.size(), inPath.end());
         relPath.erase(0, relPath.find_first_not_of("/\\"));
 
-        const std::string outPath = outputDir + "/" + relPath;
+        // Every file is initially written to the static folder, even the dynamic .html files.
+        // After the .html file is completely stripped off static tags, and IF dynamic tags still-
+        // -remain, we move onto stage two of compiling. That is when we use the dynamic folder
+        const std::string outPath = staticOutputDir + "/" + relPath;
 
         // Ensure target directory exists
         std::string relOutputDir = outPath.substr(0, outPath.find_last_of("/\\"));
         if(!fs.DirectoryExists(relOutputDir.c_str()) && !fs.CreateDirectory(relOutputDir, true)) {
-            logger_.Error("[TemplateEngine]: Failed to create template output directory: ", outputDir);
+            logger_.Error("[TemplateEngine]: Failed to create template output directory: ", staticOutputDir);
             return;
         }
 
@@ -258,10 +271,31 @@ void TemplateEngine::PreCompileTemplates()
             errors++;
         
         // Add it to our template map
-        else
+        else if(type == TemplateType::STATIC)
             templates_.emplace(
                 std::move(relPath), TemplateMeta{type, outSize, std::move(outPath)}
             );
+
+        // Websites dynamic, sigh, get ready for some fuckery
+        else {
+            logger_.Info("[TemplateEngine]: Staging dynamic template for compilation: ", relPath);
+            // Create a unique, C compatible function name
+            std::string funcName = 
+                StringSanitizer::NormalizePathToIdentifier(relPath, dynamicTemplateFuncPrefix_);
+
+            // Define path for the new .cpp file
+            std::string cppPath = dynamicCppOutputDir + "/" + relPath + ".cpp";
+
+            auto irCode = GenerateIRFromTemplate(outPath);
+            if(!irCode.empty()) {
+                logger_.Info("[TemplateEngine-Debug]: Output function name: ", funcName, ", Output path: ", cppPath);
+                for(auto&& code : irCode)
+                    logger_.Info(
+                        "OP: ", (int)code.type, " DATA: ", code.data, " OFFSET: ", code.offset,
+                        " LENGTH: ", code.length, " STATE: ", code.stateNum, " TARGET STATE: ", code.targetState
+                    );
+            }
+        }
     });
 
     if(errors > 0)
@@ -294,7 +328,7 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
     bool isExtending  = false;
     bool skipLiterals = false;
 
-    const char*      bufStart = nullptr;
+    std::size_t      outSize  = 0;
     std::size_t      tagStart = 0;
     std::size_t      tagEnd   = 0;
     std::string_view bodyView = {};
@@ -352,53 +386,108 @@ __ContinueReading:
 
         // CASE 1: Tag incomplete from previous frame
         if(!frame.carry.empty()) {
-            // Search for "%}" in the rest of the buffer
-            std::string_view tailView(bufPtr, bufLen);
+            bodyView = {bufPtr, bufLen};
 
-            std::size_t foundEnd = tailView.find("%}");
-            if(foundEnd == std::string_view::npos) {
-                // Tag is incomplete, append entire remainder to carry, consume chunk
-                frame.carry.append(bufPtr, bufLen);
-                frame.readOffset = 0;
-                continue;
+            // Check if we chunked at '{' to '%'
+            if(frame.carry == "{" && bodyView[0] != '%') {
+                // Not a tag
+                if(!SafeWrite(ctx.io, frame.carry.c_str(), frame.carry.size()))
+                    return { TemplateType::FAILURE, 0 };
+                frame.carry.clear();
+                goto __DefaultChunkProcessing;
             }
 
-            // Found tag end in this chunk, append the data to carry, make tagView and process it
-            std::size_t appendCount = foundEnd + 2;
+            // Now before we do a 'find()', check if 'frame.carry' ends with '%'
+            else if(frame.carry.back() == '%' && bodyView[0] == '}') {
+                // Tag is complete
+                frame.carry      += '}';
+                frame.readOffset += 1;
 
-            frame.carry.append(bufPtr, appendCount);
-            frame.readOffset = appendCount;
+                // Check max length
+                if(frame.carry.size() > maxTagLength_) {
+                    logger_.Error(
+                    "[TemplateEngine].[ParsingError]: OC (split); Length of the tag: '",
+                    frame.carry,
+                    "' crosses the maxTagLength_ limit which is ", maxTagLength_
+                );
+                    return { TemplateType::FAILURE, 0 };
+                }
 
+                tagView = frame.carry;
+                ctx.justProcessedTag = true;
+
+                goto __ProcessTag;
+            }
+
+            tagEnd = bodyView.find("%}");
+            if(tagEnd == std::string_view::npos) {
+                // So the min chunk size is about 512 bytes, and maxTagLength_ is like what, 270?
+                // And ur telling me that we just started this chunk and we couldn't find the tag end?
+                // Dawg fuck no
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: Couldn't find tag end in this chunk, it started in previous chunk. Tag: ",
+                    frame.carry
+                );
+                return { TemplateType::FAILURE, 0 };
+            }
+
+            // Found tag end in this chunk, but before we append, check the length of tag
+            // It cannot cross maxTagLength_
+            std::size_t appendCount = tagEnd + 2;
+            if(frame.carry.size() + appendCount > maxTagLength_) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: OC; Length of the tag: '",
+                    frame.carry,
+                    "' crosses the maxTagLength_ limit which is ", maxTagLength_
+                );
+                return { TemplateType::FAILURE, 0 };
+            }
+
+            frame.carry.append(bodyView.data(), appendCount);
+            frame.readOffset += appendCount;
+
+            // Complete tag ready, now process it
             tagView = frame.carry;
             ctx.justProcessedTag = true;
 
             goto __ProcessTag;
         }
 
+__DefaultChunkProcessing:
         // CASE 2: Normal reading of data from current frame
         while(frame.readOffset < bufLen) {
-            bufStart  = bufPtr + frame.readOffset;
-            bodyView  = {bufStart, frame.bytesRead - frame.readOffset};
+            bodyView = {bufPtr + frame.readOffset, frame.bytesRead - frame.readOffset};
 
             // If we are processing a child template (one that extends a parent)-
             // -or skipUntilFlag is set, we should NOT write any content from it
             isExtending  = !ctx.currentExtendsName.empty();
             skipLiterals = isExtending || ctx.skipUntilFlag;
+            tagStart     = bodyView.find("{%");
 
             // No tag found, literal chunk
-            tagStart = bodyView.find("{%");
             if(tagStart == std::string::npos) {
+                // Now we need to check for one thing, are we ending this chunk with '{'
+                // Because if we are, then maybe the next chunk contains the rest of the tag uk
+                // Example -> Data: <...> {% block id %} <...>
+                //         -> Chunk 1: "<...> {" , Chunk 2: "% block id %} <...>"
+                // So we write what we know is a literal to output and throw '{' inside of carry
+                bool maybeTag = EndsWith(bodyView, "{");
+                outSize = maybeTag ? bodyView.size() - 1 : bodyView.size();
+
                 // We only append content to block if we aren't in parent template
                 // For parent template we simply just write out the content if there is no replacement
                 // This condition is helpful when stuffs across boundary (like block statement across two chunks)
                 if(ctx.inBlock && isExtending)
-                    ctx.currentBlockContent.append(bodyView.data(), bodyView.size());
+                    ctx.currentBlockContent.append(bodyView.data(), outSize);
 
                 else if(
-                        !skipLiterals
-                        && !SafeWrite(ctx.io, bodyView.data(), bodyView.size(), ctx.justProcessedTag)
-                    )
+                    !skipLiterals
+                    && !SafeWrite(ctx.io, bodyView.data(), outSize, ctx.justProcessedTag)
+                )
                     return { TemplateType::FAILURE, 0 };
+
+                if(maybeTag)
+                    frame.carry.assign("{");
 
                 ctx.justProcessedTag = false;
                 break; // Break inner loop, go to __NextChunk
@@ -420,17 +509,30 @@ __ContinueReading:
             frame.readOffset += tagStart;
 
             // Recalculate view from the tag start
-            bufStart  = bufPtr + frame.readOffset;
-            bodyView  = {bufStart, frame.bytesRead - frame.readOffset};
+            bodyView = {bufPtr + frame.readOffset, bufLen - frame.readOffset};
+            tagEnd   = bodyView.find("%}");
 
             // Incomplete tag, carry over for next read
-            tagEnd = bodyView.find("%}", 2);
+            // Why use assign? Tags can only span one chunk at max, so either the '{%' or '%}' spans-
+            // -at a single time, not both at the same time
             if(tagEnd == std::string::npos) {
                 frame.carry.assign(bodyView.data(), bodyView.size());
                 goto __NextChunk;
             }
 
             tagView = {bodyView.data(), tagEnd + 2};
+
+            // Tag cannot be larger than 'maxTagLength_', so uk people don't just 'accidentally'-
+            // -make it a billion bytes :)
+            if(tagView.size() > maxTagLength_) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: IC; Length of the tag: '",
+                    tagView,
+                    "' crosses the maxTagLength_ limit which is ", maxTagLength_
+                );
+                return { TemplateType::FAILURE, 0 };
+            }
+
             ctx.justProcessedTag = true;
 
             // Common functionality for both partial and fully completed tags
@@ -438,6 +540,13 @@ __ContinueReading:
             TemplateEngine::TagResult tagResult = ProcessTag(ctx, tagView);
             if(tagResult == TagResult::FAILURE)
                 return { TemplateType::FAILURE, 0 };
+
+            // Preserve the dynamic tags for future compilation
+            if(tagResult == TagResult::PASSTHROUGH_DYNAMIC) {
+                ctx.foundDynamicTag = true;
+                if(!skipLiterals && !SafeWrite(ctx.io, tagView.data(), tagView.size()))
+                    return { TemplateType::FAILURE, 0 };
+            }
 
             if(!frame.carry.empty())
                 frame.carry.clear();
@@ -461,7 +570,7 @@ __ContinueReading:
     }
 
     return {
-        ctx.foundCompilingCode ? TemplateType::COMPILED_STATIC : TemplateType::PURE_STATIC,
+        ctx.foundDynamicTag ? TemplateType::DYNAMIC : TemplateType::STATIC,
         ctx.io.file->Size()
     };
 }
@@ -545,124 +654,144 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(
         return TagResult::SUCCESS; // Discard everything while skipping
     }
 
-    // --- {% endblock %} ---
-    if(tagName == "endblock") {
-        // Endblock doesn't take in arguments
-        if(!tagArgs.empty()) {
-            logger_.Error(
-                "[TemplateEngine].[ParsingError]: {%% endblock %%} does not take any arguments, found: ", tagArgs
-            );
-            return TagResult::FAILURE;
-        }
+    // Some dictionary type shit
+    switch(tagName[0])
+    {
+        // Tags available: 'block'
+        case 'b':
+            if(tagName == "block") {
+                if(tagArgs.empty()) {
+                    logger_.Error(
+                        "[TemplateEngine].[ParsingError]: {% block ... %} expects an identifier as an argument, found nothing"
+                    );
+                    return TagResult::FAILURE;
+                }
 
-        if(!context.inBlock) {
-            logger_.Error(
-                "[TemplateEngine].[ParsingError]: {%% endblock %%} found without its corresponding {%% block ... %%}"
-            );
-            return TagResult::FAILURE;
-        }
+                std::string blockName = std::string(tagArgs);
 
-        // Trim the content a bit for cleaner output
-        TrimInline(context.currentBlockContent);
+                // Try to find the current block in the block list, if u can, substitute it
+                auto it = context.childBlocks.find(blockName);
+                if(it != context.childBlocks.end()) {
+                    SafeWrite(context.io, it->second.data(), it->second.size());
+                    context.skipUntilFlag = true; // Now just skip everything until endblock
+                    return TagResult::SUCCESS;
+                }
 
-        context.inBlock = false;
-        context.childBlocks[std::move(context.currentBlockName)] = std::move(context.currentBlockContent);
-        context.currentBlockName.clear();
-        context.currentBlockContent.clear();
+                // Now in another case, we would want to substitute the original content inplace-
+                // -if we couldn't find a replacement above, that is if we are in original parent file now
+                if(context.currentExtendsName.empty()) {
+                    context.inBlock = true;
+                    return TagResult::SUCCESS;
+                }
 
-        return TagResult::SUCCESS; // Skip writing
-    }
+                // Else create a new block
+                context.inBlock          = true;
+                context.currentBlockName = std::move(blockName);
+                context.currentBlockContent.clear();
 
-    // --- {% extends ... %} ---
-    if(tagName == "extends") {
-        if(tagArgs.empty()) {
-            logger_.Error(
-                "[TemplateEngine].[ParsingError]: {%% extends ... %%} expects a file name as an argument, found nothing"
-            );
-            return TagResult::FAILURE;
-        }
+                return TagResult::SUCCESS; // Don't write line yet
+            }
+            break;
 
-        std::size_t q1 = tagArgs.find_first_of("'\"");
-        std::size_t q2 = tagArgs.find_last_of("'\"");
-        
-        if(q1 == std::string::npos || q2 <= q1) {
-            logger_.Error(
-                "[TemplateEngine].[ParsingError]: {%% extends ... %%} got an improperly formatted file name."
-                " Usage example: {%% extends 'base.html' %%}"
-            );
-            return TagResult::FAILURE;
-        }
+        // Tags available: 'elif', 'else', 'endblock', 'endif', 'extends'
+        case 'e':
+            if(
+                tagName == "elif"
+                || tagName == "else"
+                || tagName == "endif"
+            )
+                return TagResult::PASSTHROUGH_DYNAMIC;
 
-        // The order of operations for extends is different from include
-        // We want current file to be processed first before the parent file does
-        // Unlike include where parent file is processed first
-        context.currentExtendsName = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));;
-        context.foundCompilingCode = true;
+            if(tagName == "endblock") {
+                // Endblock doesn't take in arguments
+                if(!tagArgs.empty()) {
+                    logger_.Error(
+                        "[TemplateEngine].[ParsingError]: {% endblock %} does not take any arguments, found: ", tagArgs
+                    );
+                    return TagResult::FAILURE;
+                }
 
-        return TagResult::SUCCESS;
-    }
+                if(!context.inBlock) {
+                    logger_.Error(
+                        "[TemplateEngine].[ParsingError]: {% endblock %} found without its corresponding {% block ... %}"
+                    );
+                    return TagResult::FAILURE;
+                }
 
-    // --- {% block ... %} ---
-    if(tagName == "block") {
-        if(tagArgs.empty()) {
-            logger_.Error(
-                "[TemplateEngine].[ParsingError]: {%% block ... %%} expects an identifier as an argument, found nothing"
-            );
-            return TagResult::FAILURE;
-        }
+                // Trim the content a bit for cleaner output
+                TrimInline(context.currentBlockContent);
 
-        std::string blockName = std::string(tagArgs);
+                context.inBlock = false;
+                context.childBlocks[std::move(context.currentBlockName)] = std::move(context.currentBlockContent);
+                context.currentBlockName.clear();
+                context.currentBlockContent.clear();
 
-        // Try to find the current block in the block list, if u can, substitute it
-        auto it = context.childBlocks.find(blockName);
-        if(it != context.childBlocks.end()) {
-            SafeWrite(context.io, it->second.data(), it->second.size());
-            context.skipUntilFlag = true; // Now just skip everything until endblock
-            return TagResult::SUCCESS;
-        }
+                return TagResult::SUCCESS; // Skip writing
+            }
 
-        // Now in another case, we would want to substitute the original content inplace-
-        // -if we couldn't find a replacement above, that is if we are in original parent file now
-        if(context.currentExtendsName.empty()) {
-            context.inBlock = true;
-            return TagResult::SUCCESS;
-        }
+            if(tagName == "extends") {
+                if(tagArgs.empty()) {
+                    logger_.Error(
+                        "[TemplateEngine].[ParsingError]: {% extends ... %} expects a file name as an argument, found nothing"
+                    );
+                    return TagResult::FAILURE;
+                }
 
-        // Else create a new block
-        context.inBlock            = true;
-        context.foundCompilingCode = true;
-        context.currentBlockName   = std::move(blockName);
-        context.currentBlockContent.clear();
+                std::size_t q1 = tagArgs.find_first_of("'\"");
+                std::size_t q2 = tagArgs.find_last_of("'\"");
+                
+                if(q1 == std::string::npos || q2 <= q1) {
+                    logger_.Error(
+                        "[TemplateEngine].[ParsingError]: {% extends ... %} got an improperly formatted file name."
+                        " Usage example: {% extends 'base.html' %}"
+                    );
+                    return TagResult::FAILURE;
+                }
 
-        return TagResult::SUCCESS; // Don't write line yet
-    }
+                // The order of operations for extends is different from include
+                // We want current file to be processed first before the parent file does
+                // Unlike include where parent file is processed first
+                context.currentExtendsName = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));;
 
-    // --- {% include ... %} ---
-    if(tagName == "include") {
-        if(tagArgs.empty()) {
-            logger_.Error(
-                "[TemplateEngine].[ParsingError]: {%% include ... %%} expects a file name as an argument, found nothing"
-            );
-            return TagResult::FAILURE;
-        }
+                return TagResult::SUCCESS;
+            }
+            break;
 
-        std::size_t q1 = tagArgs.find_first_of("'\"");
-        std::size_t q2 = tagArgs.find_last_of("'\"");
-    
-        if(q1 == std::string::npos || q2 <= q1) {
-            logger_.Error(
-                "[TemplateEngine].[ParsingError]: {%% include ... %%} got an improperly formatted file name."
-                " Usage example: {%% include 'base.html' %%}"
-            );
-            return TagResult::FAILURE;
-        }
+        // Tags available: 'if', 'include'
+        case 'i':
+            if(tagName == "if") return TagResult::PASSTHROUGH_DYNAMIC;
 
-        std::string includePath = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));
-        context.foundCompilingCode = true;
+            if(tagName == "include") {
+                if(tagArgs.empty()) {
+                    logger_.Error(
+                        "[TemplateEngine].[ParsingError]: {% include ... %} expects a file name as an argument, found nothing"
+                    );
+                    return TagResult::FAILURE;
+                }
 
-        return PushFile(context, includePath)
-                ? TagResult::CONTROL_TO_ANOTHER_FILE
-                : TagResult::FAILURE;
+                std::size_t q1 = tagArgs.find_first_of("'\"");
+                std::size_t q2 = tagArgs.find_last_of("'\"");
+            
+                if(q1 == std::string::npos || q2 <= q1) {
+                    logger_.Error(
+                        "[TemplateEngine].[ParsingError]: {% include ... %} got an improperly formatted file name."
+                        " Usage example: {% include 'base.html' %}"
+                    );
+                    return TagResult::FAILURE;
+                }
+
+                std::string includePath = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));
+
+                return PushFile(context, includePath)
+                        ? TagResult::CONTROL_TO_ANOTHER_FILE
+                        : TagResult::FAILURE;
+            }
+            break;
+
+        // Tags available: 'var'
+        case 'v':
+            if(tagName == "var") return TagResult::PASSTHROUGH_DYNAMIC;
+            break;
     }
 
     // Unknown tags are not allowed

@@ -85,8 +85,6 @@ endif()
 # Link third-party libraries
 target_link_libraries(wfx PRIVATE
     tlsf
-    concurrentqueue
-    nlohmann_json
     tomlplusplus
 )
 
@@ -118,9 +116,6 @@ endif()
 
 target_link_libraries(wfxutils PRIVATE
     tlsf
-    concurrentqueue
-    nlohmann_json
-    tomlplusplus
 )
 
 set_target_properties(wfxutils PROPERTIES

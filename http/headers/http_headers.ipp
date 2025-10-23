@@ -20,7 +20,7 @@ bool CaseInsensitiveEqual::operator()(const T1& lhs, const T2& rhs) const
         (std::is_same_v<std::decay_t<T2>, std::string> || std::is_same_v<std::decay_t<T2>, std::string_view>),
         "CaseInsensitiveEqual: both operands must be std::string or std::string_view"
     );
-    return WFX::Utils::StringGuard::CTInsensitiveStringCompare(lhs, rhs);
+    return WFX::Utils::StringSanitizer::CTInsensitiveStringCompare(lhs, rhs);
 }
 
 template<typename K, typename V>

@@ -87,7 +87,7 @@ std::size_t Hasher::Fnv1aCaseInsensitive(const std::uint8_t* data, std::size_t l
 
     const std::uint8_t* end = data + len;
     while(data < end) {
-        hash ^= static_cast<std::uint8_t>(StringGuard::ToLowerAscii(static_cast<unsigned char>(*data++)));
+        hash ^= static_cast<std::uint8_t>(StringSanitizer::ToLowerAscii(static_cast<unsigned char>(*data++)));
         hash *= fnvPrime;
     }
 

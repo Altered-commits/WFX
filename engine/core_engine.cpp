@@ -84,8 +84,8 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             auto  connHeader = reqInfo.headers.GetHeader("Connection");
             
             bool shouldClose = (reqInfo.version == HttpVersion::HTTP_1_0)
-                ? !StringGuard::CaseInsensitiveCompare(connHeader, "keep-alive") // HTTP/1.0: Defaults to close
-                : StringGuard::CaseInsensitiveCompare(connHeader, "close");      // HTTP/1.1: Defaults to keep-alive
+                ? !StringSanitizer::CaseInsensitiveCompare(connHeader, "keep-alive") // HTTP/1.0: Defaults to close
+                : StringSanitizer::CaseInsensitiveCompare(connHeader, "close");      // HTTP/1.1: Defaults to keep-alive
             
             res.Set("Connection", shouldClose ? "close" : "keep-alive");
             

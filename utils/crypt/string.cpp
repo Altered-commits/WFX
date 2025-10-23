@@ -1,17 +1,18 @@
 #include "string.hpp"
 
 #include "utils/backport/string.hpp"
+#include <algorithm>
 
 namespace WFX::Utils {
 
 // Char Utilities
-std::uint8_t StringGuard::ToLowerAscii(std::uint8_t c)
+std::uint8_t StringSanitizer::ToLowerAscii(std::uint8_t c)
 {
     return (c >= 'A' && c <= 'Z') ? (c | 0x20) : c;
 }
 
 // String Utilties
-bool StringGuard::CTStringCompare(std::string_view lhs, std::string_view rhs)
+bool StringSanitizer::CTStringCompare(std::string_view lhs, std::string_view rhs)
 {
     if(lhs.size() != rhs.size()) return false;
 
@@ -22,7 +23,7 @@ bool StringGuard::CTStringCompare(std::string_view lhs, std::string_view rhs)
     return result == 0;
 }
 
-bool StringGuard::CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs)
+bool StringSanitizer::CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs)
 {
     if(lhs.size() != rhs.size()) return false;
 
@@ -38,7 +39,7 @@ bool StringGuard::CTInsensitiveStringCompare(std::string_view lhs, std::string_v
     return result == 0;
 }
 
-bool StringGuard::CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs)
+bool StringSanitizer::CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs)
 {
     if(lhs.size() != rhs.size())
         return false;
@@ -51,7 +52,7 @@ bool StringGuard::CaseInsensitiveCompare(std::string_view lhs, std::string_view 
 }
 
 // Path normalization
-bool StringGuard::NormalizeURIPathInplace(std::string_view& path)
+bool StringSanitizer::NormalizeURIPathInplace(std::string_view& path)
 {
     // Sanity check
     if(path.size() == 0 || path.data() == nullptr)
@@ -137,6 +138,26 @@ bool StringGuard::NormalizeURIPathInplace(std::string_view& path)
     path = std::string_view(buf, write - buf);
     
     return true;
+}
+
+std::string StringSanitizer::NormalizePathToIdentifier(std::string_view path, std::string_view prefix)
+{
+    static const char* hex = "0123456789abcdef";
+    std::string out;
+    
+    out.reserve(prefix.size() + path.size() * 4);
+    out += prefix;
+
+    for(unsigned char c : path) {
+        if(std::isalnum(c))
+            out += c;
+        else {
+            out += '_';
+            out += hex[(c >> 4) & 0xF];
+            out += hex[c & 0xF];
+        }
+    }
+    return out;
 }
 
 } // namespace WFX::Utils

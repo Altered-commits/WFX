@@ -5,7 +5,7 @@
 #include "http/headers/http_headers.hpp"
 #include "http/common/http_route_common.hpp"
 
-#include <nlohmann/json_fwd.hpp>
+#include "include/third_party/json/json_fwd.hpp"
 
 #include <variant>
 #include <string>
@@ -46,13 +46,9 @@ public:
     void SendTemplate(const char* cstr, bool autoHandle404);
     void SendTemplate(std::string&& path, bool autoHandle404);
 
-    // Stream API (SteamFile is for my own testing purpose, outside of it, its useless)
-    [[deprecated("StreamFile(const char*) is redundant, use SendFile() instead for files or directly use Stream()")]]
+    // Stream API
     void StreamFile(const char* cstr, bool autoHandle404);
-
-    [[deprecated("StreamFile(std::string&&) is redundant, use SendFile() instead for files or directly use Stream()")]]
     void StreamFile(std::string&& path, bool autoHandle404);
-
     void Stream(StreamGenerator generator, bool skipChecks = false);
 
 private:

@@ -5,35 +5,26 @@ function(fetch_and_log NAME)
     message(STATUS "Fetching and configuring ${NAME}...")
 endfunction()
 
-# ---------------- ConcurrentQueue ----------------
-fetch_and_log("concurrentqueue")
-FetchContent_Declare(
-  concurrentqueue
-  GIT_REPOSITORY https://github.com/cameron314/concurrentqueue.git
-  GIT_TAG        v1.0.4
-)
-FetchContent_MakeAvailable(concurrentqueue)
-message(STATUS "ConcurrentQueue ready")
-
 # ---------------- nlohmann/json ----------------
+# This approach makes it properly available for both Engine and User
 fetch_and_log("nlohmann/json")
-FetchContent_Declare(
-  nlohmann_json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG        v3.12.0
-)
-FetchContent_MakeAvailable(nlohmann_json)
-message(STATUS "nlohmann/json ready")
-
-# Copy headers to include/third_party/json
 set(JSON_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include/third_party/json)
 file(MAKE_DIRECTORY ${JSON_INCLUDE_DIR})
-file(GLOB JSON_HEADERS
-    ${nlohmann_json_SOURCE_DIR}/single_include/nlohmann/json.hpp
-    ${nlohmann_json_SOURCE_DIR}/single_include/nlohmann/json_fwd.hpp
-)
-file(COPY ${JSON_HEADERS} DESTINATION ${JSON_INCLUDE_DIR})
-message(STATUS "nlohmann/json headers copied to ${JSON_INCLUDE_DIR}")
+
+# URLs of the single-header files, v3.12.0
+set(JSON_HPP_URL "https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp")
+set(JSON_FWD_HPP_URL "https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json_fwd.hpp")
+
+# Download headers only if they don't exist
+if(NOT EXISTS "${JSON_INCLUDE_DIR}/json.hpp")
+  file(DOWNLOAD ${JSON_HPP_URL} "${JSON_INCLUDE_DIR}/json.hpp" SHOW_PROGRESS)
+endif()
+
+if(NOT EXISTS "${JSON_INCLUDE_DIR}/json_fwd.hpp")
+  file(DOWNLOAD ${JSON_FWD_HPP_URL} "${JSON_INCLUDE_DIR}/json_fwd.hpp" SHOW_PROGRESS)
+endif()
+
+message(STATUS "nlohmann/json ready in ${JSON_INCLUDE_DIR}")
 
 # ---------------- TLSF ----------------
 fetch_and_log("TLSF")
@@ -66,10 +57,3 @@ if (NOT TARGET tomlplusplus)
   target_include_directories(tomlplusplus INTERFACE ${tomlplusplus_SOURCE_DIR}/include)
   message(STATUS "tomlplusplus INTERFACE target created")
 endif()
-
-# Copy headers to include/third_party/toml++
-set(TOML_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include/third_party/toml++)
-file(MAKE_DIRECTORY ${TOML_INCLUDE_DIR})
-file(GLOB TOML_HEADERS ${tomlplusplus_SOURCE_DIR}/include/toml++/*.hpp)
-file(COPY ${TOML_HEADERS} DESTINATION ${TOML_INCLUDE_DIR})
-message(STATUS "tomlplusplus headers copied to ${TOML_INCLUDE_DIR}")

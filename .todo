@@ -16,6 +16,7 @@ To implement (In no specific order):
 9. Rate Limiting (Done: Connection and Request)
 10. Timeout (Done)
 11. Streaming (Done: Outbound, Inbound remaining)
+12. .env (Done)
 
 To Fix:
 1. Cache files < 4KB, don't use TransmitFile / sendfile on every single file
