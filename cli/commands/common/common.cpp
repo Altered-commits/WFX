@@ -1,4 +1,17 @@
-#include "dev_helper.hpp"
+#include "common.hpp"
+
+#include "config/config.hpp"
+#include "engine/core_engine.hpp"
+#include "http/common/http_global_state.hpp"
+#include "utils/logger/logger.hpp"
+#include "utils/filesystem/filesystem.hpp"
+#include "utils/process/process.hpp"
+#include "utils/backport/string.hpp"
+
+// Linux
+#ifndef _WIN32
+    #include <wait.h>
+#endif
 
 namespace WFX::CLI {
 

@@ -287,14 +287,8 @@ void TemplateEngine::PreCompileTemplates()
             std::string cppPath = dynamicCppOutputDir + "/" + relPath + ".cpp";
 
             auto irCode = GenerateIRFromTemplate(outPath);
-            if(!irCode.empty()) {
+            if(!irCode.empty())
                 logger_.Info("[TemplateEngine-Debug]: Output function name: ", funcName, ", Output path: ", cppPath);
-                for(auto&& code : irCode)
-                    logger_.Info(
-                        "OP: ", (int)code.type, " DATA: ", code.data, " OFFSET: ", code.offset,
-                        " LENGTH: ", code.length, " STATE: ", code.stateNum, " TARGET STATE: ", code.targetState
-                    );
-            }
         }
     });
 

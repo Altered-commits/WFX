@@ -1,5 +1,21 @@
 #include "dev.hpp"
-#include "dev_helper.hpp"
+
+#include "cli/commands/common/common.hpp"
+#include "config/config.hpp"
+#include "engine/core_engine.hpp"
+#include "engine/template_engine.hpp"
+#include "http/common/http_global_state.hpp"
+#include "utils/dotenv/dotenv.hpp"
+#include "utils/logger/logger.hpp"
+#include "utils/filesystem/filesystem.hpp"
+#include "utils/backport/string.hpp"
+
+#ifdef _WIN32
+    #include <windows.h>
+#else
+    #include <wait.h>
+    #include <signal.h>
+#endif
 
 namespace WFX::CLI {
 

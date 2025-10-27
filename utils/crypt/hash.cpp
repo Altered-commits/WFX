@@ -18,8 +18,45 @@
 
 namespace WFX::Utils {
 
+// vvv HASH UTILS vvv
+std::uint64_t HashUtils::Rotl(std::uint64_t n, unsigned int i) noexcept
+{
+    constexpr std::size_t m = std::numeric_limits<std::size_t>::digits - 1;
+    const std::size_t c = i & m;
+    return (n << c) | (n >> ((std::size_t(0) - c) & m));
+}
+
+std::uint64_t HashUtils::Rotr(std::uint64_t n, unsigned int i) noexcept
+{
+    constexpr std::size_t m = std::numeric_limits<std::size_t>::digits - 1;
+    const std::size_t c = i & m;
+    return (n >> c) | (n << ((std::size_t(0) - c) & m));
+}
+
+std::uint64_t HashUtils::Distribute(std::uint64_t n) noexcept
+{
+    if constexpr(sizeof(std::size_t) == 4) {
+        const std::uint32_t p = 0x55555555ul;         // Alternating bit pattern
+        const std::uint32_t c = 3423571495ul;         // Odd constant for mixing
+        std::uint32_t x = static_cast<std::uint32_t>(n);
+        x ^= x >> 16;
+        x *= p;
+        x ^= x >> 16;
+        return static_cast<std::size_t>(c * x);
+    }
+    else {
+        const std::uint64_t p = 0x5555555555555555ull;
+        const std::uint64_t c = 17316035218449499591ull;
+        std::uint64_t x = static_cast<std::uint64_t>(n);
+        x ^= x >> 32;
+        x *= p;
+        x ^= x >> 32;
+        return static_cast<std::size_t>(c * x);
+    }
+}
+
 // vvv HASHERS vvv
-std::size_t Hasher::SipHash24(const std::uint8_t* data, std::size_t len, const std::uint8_t key[16])
+std::uint64_t Hasher::SipHash24(const std::uint8_t* data, std::uint64_t len, const std::uint8_t key[16])
 {
     std::uint64_t k0, k1;
     memcpy(&k0, key, 8);
@@ -40,45 +77,45 @@ std::size_t Hasher::SipHash24(const std::uint8_t* data, std::size_t len, const s
 
         v3 ^= m;
         for(int i = 0; i < 2; ++i) {
-            v0 += v1; v1 = ROTL64(v1, 13); v1 ^= v0; v0 = ROTL64(v0, 32);
-            v2 += v3; v3 = ROTL64(v3, 16); v3 ^= v2;
-            v0 += v3; v3 = ROTL64(v3, 21); v3 ^= v0;
-            v2 += v1; v1 = ROTL64(v1, 17); v1 ^= v2; v2 = ROTL64(v2, 32);
+            v0 += v1; v1 = HashUtils::Rotl(v1, 13); v1 ^= v0; v0 = HashUtils::Rotl(v0, 32);
+            v2 += v3; v3 = HashUtils::Rotl(v3, 16); v3 ^= v2;
+            v0 += v3; v3 = HashUtils::Rotl(v3, 21); v3 ^= v0;
+            v2 += v1; v1 = HashUtils::Rotl(v1, 17); v1 ^= v2; v2 = HashUtils::Rotl(v2, 32);
         }
         v0 ^= m;
     }
 
     std::uint64_t last = static_cast<std::uint64_t>(len) << 56;
-    std::size_t rem = len & 7;
-    for(std::size_t i = 0; i < rem; ++i)
+    std::uint64_t rem = len & 7;
+    for(std::uint64_t i = 0; i < rem; ++i)
         last |= static_cast<std::uint64_t>(ptr[i]) << (i * 8);
 
     v3 ^= last;
     for(int i = 0; i < 2; ++i) {
-        v0 += v1; v1 = ROTL64(v1, 13); v1 ^= v0; v0 = ROTL64(v0, 32);
-        v2 += v3; v3 = ROTL64(v3, 16); v3 ^= v2;
-        v0 += v3; v3 = ROTL64(v3, 21); v3 ^= v0;
-        v2 += v1; v1 = ROTL64(v1, 17); v1 ^= v2; v2 = ROTL64(v2, 32);
+        v0 += v1; v1 = HashUtils::Rotl(v1, 13); v1 ^= v0; v0 = HashUtils::Rotl(v0, 32);
+        v2 += v3; v3 = HashUtils::Rotl(v3, 16); v3 ^= v2;
+        v0 += v3; v3 = HashUtils::Rotl(v3, 21); v3 ^= v0;
+        v2 += v1; v1 = HashUtils::Rotl(v1, 17); v1 ^= v2; v2 = HashUtils::Rotl(v2, 32);
     }
     v0 ^= last;
 
     v2 ^= 0xff;
     for(int i = 0; i < 4; ++i) {
-        v0 += v1; v1 = ROTL64(v1, 13); v1 ^= v0; v0 = ROTL64(v0, 32);
-        v2 += v3; v3 = ROTL64(v3, 16); v3 ^= v2;
-        v0 += v3; v3 = ROTL64(v3, 21); v3 ^= v0;
-        v2 += v1; v1 = ROTL64(v1, 17); v1 ^= v2; v2 = ROTL64(v2, 32);
+        v0 += v1; v1 = HashUtils::Rotl(v1, 13); v1 ^= v0; v0 = HashUtils::Rotl(v0, 32);
+        v2 += v3; v3 = HashUtils::Rotl(v3, 16); v3 ^= v2;
+        v0 += v3; v3 = HashUtils::Rotl(v3, 21); v3 ^= v0;
+        v2 += v1; v1 = HashUtils::Rotl(v1, 17); v1 ^= v2; v2 = HashUtils::Rotl(v2, 32);
     }
 
     return v0 ^ v1 ^ v2 ^ v3;
 }
 
-std::size_t Hasher::SipHash24(std::string_view str, const std::uint8_t key[16])
+std::uint64_t Hasher::SipHash24(std::string_view str, const std::uint8_t key[16])
 {
     return SipHash24(reinterpret_cast<const std::uint8_t*>(str.data()), str.size(), key);
 }
 
-std::size_t Hasher::Fnv1aCaseInsensitive(const std::uint8_t* data, std::size_t len)
+std::uint64_t Hasher::Fnv1aCaseInsensitive(const std::uint8_t* data, std::uint64_t len)
 {
     constexpr std::uint64_t fnvPrime       = 1099511628211ULL;
     constexpr std::uint64_t fnvOffsetBasis = 14695981039346656037ULL;

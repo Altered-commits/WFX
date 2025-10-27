@@ -39,7 +39,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
         [](const std::unordered_map<std::string, std::string>&,
            const std::vector<std::string>& positionalArgs) -> int {
             if(positionalArgs.empty())
-                Logger::GetInstance().Fatal("[WFX]: Build type is required. Usage: wfx build [templates|...]");
+                Logger::GetInstance().Fatal("[WFX]: Build type is required. Usage: wfx build [templates|source]");
 
             return CLI::BuildProject(positionalArgs[0]);
         });

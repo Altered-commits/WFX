@@ -15,14 +15,26 @@
 
 namespace WFX::Utils {
 
+// vvv HASH UTILS vvv
+class HashUtils final {
+public:
+    static std::uint64_t Rotl(std::uint64_t n, unsigned int i) noexcept;
+    static std::uint64_t Rotr(std::uint64_t n, unsigned int i) noexcept;
+    static std::uint64_t Distribute(std::uint64_t n)           noexcept;
+
+private:
+    HashUtils()  = delete;
+    ~HashUtils() = delete;
+};
+
 // vvv HASHERS vvv
 class Hasher final {
 public:
-    static std::size_t SipHash24(const std::uint8_t* data, std::size_t len, const std::uint8_t key[16]);
-    static std::size_t SipHash24(std::string_view data, const std::uint8_t key[16]);
+    static std::uint64_t SipHash24(const std::uint8_t* data, std::uint64_t len, const std::uint8_t key[16]);
+    static std::uint64_t SipHash24(std::string_view data, const std::uint8_t key[16]);
 
-    static std::size_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::size_t len);
-    static std::size_t Fnv1aCaseInsensitive(std::string_view data);
+    static std::uint64_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::uint64_t len);
+    static std::uint64_t Fnv1aCaseInsensitive(std::string_view data);
 
 private:
     Hasher()  = delete;

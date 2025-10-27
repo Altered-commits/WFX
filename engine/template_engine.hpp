@@ -1,11 +1,14 @@
 #ifndef WFX_TEMPLATE_ENGINE_HPP
 #define WFX_TEMPLATE_ENGINE_HPP
 
+#include "legacy/lexer.hpp"
 #include "utils/logger/logger.hpp"
 #include "utils/filesystem/filesystem.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <map>
+#include <variant>
 #include <stack>
 #include <deque>
 #include <cstdint>
@@ -56,6 +59,22 @@ private: // Nested helper types for the parser
         ELSE,    // Marker for 'else' block
         ENDIF,   // Marker for 'endif'
         JUMP     // Unconditional jump (used to skip past elif/else)
+    };
+
+    // OpCode for RPN State Machine
+    enum class RPNOpCode : uint8_t {
+        PUSH_CONST,
+        PUSH_VAR,
+        OP_GET_ATTR,
+        OP_AND,
+        OP_OR,
+        OP_NOT,
+        OP_EQ,
+        OP_NEQ,
+        OP_GT,
+        OP_GTE,
+        OP_LT,
+        OP_LTE
     };
 
     // Generic buffered I/O for writing
@@ -111,31 +130,62 @@ private: // Nested helper types for the parser
         {}
     };
 
-    struct Op {
-        OpType        type;
-        bool          patch  = false; // Mostly for patching jump offsets in conditions
-        std::string   data;           // Stores the variable identifier as a string
-        std::uint64_t offset = 0;     // For LITERAL: byte offset in static file
-        std::uint64_t length = 0;     // For LITERAL: byte length in static file
+    // A single RPN instruction (8 bytes)
+    struct RPNOp {
+        RPNOpCode     code = {};
+        std::uint32_t arg  = 0; // Index for PUSH_CONST or PUSH_VAR
 
-        std::uint32_t stateNum    = 0; // State number for State Machine thingy
-        std::uint32_t targetState = 0; // State to jump to (for IF, ELIF, JUMP)
+        bool operator==(const RPNOp& other) const {
+            return this->code == other.code
+                && this->arg == other.arg;
+        }
+    };
+
+    // An 'Expression' is just a flat vector of these ops
+    using RPNBytecode = std::vector<RPNOp>;
+
+    // For constants
+    using Value = std::variant<
+        std::monostate, // Represents 'null'
+        bool,
+        double,
+        std::int64_t,
+        std::string
+    >;
+
+    using LiteralValue     = std::pair<std::uint64_t, std::uint64_t>; // offset, length
+    using ConditionalValue = std::pair<std::uint32_t, std::uint32_t>; // jump_state, expr_index
+
+    using ParseResult = std::pair<bool, std::uint32_t>; // success?, expr_index
+
+    struct Op {
+        OpType type  = {};
+        bool   patch = false; // For conditions, whether it needs patching jump states or not
+
+        std::variant<
+            std::monostate,   // For JUMP, ELSE, ENDIF
+            std::uint32_t,    // For VAR (stores varId), JUMP (stored unconditional jump offset)
+            LiteralValue,     // For LITERAL (stores offset, length)
+            ConditionalValue  // For IF, ELIF (stores the jump_state, expr_index)
+        > payload{};
     };
 
     using IRCode = std::vector<Op>;
 
     struct IRContext {
         TemplateFrame frame;
+        IRCode        ir;
 
-        // Main shit
-        IRCode ir;
-
-        // Yeah man wtf
-        std::stack<std::vector<std::uint32_t>>         ifPatchStack;
+        std::stack<std::vector<std::uint32_t>> ifPatchStack;
+        
+        // Optimization ig
         std::unordered_map<std::string, std::uint32_t> varNameMap;
+        std::unordered_map<std::size_t, std::uint32_t> rpnMap;
+        std::map<Value, std::uint32_t>                 constMap;
+        std::vector<RPNBytecode>                       rpnPool;
         std::vector<std::string>                       staticVarNames;
+        std::vector<Value>                             staticConstants;
 
-        // Track file offset and length relative to file start (for Literal Op)
         std::uint64_t currentLiteralStartOffset = 0;
         std::uint64_t currentLiteralLength      = 0;
         std::uint32_t currentState              = 0;
@@ -152,12 +202,25 @@ private: // Helper functions
     TagResult      ProcessTag(CompilationContext& context, std::string_view tagView);
     TagResult      ProcessTagIR(IRContext& ctx, std::string_view tagView);
     std::uint32_t  GetVarNameId(IRContext& ctx, const std::string& name);
+    std::uint32_t  GetConstId(IRContext& ctx, const Value& val);
 
-private: // Transpiler functions (Impl in template_transpiler.cpp)
+private: // Transpiler Functions (Impl in template_transpiler.cpp)
+    // Parsing Functions
+    ParseResult   ParseExpr(IRContext& ctx, std::string expression);
+    std::uint32_t GetOperatorPrecedence(Legacy::TokenType type);
+    bool          IsOperator(Legacy::TokenType type);
+    bool          IsRightAssociative(Legacy::TokenType type);
+
+    // Generating Functions
     IRCode GenerateIRFromTemplate(const std::string& staticHtmlPath);
     bool GenerateCxxFromIR(
         const std::string& outCxxPath, const std::string& funcName, std::vector<Op>&& irCode
     );
+
+    // Helper Functions
+    RPNOpCode     TokenToOpCode(Legacy::TokenType type);
+    void          PopOperator(std::stack<Legacy::Token>& opStack, RPNBytecode& outputQueue);
+    std::uint64_t HashBytecode(const RPNBytecode& rpn);
 
 private: // IO functions
     bool FlushWrite(IOContext& context, bool force = false);
@@ -177,7 +240,7 @@ private: // For ease of use across functions
     constexpr static std::string_view partialTag_     = "{% partial %}";
     constexpr static std::size_t      partialTagSize_ = partialTag_.size();
 
-    constexpr static std::size_t      maxTagLength_   = 256 + 14;
+    constexpr static std::size_t      maxTagLength_   = 300;
 
     constexpr static const char*      cacheFile_        = "/build/templates/cache.bin";
     constexpr static const char*      staticFolder_     = "/build/templates/static";

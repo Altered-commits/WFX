@@ -91,16 +91,16 @@ max_events       = 1024   # How many events should epoll handle at a time
 
 [Misc]
 file_cache_size     = 20     # Number of files cached for efficiency
-template_chunk_size = 16384  # Max chunk size to read at once when compiling templates
+template_chunk_size = 16384  # Max chunk size to read / write at once when compiling templates
 cache_chunk_size    = 2048   # Max chunk size to read / write from template cache file
 )");
 
     // Default route
-    CreateFile(projBase / "src/api_entry.cpp", R"(#include <wfx/shared/apis/master_api.hpp>
-#include <wfx/shared/utils/deferred_init_vector.hpp>
-#include <wfx/shared/utils/export_macro.hpp>
+    CreateFile(projBase / "src/api_entry.cpp", R"(#include <shared/apis/master_api.hpp>
+#include <shared/utils/deferred_init_vector.hpp>
+#include <shared/utils/export_macro.hpp>
 
-// WARNING: DO NOT MODIFY THIS SYMBOL
+// WARNING: DO NOT MODIFY THIS SYMBOL OR THIS FILE
 // __wfx_api is reserved for WFX internal API injection
 // Modifying or redefining it will break the interface between WFX and USER
 const WFX::Shared::MASTER_API_TABLE* __wfx_api = nullptr;
