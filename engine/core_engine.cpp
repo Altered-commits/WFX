@@ -179,24 +179,24 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
 #if defined(_WIN32)
     // Windows
     HMODULE userModule = LoadLibraryA(dllPath);
-    if (!userModule) {
+    if(!userModule) {
         DWORD err = GetLastError();
         logger_.Fatal("[CoreEngine]: ", dllPath, " was not found. Error: ", err);
-        return; // logger_.Fatal probably terminates — keep for clarity
+        return;
     }
 
     FARPROC rawProc = GetProcAddress(userModule, "RegisterMasterAPI");
-    if (!rawProc) {
+    if(!rawProc) {
         DWORD err = GetLastError();
         logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user DLL. Error: ", err);
         return;
     }
 
-    // Cast to your function type (assumes calling convention matches)
+    // Cast to your function type
     auto registerFn = reinterpret_cast<WFX::Shared::RegisterMasterAPIFn>(rawProc);
 #else
     // POSIX (Linux / macOS / *nix)
-    // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed.
+    // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed
     void* handle = dlopen(dllPath, RTLD_NOW | RTLD_GLOBAL);
     if(!handle) {
         const char* err = dlerror();
@@ -206,10 +206,10 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
     // Clear any existing error
     dlerror();
     void* rawSym = dlsym(handle, "RegisterMasterAPI");
-    const char* dlsym_err = dlerror();
-    if(!rawSym || dlsym_err)
-        logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user SO: ",
-                      (dlsym_err ? dlsym_err : "symbol not found"));
+    const char* dlsymErr = dlerror();
+    if(!rawSym || dlsymErr)
+        logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user SO. Error: ",
+                      (dlsymErr ? dlsymErr : "symbol not found"));
 
     auto registerFn = reinterpret_cast<WFX::Shared::RegisterMasterAPIFn>(rawSym);
 #endif

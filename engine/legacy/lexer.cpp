@@ -3,7 +3,6 @@
  WELCOME TO THE SLOWEST LEXER WHICH I EVER BUILT, THIS IS SO BAD I WANNA DIE,
  WILL OPTIMIZE LATER CUZ THIS GIVES ME CANCER.
 */
-#include <iostream>
 #include "lexer.hpp"
 
 namespace WFX::Core::Legacy {

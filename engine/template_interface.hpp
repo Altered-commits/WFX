@@ -37,7 +37,7 @@ using TemplateChunk = std::variant<
 
 // Actual return type of the function 'GetState'
 // Returns the current state and the current result of the state
-struct TemplateResult {
+struct StateResult {
     std::size_t   newState;
     TemplateChunk chunk;
 };
@@ -64,6 +64,7 @@ inline const Json* SafeGetJson(const Json& j, std::initializer_list<std::string_
 }
 
 // Interface
+// We will make the generator class entirely stateless
 class BaseTemplateGenerator {
 public:
     virtual ~BaseTemplateGenerator() = default;
@@ -72,14 +73,16 @@ public:
     virtual std::size_t GetStateCount() const noexcept = 0;
 
     // Returns the TemplateResult for a given state index (0..count-1)
-    virtual TemplateResult GetState(std::size_t index) const noexcept = 0;
+    virtual StateResult GetState(std::size_t index, const Json& ctx) const noexcept = 0;
 };
+
+using TemplateGeneratorPtr = std::unique_ptr<BaseTemplateGenerator>;
 
 /*
  * Function pointer type exported by compiled template
  * Engine loads it via dlsym/GetProcAddress
  */
-using TemplateCreatorFn = std::unique_ptr<BaseTemplateGenerator>(*)(Json&& data);
+using TemplateCreatorFn = TemplateGeneratorPtr(*)();
 
 } // namespace WFX::Core
 

@@ -6,6 +6,10 @@
 #include <cstring>
 #include <deque>
 
+#if defined(__linux__)
+    #include <dlfcn.h>
+#endif
+
 namespace WFX::Core {
 
 TemplateEngine& TemplateEngine::GetInstance()
@@ -19,7 +23,10 @@ bool TemplateEngine::LoadTemplatesFromCache()
 {
     auto& config = Config::GetInstance();
     auto& fs     = FileSystem::GetFileSystem();
-    
+
+    // Whether to call 'LoadDynamicTemplatesFromLib()' or not
+    bool hasDynamicElement = false;
+
     std::string   cacheFile = config.projectConfig.projectName + cacheFile_;
     std::uint16_t chunkSize = config.miscConfig.cacheChunkSize;
 
@@ -82,11 +89,18 @@ bool TemplateEngine::LoadTemplatesFromCache()
         std::string fullPath(fullLen, '\0');
         if(!ReadValue(fullPath.data(), fullLen))      goto __Failure;
 
+        if(static_cast<TemplateType>(typeInt) == TemplateType::DYNAMIC)
+            hasDynamicElement = true;
+
         templates_.emplace(
             std::move(relPath),
             TemplateMeta{static_cast<TemplateType>(typeInt), sizeBytes, std::move(fullPath)}
         );
     }
+
+    // Dynamic templates currently have to be loaded from user_templates.so file
+    if(hasDynamicElement)
+        LoadDynamicTemplatesFromLib();
 
     logger_.Info("[TemplateEngine]: Successfully loaded template data from cache.bin");
     return true;
@@ -149,10 +163,10 @@ void TemplateEngine::SaveTemplatesToCache()
         if(!SafeWrite(ctx, &typeAsInt, sizeof(typeAsInt)))             goto __Failure;
         if(!SafeWrite(ctx, &templateSize, sizeof(templateSize)))       goto __Failure;
 
-        // Write Full Path (from meta)
-        std::uint64_t fullPathLen = meta.fullPath.length();
-        if(!SafeWrite(ctx, &fullPathLen, sizeof(fullPathLen)))         goto __Failure;
-        if(!SafeWrite(ctx, meta.fullPath.data(), fullPathLen))         goto __Failure;
+        // Write Full Path (from payload)
+        std::uint64_t pathOrNameLen = meta.pathOrName.length();
+        if(!SafeWrite(ctx, &pathOrNameLen, sizeof(pathOrNameLen)))     goto __Failure;
+        if(!SafeWrite(ctx, meta.pathOrName.data(), pathOrNameLen))     goto __Failure;
     }
 
     // Any extra data which still remains, flush it
@@ -176,7 +190,8 @@ void TemplateEngine::PreCompileTemplates()
     auto& fs     = FileSystem::GetFileSystem();
     auto& config = Config::GetInstance();
 
-    std::size_t        errors    = 0;
+    bool               hasDynamicElement   = false;
+    std::size_t        errors              = 0;
     const std::string& inputDir            = config.projectConfig.templateDir;
     const std::string  staticOutputDir     = config.projectConfig.projectName + staticFolder_;
     const std::string  dynamicCppOutputDir = config.projectConfig.projectName + dynamicCppFolder_;
@@ -278,6 +293,7 @@ void TemplateEngine::PreCompileTemplates()
 
         // Websites dynamic, sigh, get ready for some fuckery
         else {
+            hasDynamicElement = true;
             logger_.Info("[TemplateEngine]: Staging dynamic template for compilation: ", relPath);
             // Create a unique, C compatible function name
             std::string funcName = 
@@ -286,17 +302,27 @@ void TemplateEngine::PreCompileTemplates()
             // Define path for the new .cpp file
             std::string cppPath = dynamicCppOutputDir + "/" + relPath + ".cpp";
 
-            if(GenerateCxxFromTemplate(outPath, cppPath, funcName))
-                logger_.Info("[TemplateEngine-Debug]: Output function name: ", funcName, ", Output path: ", cppPath);
-            else
+            // Create cxx representation of templates now
+            if(!GenerateCxxFromTemplate(outPath, cppPath, funcName))
                 errors++;
-            }
+            else
+                templates_.emplace(
+                    std::move(relPath), TemplateMeta{type, outSize, std::move(funcName)}
+                );
+        }
     });
 
     if(errors > 0)
         logger_.Warn("[TemplateEngine]: Template compilation complete with ", errors, " error(s)");
-    else
+    else {
+        // Nice, now compile the cpp file to dll now (IF 'hasDynamicElement' is true)
+        // And load them as well for use
+        if(hasDynamicElement) {
+            CompileCxxToLib(dynamicCppOutputDir, dynamicObjOutputDir);
+            LoadDynamicTemplatesFromLib();
+        }
         logger_.Info("[TemplateEngine]: Template compilation completed successfully");
+    }
 }
 
 TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
@@ -309,6 +335,54 @@ TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
 }
 
 // vvv Helper Functions vvv
+void TemplateEngine::LoadDynamicTemplatesFromLib()
+{
+    // Load the user_templates.[dll/so] from <project>/build/dlls/
+    // Now its the callers responsibility to make sure it exists, if it doesn't-
+    // -we go boom boom
+    auto& fs = FileSystem::GetFileSystem();
+
+    const std::string dllPath = config_.projectConfig.projectName + templateLib_;
+    if(!fs.FileExists(dllPath.c_str()))
+        logger_.Fatal("[TemplateEngine]: Dynamic template loader couldn't find ", dllPath);
+
+#if defined(_WIN32)
+    static_assert(false, "No impl for TemplateEngine.LoadDynamicTemplatesFromLib for Windows");
+#else
+    // POSIX (Linux / macOS / *nix)
+    // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed
+    void* handle = dlopen(dllPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    if(!handle) {
+        const char* err = dlerror();
+        logger_.Fatal("[TemplateEngine]: ", dllPath, " dlopen failed: ", (err ? err : "unknown error"));
+    }
+
+    // Loop over the templates_ and find the ones with TemplateType::DYNAMIC
+    // It will contain the functions name in 'pathOrName' member, use it to get-
+    // -Generator class inside of .dll/.so
+    for(auto& templateMeta : templates_) {
+        auto& tmpl = templateMeta.second;
+        if(tmpl.type != TemplateType::DYNAMIC)
+            continue;
+
+        // Clear any existing error
+        dlerror();
+        void* rawSym = dlsym(handle, tmpl.pathOrName.c_str());
+        const char* dlsymErr = dlerror();
+        if(!rawSym || dlsymErr)
+            logger_.Fatal("[TemplateEngine]: Failed to find ", tmpl.pathOrName, " in template SO. Error: ",
+                        (dlsymErr ? dlsymErr : "symbol not found"));
+
+        // Each function returns a unique_ptr to generator class as defined by 'TemplateCreatorFn'
+        tmpl.gen = reinterpret_cast<TemplateCreatorFn>(rawSym)();
+        if(!tmpl.gen)
+            logger_.Fatal("[TemplateEngine]: Failed to create template generator for: ", tmpl.pathOrName);
+    }
+
+#endif
+    logger_.Info("[TemplateEngine]: Successfully initialized dynamic template module(s): ", dllPath);
+}
+
 TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate)
 {
     std::uint32_t      chunkSize = Config::GetInstance().miscConfig.templateChunkSize;

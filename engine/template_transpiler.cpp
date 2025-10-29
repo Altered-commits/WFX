@@ -1,5 +1,6 @@
 #include "template_engine.hpp"
 #include "config/config.hpp"
+#include "utils/process/process.hpp"
 #include "utils/crypt/hash.hpp"
 #include "utils/backport/string.hpp"
 
@@ -426,7 +427,7 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
             const auto& path = pathStack.back();
             out.reserve(32);
 
-            out = "SafeGetJson(ctx_, {";
+            out = "SafeGetJson(ctx, {";
 
             for(std::size_t i = 0; i < path.size(); ++i) {
                 if(i)
@@ -520,7 +521,7 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
     // If we have a variable path, collapse to SafeGet
     if(!pathStack.empty() && !pathStack.back().empty()) {
         const auto& keys = pathStack.back();
-        std::string outExpr = "SafeGetJson(ctx_, {";
+        std::string outExpr = "SafeGetJson(ctx, {";
         
          for(std::size_t i = 0; i < keys.size(); ++i) {
             if(i)
@@ -762,7 +763,7 @@ bool TemplateEngine::GenerateCxxFromIR(
 using Json = nlohmann::json;
 
 // Output
-using WFX::Core::TemplateResult;
+using WFX::Core::StateResult;
 using WFX::Core::FileChunk;
 using WFX::Core::VariableChunk;
 
@@ -772,7 +773,7 @@ using WFX::Core::BaseTemplateGenerator;
 // Helper Functions
 using WFX::Core::SafeGetJson;
 
-)", 443);
+)", 440);
     if(!writeResult) {
         logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to write cxx header to: ", outCxxPath);
         return false;
@@ -782,14 +783,13 @@ using WFX::Core::SafeGetJson;
     std::string generatorClass = 
         "class CLS" + funcName + " : public BaseTemplateGenerator {\n"
         "public:\n"
-        "    explicit CLS" + funcName + "(Json&& ctx)\n"
-        "        : ctx_(std::move(ctx)) {}\n\n"
+        "    CLS" + funcName + "() = default;\n\n"
 
         "    std::size_t GetStateCount() const noexcept override {\n"
         "        return " + UInt64ToStr(irCode.size()) + ";\n"
         "    }\n\n"
 
-        "    TemplateResult GetState(std::size_t state) const noexcept override {\n"
+        "    StateResult GetState(std::size_t state, const Json& ctx) const noexcept override {\n"
         "        while(true) {\n"
         "            switch(state) {\n";
 
@@ -899,11 +899,8 @@ R"(                default:
             }
         }
     }
-
-private:
-    Json ctx_;
 };
-)", 137);
+)", 112);
 
     // ------------------------------------------------------------------------
     // Emit factory
@@ -911,8 +908,8 @@ private:
     std::string factory =
         "\n/*\n * Creates and returns an instance of the template generator\n */"
         "\nextern \"C\"\nWFX_EXPORT\nstd::unique_ptr<BaseTemplateGenerator> "
-        + funcName + "(Json&& data) {\n"
-        "    return std::make_unique<CLS" + funcName + ">(std::move(data));\n"
+        + funcName + "() {\n"
+        "    return std::make_unique<CLS" + funcName + ">();\n"
         "}";
     SafeWrite(ioCtx, factory.c_str(), factory.size());
 
@@ -926,10 +923,9 @@ bool TemplateEngine::GenerateCxxFromTemplate(
     const std::string& inHtmlPath, const std::string& outCxxPath, const std::string& funcName
 )
 {
-    auto& fs     = FileSystem::GetFileSystem();
-    auto& config = Config::GetInstance();
+    auto& fs = FileSystem::GetFileSystem();
 
-    std::uint32_t chunkSize = config.miscConfig.templateChunkSize;
+    std::uint32_t chunkSize = config_.miscConfig.templateChunkSize;
     BaseFilePtr   inFile    = fs.OpenFileRead(inHtmlPath.c_str(), true);
     
     TranspilationContext ctx{std::move(inFile), chunkSize};
@@ -938,6 +934,80 @@ bool TemplateEngine::GenerateCxxFromTemplate(
         return false;
 
     return GenerateCxxFromIR(ctx, outCxxPath, funcName);
+}
+
+void TemplateEngine::CompileCxxToLib(const std::string& inCxxDir, const std::string& outObjDir)
+{
+    auto& fs   = FileSystem::GetFileSystem();
+    auto& proc = ProcessUtils::GetInstance();
+
+    auto& toolchain = config_.toolchainConfig;
+
+    // Input .cpp files will be from 'inCxxDir'
+    // The final .dll / .so will be compiled to <project>/build/dlls/ folder (Name: user_templates.[so/dll])
+    // The final .obj will be compiled to 'inObjDir'
+    const std::string dllDir  = config_.projectConfig.projectName + "/build/dlls";
+    const std::string dllPath = dllDir + "/user_templates.so";
+
+    if(!fs.DirectoryExists(inCxxDir.c_str()))
+        logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Failed to locate: ", inCxxDir);
+
+    if(!fs.CreateDirectory(outObjDir))
+        logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Failed to create obj dir: ", outObjDir);
+
+    if(!fs.CreateDirectory(dllDir))
+        logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Failed to create dll dir: ", dllDir);
+
+    // Prebuild fixed portions of compiler and linker commands
+    const std::string compilerBase = toolchain.ccmd + " " + toolchain.cargs + " ";
+    const std::string objPrefix    = toolchain.objFlag + "\"";
+    const std::string dllLinkTail  = toolchain.largs + " " + toolchain.dllFlag + "\"" + dllPath + '"';
+
+    std::string linkCmd = toolchain.lcmd + " ";
+
+    // Recurse through src/ files
+    fs.ListDirectory(inCxxDir, true, [&](const std::string& cppFile) {
+        if(!EndsWith(cppFile.c_str(), ".cpp") &&
+            !EndsWith(cppFile.c_str(), ".cxx") &&
+            !EndsWith(cppFile.c_str(), ".cc")) return;
+
+        logger_.Info("[TemplateEngine].[CodeGen:OUT]: Compiling cxx/ file: ", cppFile);
+
+        // Construct relative path
+        std::string relPath = cppFile.substr(inCxxDir.size());
+        if(!relPath.empty() && (relPath[0] == '/' || relPath[0] == '\\'))
+            relPath.erase(0, 1);
+
+        // Replace .cpp with .obj
+        std::string objFile = outObjDir + "/" + relPath;
+        objFile.replace(objFile.size() - 4, 4, ".obj");
+
+        // Ensure obj subdir exists
+        std::size_t slash = objFile.find_last_of("/\\");
+        if(slash != std::string::npos) {
+            std::string dir = objFile.substr(0, slash);
+            if(!fs.DirectoryExists(dir.c_str()) && !fs.CreateDirectory(dir))
+                logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Failed to create obj subdirectory: ", dir);
+        }
+
+        // Construct compile command
+        std::string compileCmd = compilerBase + "\"" + cppFile + "\" " + objPrefix + objFile + "\"";
+        auto result = proc.RunProcess(compileCmd);
+        if(result.exitCode != 0)
+            logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Compilation failed for: ", cppFile, ". OS code: ", result.osCode);
+
+        // Append obj to link command
+        linkCmd += "\"" + objFile + "\" ";
+    });
+
+    // Final link command
+    linkCmd += dllLinkTail;
+
+    auto linkResult = proc.RunProcess(linkCmd);
+    if(linkResult.exitCode != 0)
+        logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Linking failed. DLL not created. OS code: ", linkResult.osCode);
+
+    logger_.Info("[TemplateEngine].[CodeGen:OUT]: Templates successfully compiled to ", dllDir);
 }
 
 //  vvv Helper Functions vvv

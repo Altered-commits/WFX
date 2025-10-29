@@ -17,6 +17,7 @@ int BuildProject(const std::string& buildType)
     // Used by pretty much everything so yeah
     auto& config = Config::GetInstance();
     config.LoadCoreSettings("wfx.toml");
+    config.LoadToolchainSettings("toolchain.toml");
 
     if(buildType == BUILD_TEMPLATES) {
         auto& templateEngine = TemplateEngine::GetInstance();
@@ -28,9 +29,6 @@ int BuildProject(const std::string& buildType)
     }
 
     if(buildType == BUILD_SOURCE) {
-        // Needed for compiling shit
-        config.LoadToolchainSettings("toolchain.toml");
-
         // Copied directly from dev.cpp
         const std::string dllDir  = config.projectConfig.projectName + "/build/dlls/";
         const std::string dllPath = dllDir + "user_entry.so";

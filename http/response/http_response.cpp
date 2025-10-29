@@ -129,7 +129,7 @@ void HttpResponse::SendTemplate(std::string&& path, bool autoHandle404)
 
     // If template meta exists, template file exists as well
     // Rn we just handle 'static' templates which can be served as is
-    body = std::string_view{meta->fullPath};
+    body = std::string_view{meta->pathOrName};
 
     // Set remaining
     headers.SetHeader("Content-Length", UInt64ToStr(meta->size));

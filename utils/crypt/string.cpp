@@ -152,7 +152,6 @@ std::string StringSanitizer::NormalizePathToIdentifier(std::string_view path, st
         if(std::isalnum(c))
             out += c;
         else {
-            out += '_';
             out += hex[(c >> 4) & 0xF];
             out += hex[c & 0xF];
         }

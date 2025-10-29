@@ -1,16 +1,16 @@
 #ifndef WFX_TEMPLATE_ENGINE_HPP
 #define WFX_TEMPLATE_ENGINE_HPP
 
+#include "template_interface.hpp"
+#include "config/config.hpp"
 #include "legacy/lexer.hpp"
 #include "utils/logger/logger.hpp"
 #include "utils/filesystem/filesystem.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include <map>
 #include <variant>
 #include <stack>
-#include <deque>
 #include <cstdint>
 
 namespace WFX::Core {
@@ -24,9 +24,11 @@ enum class TemplateType : std::uint8_t {
 };
 
 struct TemplateMeta {
-    TemplateType type;
-    std::size_t  size;
-    std::string  fullPath; // Full path to the file to serve
+    TemplateType type{TemplateType::STATIC};
+    std::size_t  size{0};
+    std::string  pathOrName{};
+    // For dynamic templates only
+    TemplateGeneratorPtr gen{nullptr};
 };
 
 // <Type, FileSize>
@@ -196,6 +198,7 @@ private: // Nested helper types for the parser
     };
 
 private: // Helper functions
+    void           LoadDynamicTemplatesFromLib();
     TemplateResult CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate);
     bool           PushFile(CompilationContext& context, const std::string& relPath);
     Tag            ExtractTag(std::string_view line);
@@ -226,6 +229,11 @@ private: // Transpiler Functions (Impl in template_transpiler.cpp)
         const std::string& inHtmlPath, const std::string& outCxxPath, const std::string& funcName
     );
 
+    // Final DLL Generator (If going down the path of template compilation)
+    void CompileCxxToLib(
+        const std::string& inCxxDir, const std::string& inObjDir
+    );
+
     // Helper Functions
     RPNOpCode     TokenToOpCode(Legacy::TokenType type);
     std::uint64_t HashBytecode(const RPNBytecode& rpn);
@@ -250,6 +258,7 @@ private: // For ease of use across functions
 
     constexpr static std::size_t      maxTagLength_   = 300;
 
+    constexpr static const char*      templateLib_      = "/build/dlls/user_templates.so";
     constexpr static const char*      cacheFile_        = "/build/templates/cache.bin";
     constexpr static const char*      staticFolder_     = "/build/templates/static";
     constexpr static const char*      dynamicCppFolder_ = "/build/templates/dynamic/cxx";
@@ -259,6 +268,7 @@ private: // For ease of use across functions
 
 private: // Storage
     Logger& logger_ = Logger::GetInstance();
+    Config& config_ = Config::GetInstance();
 
     // We don't want to save template data to cache.bin always, only save it if we-
     // -compile the templates, in which case there might be a chance the data is modified
