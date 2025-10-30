@@ -35,8 +35,15 @@ using TemplateChunk = std::variant<
     VariableChunk
 >;
 
+// Enum representation of variant types
+enum class TemplateChunkType {
+    MONOSTATE,
+    FILE,
+    VARIABLE
+};
+
 // Actual return type of the function 'GetState'
-// Returns the current state and the current result of the state
+// Returns the next state and the result of current state
 struct StateResult {
     std::size_t   newState;
     TemplateChunk chunk;

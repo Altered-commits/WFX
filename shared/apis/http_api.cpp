@@ -56,19 +56,13 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         SendFileRvalueFn{[](HttpResponse* backend, std::string&& path, bool autoHandle404) {  // SendFileRvalueFn
             backend->SendFile(std::move(path), autoHandle404);
         }},
-        [](HttpResponse* backend, const char* cstr, bool autoHandle404) {  // SendTemplateCStrFn
-            backend->SendTemplate(cstr, autoHandle404);
+        [](HttpResponse* backend, const char* cstr, Json&& ctx) {  // SendTemplateCStrFn
+            backend->SendTemplate(cstr, std::move(ctx));
         },
-        SendTemplateRvalueFn{[](HttpResponse* backend, std::string&& path, bool autoHandle404) {  // SendTemplateRvalueFn
-            backend->SendTemplate(std::move(path), autoHandle404);
+        SendTemplateRvalueFn{[](HttpResponse* backend, std::string&& path, Json&& ctx) {  // SendTemplateRvalueFn
+            backend->SendTemplate(std::move(path), std::move(ctx));
         }},
-        [](HttpResponse* backend, const char* cstr, bool autoHandle404) {  // StreamFileCStrFn
-            backend->StreamFile(cstr, autoHandle404);
-        },
-        StreamFileRvalueFn{[](HttpResponse* backend, std::string&& path, bool autoHandle404) {  // StreamFileRvalueFn
-            backend->StreamFile(std::move(path), autoHandle404);
-        }},
-        [](HttpResponse* backend, StreamGenerator generator, bool streamChunked) {
+        [](HttpResponse* backend, StreamGenerator generator, bool streamChunked) { // StreamFn
             backend->Stream(std::move(generator), streamChunked);
         },
 

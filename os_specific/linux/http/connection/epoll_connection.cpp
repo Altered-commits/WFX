@@ -795,8 +795,11 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
             break;
     }
 
-    // Only STOP_AND_... states can reach here btw
-    // Before we append any chunk and stuff, reset stuff
+    // Storing value before resetting it below
+    bool wasChunked = static_cast<bool>(ctx->streamChunked);
+
+    // Only STOP_AND_... states can reach here
+    // Now its not necessary to reset "ALL" the data here but uk, fun
     writeMeta->dataLength    = 0;
     writeMeta->writtenLength = 0;
     ctx->isStreamOperation   = 0;
@@ -804,7 +807,7 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     ctx->streamGenerator     = {};
 
     // Write final chunk or finalize stream
-    if(ctx->streamChunked)
+    if(wasChunked)
         rwBuffer.AppendData(CHUNK_END, sizeof(CHUNK_END) - 1)
             ? Write(ctx)
             : Close(ctx);

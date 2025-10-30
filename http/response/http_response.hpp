@@ -45,12 +45,10 @@ public:
     void SendFile(const char* cstr, bool autoHandle404);
     void SendFile(std::string&& path, bool autoHandle404);
 
-    void SendTemplate(const char* cstr, bool autoHandle404);
-    void SendTemplate(std::string&& path, bool autoHandle404);
+    void SendTemplate(const char* cstr, Json&& ctx);
+    void SendTemplate(std::string&& path, Json&& ctx);
 
     // Stream API
-    void StreamFile(const char* cstr, bool autoHandle404);
-    void StreamFile(std::string&& path, bool autoHandle404);
     void Stream(StreamGenerator generator, bool streamChunked = true, bool skipChecks = false);
 
 private:

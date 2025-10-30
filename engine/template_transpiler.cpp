@@ -819,7 +819,7 @@ using WFX::Core::SafeGetJson;
                 needEndingBrace = false;
                 auto [off, len] = std::get<LiteralValue>(op.payload);
 
-                line = " return {" + UInt64ToStr(i) +
+                line = " return {" + UInt64ToStr(i + 1) +
                                 ", FileChunk{" + UInt64ToStr(off) + ", " +
                                 UInt64ToStr(len) + "}};\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
@@ -831,7 +831,7 @@ using WFX::Core::SafeGetJson;
                 needEndingBrace = false;
                 std::uint32_t exprIdx = std::get<std::uint32_t>(op.payload);
 
-                line = " return {" + UInt64ToStr(i) +
+                line = " return {" + UInt64ToStr(i + 1) +
                                 ", VariableChunk{ " + GenerateCxxFromRPN(ctx, exprIdx) +
                                 " }};\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());

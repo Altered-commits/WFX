@@ -24,11 +24,10 @@ enum class TemplateType : std::uint8_t {
 };
 
 struct TemplateMeta {
-    TemplateType type{TemplateType::STATIC};
-    std::size_t  size{0};
-    std::string  pathOrName{};
-    // For dynamic templates only
-    TemplateGeneratorPtr gen{nullptr};
+    TemplateType         type{TemplateType::STATIC};
+    std::size_t          size{0};
+    std::string          filePath{};
+    TemplateGeneratorPtr gen{nullptr}; // For dynamic templates only
 };
 
 // <Type, FileSize>
@@ -261,7 +260,7 @@ private: // For ease of use across functions
     constexpr static const char*      templateLib_      = "/build/dlls/user_templates.so";
     constexpr static const char*      cacheFile_        = "/build/templates/cache.bin";
     constexpr static const char*      staticFolder_     = "/build/templates/static";
-    constexpr static const char*      dynamicCppFolder_ = "/build/templates/dynamic/cxx";
+    constexpr static const char*      dynamicCxxFolder_ = "/build/templates/dynamic/cxx";
     constexpr static const char*      dynamicObjFolder_ = "/build/templates/dynamic/objs";
 
     constexpr static const char*      dynamicTemplateFuncPrefix_ = "__TmplSM_";

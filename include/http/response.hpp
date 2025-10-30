@@ -2,6 +2,7 @@
 #define WFX_INC_HTTP_USER_RESPONSE_HPP
 
 #include "shared/apis/http_api.hpp"
+#include "third_party/json/json.hpp"
 #include <cassert>
 
 /* User side implementation of 'Response' class. CoreEngine passes the API */
@@ -41,13 +42,11 @@ public:
     void SendFile(std::string&& path, bool autoHandle404 = true) { httpApi_->SendFileMove(backend_, std::move(path), autoHandle404); }
 
     // SendTemplate overloads
-    void SendTemplate(const char* path, bool autoHandle404 = true)   { httpApi_->SendTemplateCStr(backend_, path, autoHandle404); }
-    void SendTemplate(std::string&& path, bool autoHandle404 = true) { httpApi_->SendTemplateMove(backend_, std::move(path), autoHandle404); }
+    void SendTemplate(const char* path, Json&& ctx = {})   { httpApi_->SendTemplateCStr(backend_, path, std::move(ctx)); }
+    void SendTemplate(std::string&& path, Json&& ctx = {}) { httpApi_->SendTemplateMove(backend_, std::move(path), std::move(ctx)); }
 
     // Stream API
     void Stream(StreamGenerator generator, bool streamChunked = true) { httpApi_->Stream(backend_, std::move(generator), streamChunked); }
-    void StreamFile(const char* path, bool autoHandle404 = true)      { httpApi_->StreamFileCStr(backend_, path, autoHandle404); }
-    void StreamFile(std::string&& path, bool autoHandle404 = true)    { httpApi_->StreamFileMove(backend_, std::move(path), autoHandle404); }
 
 private:
     ResponsePtr backend_;

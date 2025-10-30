@@ -37,21 +37,19 @@ using SendTextCStrFn          = void (*)(HttpResponse* backend, const char* cstr
 using SendJsonConstRefFn      = void (*)(HttpResponse* backend, const Json* json);
 
 // SendFile
-using SendFileCStrFn          = void (*)(HttpResponse* backend, const char* cstr, bool);
+using SendFileCStrFn          = void (*)(HttpResponse* backend, const char* cstr, bool autoHandle404);
+
+// SendTemplate
+using SendTemplateCStrFn      = void (*)(HttpResponse* backend, const char* cstr, Json&& ctx);
 
 // Special rvalue overload
 using SendTextRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&)>;
 using SendJsonRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, Json&&)>;
 using SendFileRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&, bool)>;
-
-// SendTemplate, has the same api signature as SendFile
-using SendTemplateCStrFn      = SendFileCStrFn;
-using SendTemplateRvalueFn    = SendFileRvalueFn;
+using SendTemplateRvalueFn    = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&, Json&&)>;
 
 // Stream API
-using StreamFileCStrFn   = SendFileCStrFn;
-using StreamFileRvalueFn = SendFileRvalueFn;
-using StreamFn           = void (*)(HttpResponse* backend, StreamGenerator generator, bool streamChunked);
+using StreamFn = void (*)(HttpResponse* backend, StreamGenerator generator, bool streamChunked);
 
 // vvv API declarations vvv
 struct HTTP_API_TABLE {
@@ -85,8 +83,6 @@ struct HTTP_API_TABLE {
     SendTemplateRvalueFn    SendTemplateMove;
 
     // Stream API
-    StreamFileCStrFn        StreamFileCStr;
-    StreamFileRvalueFn      StreamFileMove;
     StreamFn                Stream;
 
     // Metadata
