@@ -755,10 +755,6 @@ bool TemplateEngine::GenerateCxxFromIR(
  */
 #include "engine/template_interface.hpp"
 #include "shared/utils/export_macro.hpp"
-#include <memory>
-#include <variant>
-#include <string>
-#include <vector>
 
 using Json = nlohmann::json;
 
@@ -773,7 +769,7 @@ using WFX::Core::BaseTemplateGenerator;
 // Helper Functions
 using WFX::Core::SafeGetJson;
 
-)", 440);
+)", 367);
     if(!writeResult) {
         logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to write cxx header to: ", outCxxPath);
         return false;

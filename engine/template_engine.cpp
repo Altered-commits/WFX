@@ -98,11 +98,12 @@ bool TemplateEngine::LoadTemplatesFromCache()
         );
     }
 
+    logger_.Info("[TemplateEngine]: Successfully loaded template data from cache.bin");
+
     // Dynamic templates currently have to be loaded from user_templates.so file
     if(hasDynamicElement)
         LoadDynamicTemplatesFromLib();
 
-    logger_.Info("[TemplateEngine]: Successfully loaded template data from cache.bin");
     return true;
 
 __Failure:

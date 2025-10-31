@@ -116,15 +116,23 @@ extern "C" {
         if(api) {
             __wfx_api = api;
 
-            auto& routes = WFX::Shared::__WFXDeferredRoutes();
+            auto& constructors = WFX::Shared::__WFXDeferredConstructors();
+            auto& middlewares  = WFX::Shared::__WFXDeferredMiddleware();
+            auto& routes       = WFX::Shared::__WFXDeferredRoutes();
 
-            // Run all deferred route registrations
+            for(auto& fn : constructors)
+                fn();
+
+            for(auto& fn : middlewares)
+                fn();
+
             for(auto& fn : routes)
                 fn();
 
             // Clean up memory
-            routes.clear();
-            routes.shrink_to_fit();
+            WFX::Shared::__EraseDeferredVector(constructors);
+            WFX::Shared::__EraseDeferredVector(middlewares);
+            WFX::Shared::__EraseDeferredVector(routes);
 
             registered = true;
         }

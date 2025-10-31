@@ -4,7 +4,7 @@
 #include "aliases.hpp"
 #include "helper.hpp"
 #include "response.hpp"
-#include "common/core.hpp"
+#include "core/core.hpp"
 #include "shared/utils/deferred_init_vector.hpp"
 
 // Glue suffix to names

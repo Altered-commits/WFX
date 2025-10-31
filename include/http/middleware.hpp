@@ -3,7 +3,7 @@
 
 #include "aliases.hpp"
 #include "response.hpp"
-#include "common/core.hpp"
+#include "core/core.hpp"
 #include "shared/utils/deferred_init_vector.hpp"
 
 #define WFX_MW_CLASS(id)    WFX_CONCAT(WFXMiddleware_, id)
