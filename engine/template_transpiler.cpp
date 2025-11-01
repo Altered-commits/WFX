@@ -43,172 +43,268 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
 
     // For ease of use :)
     auto& ir           = ctx.ir;
-    auto& ifPatchStack = ctx.ifPatchStack;
+    auto& offsetPatchStack = ctx.offsetPatchStack;
 
-    if(tagName == "var") {
-        // Parse the expression, get its index in the rpnPool
-        auto [success, exprIndex] = ParseExpr(ctx, std::string(tagArgs));
-        if(!success)
-            return TagResult::FAILURE;
+    // Get the tag type we working with
+    auto it = tagViewToType.find(tagName);
+    if(it == tagViewToType.end())
+        goto __Failure;
 
-        ir.push_back({
-            OpType::VAR,
-            false,
-            exprIndex // Payload is std::uint32_t (index to RPNBytecode)
-        });
+    switch(it->second) {
+        case TagType::IF:
+        {
+            // Parse the expression, get its index in the rpnPool
+            auto [success, exprIndex] = ParseExpr(ctx, tagArgs);
+            if(!success)
+                return TagResult::FAILURE;
+
+            // Create a new patch frame for this 'if' block
+            offsetPatchStack.push({});
+            
+            // Push the index of this op (which is the current size) onto the stack
+            offsetPatchStack.top().push_back(static_cast<std::uint32_t>(ir.size()));
+
+            // Add the IF op, it needs patching
+            ir.push_back({
+                OpType::IF,
+                true,
+                ConditionalValue{ 0, exprIndex } // Payload is {jump_state, expr_index}
+            });
+
+            return TagResult::SUCCESS;
+        }
+        case TagType::ELIF:
+        {
+            if(offsetPatchStack.empty()) {
+                logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'elif' without 'if'");
+                return TagResult::FAILURE;
+            }
+            if(offsetPatchStack.top().empty()) {
+                logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'elif' after 'else'");
+                return TagResult::FAILURE;
+            }
+
+            // Add a JUMP op (to jump to 'endif' if the previous 'if' was true)
+            // This JUMP also needs patching
+            std::uint32_t jumpOpIndex = static_cast<std::uint32_t>(ir.size());
+            ir.push_back({
+                OpType::JUMP,
+                true,
+                std::uint32_t(0) // Payload is jump_state
+            });
+            offsetPatchStack.top().push_back(jumpOpIndex);
+
+            // Patch all previous IF/ELIF/JUMP ops in the current frame to jump here
+            for(auto idx : offsetPatchStack.top()) {
+                auto& prevOp = ir[idx];
+                prevOp.patch = false;
+
+                if(prevOp.type == OpType::IF || prevOp.type == OpType::ELIF) {
+                    auto& cond = std::get<ConditionalValue>(prevOp.payload);
+                    cond.first = static_cast<std::uint32_t>(ir.size());
+                }
+                else if(prevOp.type == OpType::JUMP)
+                    prevOp.payload = static_cast<std::uint32_t>(ir.size());
+            }
+            offsetPatchStack.top().clear();
+
+            // Parse this 'elif's expression
+            auto [success, exprIndex] = ParseExpr(ctx, tagArgs);
+            if(!success)
+                return TagResult::FAILURE;
+
+            // Add the ELIF op, it needs patching
+            offsetPatchStack.top().push_back(static_cast<std::uint32_t>(ir.size()));
+            ir.push_back({
+                OpType::ELIF,
+                true,
+                ConditionalValue{ 0, exprIndex } // Payload is {jump_state, expr_index}
+            });
+
+            return TagResult::SUCCESS;
+        }    
+        case TagType::ELSE:
+        {
+            if(offsetPatchStack.empty()) {
+                logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'else' without 'if'");
+                return TagResult::FAILURE;
+            }
+            if(offsetPatchStack.top().empty()) {
+                logger_.Error("[TemplateEngine].[CodeGen:IR]: Found multiple 'else' tags");
+                return TagResult::FAILURE;
+            }
+
+            // Add a JUMP op (to jump to endif)
+            std::uint32_t jumpOpIndex = static_cast<std::uint32_t>(ir.size());
+            ir.push_back({
+                OpType::JUMP,
+                true,
+                std::uint32_t(0) // Payload is jump_state
+            });
+
+            // Get the index of the 'else' block
+            std::uint32_t elseStateNum = static_cast<std::uint32_t>(ir.size());
+
+            // Patch all previous 'if' and 'elif' ops to jump to this 'else' block
+            for(std::uint32_t idx : offsetPatchStack.top()) {
+                auto& op = ir[idx];
+                op.patch = false;
+
+                if(op.type == OpType::IF || op.type == OpType::ELIF)
+                    std::get<ConditionalValue>(op.payload).first = elseStateNum;
+                else if(op.type == OpType::JUMP)
+                    op.payload = elseStateNum; // Set the std::uint32_t payload
+            }
+
+            // Clear the stack, but add the new JUMP op index-
+            // -as its the only one that needs to be patched by 'endif'
+            offsetPatchStack.top().clear();
+            offsetPatchStack.top().push_back(jumpOpIndex);
+
+            // Add the ELSE marker op
+            ir.push_back({
+                OpType::ELSE,
+                false,
+                std::monostate{} // No payload
+            });
+
+            return TagResult::SUCCESS;
+        }
+        case TagType::ENDIF:
+        {
+            if(offsetPatchStack.empty()) {
+                logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'endif' without 'if'");
+                return {};
+            }
+
+            std::uint32_t endState = static_cast<std::uint32_t>(ir.size());
+
+            // Patch all remaining jumps (from 'if', 'elif', or 'else')
+            for(std::uint32_t idx : offsetPatchStack.top()) {
+                auto& op = ir[idx];
+                op.patch = false;
+
+                if(op.type == OpType::IF || op.type == OpType::ELIF)
+                    std::get<ConditionalValue>(op.payload).first = endState;
+                else if(op.type == OpType::JUMP)
+                    op.payload = endState; // Set the std::uint32_t payload
+            }
+
+            offsetPatchStack.pop(); // Pop this 'if' frame
+
+            // Add the ENDIF marker op
+            ir.push_back({
+                OpType::ENDIF,
+                false,
+                std::monostate{} // No payload
+            });
+
+            return TagResult::SUCCESS;
+        }
+        case TagType::VAR:
+        {
+            // Parse the expression, get its index in the rpnPool
+            auto [success, exprIndex] = ParseExpr(ctx, tagArgs);
+            if(!success)
+                return TagResult::FAILURE;
+
+            ir.push_back({
+                OpType::VAR,
+                false,
+                exprIndex // Payload is std::uint32_t (index to RPNBytecode)
+            });
+
+            return TagResult::SUCCESS;
+        }
+        case TagType::FOR:
+        {
+            // Syntax: for <identifier> in <expr>
+            Legacy::Lexer lexer{tagArgs};
+            Legacy::Token token = lexer.get_token();
+
+            // Identifier
+            if(token.token_type != Legacy::TOKEN_ID) {
+                logger_.Error("[TemplateEngine].[CodeGen:IR]: Expected identifier after 'for'");
+                return TagResult::FAILURE;
+            }
+            std::string loopVar = std::move(token.token_value);
+
+            // In keyword
+            token = lexer.get_token();
+            if(token.token_type != Legacy::TOKEN_KEYWORD_IN) {
+                logger_.Error("[TemplateEngine].[CodeGen:IR]: Expected keyword 'in' after loop variable");
+                return TagResult::FAILURE;
+            }
+            
+            // Loop expression, take substring of it till end of string and pass it to 'ParseExpr'
+            auto [success, exprIndex] = ParseExpr(ctx, lexer.get_remaining_string());
+            if(!success)
+                return TagResult::FAILURE;
+
+            // Push FOR op (needs patching)
+            offsetPatchStack.push({});
+            offsetPatchStack.top().push_back(static_cast<std::uint32_t>(ir.size()));
+
+            // Record loop variable name
+            auto varId = GetVarNameId(ctx, loopVar);
+
+            ir.push_back({
+                OpType::FOR,
+                true,
+                ForLoopValue{0, exprIndex, varId} // Payload is jump_state, expr_index, var_id
+            });
+
+            return TagResult::SUCCESS;
+        }
+        case TagType::ENDFOR:
+        {
+            if(offsetPatchStack.empty()) {
+                logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'endfor' without matching 'for'");
+                return TagResult::FAILURE;
+            }
+
+            auto& patchList = offsetPatchStack.top();
+            std::uint32_t forIdx = patchList.front();
+            patchList.clear();
+            offsetPatchStack.pop();
+
+            std::uint32_t endState = static_cast<std::uint32_t>(ir.size());
+
+            // Patch the previous for loop to this marker
+            auto& forOp      = ir[forIdx];
+            auto& forPayload = std::get<ForLoopValue>(forOp.payload);
+            forOp.patch          = false;
+            forPayload.jumpState = endState;
+
+            // Range check / finish marker
+            ir.push_back({
+                OpType::ENDFOR,
+                false,
+                forPayload // Payload is jump_state, expr_index, var_id
+            });
+
+            return TagResult::SUCCESS;
+        }
+        // Any other tag shouldn't exist here btw
+        default:
+            break;
     }
-    else if(tagName == "if") {
-        // Parse the expression, get its index in the rpnPool
-        auto [success, exprIndex] = ParseExpr(ctx, std::string(tagArgs));
-        if(!success)
-            return TagResult::FAILURE;
-
-        // Create a new patch frame for this 'if' block
-        ifPatchStack.push({});
-        
-        // Push the index of this op (which is the current size) onto the stack
-        ifPatchStack.top().push_back(static_cast<std::uint32_t>(ir.size()));
-
-        // Add the IF op, it needs patching
-        ir.push_back({
-            OpType::IF,
-            true,
-            ConditionalValue{ 0, exprIndex } // Payload is {jump_state, expr_index}
-        });
-    }
-    else if(tagName == "elif") {
-        if(ifPatchStack.empty()) {
-            logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'elif' without 'if'");
-            return TagResult::FAILURE;
-        }
-        if(ifPatchStack.top().empty()) {
-            logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'elif' after 'else'");
-            return TagResult::FAILURE;
-        }
-
-        // Add a JUMP op (to jump to 'endif' if the previous 'if' was true)
-        // This JUMP also needs patching
-        std::uint32_t jumpOpIndex = static_cast<std::uint32_t>(ir.size());
-        ir.push_back({
-            OpType::JUMP,
-            true,
-            std::uint32_t(0) // Payload is jump_state
-        });
-        ifPatchStack.top().push_back(jumpOpIndex);
-
-        // Patch the previous 'if' or 'elif' to jump to this op
-        std::uint32_t prevOpIndex = ifPatchStack.top().front();
-        ifPatchStack.top().erase(ifPatchStack.top().begin());
-
-        auto& prevOp = ir.at(prevOpIndex);
-        prevOp.patch = false;
-        // We know prevOp is IF or ELIF, so it has a ConditionalValue
-        auto& conditionalPayload = std::get<ConditionalValue>(prevOp.payload);
-        conditionalPayload.first = static_cast<std::uint32_t>(ir.size());
-
-        // Parse this 'elif's expression
-        auto [success, exprIndex] = ParseExpr(ctx, std::string(tagArgs));
-        if(!success)
-            return TagResult::FAILURE;
-
-        // Add the ELIF op, it needs patching
-        ifPatchStack.top().push_back(static_cast<std::uint32_t>(ir.size()));
-        ir.push_back({
-            OpType::ELIF,
-            true,
-            ConditionalValue{ 0, exprIndex } // Payload is {jump_state, expr_index}
-        });
-    }
-    else if(tagName == "else") {
-        if(ifPatchStack.empty()) {
-            logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'else' without 'if'");
-            return TagResult::FAILURE;
-        }
-        if(ifPatchStack.top().empty()) {
-            logger_.Error("[TemplateEngine].[CodeGen:IR]: Found multiple 'else' tags");
-            return TagResult::FAILURE;
-        }
-
-        // Add a JUMP op (to jump to endif)
-        std::uint32_t jumpOpIndex = static_cast<std::uint32_t>(ir.size());
-        ir.push_back({
-            OpType::JUMP,
-            true,
-            std::uint32_t(0) // Payload is jump_state
-        });
-
-        // Get the index of the 'else' block
-        std::uint32_t elseStateNum = static_cast<std::uint32_t>(ir.size());
-
-        // Patch all previous 'if' and 'elif' ops to jump to this 'else' block
-        for(std::uint32_t idx : ifPatchStack.top()) {
-            auto& op = ir.at(idx);
-            op.patch = false;
-
-            if(op.type == OpType::IF || op.type == OpType::ELIF)
-                std::get<ConditionalValue>(op.payload).first = elseStateNum;
-            else if(op.type == OpType::JUMP)
-                op.payload = elseStateNum; // Set the std::uint32_t payload
-        }
-
-        // Clear the stack, but add the new JUMP op index-
-        // -as its the only one that needs to be patched by 'endif'
-        ifPatchStack.top().clear();
-        ifPatchStack.top().push_back(jumpOpIndex);
-
-        // Add the ELSE marker op
-        ir.push_back({
-            OpType::ELSE,
-            false,
-            std::monostate{} // No payload
-        });
-    }
-    else if(tagName == "endif") {
-        if(ifPatchStack.empty()) {
-            logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'endif' without 'if'");
-            return {};
-        }
-
-        std::uint32_t endState = static_cast<std::uint32_t>(ir.size());
-
-        // Patch all remaining jumps (from 'if', 'elif', or 'else')
-        for(std::uint32_t idx : ifPatchStack.top()) {
-            auto& op = ir.at(idx);
-            op.patch = false;
-
-            if(op.type == OpType::IF || op.type == OpType::ELIF)
-                std::get<ConditionalValue>(op.payload).first = endState;
-            else if(op.type == OpType::JUMP)
-                op.payload = endState; // Set the std::uint32_t payload
-        }
-
-        ifPatchStack.pop(); // Pop this 'if' frame
-
-        // Add the ENDIF marker op
-        ir.push_back({
-            OpType::ENDIF,
-            false,
-            std::monostate{} // No payload
-        });
-    }
+    
+__Failure:
     // Shouldn't happen btw
-    else {
-        logger_.Error("[TemplateEngine].[CodeGen:IR]: Unknown tag appeared: ", tagName);
-        return TagResult::FAILURE;
-    }
-
-    return TagResult::SUCCESS;
+    logger_.Error("[TemplateEngine].[CodeGen:IR]: Unknown tag appeared: ", tagName);
+    return TagResult::FAILURE;
 }
 
 // vvv Transpiler Functions vvv
 //  vvv Parsing Functions vvv
 TemplateEngine::ParseResult TemplateEngine::ParseExpr(
-    TranspilationContext& ctx, std::string expression
+    TranspilationContext& ctx, std::string_view expression
 )
 {
     RPNBytecode outputQueue;
     std::stack<Legacy::Token> operatorStack;
-    Legacy::Lexer lexer{std::move(expression)}; // My trusty old lexer :)
+    Legacy::Lexer lexer{expression}; // My trusty old lexer :)
 
     auto& token = lexer.get_token();
     while(token.token_type != Legacy::TOKEN_EOF) {
@@ -710,7 +806,7 @@ bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std
     // Finalize any trailing literal
     FinalizeLiteral();
 
-    if(!ctx.ifPatchStack.empty()) {
+    if(!ctx.offsetPatchStack.empty()) {
         logger_.Error("[TemplateEngine].[CodeGen:IR]: Unmatched 'if' block, missing 'endif'");
         return false;
     }
@@ -785,7 +881,7 @@ using WFX::Core::SafeGetJson;
         "        return " + UInt64ToStr(irCode.size()) + ";\n"
         "    }\n\n"
 
-        "    StateResult GetState(std::size_t state, const Json& ctx) const noexcept override {\n"
+        "    StateResult GetState(std::size_t state, Json& ctx) const noexcept override {\n"
         "        while(true) {\n"
         "            switch(state) {\n";
 
@@ -866,6 +962,55 @@ using WFX::Core::SafeGetJson;
                     " {\n"
                     "                    state = " + UInt64ToStr(jump) + ";\n"
                     "                    continue;\n";
+                writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
+
+                break;
+            }
+
+            case OpType::FOR: { // Initializer
+                const auto& [jump, exprIdx, varId] = std::get<ForLoopValue>(op.payload);
+                std::string expr    = GenerateCxxFromRPN(ctx, exprIdx);
+                std::string loopVar = ctx.staticVarNames[varId];
+                std::string jumpVar = UInt64ToStr(jump);
+
+                line =
+                    " {\n"
+                    "                    auto* res = " + expr + ";\n"
+                    "                    if(!res || !res->is_array() || res->get_ref<Json::array_t&>().empty()) {\n"
+                    "                        state = " + UInt64ToStr(jump + 1) + ";\n"
+                    "                        continue;\n"
+                    "                    }\n"
+                    "                    auto& arr = res->get_ref<Json::array_t&>();\n"
+                    "                    ctx[\"" + loopVar + "\"] = arr.front();\n"
+                    "                    ctx[\"__iid_" + jumpVar + "\"] = std::uint32_t(" + UInt64ToStr(i + 1) + ");\n"
+                    "                    ctx[\"__idx_" + jumpVar + "\"] = std::uint32_t(1);\n"
+                    "                    [[fallthrough]];\n";
+                writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
+
+                break;
+            }
+
+            case OpType::ENDFOR: { // Checker and Finisher
+                const auto& [jump, exprIdx, varId] = std::get<ForLoopValue>(op.payload);
+                std::string expr    = GenerateCxxFromRPN(ctx, exprIdx);
+                std::string loopVar = ctx.staticVarNames[varId];
+                std::string jumpVar = UInt64ToStr(jump);
+
+                line =
+                    " {\n"
+                    "                    auto& arr = " + expr + "->get_ref<Json::array_t&>();\n"
+                    "                    auto& idxVal = ctx[\"__idx_" + jumpVar + "\"];\n"
+                    "                    std::uint32_t idx = idxVal.get<std::uint32_t>();\n"
+                    "                    if(idx < arr.size()) {\n"
+                    "                        ctx[\"" + loopVar + "\"] = arr[idx];\n"
+                    "                        idxVal = idx + 1;\n"
+                    "                        state = ctx[\"__iid_" + jumpVar + "\"].get<std::uint32_t>();\n"
+                    "                        continue;\n"
+                    "                    }\n"
+                    "                    ctx.erase(\"" + loopVar + "\");\n"
+                    "                    ctx.erase(\"__idx_" + jumpVar + "\");\n"
+                    "                    ctx.erase(\"__iid_" + jumpVar + "\");\n"
+                    "                    [[fallthrough]];\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
                 break;

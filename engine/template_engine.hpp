@@ -45,6 +45,20 @@ public:
     TemplateMeta* GetTemplate(std::string&& relPath);
 
 private: // Nested helper types for the parser
+    enum class TagType : std::uint8_t {
+        INCLUDE,
+        EXTENDS,
+        BLOCK,
+        ENDBLOCK,
+        VAR,
+        IF,
+        ELIF,
+        ELSE,
+        ENDIF,
+        FOR,
+        ENDFOR
+    };
+
     enum class TagResult : std::uint8_t {
         FAILURE,                  // Ded
         SUCCESS,                  // Processed tag
@@ -59,6 +73,8 @@ private: // Nested helper types for the parser
         ELIF,    // Conditional jump
         ELSE,    // Marker for 'else' block
         ENDIF,   // Marker for 'endif'
+        FOR,     // Range init
+        ENDFOR,  // Range check or finish
         JUMP,    // Unconditional jump (used to skip past elif/else)
     };
 
@@ -156,6 +172,11 @@ private: // Nested helper types for the parser
 
     using LiteralValue     = std::pair<std::uint64_t, std::uint64_t>; // offset, length
     using ConditionalValue = std::pair<std::uint32_t, std::uint32_t>; // jump_state, expr_index
+    struct ForLoopValue {
+        std::uint32_t jumpState;
+        std::uint32_t exprIndex;
+        std::uint32_t varId;
+    };
 
     using ParseResult = std::pair<bool, std::uint32_t>; // success?, expr_index
 
@@ -167,7 +188,8 @@ private: // Nested helper types for the parser
             std::monostate,   // For JUMP, ELSE, ENDIF
             std::uint32_t,    // For VAR (stores expr_index), JUMP (stored unconditional jum_offset)
             LiteralValue,     // For LITERAL (stores offset, length)
-            ConditionalValue  // For IF, ELIF (stores the jump_state, expr_index)
+            ConditionalValue, // For IF, ELIF (stores the jump_state, expr_index)
+            ForLoopValue      // For FOR, ENDFOR
         > payload{};
     };
 
@@ -177,7 +199,7 @@ private: // Nested helper types for the parser
         TemplateFrame frame;
         IRCode        ir;
 
-        std::stack<std::vector<std::uint32_t>> ifPatchStack;
+        std::stack<std::vector<std::uint32_t>> offsetPatchStack;
 
         // Optimization ig
         std::unordered_map<std::string, std::uint32_t> varNameMap;
@@ -208,7 +230,7 @@ private: // Helper functions
 
 private: // Transpiler Functions (Impl in template_transpiler.cpp)
     // Parsing Functions
-    ParseResult   ParseExpr(TranspilationContext& ctx, std::string expression);
+    ParseResult   ParseExpr(TranspilationContext& ctx, std::string_view expression);
     std::uint32_t GetOperatorPrecedence(Legacy::TokenType type);
     bool          PopOperator(std::stack<Legacy::Token>& opStack, RPNBytecode& outputQueue);
     bool          IsOperator(Legacy::TokenType type);
@@ -268,6 +290,21 @@ private: // For ease of use across functions
 private: // Storage
     Logger& logger_ = Logger::GetInstance();
     Config& config_ = Config::GetInstance();
+
+    // For simplification of conditional checking in ProcessTag.. functions
+    const std::unordered_map<std::string_view, TagType> tagViewToType = {
+        {"include",  TagType::INCLUDE},
+        {"extends",  TagType::EXTENDS},
+        {"block",    TagType::BLOCK},
+        {"endblock", TagType::ENDBLOCK},
+        {"var",      TagType::VAR},
+        {"if",       TagType::IF},
+        {"elif",     TagType::ELIF},
+        {"else",     TagType::ELSE},
+        {"endif",    TagType::ENDIF},
+        {"for",      TagType::FOR},
+        {"endfor",   TagType::ENDFOR}
+    };
 
     // We don't want to save template data to cache.bin always, only save it if we-
     // -compile the templates, in which case there might be a chance the data is modified

@@ -517,7 +517,7 @@ __ContinueReading:
                 logger_.Error(
                     "[TemplateEngine].[ParsingError]: OC; Length of the tag: '",
                     frame.carry,
-                    "' crosses the maxTagLength_ limit which is ", maxTagLength_
+                    "' crosses the 'maxTagLength_' limit which is ", maxTagLength_
                 );
                 return { TemplateType::FAILURE, 0 };
             }
@@ -607,7 +607,7 @@ __DefaultChunkProcessing:
                 logger_.Error(
                     "[TemplateEngine].[ParsingError]: IC; Length of the tag: '",
                     tagView,
-                    "' crosses the maxTagLength_ limit which is ", maxTagLength_
+                    "' crosses the 'maxTagLength_' limit which is ", maxTagLength_
                 );
                 return { TemplateType::FAILURE, 0 };
             }
@@ -733,146 +733,142 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(
         return TagResult::SUCCESS; // Discard everything while skipping
     }
 
+    // Get the tag type we working with
+    auto it = tagViewToType.find(tagName);
+    if(it == tagViewToType.end())
+        goto __Failure;
+
     // Some dictionary type shit
-    switch(tagName[0])
+    switch(it->second)
     {
-        // Tags available: 'block'
-        case 'b':
-            if(tagName == "block") {
-                if(tagArgs.empty()) {
-                    logger_.Error(
-                        "[TemplateEngine].[ParsingError]: {% block ... %} expects an identifier as an argument, found nothing"
-                    );
-                    return TagResult::FAILURE;
-                }
-
-                std::string blockName = std::string(tagArgs);
-
-                // Try to find the current block in the block list, if u can, substitute it
-                auto it = context.childBlocks.find(blockName);
-                if(it != context.childBlocks.end()) {
-                    SafeWrite(context.io, it->second.data(), it->second.size());
-                    context.skipUntilFlag = true; // Now just skip everything until endblock
-                    return TagResult::SUCCESS;
-                }
-
-                // Now in another case, we would want to substitute the original content inplace-
-                // -if we couldn't find a replacement above, that is if we are in original parent file now
-                if(context.currentExtendsName.empty()) {
-                    context.inBlock = true;
-                    return TagResult::SUCCESS;
-                }
-
-                // Else create a new block
-                context.inBlock          = true;
-                context.currentBlockName = std::move(blockName);
-                context.currentBlockContent.clear();
-
-                return TagResult::SUCCESS; // Don't write line yet
-            }
-            break;
-
-        // Tags available: 'elif', 'else', 'endblock', 'endif', 'extends'
-        case 'e':
-            if(
-                tagName == "elif"
-                || tagName == "else"
-                || tagName == "endif"
-            )
-                return TagResult::PASSTHROUGH_DYNAMIC;
-
-            if(tagName == "endblock") {
-                // Endblock doesn't take in arguments
-                if(!tagArgs.empty()) {
-                    logger_.Error(
-                        "[TemplateEngine].[ParsingError]: {% endblock %} does not take any arguments, found: ", tagArgs
-                    );
-                    return TagResult::FAILURE;
-                }
-
-                if(!context.inBlock) {
-                    logger_.Error(
-                        "[TemplateEngine].[ParsingError]: {% endblock %} found without its corresponding {% block ... %}"
-                    );
-                    return TagResult::FAILURE;
-                }
-
-                // Trim the content a bit for cleaner output
-                TrimInline(context.currentBlockContent);
-
-                context.inBlock = false;
-                context.childBlocks[std::move(context.currentBlockName)] = std::move(context.currentBlockContent);
-                context.currentBlockName.clear();
-                context.currentBlockContent.clear();
-
-                return TagResult::SUCCESS; // Skip writing
+        case TagType::INCLUDE:
+        {
+            if(tagArgs.empty()) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: {% include ... %} expects a file name as an argument, found nothing"
+                );
+                return TagResult::FAILURE;
             }
 
-            if(tagName == "extends") {
-                if(tagArgs.empty()) {
-                    logger_.Error(
-                        "[TemplateEngine].[ParsingError]: {% extends ... %} expects a file name as an argument, found nothing"
-                    );
-                    return TagResult::FAILURE;
-                }
+            std::size_t q1 = tagArgs.find_first_of("'\"");
+            std::size_t q2 = tagArgs.find_last_of("'\"");
+        
+            if(q1 == std::string::npos || q2 <= q1) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: {% include ... %} got an improperly formatted file name."
+                    " Usage example: {% include 'base.html' %}"
+                );
+                return TagResult::FAILURE;
+            }
 
-                std::size_t q1 = tagArgs.find_first_of("'\"");
-                std::size_t q2 = tagArgs.find_last_of("'\"");
-                
-                if(q1 == std::string::npos || q2 <= q1) {
-                    logger_.Error(
-                        "[TemplateEngine].[ParsingError]: {% extends ... %} got an improperly formatted file name."
-                        " Usage example: {% extends 'base.html' %}"
-                    );
-                    return TagResult::FAILURE;
-                }
+            std::string includePath = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));
 
-                // The order of operations for extends is different from include
-                // We want current file to be processed first before the parent file does
-                // Unlike include where parent file is processed first
-                context.currentExtendsName = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));;
+            return PushFile(context, includePath)
+                    ? TagResult::CONTROL_TO_ANOTHER_FILE
+                    : TagResult::FAILURE;
+        }
+        case TagType::EXTENDS:
+        {
+            if(tagArgs.empty()) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: {% extends ... %} expects a file name as an argument, found nothing"
+                );
+                return TagResult::FAILURE;
+            }
 
+            std::size_t q1 = tagArgs.find_first_of("'\"");
+            std::size_t q2 = tagArgs.find_last_of("'\"");
+            
+            if(q1 == std::string::npos || q2 <= q1) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: {% extends ... %} got an improperly formatted file name."
+                    " Usage example: {% extends 'base.html' %}"
+                );
+                return TagResult::FAILURE;
+            }
+
+            // The order of operations for extends is different from include
+            // We want current file to be processed first before the parent file does
+            // Unlike include where parent file is processed first
+            context.currentExtendsName = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));;
+
+            return TagResult::SUCCESS;
+        }
+        case TagType::BLOCK:
+        {
+            if(tagArgs.empty()) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: {% block ... %} expects an identifier as an argument, found nothing"
+                );
+                return TagResult::FAILURE;
+            }
+
+            std::string blockName = std::string(tagArgs);
+
+            // Try to find the current block in the block list, if u can, substitute it
+            auto it = context.childBlocks.find(blockName);
+            if(it != context.childBlocks.end()) {
+                SafeWrite(context.io, it->second.data(), it->second.size());
+                context.skipUntilFlag = true; // Now just skip everything until endblock
                 return TagResult::SUCCESS;
             }
-            break;
 
-        // Tags available: 'if', 'include'
-        case 'i':
-            if(tagName == "if") return TagResult::PASSTHROUGH_DYNAMIC;
-
-            if(tagName == "include") {
-                if(tagArgs.empty()) {
-                    logger_.Error(
-                        "[TemplateEngine].[ParsingError]: {% include ... %} expects a file name as an argument, found nothing"
-                    );
-                    return TagResult::FAILURE;
-                }
-
-                std::size_t q1 = tagArgs.find_first_of("'\"");
-                std::size_t q2 = tagArgs.find_last_of("'\"");
-            
-                if(q1 == std::string::npos || q2 <= q1) {
-                    logger_.Error(
-                        "[TemplateEngine].[ParsingError]: {% include ... %} got an improperly formatted file name."
-                        " Usage example: {% include 'base.html' %}"
-                    );
-                    return TagResult::FAILURE;
-                }
-
-                std::string includePath = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));
-
-                return PushFile(context, includePath)
-                        ? TagResult::CONTROL_TO_ANOTHER_FILE
-                        : TagResult::FAILURE;
+            // Now in another case, we would want to substitute the original content inplace-
+            // -if we couldn't find a replacement above, that is if we are in original parent file now
+            if(context.currentExtendsName.empty()) {
+                context.inBlock = true;
+                return TagResult::SUCCESS;
             }
-            break;
 
-        // Tags available: 'var'
-        case 'v':
-            if(tagName == "var") return TagResult::PASSTHROUGH_DYNAMIC;
+            // Else create a new block
+            context.inBlock          = true;
+            context.currentBlockName = std::move(blockName);
+            context.currentBlockContent.clear();
+
+            return TagResult::SUCCESS; // Don't write line yet
+        }
+        case TagType::ENDBLOCK:
+        {
+            // Endblock doesn't take in arguments
+            if(!tagArgs.empty()) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: {% endblock %} does not take any arguments, found: ", tagArgs
+                );
+                return TagResult::FAILURE;
+            }
+
+            if(!context.inBlock) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: {% endblock %} found without its corresponding {% block ... %}"
+                );
+                return TagResult::FAILURE;
+            }
+
+            // Trim the content a bit for cleaner output
+            TrimInline(context.currentBlockContent);
+
+            context.inBlock = false;
+            context.childBlocks[std::move(context.currentBlockName)] = std::move(context.currentBlockContent);
+            context.currentBlockName.clear();
+            context.currentBlockContent.clear();
+
+            return TagResult::SUCCESS; // Skip writing
+        }
+        case TagType::VAR:     // ---
+        case TagType::IF:      //   |
+        case TagType::ELIF:    //   |
+        case TagType::ELSE:    //   | All these are parsed later in transpilation process
+        case TagType::ENDIF:   //   |
+        case TagType::FOR:     //   |
+        case TagType::ENDFOR:  // ---
+            return TagResult::PASSTHROUGH_DYNAMIC;
+
+        // Shouldn't happen but yeah    
+        default:
             break;
     }
 
+__Failure:
     // Unknown tags are not allowed
     logger_.Error("[TemplateEngine].[ParsingError]: Unknown tag found: ", tagName);
     return TagResult::FAILURE;

@@ -7,7 +7,7 @@
 #ifndef UNNAMED_LEXER_HPP
 #define UNNAMED_LEXER_HPP
 
-#include <string>
+#include <string_view>
 #include <cstdint>
 #include <unordered_map>
 #include "token.hpp"
@@ -25,17 +25,25 @@
 
 namespace WFX::Core::Legacy {
 
+// Modified it a bit to use string_view in some places instead of string
+// The core 'token' still uses string
 class Lexer
 {
     public:
-        Lexer(std::string&& text_)
-            : text(std::move(text_)), text_length(text.length()), cur_pos(0), cur_chr(text[cur_pos])
-        {}
+        Lexer(std::string_view text_)
+            : text(text_), text_length(text.length()), cur_pos(0)
+        {
+            if(text.empty())
+                cur_chr = '\0';
+            else
+                cur_chr = text[0];
+        }
 
-        Token& get_token();
-        Token& get_current_token();
-        Token  peek_next_token();
-        static std::pair<std::size_t, std::size_t> getLineColCount();
+        Token&           get_token();
+        Token&           get_current_token();
+        Token            peek_next_token();
+        std::string_view get_remaining_string();
+        static std::pair<std::size_t, std::size_t> get_line_col_count();
 
     private:
         void advance();
@@ -53,8 +61,8 @@ class Lexer
         void lex();
 
     private:
-        std::string   text;
-        std::uint64_t text_length;
+        std::string_view text;
+        std::uint64_t    text_length;
     
     private:
         std::uint64_t cur_pos;
@@ -69,7 +77,7 @@ class Lexer
         WFX::Utils::Logger& logger_ = WFX::Utils::Logger::GetInstance();
 
         //For Differentiation of keyword and identifier
-        const std::unordered_map<std::string, TokenType> identifier_map = {
+        const std::unordered_map<std::string_view, TokenType> identifier_map = {
             {"Auto",     TOKEN_KEYWORD_AUTO},
             {"Void",     TOKEN_KEYWORD_VOID},
             {"Int",      TOKEN_KEYWORD_INT},

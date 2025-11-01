@@ -294,7 +294,12 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
                     }
 
                     // Get the string representation of json value
-                    carry = vc->value->dump();
+                    // The reason why we check for a string value specifically is because JSON includes-
+                    // -quote (") around string when u call dump, instead just get the string directly
+                    if(vc->value->is_string())
+                        carry = vc->value->get<std::string>();
+                    else
+                        carry = vc->value->dump();
 
                     currentType   = TemplateChunkType::VARIABLE;
                     currentOffset = 0;

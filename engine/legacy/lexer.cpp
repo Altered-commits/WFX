@@ -18,7 +18,12 @@ void Lexer::advance()
     }
     else
         ++col;
-    cur_chr = text[++cur_pos];
+
+    ++cur_pos;
+    if(cur_pos >= text_length)
+        cur_chr = '\0';
+    else
+        cur_chr = text[cur_pos];
 }
 
 char Lexer::peek(std::uint8_t offset)
@@ -52,7 +57,7 @@ void Lexer::skip_multi_line_comments()
 
 void Lexer::lex_digits()
 {
-    char* start_pos = &text[cur_pos];
+    const char* start_pos = &text[cur_pos];
     
     //Look only for digits -> 0..9
     while (SANITY_CHECK(IS_DIGIT(cur_chr)))
@@ -62,7 +67,7 @@ void Lexer::lex_digits()
     //If its not '.', its an integer return it
     if(cur_chr != '.')
     {
-        set_token(std::string(start_pos, &text[cur_pos]), TOKEN_INT);
+        set_token(std::string(start_pos, &text[cur_pos] - start_pos), TOKEN_INT);
         return;
     }
     //But if it is a '.', make sure before lexing float, character after '.' is also not a dot
@@ -75,22 +80,22 @@ void Lexer::lex_digits()
             advance();
         
         //Set token as float
-        set_token(std::string(start_pos, &text[cur_pos]), TOKEN_FLOAT);
+        set_token(std::string(start_pos, &text[cur_pos] - start_pos), TOKEN_FLOAT);
         return;
     }
     //Else its '..' or some other character, return the current token as integer again
-    set_token(std::string(start_pos, &text[cur_pos]), TOKEN_INT);
+    set_token(std::string(start_pos, &text[cur_pos] - start_pos), TOKEN_INT);
 }
 
 void Lexer::lex_identifier_or_keyword()
 {
-    char* start_pos = &text[cur_pos];
+    const char* start_pos = &text[cur_pos];
 
     while(SANITY_CHECK(IS_IDENT(cur_chr)))
         advance();
     
     //Construct string from starting to current character
-    std::string temp(start_pos, &text[cur_pos]);
+    std::string temp(start_pos, &text[cur_pos] - start_pos);
 
     //Using the identifier map, if the string exists in the map, its a keyword, else its just identifier
     auto elem = identifier_map.find(temp);
@@ -352,13 +357,18 @@ Token Lexer::peek_next_token()
     return next;
 }
 
+std::string_view Lexer::get_remaining_string()
+{
+    return text.substr(cur_pos);
+}
+
 void Lexer::set_token(std::string&& token_value, TokenType token_type)
 {
     token.token_value = std::move(token_value);
     token.token_type  = token_type;
 }
 
-std::pair<std::size_t, std::size_t> Lexer::getLineColCount()
+std::pair<std::size_t, std::size_t> Lexer::get_line_col_count()
 {
     return {line, col};
 }

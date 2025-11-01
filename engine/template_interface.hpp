@@ -53,10 +53,10 @@ struct StateResult {
 /*
  * NOTE: THESE FUNCTIONS ASSUMES THAT KEYS ARE ALWAYS KNOWN AT RUNTIME, WHICH THEY ARE BTW
  */
-inline const Json* SafeGetJson(const Json& j, std::initializer_list<std::string_view> keys) noexcept
+inline Json* SafeGetJson(Json& j, std::initializer_list<std::string_view> keys) noexcept
 {
-    const Json* cur = &j;
-    for(const auto& k : keys) {
+    Json* cur = &j;
+    for(auto& k : keys) {
         if(!cur->is_object())
             return nullptr;
 
@@ -80,7 +80,7 @@ public:
     virtual std::size_t GetStateCount() const noexcept = 0;
 
     // Returns the TemplateResult for a given state index (0..count-1)
-    virtual StateResult GetState(std::size_t index, const Json& ctx) const noexcept = 0;
+    virtual StateResult GetState(std::size_t index, Json& ctx) const noexcept = 0;
 };
 
 using TemplateGeneratorPtr = std::unique_ptr<BaseTemplateGenerator>;
