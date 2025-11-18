@@ -1,5 +1,6 @@
 #include "http_connection.hpp"
 #include "http/response/http_response.hpp"
+#include "shared/apis/http_api.hpp"
 
 namespace WFX::Http {
 
@@ -60,6 +61,7 @@ const char* WFXIpAddress::GetIpType() const
 void ConnectionContext::ResetContext()
 {
     rwBuffer.ResetBuffer();
+    coroStack.clear();
     
     if(requestInfo)  { delete requestInfo;  requestInfo  = nullptr; }
     if(responseInfo) { delete responseInfo; responseInfo = nullptr; }
@@ -80,6 +82,7 @@ void ConnectionContext::ResetContext()
 void ConnectionContext::ClearContext()
 {
     rwBuffer.ClearBuffer();
+    coroStack.clear();
 
     if(requestInfo)  requestInfo->ClearInfo();
     if(responseInfo) responseInfo->ClearInfo();
@@ -114,6 +117,42 @@ HttpParseState ConnectionContext::GetParseState() const
 ConnectionState ConnectionContext::GetConnectionState() const
 {
     return static_cast<ConnectionState>(connectionState);
+}
+
+bool ConnectionContext::IsAsyncOperation()
+{
+    return !coroStack.empty();
+}
+
+bool ConnectionContext::TryFinishCoroutines()
+{
+    if(coroStack.empty())
+        return true;
+
+    // THE MOST IMPORTANT THING, ASYNC FUNCTIONS EXPECT US TO SET CTX (current connection context)-
+    // -VIA HTTP API. AND WE WILL SET IT TO NULLPTR ONCE WE ARE DONE USING IT, WE DON'T WANT DANGLING-
+    // -POINTERS
+    auto httpApi = WFX::Shared::GetHttpAPIV1();
+    httpApi->SetGlobalPtrData(this);
+
+    // Execute from top to bottom, each of it is stateless
+    // Now if it hasn't finished after resuming, break out of the loop, -
+    // -do not try to finish rest of it as they depend on each other
+    while(!coroStack.empty()) {
+        auto& coro = coroStack.back();
+        coro->Resume();
+
+        if(coro->IsFinished())
+            coroStack.pop_back(); // Remove finished coroutine
+        else {
+            httpApi->SetGlobalPtrData(nullptr);
+            return false;
+        }
+    }
+
+    // We finished all the stuff, signal caller to handle response creation now
+    httpApi->SetGlobalPtrData(nullptr);
+    return true;
 }
 
 } // namespace WFX::Http

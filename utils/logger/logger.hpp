@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <string>
-#include <mutex>
 #include <atomic>
 
 #define WFX_LOG_ALL      Logger::ALL_MASK
@@ -15,11 +14,14 @@
 
 namespace WFX::Utils {
 
+/*
+ * NOTE: This is not thread safe, this expects itself to be used in a pure sync state
+ */
 class Logger {
 public:
-    using LevelMask = uint32_t;
+    using LevelMask = std::uint32_t;
 
-    enum class Level : uint8_t {
+    enum class Level : std::uint8_t {
         DEBUG,
         INFO,
         WARN,
@@ -61,13 +63,15 @@ private:
     Logger() = default;
     ~Logger() = default;
 
-    Logger(const Logger&) = delete;
+    // No copying / moving
+    Logger(const Logger&)            = delete;
     Logger& operator=(const Logger&) = delete;
-    Logger(Logger&&) = delete;
-    Logger& operator=(Logger&&) = delete;
+    Logger(Logger&&)                 = delete;
+    Logger& operator=(Logger&&)      = delete;
 
-    const char* LevelToString(Level level) const;
-    void CurrentTimestamp(char* buf, size_t len) const;
+private:
+    const char* LevelToString(Level level)              const;
+    void        CurrentTimestamp(char* buf, size_t len) const;
 
     template <bool PureLog = true, typename... Args>
     void Log(Level level, Args&&... args);
@@ -78,7 +82,6 @@ private:
 private:
     std::atomic<LevelMask> levelMask_     = ALL_MASK;
     std::atomic<bool>      useTimestamps_ = true;
-    std::mutex             logMutex_;
 };
 
 } // namespace WFX::Utils
@@ -88,12 +91,13 @@ namespace WFX::Utils {
 
 // ---- Type-safe PrintArg overload ----
 template <typename T>
-void Logger::PrintArg(FILE* out, T&& arg) {
+void Logger::PrintArg(FILE* out, T&& arg)
+{
     using U = std::decay_t<T>;
 
     if constexpr(std::is_same_v<U, const char*> || std::is_same_v<U, char*>)
         std::fprintf(out, "%s", arg ? arg : "(null)");
-    
+
     else if constexpr(std::is_same_v<U, std::string>)
         std::fprintf(out, "%s", arg.c_str());
 
@@ -109,11 +113,14 @@ void Logger::PrintArg(FILE* out, T&& arg) {
         else
             std::fprintf(out, "%llu", static_cast<unsigned long long>(arg));
     }
-    
+
     else if constexpr(std::is_floating_point_v<U>)
         std::fprintf(out, "%f", static_cast<double>(arg));
-    
-    // fallback: print pointer
+
+    else if constexpr(std::is_pointer_v<U>)
+        std::fprintf(out, "%p", static_cast<const void*>(arg));
+
+    // Fallback: print pointer
     else
         std::fprintf(out, "%p", (const void*)&arg);
 }
@@ -125,7 +132,6 @@ void Logger::Log(Level level, Args&&... args)
     if((levelMask_.load() & mask) == 0)
         return;
 
-    std::lock_guard<std::mutex> lock(logMutex_);
     FILE* out = (level >= Level::WARN) ? stderr : stdout;
 
     if(useTimestamps_ && PureLog) {

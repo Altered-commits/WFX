@@ -63,14 +63,14 @@ int WFXEntryPoint(int argc, char* argv[]) {
             cfg.port = port;
 
             // --no-cache combinations, either use --no-cache for everything
-            // or use --no-build-cache, --no-template-cache for specific stuff
+            // or use --no-source-cache, --no-template-cache for specific stuff
             // but not at the same time
             bool noCache         = options.count("--no-cache") > 0;
-            bool noBuildCache    = options.count("--no-build-cache") > 0;
+            bool noBuildCache    = options.count("--no-source-cache") > 0;
             bool noTemplateCache = options.count("--no-template-cache") > 0;
 
             if(noCache && (noBuildCache || noTemplateCache))
-                logger.Fatal("[WFX]: Cannot set --no-build-cache or --no-template-cache while --no-cache is enabled");
+                logger.Fatal("[WFX]: Cannot set --no-source-cache or --no-template-cache while --no-cache is enabled");
 
             // Set flags based on CLI options
             if(noCache) {
@@ -89,7 +89,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
     parser.AddOption("dev", "--host",                "Host to bind",                false, "127.0.0.1", false);
     parser.AddOption("dev", "--port",                "Port to bind",                false, "8080",      false);
     parser.AddOption("dev", "--no-cache",            "Disable caching",             true,  "",          false);
-    parser.AddOption("dev", "--no-build-cache",      "Disable build cache",         true,  "",          false);
+    parser.AddOption("dev", "--no-source-cache",     "Disable build cache",         true,  "",          false);
     parser.AddOption("dev", "--no-template-cache",   "Disable template cache",      true,  "",          false);
     parser.AddOption("dev", "--use-https",           "Use HTTPS connection",        true,  "",          false);
     parser.AddOption("dev", "--https-port-override", "Override default HTTPS port", true,  "",          false);

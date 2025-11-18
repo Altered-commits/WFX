@@ -20,8 +20,10 @@ To implement (In no specific order):
 10. Timeout (Done)
 11. Streaming (Done: Outbound, Inbound remaining)
 12. .env (Done)
+13. Server <-> Server request-response handling
 
 To Fix:
 1. Cache files < 4KB, don't use TransmitFile / sendfile on every single file
 2. Batch syscalls (for receving and sending data) instead of spamming them every request
 3. Implement sending file via write call for stuff without sendfile support (Ex: OpenSSL's SSL_sendfile) [Done]
+4. Timer wheel shouldn't expire connections inline, or for larger count it will stall backend pipeline

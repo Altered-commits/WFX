@@ -3,6 +3,7 @@
 #include "async/interface.hpp"
 #include "http/response.hpp"
 #include "http/common/http_error_msgs.hpp"
+#include "http/common/http_global_state.hpp"
 #include "http/formatters/parser/http_parser.hpp"
 #include "http/formatters/serializer/http_serializer.hpp"
 #include "http/routing/router.hpp"
@@ -25,15 +26,23 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
 
     // Now that user code is available to us, load middleware in proper order
     HandleMiddlewareLoading();
+
+    // Set connection handler inside of global state
+    GetGlobalState().connHandler = connHandler_.get();
 }
 
 void CoreEngine::Listen(const std::string& host, int port)
 {
     connHandler_->Initialize(host, port);
 
-    connHandler_->SetReceiveCallback([this](ConnectionContext* ctx){
-        this->HandleRequest(ctx);
-    });
+    connHandler_->SetEngineCallbacks(
+        [this](ConnectionContext* ctx) {
+            this->HandleRequest(ctx);
+        },
+        [this](ConnectionContext* ctx) {
+            this->HandleResponse(ctx);
+        }
+    );
     connHandler_->Run();
 }
 
@@ -93,6 +102,14 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
                 : StringSanitizer::CaseInsensitiveCompare(connHeader, "close");      // HTTP/1.1: Defaults to keep-alive
             
             res.Set("Connection", shouldClose ? "close" : "keep-alive");
+
+            // Set the connection state according to this right now, later if we have any issue, it-
+            // -will be overridden
+            ctx->SetConnectionState(
+                shouldClose
+                ? ConnectionState::CONNECTION_CLOSE
+                : ConnectionState::CONNECTION_ALIVE
+            );
             
             // A bit of shortcut if its public route (starts with '/public/')
             if(StartsWith(reqInfo.path, "/public/")) {
@@ -139,11 +156,9 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
 
                     httpApi->SetGlobalPtrData(nullptr);
 
-                    if(!coro) {
-                        res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                            .SendText("[HR]_1Internal Error");
-                        goto __HandleResponse;
-                    }
+                    // Fuck up the server, something went wrong, shouldn't happen
+                    if(!coro)
+                        logger_.Fatal("[CoreEngine]: Null coroutine detected in active connection context, aborting");
 
                     // (Async path)
                     if(!coro->IsFinished())
@@ -152,11 +167,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
                     // So if coroutine is done, then the user defined lambda should be the only thing-
                     // -existing inside of 'ctx->coroStack'. If anything else remains, thats a big no no
                     if(ctx->coroStack.size() > 1)
-                        res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                            .SendText("[HR]_2Internal Error");
-                    // Ok good, so our async function is complete (sync path), empty out 'ctx->coroStack'
-                    else
-                        ctx->coroStack.clear();
+                        logger_.Fatal("[CoreEngine]: Coroutine stack imbalance detected after completion, aborting");
                 }
             }
 
@@ -164,9 +175,9 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             ctx->parseState = static_cast<std::uint8_t>(HttpParseState::PARSE_IDLE);
             connHandler_->RefreshExpiry(ctx, networkConfig.idleTimeout);
 
-            HandleResponse(res, ctx, shouldClose);
+            HandleResponse(ctx);
             return;
-        } 
+        }
 
         case HttpParseState::PARSE_ERROR:
             ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
@@ -181,15 +192,11 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
     }
 }
 
-void CoreEngine::HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shouldClose)
+void CoreEngine::HandleResponse(ConnectionContext* ctx)
 {
-    auto&& [serializeResult, bodyView] = HttpSerializer::SerializeToBuffer(res, ctx->rwBuffer);
+    HttpResponse& res = *ctx->responseInfo;
 
-    ConnectionState afterWriteState = shouldClose
-                                        ? ConnectionState::CONNECTION_CLOSE
-                                        : ConnectionState::CONNECTION_ALIVE;
-    
-    ctx->SetConnectionState(afterWriteState);
+    auto&& [serializeResult, bodyView] = HttpSerializer::SerializeToBuffer(res, ctx->rwBuffer);
 
     switch(serializeResult)
     {

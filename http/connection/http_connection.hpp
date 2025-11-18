@@ -77,8 +77,9 @@ enum class ConnectionState : std::uint8_t {
 // Forward declare it so compilers won't cry
 struct ConnectionContext;
 
-using CoroutineStack  = std::vector<Async::CoroutinePtr>;
-using ReceiveCallback = WFX::Utils::MoveOnlyFunction<void(ConnectionContext*)>;
+using CoroutineStack     = std::vector<Async::CoroutinePtr>;
+using ReceiveCallback    = std::function<void(ConnectionContext*)>;
+using CompletionCallback = std::function<void(ConnectionContext*)>;
 
 struct FileInfo {
 #if defined(_WIN32)
@@ -135,6 +136,9 @@ public: // Helper functions
 
     HttpParseState  GetParseState()      const;
     ConnectionState GetConnectionState() const;
+
+    bool IsAsyncOperation();
+    bool TryFinishCoroutines();
 };
 static_assert(sizeof(ConnectionContext) <= 128, "ConnectionContext must STRICTLY be less than or equal to 128 bytes.");
 
@@ -147,7 +151,7 @@ public:
     virtual void Initialize(const std::string& host, int port) = 0;
 
     // Set the receive callback ONCE per socket (can be overwritten if needed)
-    virtual void SetReceiveCallback(ReceiveCallback onData) = 0;
+    virtual void SetEngineCallbacks(ReceiveCallback onData, CompletionCallback onComplete) = 0;
 
     // Read more data if required (Async)
     virtual void ResumeReceive(ConnectionContext* ctx) = 0;
@@ -169,6 +173,9 @@ public:
 
     // Refresh the connection's expiry time
     virtual void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) = 0;
+
+    // Refresh the connection's async timer
+    virtual void RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) = 0;
 
     // Shutdown the main connection loop, cleanup everything
     virtual void Stop() = 0;

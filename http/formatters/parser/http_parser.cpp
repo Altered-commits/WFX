@@ -13,14 +13,15 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
 {
     ReadMetadata* readMeta = ctx->rwBuffer.GetReadMeta();
     const char*   data     = ctx->rwBuffer.GetReadData();
-    
+
     // Sanity checks
     if(!data || readMeta->dataLength == 0)
         return HttpParseState::PARSE_ERROR;
 
     // Config variables
-    std::uint32_t maxBufferSize = Config::GetInstance().networkConfig.maxRecvBufferSize;
-    std::uint32_t maxBodySize   = Config::GetInstance().networkConfig.maxBodyTotalSize;
+    std::uint32_t maxBufferSize      = Config::GetInstance().networkConfig.maxRecvBufferSize;
+    std::uint32_t maxBodyTotalSize   = Config::GetInstance().networkConfig.maxBodyTotalSize;
+    std::uint32_t maxHeaderTotalSize = Config::GetInstance().networkConfig.maxHeaderTotalSize;
 
     // Connection Context variables
     std::uint32_t& trackBytes = ctx->trackBytes;
@@ -47,9 +48,19 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
             // Even if we werent able to find header end, update trackBytes so we don't start reading-
             // -from beginning everytime.
             if(!SafeFindHeaderEnd(data, size, trackBytes, headerEnd)) {
+                // Even if we haven't reached the end of header, check if the data we received exceeds-
+                // -header limit. If it does, GG
+                if(size > maxHeaderTotalSize)
+                    return HttpParseState::PARSE_ERROR;
+
                 trackBytes = size;
                 return HttpParseState::PARSE_INCOMPLETE_HEADERS;
             }
+
+            // We found the end of the headers. Now check if the total header size-
+            // -(from 'GET /...' to '\r\n\r\n') exceeds the limit
+            if(headerEnd > maxHeaderTotalSize)
+                return HttpParseState::PARSE_ERROR;
 
             // Update trackBytes to match the headerEnd position
             trackBytes = headerEnd;
@@ -61,7 +72,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
 
             if(!ParseHeaders(data, size, pos, request.headers))
                 return HttpParseState::PARSE_ERROR;
-            
+
             // Now we check the type, whether its streaming data or all at once kinda stuff or expect header
             auto expectHeader        = request.headers.GetHeader("Expect");
             auto contentLengthHeader = request.headers.GetHeader("Content-Length");
@@ -70,7 +81,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
             bool hasExpectHeader        = !expectHeader.empty() && StringSanitizer::CaseInsensitiveCompare(expectHeader, "100-continue");
             bool hasContentLengthHeader = !contentLengthHeader.empty();
             bool hasEncodingHeader      = !encodingHeader.empty();
-            
+
             // RFC Spec Violation: Both headers cannot be present at the same time
             if(hasEncodingHeader && hasContentLengthHeader)
                 return HttpParseState::PARSE_ERROR;
@@ -78,7 +89,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
             // Handle invalid Expect case: Expect present but no body indication
             if(hasExpectHeader && !hasContentLengthHeader && !hasEncodingHeader)
                 return HttpParseState::PARSE_EXPECT_417;
-            
+
             // Data should be fetched all at once
             if(hasContentLengthHeader) {
                 std::size_t contentLen = 0;
@@ -86,10 +97,21 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
                 if(!StrToUInt64(contentLengthHeader, contentLen))
                     return HttpParseState::PARSE_ERROR;
 
-                if(hasExpectHeader) {
-                    if(contentLen > maxBodySize)
+                // Sanity check: are we about to exceed our max buffer size or max body size?
+                // If so, reject oversized payload
+                if(
+                    contentLen > maxBodyTotalSize
+                    || contentLen > maxBufferSize - 1
+                    || headerEnd > maxBufferSize - 1 - contentLen
+                ) {
+                    // If client sent "Expect", reply with 417 else fail the response
+                    if(hasExpectHeader)
                         return HttpParseState::PARSE_EXPECT_417;
 
+                    return HttpParseState::PARSE_ERROR;
+                }
+
+                if(hasExpectHeader) {
                     // Set the state so the next time parser returns to this, it knows to parse body not header
                     ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
                     return HttpParseState::PARSE_EXPECT_100;
@@ -97,10 +119,6 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
 
                 // Body exists
                 if(contentLen > 0) {
-                    // Sanity check: are we about to exceed our max buffer size? Reject oversized payload
-                    if(contentLen > maxBufferSize - 1 || headerEnd > maxBufferSize - 1 - contentLen)
-                        return HttpParseState::PARSE_ERROR;
-
                     // Calc total body which recv got till now
                     std::size_t availableBody = size - trackBytes;
                     
@@ -133,7 +151,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
                 if(!StringSanitizer::CaseInsensitiveCompare(encodingHeader, "chunked"))
                     return HttpParseState::PARSE_ERROR;
 
-                // Parser will not try to buffer the full body – instead user will handle chunks
+                // Parser will not try to buffer the full body, instead user will handle chunks
                 ctx->SetParseState(HttpParseState::PARSE_STREAMING_BODY);
                 
                 if(hasExpectHeader)
@@ -142,17 +160,11 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
                 return HttpParseState::PARSE_STREAMING_BODY;
             }
 
-            // Neither encoding header nor content length header is present
-            // This is valid in RFC spec under the conditions the request type isn't POST/PUT
-            // We only support POST so yeah
-            if(request.method == HttpMethod::POST)
-                return HttpParseState::PARSE_ERROR;
-            
             // We just assume it's a header only request
             ctx->SetParseState(HttpParseState::PARSE_SUCCESS);
             return HttpParseState::PARSE_SUCCESS;
         }
-        
+
         case HttpParseState::PARSE_INCOMPLETE_BODY:
         {
             if(readMeta->dataLength < trackBytes)
@@ -171,7 +183,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
         // Not implemented [future]
         case HttpParseState::PARSE_STREAMING_BODY:
             return HttpParseState::PARSE_STREAMING_BODY;
-        
+
         case HttpParseState::PARSE_SUCCESS:
             return HttpParseState::PARSE_SUCCESS;
 
@@ -220,9 +232,8 @@ bool HttpParser::ParseRequest(const char* data, std::size_t size, std::size_t& p
 
 bool HttpParser::ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestHeaders& outHeaders)
 {
-    std::size_t headerCount      = 0;
-    std::size_t headerTotalBytes = 0;
-    std::size_t nextPos          = 0;
+    std::size_t headerCount = 0;
+    std::size_t nextPos     = 0;
     std::string_view line;
 
     auto& networkConfig = Config::GetInstance().networkConfig;
@@ -232,10 +243,6 @@ bool HttpParser::ParseHeaders(const char* data, std::size_t size, std::size_t& p
             return false;
 
         std::size_t lineBytes = nextPos - pos;
-        headerTotalBytes += lineBytes;
-        if(headerTotalBytes > networkConfig.maxHeaderTotalSize)
-            return false;
-
         pos = nextPos;
 
         if(line.empty())
@@ -268,10 +275,6 @@ bool HttpParser::ParseBody(const char* data, std::size_t size, std::size_t& pos,
 {
     // Overflow check: position + contentLen must be within bounds
     if(pos > size || contentLen > size || pos + contentLen > size)
-        return false;
-    
-    // Max body size constraint
-    if(contentLen > Config::GetInstance().networkConfig.maxBodyTotalSize)
         return false;
 
     outRequest.SetContext("body", std::string_view{data + pos, contentLen});

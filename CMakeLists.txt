@@ -18,6 +18,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 # -----------------------------
 # Gather sources (exclude utils here)
 # -----------------------------
+# But before we do it, add this flag if we want to debug
+if(CMAKE_BUILD_TYPE MATCHES "Debug")
+    add_compile_definitions(WFX_DEBUG)
+endif()
+
 file(GLOB_RECURSE WFX_CLI_SOURCES         "${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cpp")
 file(GLOB_RECURSE WFX_CONFIG_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/config/*.cpp")
 file(GLOB_RECURSE WFX_ENGINE_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/engine/*.cpp")

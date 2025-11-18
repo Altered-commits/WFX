@@ -9,7 +9,7 @@
 #include "http/ssl/http_ssl.hpp"
 #include "utils/filecache/filecache.hpp"
 #include "utils/buffer_pool/buffer_pool.hpp"
-#include "utils/timer_wheel/timer_wheel.hpp"
+#include "utils/timer_wheel/ext_timer_wheel.hpp"
 
 #include <sys/epoll.h>
 
@@ -19,8 +19,7 @@ using namespace WFX::Http;  // For 'HttpConnectionHandler', 'ReceiveCallback', '
 using namespace WFX::Utils; // For 'Logger', 'RWBuffer', ...
 using namespace WFX::Core;  // For 'Config'
 
-static constexpr int INVOKE_TIMEOUT_COOLDOWN = 5; // In seconds
-static constexpr int INVOKE_TIMEOUT_DELAY    = 1; // In seconds
+using SteadyClock = std::chrono::steady_clock;
 
 class EpollConnectionHandler : public HttpConnectionHandler {
 public:
@@ -28,8 +27,8 @@ public:
     ~EpollConnectionHandler();
 
 public: // Initializing
-    void Initialize(const std::string& host, int port) override;
-    void SetReceiveCallback(ReceiveCallback onData)    override;
+    void Initialize(const std::string& host, int port)                                 override;
+    void SetEngineCallbacks(ReceiveCallback onData, CompletionCallback onComplete)     override;
     
 public: // I/O Operations
     void ResumeReceive(ConnectionContext* ctx)                                         override;
@@ -39,9 +38,10 @@ public: // I/O Operations
     void Close(ConnectionContext* ctx, bool forceClose = false)                        override;
     
 public: // Main Functions
-    void Run()                                                               override;
-    void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) override;
-    void Stop()                                                              override;
+    void Run()                                                                      override;
+    void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)        override;
+    void RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) override;
+    void Stop()                                                                     override;
 
 private: // Helper Functions
     std::int64_t       AllocSlot(std::uint64_t* bitmap, std::uint32_t numWords, std::uint32_t maxSlots);
@@ -49,6 +49,7 @@ private: // Helper Functions
     ConnectionContext* GetConnection();
     void               ReleaseConnection(ConnectionContext* ctx);
     
+    std::uint64_t      NowMs();
     bool               SetNonBlocking(int fd);
     bool               EnsureFileReady(ConnectionContext* ctx, std::string path);
     bool               EnsureReadReady(ConnectionContext* ctx);
@@ -58,6 +59,7 @@ private: // Helper Functions
     void               SendFile(ConnectionContext* ctx);
     void               ResumeStream(ConnectionContext* ctx);
     void               PollAgain(ConnectionContext* ctx, EventType eventType, std::uint32_t events);
+    void               UpdateAsyncTimer(std::uint64_t minTickMs);
     
     void               WrapAccept(ConnectionContext* ctx, int clientFd);
     ssize_t            WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
@@ -65,23 +67,29 @@ private: // Helper Functions
     ssize_t            WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);
 
 private: // Misc
-    Config&           config_     = Config::GetInstance();
-    Logger&           logger_     = Logger::GetInstance();
-    FileCache&        fileCache_  = FileCache::GetInstance();
-    BufferPool&       pool_       = BufferPool::GetInstance();
+    Config&            config_     = Config::GetInstance();
+    Logger&            logger_     = Logger::GetInstance();
+    FileCache&         fileCache_  = FileCache::GetInstance();
+    BufferPool&        pool_       = BufferPool::GetInstance();
 
-    IpLimiter         ipLimiter_  = {pool_};
-    ReceiveCallback   onReceive_  = {};
-    std::atomic<bool> running_    = true;
-    bool              useHttps_   = false;
+    IpLimiter          ipLimiter_  = {pool_};
+    ReceiveCallback    onReceive_  = {};
+    CompletionCallback onComplete_ = {};
+    std::atomic<bool>  running_    = true;
+    bool               useHttps_   = false;
 
 private: // Constexpr stuff
     constexpr static char    CHUNK_END[]           = "0\r\n\r\n";
     constexpr static ssize_t SWITCH_FILE_TO_STREAM = std::numeric_limits<ssize_t>::min();
 
+    constexpr static int INVOKE_TIMEOUT_COOLDOWN = 5; // In seconds
+    constexpr static int INVOKE_TIMEOUT_DELAY    = 1; // In seconds
+
 private: // Timeout handler
-    TimerWheel timerWheel_;
-    int        timerFd_ = -1;
+    ExtendedTimerWheel      timerWheel_;
+    SteadyClock::time_point startTime_      = SteadyClock::now();
+    int                     timeoutTimerFd_ = -1;
+    int                     asyncTimerFd_   = -1;
 
 private: // Epoll + SSL
     int           listenFd_  = -1;

@@ -14,12 +14,17 @@ using RegisterCallbackFn     = Async::CoroutineRawPtr (*)(void*, Async::Coroutin
 using PopCallbackFn          = void                   (*)(void*);
 using ResumeRecentCallbackFn = bool                   (*)(void*);
 
+using RegisterAsyncTimerFn   = bool (*)(void*, std::uint32_t);
+
 // vvv API declarations vvv
 struct ASYNC_API_TABLE {
     // vvv Base Operations vvv
     RegisterCallbackFn     RegisterCallback;
     PopCallbackFn          PopCallback;
     ResumeRecentCallbackFn ResumeRecentCallback;
+
+    // vvv Async Operations vvv
+    RegisterAsyncTimerFn   RegisterAsyncTimer;
 
     // Metadata
     AsyncAPIVersion apiVersion;

@@ -272,11 +272,14 @@ SSLReturn HttpOpenSSL::ForceShutdown(void *conn)
 // vvv Helper functions vvv
 void HttpOpenSSL::GlobalOpenSSLInit()
 {
-    static std::once_flag initFlag;
-    std::call_once(initFlag, []() {
-        if(OPENSSL_init_ssl(OPENSSL_INIT_LOAD_CONFIG, nullptr) != 1)
-            Logger::GetInstance().Fatal("[HttpOpenSSL]: Initialization failed");
-    });
+    static bool initialized = false;
+    if(initialized)
+        return;
+
+    if(OPENSSL_init_ssl(OPENSSL_INIT_LOAD_CONFIG, nullptr) != 1)
+        Logger::GetInstance().Fatal("[HttpOpenSSL]: Initialization failed");
+
+    initialized = true;
 }
 
 void HttpOpenSSL::LogOpenSSLError(const char* message, bool fatal)

@@ -28,7 +28,7 @@ HttpCallbackType MakeHttpCallbackFromLambda(Lambda&& cb)
     else if constexpr(std::is_invocable_r_v<void, Lambda, AsyncPtr, RequestRef, ResponseRef>)
         return AsyncCallbackType{
             [cb = std::forward<Lambda>(cb)](RequestRef req, ResponseRef res) mutable -> AsyncPtr {
-                return Async::MakeAsync(std::forward<Lambda>(cb), req, res); 
+                return Async::MakeAsync(std::forward<Lambda>(cb), std::ref(req), res); 
             }
         };
 

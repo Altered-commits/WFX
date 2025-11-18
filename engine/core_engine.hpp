@@ -20,7 +20,7 @@ public:
 
 private:
     void HandleRequest(ConnectionContext* ctx);
-    void HandleResponse(HttpResponse& res, ConnectionContext* ctx, bool shouldClose);
+    void HandleResponse(ConnectionContext* ctx);
 
 private:
     void HandleUserDLLInjection(const char* dllDir);
