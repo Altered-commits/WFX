@@ -67,16 +67,17 @@ void ConnectionContext::ResetContext()
     if(responseInfo) { delete responseInfo; responseInfo = nullptr; }
     if(fileInfo)     { delete fileInfo;     fileInfo     = nullptr; }
     
-    connectionState    = 0;
-    isFileOperation    = 0;
-    isStreamOperation  = 0;
-    isShuttingDown     = 0;
-    streamChunked      = 0;
-    connInfo           = WFXIpAddress{};
-    expectedBodyLength = 0;
-    eventType          = EventType::EVENT_ACCEPT;
-    parseState         = 0;
-    trackBytes         = 0;
+    connectionState       = 0;
+    isFileOperation       = 0;
+    isStreamOperation     = 0;
+    isAsyncTimerOperation = 0;
+    isShuttingDown        = 0;
+    streamChunked         = 0;
+    connInfo              = WFXIpAddress{};
+    expectedBodyLength    = 0;
+    eventType             = EventType::EVENT_ACCEPT;
+    parseState            = 0;
+    trackBytes            = 0;
 }
 
 void ConnectionContext::ClearContext()
@@ -88,11 +89,12 @@ void ConnectionContext::ClearContext()
     if(responseInfo) responseInfo->ClearInfo();
     if(fileInfo)     *fileInfo = FileInfo{};
 
-    isFileOperation    = 0;
-    isStreamOperation  = 0;
-    streamChunked      = 0;
-    expectedBodyLength = 0;
-    trackBytes         = 0;
+    isFileOperation       = 0;
+    isStreamOperation     = 0;
+    isAsyncTimerOperation = 0;
+    streamChunked         = 0;
+    expectedBodyLength    = 0;
+    trackBytes            = 0;
     // eventType          = EventType::EVENT_ACCEPT;
     // connInfo           = WFXIpAddress{};
     // timeoutTick        = 0;
@@ -126,6 +128,11 @@ bool ConnectionContext::IsAsyncOperation()
 
 bool ConnectionContext::TryFinishCoroutines()
 {
+    // Sanity checks, is the connection still alive or no
+    if(GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
+        return false;
+
+    // Already completed
     if(coroStack.empty())
         return true;
 

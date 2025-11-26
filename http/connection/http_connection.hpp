@@ -104,13 +104,14 @@ struct ConnectionContext : public ConnectionTag {
     bool handshakeDone = false;                    // 1 byte
 
     struct {
-        std::uint16_t parseState        : 3;       // --
-        std::uint16_t connectionState   : 2;       //  |
-        std::uint16_t isStreamOperation : 1;       //  |
-        std::uint16_t isFileOperation   : 1;       //  |
-        std::uint16_t isShuttingDown    : 1;       //  |
-        std::uint16_t streamChunked     : 1;       //  |
-        std::uint16_t __Pad             : 7;       //  V
+        std::uint16_t parseState            : 3;   // --
+        std::uint16_t connectionState       : 2;   //  |
+        std::uint16_t isStreamOperation     : 1;   //  |
+        std::uint16_t isFileOperation       : 1;   //  |
+        std::uint16_t isAsyncTimerOperation : 1;   //  |
+        std::uint16_t isShuttingDown        : 1;   //  |
+        std::uint16_t streamChunked         : 1;   //  |
+        std::uint16_t __Pad                 : 6;   //  V
     };                                             // 2 byte
 
     std::uint32_t trackBytes = 0;                  // 4 bytes
@@ -175,7 +176,7 @@ public:
     virtual void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) = 0;
 
     // Refresh the connection's async timer
-    virtual void RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) = 0;
+    virtual bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) = 0;
 
     // Shutdown the main connection loop, cleanup everything
     virtual void Stop() = 0;

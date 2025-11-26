@@ -12,6 +12,7 @@ enum class ServerFlags : std::uint64_t {
     NO_TEMPLATE_CACHE   = 1ull << 1,
     USE_HTTPS           = 1ull << 2,
     OVERRIDE_HTTPS_PORT = 1ull << 3,
+    USE_DEBUG           = 1ull << 4,
 };
 
 struct ServerConfig {

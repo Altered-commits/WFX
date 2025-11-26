@@ -88,45 +88,28 @@ void EpollConnectionHandler::Initialize(const std::string& host, int port)
         logger_.Fatal("[Epoll]: Failed to add listening socket to epoll: ", strerror(errno));
 
     // vvv Initialize timeout handler vvv
-    /*
-     * NOTE: For both timeouts and async timers, we need to store 2x slots (but because its memory efficient-
-     *       -its not that big of a deal), and how are both stored? via Interleaving. 'Even' slots are taken by-
-     *       -timeouts [id << 1] and 'Odd' slots are taken by async timers [(id << 1) | 1]
-     */
     timerWheel_.Init(
-        networkConfig.maxConnections * 2,
-        [this](std::uint32_t wheelId, UserMeta meta) {
-            // Get the original connection index (and sanity check it)
-            std::uint32_t connId = wheelId >> 1;
+        networkConfig.maxConnections,
+        1024, 1, TimeUnit::SECONDS,
+        [this](std::uint32_t connId) {
+            // Get the connection index (and sanity check it)
             if(connId >= config_.networkConfig.maxConnections)
                 return;
 
             ConnectionContext* ctx = &connections_[connId];
 
-            if(meta.flags == TimerFlags::TIMEOUT) {
-                // So the logic behind the if condition is, in normal sync path, if a connection is marked-
-                // -'close', it will trigger cleanup after it sent data so no need to clash with it
-                // But on the other hand, in the async path, if a connections is marked 'close' and the callback,-
-                // -for some odd reason, just hung up and isn't responding, we shouldn't care about connection atp
-                // WE CLOSE IT OURSELVES
-                if(
-                    ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE
-                    || ctx->IsAsyncOperation()
-                )
-                    Close(ctx, true);
-            }
-            else if(meta.flags == TimerFlags::SCHEDULER) {
-                bool finished = ctx->TryFinishCoroutines();
-                if(finished)
-                    onComplete_(ctx); // See 'HandleResponse' in engine.cpp
-            }
-            // Other flags are ignored if any
+            // So the logic behind the if condition is, in normal sync path, if a connection is marked-
+            // -'close', it will trigger cleanup after it sent data so no need to clash with it
+            // But on the other hand, in the async path, if a connections is marked 'close' and the callback,-
+            // -for some odd reason, just hung up and isn't responding, we shouldn't care about connection atp
+            // WE CLOSE IT OURSELVES
+            if(
+                ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE
+                || ctx->IsAsyncOperation()
+            )
+                Close(ctx, true);
         }
     );
-
-    timerWheel_.SetMinUpdateCallback([this](std::uint64_t expireMs) {
-        UpdateAsyncTimer(expireMs);
-    });
 
     timeoutTimerFd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if(timeoutTimerFd_ < 0)
@@ -272,7 +255,7 @@ void EpollConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
     // Sanity check
     if(!ctx)
         return;
-    
+
     // Force close bypasses any in-progress shutdown or state checks
     if(!forceClose && ctx->isShuttingDown)
         return;
@@ -287,11 +270,11 @@ void EpollConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
         }
         else {
             auto res = sslHandler_->Shutdown(ctx->sslConn);
-    
+
             // Shutdown finished or failed immediately. Proceed to synchronous cleanup
             if(res == SSLReturn::SUCCESS || res == SSLReturn::FATAL)
                 ctx->sslConn = nullptr;
-            
+
             // Wait for the event loop to complete the shutdown
             else {
                 std::uint32_t events = ((res == SSLReturn::WANT_READ) ? EPOLLIN : EPOLLOUT) | EPOLLET;
@@ -329,20 +312,48 @@ void EpollConnectionHandler::Run()
             int  fd = events_[i].data.fd;
             auto ev = events_[i].events;
 
-            // Handle timeouts and async timers
-            if(fd == timeoutTimerFd_ || fd == asyncTimerFd_) {
+            // Handle timeouts timers
+            if(fd == timeoutTimerFd_) {
                 // We just need to drain the fd, we dont care about the 'expirations' value
                 std::uint64_t expirations = 0;
                 (void)read(fd, &expirations, sizeof(expirations));
 
-                // Calculate REAL elapsed time since the server started
+                // Calculate elapsed time since the server started in seconds
+                std::uint64_t nowSec = NowMs() / 1000;
+
+                timerWheel_.Tick(nowSec);
+
+                logger_.Info("<TimeoutTimer>: ", numConnectionsAlive_, ' ', nowSec);
+                continue;
+            }
+
+            // Handle async timers
+            if(fd == asyncTimerFd_) {
+                std::uint64_t expirations = 0;
+                (void)read(fd, &expirations, sizeof(expirations));
+
                 std::uint64_t newTick = NowMs();
+                std::uint64_t connId  = 0;
 
-                // Tick the wheel to the current millisecond
-                timerWheel_.Tick(newTick);
+                while(timerHeap_.PopExpired(newTick, connId)) {
+                    // Sanity checks
+                    if(connId >= config_.networkConfig.maxConnections)
+                        continue;
 
-                const char* tag = (fd == asyncTimerFd_) ? "<AsyncTimer>: " : "<TimeoutTimer>: ";
-                logger_.Info(tag, numConnectionsAlive_, ' ', newTick);
+                    ConnectionContext* ctx = &connections_[connId];
+
+                    // Well, we are done with our timer operation so yeah
+                    ctx->isAsyncTimerOperation = 0;
+
+                    if(ctx->TryFinishCoroutines())
+                        onComplete_(ctx);
+                }
+
+                // Because the async timer is one shot, update it just in case there exists more async-
+                // -registered timers
+                UpdateAsyncTimer();
+
+                logger_.Info("<AsyncTimer>: ", numConnectionsAlive_, ' ', newTick);
                 continue;
             }
 
@@ -487,22 +498,25 @@ void EpollConnectionHandler::Run()
 
 void EpollConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)
 {
-    // Use array index * 2 as timer wheel id [read the 'NOTE' in 'Initialize']
-    std::uint32_t idx       = ctx - &connections_[0];
-    std::uint32_t timeoutId = idx << 1;
-
-    // timerWheel_ uses ms precision, our seconds need to be converted to milliseconds pretty much
-    timerWheel_.Schedule(timeoutId, timeoutSeconds * 1000, TimerFlags::TIMEOUT);
+    std::uint32_t idx = ctx - &connections_[0];
+    timerWheel_.Schedule(idx, timeoutSeconds);
 }
 
-void EpollConnectionHandler::RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds)
+bool EpollConnectionHandler::RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds)
 {
-    // Use array index * 2 + 1 as timer wheel id [read the 'NOTE' in 'Initialize']
-    std::uint32_t idx     = ctx - &connections_[0];
-    std::uint32_t asyncId = (idx << 1) | 1;
+    std::uint32_t idx    = ctx - &connections_[0];
+    std::uint64_t expire = NowMs() + delayMilliseconds;
 
-    // Our delay is already in milliseconds so yeah
-    timerWheel_.Schedule(asyncId, delayMilliseconds, TimerFlags::SCHEDULER);
+    // Timers are coalesced if they fall within +-10ms of each other
+    if(!timerHeap_.Insert(idx, expire, 10)) {
+        logger_.Warn("[Epoll]: Failed to refresh async timer");
+        return false;
+    }
+
+    ctx->isAsyncTimerOperation = 1;
+    UpdateAsyncTimer();
+
+    return true;
 }
 
 void EpollConnectionHandler::Stop()
@@ -551,22 +565,26 @@ ConnectionContext* EpollConnectionHandler::GetConnection()
 
 void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx)
 {
-    // Sanity checks
     if(!ctx)
         return;
 
     // For debugging purposes
     numConnectionsAlive_--;
 
+    // Slot index is [current pointer] - [base pointer]
+    std::uint32_t idx = ctx - &connections_[0];
+
     // Cancelling timer in 'Close' kinda sucks cuz during SSL async shutdown-
     // -the client might bail, never finish it, and we just be stuck in-
     // -closing state forever aaand timeout won't do anything cuz... we cancelled it
-    std::uint32_t idx       = ctx - &connections_[0];
-    std::uint32_t timeoutId = idx << 1;
-    std::uint32_t asyncId   = (idx << 1) | 1;
+    timerWheel_.Cancel(idx);
 
-    timerWheel_.Cancel(timeoutId);
-    timerWheel_.Cancel(asyncId);
+    if(ctx->isAsyncTimerOperation) {
+        if(timerHeap_.Remove(idx))
+            UpdateAsyncTimer();
+        else
+            logger_.Warn("[Epoll]: Failed to cancel async timer");
+    }
 
     if(ctx->socket > 0)
         close(ctx->socket);
@@ -575,8 +593,7 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx)
 
     ctx->ResetContext();
 
-    // Slot index is [current pointer] - [base pointer]
-    FreeSlot(connBitmap_.get(), ctx - (&connections_[0]));
+    FreeSlot(connBitmap_.get(), idx);
 }
 
 //  --- MISC Handlers ---
@@ -907,24 +924,25 @@ void EpollConnectionHandler::PollAgain(ConnectionContext* ctx, EventType eventTy
         Close(ctx, true);
 }
 
-void EpollConnectionHandler::UpdateAsyncTimer(std::uint64_t expireMs)
+void EpollConnectionHandler::UpdateAsyncTimer()
 {
-    // Base check
-    if(expireMs == UINT64_MAX)
+    TimerNode* min = timerHeap_.GetMin();
+
+    // Base check, nothing is pending so disarm the timer
+    if(!min) {
+        itimerspec disarm{};
+        timerfd_settime(asyncTimerFd_, 0, &disarm, nullptr);
         return;
+    }
 
-    std::uint64_t nowMs = NowMs();
-    if(expireMs <= nowMs)
-        expireMs = nowMs + 1;
-
-    std::uint64_t diff = expireMs - nowMs;
+    std::uint64_t now     = NowMs();
+    std::uint64_t expire  = min->delay;
+    std::uint64_t remain  = (expire <= now) ? 1 : (expire - now);
 
     itimerspec ts{};
-    ts.it_value.tv_sec  = diff / 1000;               // |
-    ts.it_value.tv_nsec = (diff % 1000) * 1'000'000; // |-> Hopefully compiler can optimize '/' and '%' without me doing '(diff * 0x4189375A) >> 42'
-
-    ts.it_interval.tv_sec  = 0;
-    ts.it_interval.tv_nsec = 0; // Timer is one shot
+    ts.it_value.tv_sec  = remain / 1000;               // |
+    ts.it_value.tv_nsec = (remain % 1000) * 1'000'000; // |-> Hopefully compiler can optimize '/' and '%' without me doing '(remain * 0x4189375A) >> 42'
+    ts.it_interval      = {0, 0}; // Timer is one shot
 
     while(timerfd_settime(asyncTimerFd_, 0, &ts, nullptr) < 0) {
         if(errno == EINTR)

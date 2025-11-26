@@ -18,6 +18,16 @@
 
 namespace WFX::Core {
 
+// Some internal enum stuff for connection header
+enum ConnectionHeader : std::uint8_t {
+    NONE       = 0,
+    CLOSE      = 1 << 0,
+    KEEP_ALIVE = 1 << 1,
+    UPGRADE    = 1 << 2,
+    ERROR      = 1 << 3,
+};
+
+// vvv Main Functions vvv
 CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
     : connHandler_(CreateConnectionHandler(useHttps))
 {
@@ -53,19 +63,26 @@ void CoreEngine::Stop()
     logger_.Info("[CoreEngine]: Stopped Successfully!");
 }
 
-// vvv Internals vvv
+// vvv Internal Functions vvv
 void CoreEngine::HandleRequest(ConnectionContext* ctx)
 {
     // This will be transmitted through all the layers (from here to middleware to user)
     if(!ctx->responseInfo)
         ctx->responseInfo = new HttpResponse{};
 
-    auto* httpApi = WFX::Shared::GetHttpAPIV1();
-    auto& res     = *ctx->responseInfo;
-    Response userRes{&res, httpApi};
+    auto* httpApi       = WFX::Shared::GetHttpAPIV1();
+    auto& res           = *ctx->responseInfo;
+    auto& networkConfig = config_.networkConfig;
 
+    // Simple lambda to finish the reset some important states without my dumbass forgetting to do it
+    auto FinishRequest = [&](ConnectionContext* ctx) {
+        ctx->SetParseState(HttpParseState::PARSE_IDLE);
+        connHandler_->RefreshExpiry(ctx, networkConfig.idleTimeout);
+    };
+
+    // Main shit
+    Response userRes{&res, httpApi};
     HttpParseState state = HttpParser::Parse(ctx);
-    auto& networkConfig  = config_.networkConfig;
 
     switch(state)
     {
@@ -91,16 +108,33 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
         case HttpParseState::PARSE_SUCCESS:
         {
             // Version is important for Serializer to properly create a response
-            // HTTP/1.1 and HTTP/2 have different formats dawg
+            // HTTP/1.1 and HTTP/2 have different formats duh
             res.version = ctx->requestInfo->version;
 
             auto& reqInfo    = *ctx->requestInfo;
             auto  connHeader = reqInfo.headers.GetHeader("Connection");
-            
-            bool shouldClose = (reqInfo.version == HttpVersion::HTTP_1_0)
-                ? !StringSanitizer::CaseInsensitiveCompare(connHeader, "keep-alive") // HTTP/1.0: Defaults to close
-                : StringSanitizer::CaseInsensitiveCompare(connHeader, "close");      // HTTP/1.1: Defaults to keep-alive
-            
+            auto  connMask   = HandleConnectionHeader(connHeader);
+
+            // RFC violation, close connection
+            if(connMask & ConnectionHeader::ERROR) {
+                ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+                connHandler_->Write(ctx, badRequest);
+                return;
+            }
+
+            bool shouldClose = false;
+
+            // In this case:
+            // HTTP/1.0: Defaults to close
+            // HTTP/1.1: Defaults to keep-alive
+            if(connMask == ConnectionHeader::NONE)
+                shouldClose = (reqInfo.version == HttpVersion::HTTP_1_0);
+
+            // Propagate value from request header
+            else
+                shouldClose = connMask & ConnectionHeader::CLOSE;
+
+            // Set the 'connection' header ourselves in final response
             res.Set("Connection", shouldClose ? "close" : "keep-alive");
 
             // Set the connection state according to this right now, later if we have any issue, it-
@@ -110,7 +144,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
                 ? ConnectionState::CONNECTION_CLOSE
                 : ConnectionState::CONNECTION_ALIVE
             );
-            
+
             // A bit of shortcut if its public route (starts with '/public/')
             if(StartsWith(reqInfo.path, "/public/")) {
                 // Skip the '/public' part (7 chars)
@@ -161,8 +195,10 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
                         logger_.Fatal("[CoreEngine]: Null coroutine detected in active connection context, aborting");
 
                     // (Async path)
-                    if(!coro->IsFinished())
+                    if(!coro->IsFinished()) {
+                        FinishRequest(ctx);
                         return;
+                    }
 
                     // So if coroutine is done, then the user defined lambda should be the only thing-
                     // -existing inside of 'ctx->coroStack'. If anything else remains, thats a big no no
@@ -172,9 +208,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             }
 
         __HandleResponse:
-            ctx->parseState = static_cast<std::uint8_t>(HttpParseState::PARSE_IDLE);
-            connHandler_->RefreshExpiry(ctx, networkConfig.idleTimeout);
-
+            FinishRequest(ctx);
             HandleResponse(ctx);
             return;
         }
@@ -225,7 +259,53 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     }
 }
 
-// vvv HELPER STUFF vvv
+// vvv Helper Functions vvv
+std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
+{
+    std::uint8_t mask  = ConnectionHeader::NONE;
+    std::size_t  start = 0;
+    std::size_t  size  = header.size();
+
+    while(start < size) {
+        // Find comma
+        std::size_t end = header.find(',', start);
+        if(end == std::string_view::npos)
+            end = size;
+
+        // Extract token substring trimming leading and trailing spaces / tabs
+        std::string_view token = TrimView(header.substr(start, end - start));
+
+        // CLOSE
+        if(StringSanitizer::CaseInsensitiveCompare(token, "close")) {
+            if(mask & ConnectionHeader::KEEP_ALIVE)
+                return ConnectionHeader::ERROR; // Mutually exclusive
+
+            mask |= ConnectionHeader::CLOSE;
+        }
+
+        // KEEP-ALIVE
+        else if(StringSanitizer::CaseInsensitiveCompare(token, "keep-alive")) {
+            if(mask & ConnectionHeader::CLOSE)
+                return ConnectionHeader::ERROR; // Mutually exclusive
+
+            mask |= ConnectionHeader::KEEP_ALIVE;
+        }
+
+        // UPGRADE
+        else if(StringSanitizer::CaseInsensitiveCompare(token, "upgrade"))
+            mask |= ConnectionHeader::UPGRADE;
+
+        // UNKNOWN
+        else
+            return ConnectionHeader::ERROR;
+
+        // Move to next token
+        start = end + 1;
+    }
+
+    return mask;
+}
+
 void CoreEngine::HandleUserDLLInjection(const char* dllPath)
 {
 #if defined(_WIN32)

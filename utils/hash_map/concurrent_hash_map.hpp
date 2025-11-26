@@ -1,7 +1,7 @@
 #ifndef WFX_UTILS_CONCURRENT_HASH_MAP_HPP
 #define WFX_UTILS_CONCURRENT_HASH_MAP_HPP
 
-#include "utils/hash_map/concurrent_map/hash_shard.hpp"
+#include "utils/hash_map/hash_shard.hpp"
 
 namespace WFX::Utils {
 

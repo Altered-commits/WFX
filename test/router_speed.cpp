@@ -2,6 +2,10 @@
  * Build: g++ -O3 -s -I. test/router_speed.cpp utils/logger/logger.cpp http/routing/*.cpp utils/uuid/uuid.cpp
  */
 
+/*
+ * OUTDATED, WON'T COMPILE, BUT U GET THE IDEA :)
+ */
+
 #include <iostream>
 #include <chrono>
 #include <string_view>

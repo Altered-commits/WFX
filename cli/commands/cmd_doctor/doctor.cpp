@@ -16,50 +16,79 @@
 
 namespace WFX::CLI {
 
-struct CompilerConfig {
-    const char* id;
-    const char* display;
-    const char* command;
-    const char* linker;
+struct CompilerArgs {
     const char* cargs;
     const char* largs;
+};
+
+struct CompilerConfig {
+    const char* id;
+    const char* command;
+    const char* linker;
     const char* objFlag;
     const char* dllFlag;
+
+    CompilerArgs prod;
+    CompilerArgs debug;
 };
 
 #if defined(_MSC_VER)
 constexpr CompilerConfig BUILD_COMPILER{
-    "msvc", "MSVC", "cl", "link",
-    "/std:c++17 /O2 /GL /GS- /GR- /EHsc /MD /I. /Iwfx/include /Iwfx /c",
-    "/DLL /LTCG /OPT:REF /DEBUG:NONE",
-    "/Fo:", "/OUT:"
+    "msvc", "cl", "link",
+    "/Fo:", "/OUT:",     // objFlag, dllFlag
+    {                    // prod
+        "/std:c++17 /O2 /GL /GS /EHsc /MD /Gw /Gy /I. /Iwfx/include /Iwfx /c",
+        "/DLL /LTCG /OPT:REF /OPT:ICF /DEBUG:OFF"
+    },
+    {                    // debug
+        "/std:c++17 /Od /EHsc /MDd /I. /Iwfx/include /Iwfx /c",
+        "/DLL /DEBUG"
+    }
 };
 #elif defined(__MINGW32__) || defined(__MINGW64__)
 constexpr CompilerConfig BUILD_COMPILER{
-    "g++-mingw", "G++ (MinGW)", "g++", "g++",
-    "-std=c++17 -O2 -flto -ffunction-sections -fdata-sections "
-    "-fvisibility=hidden -fvisibility-inlines-hidden -I. -Iwfx/include -Iwfx -c",
-    "-shared -flto -Wl,--gc-sections -Wl,--strip-all",
-    "-o ", "-o "
+    "g++[mingw]", "g++", "g++",
+    "-o ", "-o ",
+    {
+        "-std=c++17 -fPIC -O3 -flto=auto -fno-plt -fvisibility=hidden -fvisibility-inlines-hidden "
+        "-ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c",
+        "-shared -fPIC -flto=auto -Wl,--gc-sections -Wl,--strip-all"
+    },
+    {
+        "-std=c++17 -fPIC -O0 -I. -Iwfx/include -Iwfx -c",
+        "-shared -fPIC"
+    }
 };
 #elif defined(__clang__)
 constexpr CompilerConfig BUILD_COMPILER{
-    "clang++", "Clang++", "clang++", "clang++",
-    "-std=c++17 -O2 -flto -fvisibility=hidden -fvisibility-inlines-hidden "
-    "-ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c",
-    "-shared -fPIC -flto -Wl,--gc-sections -Wl,--strip-all",
-    "-o ", "-o "
+    "clang++", "clang++", "clang++",
+    "-o ", "-o ",
+    {
+        "-std=c++17 -fPIC -O3 -flto=auto -fno-plt -fvisibility=hidden -fvisibility-inlines-hidden "
+        "-ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c",
+        "-shared -fPIC -flto=auto -Wl,--gc-sections -Wl,--strip-all"
+    },
+    {
+        "-std=c++17 -fPIC -O0 -I. -Iwfx/include -Iwfx -c",
+        "-shared -fPIC"
+    }
 };
 #elif defined(__GNUC__)
 constexpr CompilerConfig BUILD_COMPILER{
-    "g++", "G++", "g++", "g++",
-    "-std=c++17 -O2 -flto -fvisibility=hidden -fvisibility-inlines-hidden "
-    "-ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c",
-    "-shared -fPIC -flto -Wl,--gc-sections -Wl,--strip-all",
-    "-o ", "-o "
+    "g++[gnu]", "g++", "g++",
+    "-o ", "-o ",
+    {
+        "-std=c++17 -fPIC -O3 -flto=auto -fno-plt -fvisibility=hidden -fvisibility-inlines-hidden "
+        "-ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c",
+        "-shared -fPIC -flto=auto -Wl,--gc-sections -Wl,--strip-all"
+    },
+    {
+        "-std=c++17 -fPIC -O0 -I. -Iwfx/include -Iwfx -c",
+        "-shared -fPIC"
+    }
 };
 #else
-#error "[WFX Doctor]: Unsupported compiler. (__VERSION__: " __VERSION__ ")"
+#error "[Doctor]: Unsupported compiler. (__VERSION__: " __VERSION__ ")"
 #endif
 
 static std::string RunCommand(const std::string& cmd)
@@ -168,17 +197,23 @@ int WFXDoctor()
 
     // Extract first line only
     std::string versionLine = version.substr(0, version.find('\n'));
-    logger.Info("[+] Detected: [", BUILD_COMPILER.display, ": ", versionLine, ']');
+    logger.Info("[+] Detected: [", BUILD_COMPILER.id, ": ", versionLine, ']');
 
     std::ofstream out("toolchain.toml");
     out << "[Compiler]\n";
     out << "name    = \"" << BUILD_COMPILER.id       << "\"\n";
     out << "ccmd    = \"" << compiler                << "\"\n";
     out << "lcmd    = \"" << linker                  << "\"\n";
-    out << "cargs   = \"" << BUILD_COMPILER.cargs    << "\"\n";
-    out << "largs   = \"" << BUILD_COMPILER.largs    << "\"\n";
     out << "objflag = \"" << BUILD_COMPILER.objFlag  << "\"\n";
-    out << "dllflag = \"" << BUILD_COMPILER.dllFlag  << '"';
+    out << "dllflag = \"" << BUILD_COMPILER.dllFlag  << "\"\n";
+
+    out << "\n[Compiler.Prod]\n";
+    out << "cargs   = \"" << BUILD_COMPILER.prod.cargs  << "\"\n";
+    out << "largs   = \"" << BUILD_COMPILER.prod.largs  << "\"\n";
+
+    out << "\n[Compiler.Debug]\n";
+    out << "cargs   = \"" << BUILD_COMPILER.debug.cargs << "\"\n";
+    out << "largs   = \"" << BUILD_COMPILER.debug.largs << '"';
 
     logger.Info("[Doctor]: Saved toolchain config to toolchain.toml");
     return 0;

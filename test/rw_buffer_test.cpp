@@ -6,6 +6,10 @@
             utils/buffer_pool/buffer_pool.cpp
  */
 
+/*
+ * OUTDATED, WON'T COMPILE, BUT U GET THE IDEA :)
+ */
+
 #include <chrono>
 #include <iostream>
 #include <vector>

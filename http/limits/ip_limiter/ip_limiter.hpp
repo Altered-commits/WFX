@@ -3,7 +3,7 @@
 
 #include "../base_limiter.hpp"
 #include "utils/buffer_pool/buffer_pool.hpp"
-#include "utils/hash_map/concurrent_map/hash_shard.hpp"
+#include "utils/hash_map/hash_shard.hpp"
 
 namespace WFX::Http {
 
@@ -41,8 +41,7 @@ private:
         TokenBucket bucket;
     };
 
-    BufferPool& poolRef_;
-    HashShard<WFXIpAddress, IpLimiterEntry> ipLimits_{poolRef_};
+    HashShard<WFXIpAddress, IpLimiterEntry> ipLimits_;
 };
 
 } // namespace WFX::Http

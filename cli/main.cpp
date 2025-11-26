@@ -36,13 +36,14 @@ int WFXEntryPoint(int argc, char* argv[]) {
 
     // --- Command: build ---
     parser.AddCommand("build", "Pre-Build various parts of WFX",
-        [](const std::unordered_map<std::string, std::string>&,
+        [](const std::unordered_map<std::string, std::string>& options,
            const std::vector<std::string>& positionalArgs) -> int {
             if(positionalArgs.empty())
                 Logger::GetInstance().Fatal("[WFX]: Build type is required. Usage: wfx build [templates|source]");
 
-            return CLI::BuildProject(positionalArgs[0]);
+            return CLI::BuildProject(positionalArgs[0], options.count("--debug") > 0);
         });
+    parser.AddOption("build", "--debug", "Build in debug mode", true, "", false);
 
     // --- Command: dev ---
     parser.AddCommand("dev", "Start WFX dev server",
@@ -83,6 +84,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
             }
             if(options.count("--use-https") > 0)           cfg.SetFlag(CLI::ServerFlags::USE_HTTPS);
             if(options.count("--https-port-override") > 0) cfg.SetFlag(CLI::ServerFlags::OVERRIDE_HTTPS_PORT);
+            if(options.count("--debug") > 0)               cfg.SetFlag(CLI::ServerFlags::USE_DEBUG);
 
             return CLI::RunDevServer(cfg);
         });
@@ -93,6 +95,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
     parser.AddOption("dev", "--no-template-cache",   "Disable template cache",      true,  "",          false);
     parser.AddOption("dev", "--use-https",           "Use HTTPS connection",        true,  "",          false);
     parser.AddOption("dev", "--https-port-override", "Override default HTTPS port", true,  "",          false);
+    parser.AddOption("dev", "--debug",               "For runtime debugging",       true,  "",          false);
 
     return parser.Parse(argc, argv);
 }

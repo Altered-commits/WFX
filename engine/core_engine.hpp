@@ -13,18 +13,19 @@ using namespace WFX::Utils; // For 'Logger', 'FileSystem', 'ProcessUtils'
 using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpRequest', 'HttpMiddleware'
 
 class CoreEngine {
-public:
+public: // Main Stuff
     CoreEngine(const char* dllPath, bool useHttps);
     void Listen(const std::string& host, int port);
     void Stop();
 
-private:
+private: // Internal Functions
     void HandleRequest(ConnectionContext* ctx);
     void HandleResponse(ConnectionContext* ctx);
 
-private:
-    void HandleUserDLLInjection(const char* dllDir);
-    void HandleMiddlewareLoading();
+private: // Helper Functions
+    std::uint8_t HandleConnectionHeader(std::string_view header);
+    void         HandleUserDLLInjection(const char* dllDir);
+    void         HandleMiddlewareLoading();
 
 private:
     Logger& logger_             = Logger::GetInstance();

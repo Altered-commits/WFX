@@ -111,7 +111,7 @@ inline constexpr std::uint8_t UInt8FromHexChar(std::uint8_t uc) noexcept
 }
 
 // vvv Misc vvv
-inline void TrimInline(std::string& s)
+inline void TrimInline(std::string& s) noexcept
 {
     std::size_t start = 0;
     std::size_t end   = s.size();
@@ -135,6 +135,22 @@ inline void TrimInline(std::string& s)
     // Just resize to trim end
     else
         s.resize(end);
+}
+
+inline std::string_view TrimView(std::string_view sv) noexcept
+{
+    std::size_t start = 0;
+    std::size_t end   = sv.size();
+
+    // Trim front
+    while(start < end && std::isspace(static_cast<unsigned char>(sv[start])))
+        ++start;
+
+    // Trim back
+    while(end > start && std::isspace(static_cast<unsigned char>(sv[end - 1])))
+        --end;
+
+    return sv.substr(start, end - start);
 }
 
 } // namespace WFX::Utils

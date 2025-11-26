@@ -1,13 +1,16 @@
 /*
- * Build:
- * g++ -std=c++20 -O0 -g -pthread -I. test/conc_hash_map_mem_usage.cpp \
-    utils/buffer_pool/buffer_pool.cpp \
-    utils/logger/logger.cpp \
-    third_party/tlsf/tlsf.c \
-    -o map_bench
+ * Build: g++ -std=c++20 -O0 -g -pthread -I. test/conc_hash_map_mem_usage.cpp \
+            utils/buffer_pool/buffer_pool.cpp \
+            utils/logger/logger.cpp \
+            third_party/tlsf/tlsf.c \
+            -o map_bench
  */
 
-#include "utils/hash_map/concurrent_map/concurrent_hash_map.hpp"
+/*
+ * OUTDATED, WON'T COMPILE, BUT U GET THE IDEA :)
+ */
+
+#include "utils/hash_map/concurrent_hash_map.hpp"
 
 #include <thread>
 #include <atomic>

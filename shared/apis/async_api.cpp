@@ -71,8 +71,7 @@ const ASYNC_API_TABLE* GetAsyncAPIV1()
                 return false;
             }
 
-            connHandler->RefreshAsyncTimer(cctx, delayMs);
-            return true;
+            return connHandler->RefreshAsyncTimer(cctx, delayMs);
         },
 
         // Version

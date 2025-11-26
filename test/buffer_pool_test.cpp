@@ -6,6 +6,10 @@
                                 -o alloc_bench
  */
 
+/*
+ * OUTDATED, WON'T COMPILE, BUT U GET THE IDEA :)
+ */
+
 #include <cassert>
 #include <cstring>
 #include <iostream>

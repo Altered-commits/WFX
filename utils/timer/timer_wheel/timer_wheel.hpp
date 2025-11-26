@@ -15,32 +15,14 @@ enum class TimeUnit : std::uint8_t {
     MICROSECONDS
 };
 
-// If we are going to store flags inside of 'SlotMeta', might as well predefine some constants-
-// -which we will frequently used, not that it makes sense for it to be inside of timer_wheel.hpp
-// But yeah
-enum TimerFlags : std::uint8_t {
-    NONE      = 0,
-    TIMEOUT   = 1 << 0,  // Connection timeout at network backend
-    SCHEDULER = 1 << 1   // For async timer scheduler (Used in async sleep functions)
-};
-
 struct SlotMeta {
-    std::uint32_t next      = NIL;
-    std::uint32_t prev      = NIL;
-    std::uint32_t remainder = 0;
-    std::uint16_t bucket    = 0;
-    std::uint8_t  rounds    = 0;
-    std::uint8_t  flags     = 0;
+    std::uint32_t next   = NIL;
+    std::uint32_t prev   = NIL;
+    std::uint16_t bucket = 0;
+    std::uint8_t  rounds = 0;
 };
 
-// Just the stuff which are passed in callbacks
-struct UserMeta {
-    std::uint32_t remainder = 0;
-    std::uint8_t  flags     = 0;
-};
-
-using OnExpireCallback    = std::function<void(std::uint32_t id, UserMeta meta)>;
-using OnMinUpdateCallback = std::function<void(std::uint64_t expireTick)>;
+using OnExpireCallback = std::function<void(std::uint32_t id)>;
 
 class TimerWheel {
 public:
@@ -53,11 +35,10 @@ public:
                        std::uint32_t tickVal,
                        TimeUnit unit,
                        OnExpireCallback onExpire);
-    void          SetMinUpdateCallback(OnMinUpdateCallback onMinUpdate);
     void          Reinit(std::uint32_t capacity);
     void          SetTick(std::uint32_t val, TimeUnit unit);
     std::uint64_t GetTick() const noexcept;
-    void          Schedule(std::uint32_t pos, std::uint64_t timeout, std::uint8_t flags);
+    void          Schedule(std::uint32_t pos, std::uint64_t timeout);
     void          Cancel(std::uint32_t pos);
     void          Tick(std::uint64_t nowTick);
 
@@ -73,15 +54,10 @@ private:
     std::uint16_t tickVal_  = 1;     // Tick size in unit
     std::uint64_t nowTick_  = 0;     // Current tick counter
     TimeUnit      unit_     = TimeUnit::MILLISECONDS;
-    bool          inTick_   = false;
 
     OnExpireCallback            onExpire_;
     std::vector<SlotMeta>       meta_;
     std::vector<std::uint32_t>  wheelHeads_;
-
-    std::uint64_t               globalMin_ = UINT64_MAX;
-    OnMinUpdateCallback         onMinUpdate_;
-    std::vector<std::uint64_t>  bucketMin_;
 };
 
 } // namespace WFX::Utils

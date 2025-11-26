@@ -10,29 +10,44 @@ namespace WFX::Core::ConfigHelpers {
 
 using WFX::Utils::Logger;
 
+// vvv Helper Helper Functions vvv
+toml::node_view<const toml::node> ResolveTomlPath(const toml::table& tbl, const char* section)
+{
+    toml::node_view<const toml::node> node{tbl};
+
+    const char* p = section;
+    const char* segment_start = p;
+
+    while(true) {
+        // Find the next '.' or '\0'
+        while(*p != '\0' && *p != '.')
+            ++p;
+
+        std::string_view key(segment_start,
+                             static_cast<size_t>(p - segment_start));
+
+        node = node[key];
+        if(!node || !node.is_table())
+            return {}; // Invalid path or missing table
+
+        if(*p == '\0')
+            break;      // Reached end of string
+
+        // Skip '.', next segment starts after it
+        ++p;
+        segment_start = p;
+    }
+
+    return node;
+}
+
+// vvv Helper Functions vvv
 template<typename T>
 bool ExtractValue(
     const toml::table& tbl, const char* section, const char* field, T& target
 )
 {
-    std::string sec(section);
-    toml::node_view<const toml::node> node{tbl};
-
-    // Check if section is like "Linux.IoUring"
-    auto dotPos = sec.find('.');
-    if(dotPos != std::string::npos) {
-        auto parent = sec.substr(0, dotPos);
-        auto child  = sec.substr(dotPos + 1);
-
-        node = tbl[parent];
-        if(node && node.is_table())
-            node = node[child];
-        else
-            node = {};
-    }
-    else
-        node = tbl[sec];
-
+    auto node = ResolveTomlPath(tbl, section);
     if(node && node.is_table()) {
         if(auto val = node[field].value<T>()) {
             target = *val;
@@ -52,10 +67,17 @@ void ExtractValueOrFatal(
     const toml::table& tbl, const char* section, const char* field, T& target
 )
 {
-    if(auto val = tbl[section][field].value<T>())
-        target = *val;
-    else
-        Logger::GetInstance().Fatal("[Config]: Missing or invalid entry: [", section, "] ", field, '.');
+    auto node = ResolveTomlPath(tbl, section);
+    if(node && node.is_table()) {
+        if(auto val = node[field].value<T>()) {
+            target = *val;
+            return;
+        }
+    }
+
+    Logger::GetInstance().Fatal(
+        "[Config]: Missing or invalid entry: [", section, "] ", field, '.'
+    );
 }
 
 template<typename T>

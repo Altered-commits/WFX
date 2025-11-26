@@ -12,12 +12,16 @@ using namespace WFX::Core; // For 'TemplateEngine', 'Config'
 constexpr static const char* BUILD_TEMPLATES = "templates";
 constexpr static const char* BUILD_SOURCE    = "source";
 
-int BuildProject(const std::string& buildType)
+int BuildProject(const std::string& buildType, bool isDebug)
 {
     // Used by pretty much everything so yeah
     auto& config = Config::GetInstance();
+    auto& logger = Logger::GetInstance();
+
+    logger.Info("[WFX]: Build mode: ", isDebug ? "debug" : "prod");
+
     config.LoadCoreSettings("wfx.toml");
-    config.LoadToolchainSettings("toolchain.toml");
+    config.LoadToolchainSettings("toolchain.toml", isDebug);
 
     if(buildType == BUILD_TEMPLATES) {
         auto& templateEngine = TemplateEngine::GetInstance();
@@ -38,7 +42,7 @@ int BuildProject(const std::string& buildType)
     }
 
     // Invalid type
-    Logger::GetInstance().Fatal(
+    logger.Fatal(
         "[WFX]: Wrong build type provided: ", buildType.c_str(), ". Supported types: 'templates', 'source'"
     );
 

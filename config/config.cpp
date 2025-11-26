@@ -107,17 +107,19 @@ void Config::LoadCoreSettings(std::string_view path)
     }
 }
 
-void Config::LoadToolchainSettings(std::string_view path)
+void Config::LoadToolchainSettings(std::string_view path, bool isDebug)
 {
     try {
         auto tbl = toml::parse_file(path);
 
         ExtractValueOrFatal(tbl, "Compiler", "ccmd",    toolchainConfig.ccmd);
         ExtractValueOrFatal(tbl, "Compiler", "lcmd",    toolchainConfig.lcmd);
-        ExtractValueOrFatal(tbl, "Compiler", "cargs",   toolchainConfig.cargs);
-        ExtractValueOrFatal(tbl, "Compiler", "largs",   toolchainConfig.largs);
         ExtractValueOrFatal(tbl, "Compiler", "objflag", toolchainConfig.objFlag);
         ExtractValueOrFatal(tbl, "Compiler", "dllflag", toolchainConfig.dllFlag);
+
+        const char* sec = isDebug ? "Compiler.Debug" : "Compiler.Prod";
+        ExtractValueOrFatal(tbl, sec, "cargs", toolchainConfig.cargs);
+        ExtractValueOrFatal(tbl, sec, "largs", toolchainConfig.largs);
     }
     catch(const toml::parse_error& err) {
         Logger::GetInstance().Fatal("[Config]: File -> 'toolchain.toml', Error -> ", err.what());

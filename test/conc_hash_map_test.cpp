@@ -6,14 +6,18 @@
 #include <algorithm>
 #include <atomic>
 
-#include "utils/hash_map/concurrent_map/concurrent_hash_map.hpp"
+/*
+ * OUTDATED, WON'T COMPILE, BUT U GET THE IDEA :)
+ */
+
+#include "utils/hash_map/concurrent_hash_map.hpp"
 #include "utils/logger/logger.hpp"
 
 using namespace WFX::Utils;
 
 constexpr size_t TOTAL_KEYS       = 5'000'000; // total entries
 constexpr size_t THREAD_COUNT     = 8;         // threads for stress test
-constexpr size_t SHARD_COUNT      = 64;        // match your current config
+constexpr size_t SHARD_COUNT      = 64;        // match your current config [not even going to bother removing this comment]
 constexpr size_t BUCKET_COUNT     = 512;
 
 using MapType = ConcurrentHashMap<uint64_t, uint64_t, SHARD_COUNT, BUCKET_COUNT>;

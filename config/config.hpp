@@ -103,7 +103,7 @@ public: // Access
 
 public: // Load from TOML
     void LoadCoreSettings(std::string_view path);
-    void LoadToolchainSettings(std::string_view path);
+    void LoadToolchainSettings(std::string_view path, bool isDebug);
 
 public: // Main storage space for configurations
     ProjectConfig    projectConfig;

@@ -93,7 +93,7 @@ inline AsyncPtr Call(Fn&& fn, Args&&... args)
     return MakeAsync(std::forward<Fn>(fn), std::forward<Args>(args)...);
 }
 
-// Await returns whether to yield or not. True means we need to yield, False me no need to [yield / handle error]-
+// Await returns whether to yield or not. True means we need to yield, False means no need to [yield / handle error]-
 // -function was completed in sync. It also increments 'self' state by 1 on every call.
 // IMPORTANT: THIS FUNCTION EXPECTS POINTER TO CONNECTION CONTEXT BE SET VIA 'SetGlobalPtrData' BEFORE BEING INVOKED
 template<typename T>

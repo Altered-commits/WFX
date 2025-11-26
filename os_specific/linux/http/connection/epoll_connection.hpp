@@ -9,7 +9,8 @@
 #include "http/ssl/http_ssl.hpp"
 #include "utils/filecache/filecache.hpp"
 #include "utils/buffer_pool/buffer_pool.hpp"
-#include "utils/timer_wheel/ext_timer_wheel.hpp"
+#include "utils/timer/timer_wheel/timer_wheel.hpp"
+#include "utils/timer/timer_heap/timer_heap.hpp"
 
 #include <sys/epoll.h>
 
@@ -40,7 +41,7 @@ public: // I/O Operations
 public: // Main Functions
     void Run()                                                                      override;
     void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)        override;
-    void RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) override;
+    bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) override;
     void Stop()                                                                     override;
 
 private: // Helper Functions
@@ -59,7 +60,7 @@ private: // Helper Functions
     void               SendFile(ConnectionContext* ctx);
     void               ResumeStream(ConnectionContext* ctx);
     void               PollAgain(ConnectionContext* ctx, EventType eventType, std::uint32_t events);
-    void               UpdateAsyncTimer(std::uint64_t minTickMs);
+    void               UpdateAsyncTimer();
     
     void               WrapAccept(ConnectionContext* ctx, int clientFd);
     ssize_t            WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
@@ -86,7 +87,8 @@ private: // Constexpr stuff
     constexpr static int INVOKE_TIMEOUT_DELAY    = 1; // In seconds
 
 private: // Timeout handler
-    ExtendedTimerWheel      timerWheel_;
+    TimerWheel              timerWheel_;
+    TimerHeap               timerHeap_      = {pool_};
     SteadyClock::time_point startTime_      = SteadyClock::now();
     int                     timeoutTimerFd_ = -1;
     int                     asyncTimerFd_   = -1;

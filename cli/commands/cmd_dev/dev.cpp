@@ -44,7 +44,7 @@ int RunDevServer(const ServerConfig& cfg)
 #else
     // -------------------- LOADING PHASE --------------------
     config.LoadCoreSettings("wfx.toml");
-    config.LoadToolchainSettings("toolchain.toml");
+    config.LoadToolchainSettings("toolchain.toml", cfg.GetFlag(ServerFlags::USE_DEBUG));
 
     EnvConfig envConfig;
     envConfig.SetFlag(EnvFlags::REQUIRE_OWNER_UID);

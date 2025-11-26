@@ -5,7 +5,7 @@
 
 namespace WFX::CLI {
 
-int BuildProject(const std::string& buildType);
+int BuildProject(const std::string& buildType, bool isDebug);
 
 }  // namespace WFX::CLI
 

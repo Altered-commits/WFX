@@ -5,6 +5,7 @@
 #include "utils/math/math.hpp"
 
 #include <atomic>
+#include <mutex>
 #include <shared_mutex>
 #include <cstdint>
 #include <cstring>
@@ -72,6 +73,6 @@ private:
 
 } // namespace WFX::Utils
 
-#include "utils/hash_map/concurrent_map/hash_shard.ipp"
+#include "utils/hash_map/hash_shard.ipp"
 
 #endif // WFX_UTILS_HASH_SHARD_HPP
