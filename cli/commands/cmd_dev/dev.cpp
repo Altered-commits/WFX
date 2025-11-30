@@ -78,11 +78,6 @@ int RunDevServer(const ServerConfig& cfg)
         templateEngine.PreCompileTemplates();
     }
 
-    // We store it in global state because template engine carries mappings from-
-    // -relative paths (index.html) -> template metadata (type, path, etc)
-    // We want to be able to access same data across workers even after COW
-    globalState.templateEnginePtr = &templateEngine;
-
     // -------------------- USER CODE COMPILATION PHASE --------------------
     const std::string dllDir      = config.projectConfig.projectName + "/build/dlls/";
     const char*       dllDirCStr  = dllDir.c_str();

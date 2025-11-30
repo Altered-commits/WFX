@@ -3,9 +3,7 @@
 
 #include <cstdio>
 #include <cstdint>
-#include <cstdlib>
 #include <string>
-#include <atomic>
 
 #define WFX_LOG_ALL      Logger::ALL_MASK
 #define WFX_LOG_WARNINGS Logger::WARN_MASK | Logger::ERROR_MASK | Logger::FATAL_MASK
@@ -80,8 +78,8 @@ private:
     void PrintArg(FILE* out, T&& arg);
 
 private:
-    std::atomic<LevelMask> levelMask_     = ALL_MASK;
-    std::atomic<bool>      useTimestamps_ = true;
+    LevelMask levelMask_     = ALL_MASK;
+    bool      useTimestamps_ = true;
 };
 
 } // namespace WFX::Utils
@@ -129,7 +127,7 @@ template <bool PureLog, typename... Args>
 void Logger::Log(Level level, Args&&... args)
 {
     LevelMask mask = 1 << static_cast<int>(level);
-    if((levelMask_.load() & mask) == 0)
+    if((levelMask_ & mask) == 0)
         return;
 
     FILE* out = (level >= Level::WARN) ? stderr : stdout;

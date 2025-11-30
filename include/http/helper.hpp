@@ -6,12 +6,12 @@
  * More to be added here, someday
  */
 
-#include "async/routes.hpp"
+#include "async/runtime.hpp"
 #include "http/common/http_route_common.hpp"
 
 // vvv Helper Stuff vvv
 template<class>
-inline constexpr bool always_false = false;
+inline constexpr bool AlwaysFalse = false;
 
 // vvv Main Stuff vvv
 template<typename Lambda>
@@ -33,15 +33,47 @@ HttpCallbackType MakeHttpCallbackFromLambda(Lambda&& cb)
         };
 
     else
-        static_assert(always_false<Lambda>, "Lambda must match either sync or async signature");
+        static_assert(
+            AlwaysFalse<Lambda>,
+            "[UserSide:Http-Callback]: Lambda must match either sync [ void(Request&, Response&) ]"
+            " or async [ void(AsyncPtr, Request&, Response&) ] signature"
+        );
 }
 
-template<typename... MWs>
-inline MiddlewareStack MakeMiddlewareFromFunctions(MWs&&... mws)
+template<typename T>
+inline MiddlewareEntry MakeMiddlewareEntry(T&& entry)
+{
+    using Request = WFX::Http::HttpRequest;
+    using RawT    = std::decay_t<T>;
+
+    if constexpr (std::is_invocable_r_v<MiddlewareAction, RawT, Request&, Response&>) {
+        MiddlewareEntry e{};
+        e.sm = std::forward<T>(entry);
+        return e;
+    }
+
+    else if constexpr (std::is_same_v<RawT, MiddlewareEntry>)
+        return std::forward<T>(entry);
+
+    else {
+        static_assert(
+            AlwaysFalse<T>,
+            "[UserSide:Http-Middleware]: Middleware must be either a function with signature "
+            "'MiddlewareAction(Request&,Response&)' or a MiddlewareEntry struct."
+        );
+    }
+}
+
+template <typename... FunctionOrEntry>
+inline MiddlewareStack MakeMiddlewareFromFunctions(FunctionOrEntry&&... mws)
 {
     MiddlewareStack stack;
     stack.reserve(sizeof...(mws));
-    (stack.emplace_back(std::forward<MWs>(mws)), ...);
+
+    (stack.emplace_back(
+        MakeMiddlewareEntry(std::forward<FunctionOrEntry>(mws))
+    ), ...);
+
     return stack;
 }
 

@@ -18,8 +18,8 @@ using namespace WFX;
 using Request = Http::HttpRequest;
 
 // HTTP Constants
-using Status  = Http::HttpStatus;
-using Method  = Http::HttpMethod;
-using Version = Http::HttpVersion;
+using Http::HttpStatus;
+using Http::HttpMethod;
+using Http::HttpVersion;
 
 #endif // WFX_INC_HTTP_ALIASES_HPP

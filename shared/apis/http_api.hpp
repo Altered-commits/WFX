@@ -8,12 +8,25 @@
 // To be consistent with naming
 using Json = nlohmann::json;
 
+// Fwd declare stuff
+namespace WFX::Http {
+    class Router;
+    class HttpMiddleware;
+}
+
 namespace WFX::Shared {
 
 using namespace WFX::Http; // For 'HttpMethod', 'HttpResponse', 'HttpStatus'
 
 enum class HttpAPIVersion : std::uint8_t {
     V1 = 1,
+};
+
+// Data internally used by Http API
+struct HttpAPIDataV1 {
+    Router*         router     = nullptr;
+    HttpMiddleware* middleware = nullptr;
+    void*           data       = nullptr;  // Any data type erased
 };
 
 // vvv All aliases for clarity vvv
@@ -24,7 +37,7 @@ using PushRoutePrefixFn       = void (*)(std::string_view prefix);
 using PopRoutePrefixFn        = void (*)();
 
 // Middleware
-using RegisterMiddlewareFn    = void (*)(std::string_view name, MiddlewareCallbackType callback);
+using RegisterMiddlewareFn    = void (*)(std::string_view name, MiddlewareEntry callback);
 
 // Response control
 using SetStatusFn             = void (*)(HttpResponse* backend, HttpStatus status);
@@ -97,8 +110,9 @@ struct HTTP_API_TABLE {
     HttpAPIVersion          apiVersion;
 };
 
-// vvv Getter vvv
+// vvv Getter & Initializers vvv
 const HTTP_API_TABLE* GetHttpAPIV1();
+void                  InitHttpAPIV1(Router*, HttpMiddleware*);
 
 } // namespace WFX::Shared
 

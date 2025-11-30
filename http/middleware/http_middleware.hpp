@@ -11,16 +11,20 @@ struct TrieNode;
 
 using MiddlewareName        = std::string_view;
 using MiddlewareConfigOrder = const std::vector<std::string>&;
-using MiddlewareFactory     = std::unordered_map<MiddlewareName, MiddlewareCallbackType>;
+using MiddlewareFactory     = std::unordered_map<MiddlewareName, MiddlewareEntry>;
 using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, MiddlewareStack>;
 
 class HttpMiddleware {
 public:
-    static HttpMiddleware& GetInstance();
+    HttpMiddleware()  = default;
+    ~HttpMiddleware() = default;
 
-    void RegisterMiddleware(MiddlewareName name, MiddlewareCallbackType mw);
+public:
+    void RegisterMiddleware(MiddlewareName name, MiddlewareEntry mw);
     void RegisterPerRouteMiddleware(const TrieNode* node, MiddlewareStack mwStack);
-    bool ExecuteMiddleware(const TrieNode* node, HttpRequest& req, Response& res);
+    
+    bool ExecuteMiddleware(const TrieNode* node, HttpRequest& req, Response& res,
+                            MiddlewareType type, MiddlewareBuffer optBuf = {});
     
     // Using std::string because TOML loader returns vector<string>
     void LoadMiddlewareFromConfig(MiddlewareConfigOrder order);
@@ -28,19 +32,19 @@ public:
     void DiscardFactoryMap();
 
 private:
-    HttpMiddleware()  = default;
-    ~HttpMiddleware() = default;
-
     HttpMiddleware(const HttpMiddleware&)            = delete;
     HttpMiddleware& operator=(const HttpMiddleware&) = delete;
-    HttpMiddleware(HttpMiddleware&&)                 = delete;
-    HttpMiddleware& operator=(HttpMiddleware&&)      = delete;
 
 private: // Helper functions
-    bool ExecuteHelper(HttpRequest& req, Response& res, const MiddlewareStack& stack);
+    bool ExecuteHelper(HttpRequest& req, Response& res, MiddlewareStack& stack,
+                        MiddlewareType type, MiddlewareBuffer optBuf);
+    void FixInternalLinks(MiddlewareStack& stack);
 
 private:
+    // Temporary construct
     MiddlewareFactory  middlewareFactories_;
+
+    // Main stuff
     MiddlewareStack    middlewareGlobalCallbacks_;
     MiddlewarePerRoute middlewarePerRouteCallbacks_;
 };

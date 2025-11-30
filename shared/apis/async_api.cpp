@@ -1,13 +1,14 @@
 #include "async_api.hpp"
 #include "utils/logger/logger.hpp"
-#include "http/common/http_global_state.hpp"
 #include "http/connection/http_connection.hpp"
 
 namespace WFX::Shared {
 
 using WFX::Http::ConnectionContext;
 using WFX::Utils::Logger;
-using WFX::Http::GetGlobalState;
+
+// Important stuff :)
+static AsyncAPIDataV1 __GlobalAsyncDataV1;
 
 const ASYNC_API_TABLE* GetAsyncAPIV1()
 {
@@ -63,7 +64,7 @@ const ASYNC_API_TABLE* GetAsyncAPIV1()
             }
 
             auto  cctx        = static_cast<ConnectionContext*>(ctx);
-            auto* connHandler = GetGlobalState().connHandler;
+            auto* connHandler = __GlobalAsyncDataV1.connHandler;
 
             // Shouldn't happen considering we set it in core_engine.cpp
             if(!connHandler) {
@@ -79,6 +80,11 @@ const ASYNC_API_TABLE* GetAsyncAPIV1()
     };
 
     return &__GlobalAsyncAPIV1;
+}
+
+void InitAsyncAPIV1(HttpConnectionHandler* connHandler)
+{
+    __GlobalAsyncDataV1.connHandler = connHandler;
 }
 
 } // namespace WFX::Shared

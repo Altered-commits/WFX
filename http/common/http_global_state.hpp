@@ -17,15 +17,10 @@ using namespace WFX::Core; // For 'CoreEngine', 'TemplateEngine'
 
 using SSLKey = std::array<std::uint8_t, 80>;
 
-// Forward declare 'HttpConnectionHandler'. This must be strictly set inside of core_engine.cpp
-class HttpConnectionHandler;
-
 struct WFXGlobalState {
-    std::atomic<bool>      shouldStop        = false;
-    CoreEngine*            enginePtr         = nullptr;
-    TemplateEngine*        templateEnginePtr = nullptr;
-    SSLKey                 sslKey            = { 0 };
-    HttpConnectionHandler* connHandler       = nullptr;
+    std::atomic<bool> shouldStop = false;
+    CoreEngine*       enginePtr  = nullptr;
+    SSLKey            sslKey     = { 0 };
 
 #ifdef _WIN32
     // Nothing in Windows for now...

@@ -3,10 +3,8 @@
 #include "async/interface.hpp"
 #include "http/response.hpp"
 #include "http/common/http_error_msgs.hpp"
-#include "http/common/http_global_state.hpp"
 #include "http/formatters/parser/http_parser.hpp"
 #include "http/formatters/serializer/http_serializer.hpp"
-#include "http/routing/router.hpp"
 #include "shared/apis/master_api.hpp"
 #include "utils/backport/string.hpp"
 #include "utils/filesystem/filesystem.hpp"
@@ -29,16 +27,20 @@ enum ConnectionHeader : std::uint8_t {
 
 // vvv Main Functions vvv
 CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
-    : connHandler_(CreateConnectionHandler(useHttps))
 {
+    connHandler_ = CreateConnectionHandler(useHttps);
+    if(!connHandler_)
+        logger_.Fatal("[CoreEngine]: Failed to create connection backend");
+
+    // Initialize API backend before anything else
+    WFX::Shared::InitHttpAPIV1(&router_, &middleware_);
+    WFX::Shared::InitAsyncAPIV1(connHandler_.get());
+
     // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath);
 
     // Now that user code is available to us, load middleware in proper order
     HandleMiddlewareLoading();
-
-    // Set connection handler inside of global state
-    GetGlobalState().connHandler = connHandler_.get();
 }
 
 void CoreEngine::Listen(const std::string& host, int port)
@@ -157,7 +159,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             }
             else {
                 // Get the callback for the route we got, if it doesn't exist, we display error
-                auto node = Router::GetInstance().MatchRoute(
+                auto node = router_.MatchRoute(
                                     reqInfo.method,
                                     reqInfo.path,
                                     reqInfo.pathSegments
@@ -169,7 +171,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
                     goto __HandleResponse;
                 }
                                 
-                if(!middleware_.ExecuteMiddleware(node, reqInfo, userRes))
+                if(!middleware_.ExecuteMiddleware(node, reqInfo, userRes, MiddlewareType::SYNC))
                     goto __HandleResponse;
 
                 // Sync, execute it right now

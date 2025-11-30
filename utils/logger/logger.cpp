@@ -13,7 +13,7 @@ Logger& Logger::GetInstance()
 
 const char* Logger::LevelToString(Level level) const
 {
-    switch (level) {
+    switch(level) {
         case Level::TRACE: return "TRACE";
         case Level::DEBUG: return "DEBUG";
         case Level::INFO:  return "INFO";

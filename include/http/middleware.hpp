@@ -3,6 +3,7 @@
 
 #include "aliases.hpp"
 #include "response.hpp"
+#include "helper.hpp"
 #include "core/core.hpp"
 #include "shared/utils/deferred_init_vector.hpp"
 
@@ -14,8 +15,8 @@
     static struct WFX_MW_CLASS(uniq) {                                 \
         WFX_MW_CLASS(uniq)() {                                         \
             WFX::Shared::__WFXDeferredMiddleware().emplace_back([] {   \
-                __WFXApi->GetHttpAPIV1()->RegisterMiddleware(         \
-                    name, callback                                     \
+                __WFXApi->GetHttpAPIV1()->RegisterMiddleware(          \
+                    name, MakeMiddlewareEntry(callback)                \
                 );                                                     \
             });                                                        \
         }                                                              \

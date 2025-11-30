@@ -345,6 +345,7 @@ void HttpResponse::Stream(StreamGenerator generator, bool streamChunked, bool sk
 void HttpResponse::SetTextBody(std::string&& text, const char* contentType)
 {
     auto& logger = Logger::GetInstance();
+    std::size_t size = text.size();
 
     if(!std::holds_alternative<std::monostate>(body))
         logger.Fatal("[HttpResponse]: Text body already set");
@@ -353,7 +354,7 @@ void HttpResponse::SetTextBody(std::string&& text, const char* contentType)
         logger.Fatal("[HttpResponse]: Cannot mix text and file responses");
 
     body = std::move(text);
-    headers.SetHeader("Content-Length", UInt64ToStr(std::get<std::string>(body).size()));
+    headers.SetHeader("Content-Length", UInt64ToStr(size));
     headers.SetHeader("Content-Type", contentType);
 }
 

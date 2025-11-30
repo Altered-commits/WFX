@@ -103,16 +103,19 @@ struct ConnectionContext : public ConnectionTag {
     // ------------------------------------------  // 1 byte from ConnectionTag
     bool handshakeDone = false;                    // 1 byte
 
-    struct {
-        std::uint16_t parseState            : 3;   // --
-        std::uint16_t connectionState       : 2;   //  |
-        std::uint16_t isStreamOperation     : 1;   //  |
-        std::uint16_t isFileOperation       : 1;   //  |
-        std::uint16_t isAsyncTimerOperation : 1;   //  |
-        std::uint16_t isShuttingDown        : 1;   //  |
-        std::uint16_t streamChunked         : 1;   //  |
-        std::uint16_t __Pad                 : 6;   //  V
-    };                                             // 2 byte
+    union {
+        struct {
+            std::uint16_t parseState            : 3;   // --
+            std::uint16_t connectionState       : 2;   //  |
+            std::uint16_t isStreamOperation     : 1;   //  |
+            std::uint16_t isFileOperation       : 1;   //  |
+            std::uint16_t isAsyncTimerOperation : 1;   //  |
+            std::uint16_t isShuttingDown        : 1;   //  |
+            std::uint16_t streamChunked         : 1;   //  |
+            std::uint16_t __Pad                 : 6;   //  V
+        };                                             // 2 byte
+        std::uint16_t __Flags = 0;
+    };
 
     std::uint32_t trackBytes = 0;                  // 4 bytes
     void*         sslConn    = nullptr;            // 8 bytes

@@ -3,10 +3,22 @@
 
 #include "async/interface.hpp"
 
+// Fwd declare stuff
+namespace WFX::Http {
+    class HttpConnectionHandler;
+}
+
 namespace WFX::Shared {
+
+using WFX::Http::HttpConnectionHandler;
 
 enum class AsyncAPIVersion : std::uint8_t {
     V1 = 1,
+};
+
+// Data internally used by Async API
+struct AsyncAPIDataV1 {
+    HttpConnectionHandler* connHandler = nullptr;
 };
 
 // vvv All aliases for clarity vvv
@@ -30,8 +42,9 @@ struct ASYNC_API_TABLE {
     AsyncAPIVersion apiVersion;
 };
 
-// vvv Getter vvv
+// vvv Getter & Initializers vvv
 const ASYNC_API_TABLE* GetAsyncAPIV1();
+void                   InitAsyncAPIV1(HttpConnectionHandler*);
 
 } // namespace WFX::Shared
 

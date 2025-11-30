@@ -1,7 +1,7 @@
 #ifndef WFX_INC_ASYNC_BUILTINS_HPP
 #define WFX_INC_ASYNC_BUILTINS_HPP
 
-#include "routes.hpp"
+#include "runtime.hpp"
 
 namespace Async {
 
@@ -9,7 +9,7 @@ namespace Async {
 inline AsyncPtr SleepFor(std::uint32_t delayMs) noexcept
 {
     return Async::MakeAsync(
-        [](Async::CoroutineRawPtr self, std::uint32_t delayMs) {
+        [](AsyncPtr self, std::uint32_t delayMs) {
             switch(self->GetState())
             {
                 // This will be called only once, to schedule a delay

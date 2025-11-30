@@ -9,8 +9,10 @@ namespace WFX::Http {
 
 class Router {
 public:
-    static Router& GetInstance();
+    Router()  = default;
+    ~Router() = default;
 
+public:
     const TrieNode* RegisterRoute(HttpMethod method, std::string_view path, HttpCallbackType handler);
     const TrieNode* MatchRoute(HttpMethod method, std::string_view path, PathSegments& outParams) const;
 
@@ -20,9 +22,6 @@ public:
 private:
     RouteTrie getRoutes_;
     RouteTrie postRoutes_;
-
-    Router()  = default;
-    ~Router() = default;
 
     // No need for copy and move constructors
     Router(const Router&)            = delete;

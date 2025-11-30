@@ -4,6 +4,7 @@
 #include "config/config.hpp"
 #include "http/connection/http_connection_factory.hpp"
 #include "http/middleware/http_middleware.hpp"
+#include "http/routing/router.hpp"
 
 #include <string>
 
@@ -28,9 +29,11 @@ private: // Helper Functions
     void         HandleMiddlewareLoading();
 
 private:
-    Logger& logger_             = Logger::GetInstance();
-    Config& config_             = Config::GetInstance();
-    HttpMiddleware& middleware_ = HttpMiddleware::GetInstance();
+    Logger& logger_ = Logger::GetInstance();
+    Config& config_ = Config::GetInstance();
+    
+    HttpMiddleware middleware_;
+    Router         router_;
 
     std::unique_ptr<HttpConnectionHandler> connHandler_;
 };

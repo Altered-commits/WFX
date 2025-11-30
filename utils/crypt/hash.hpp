@@ -4,11 +4,7 @@
 #include "./string.hpp"
 
 #include <cstdint>
-#include <memory>
 #include <string_view>
-#include <thread>
-#include <mutex>
-#include <atomic>
 
 // Helper macros
 #define ROTL64(x, b) ((x << b) | (x >> (64 - b)))
@@ -44,7 +40,7 @@ private:
 // vvv TRUE RANDOMIZER vvv
 class RandomPool final {
     static constexpr std::size_t BUFFER_SIZE = 1024 * 1024; // Stores 1MB worth of random bytes
-    static constexpr std::size_t MAX_RETRIES = 32; // Retries for GetBytes function
+    static constexpr std::size_t MAX_RETRIES = 32;          // Retries for GetBytes function
 
 public:
     static RandomPool& GetInstance();
@@ -64,9 +60,8 @@ private:
     bool RefillBytes(); // Actual shit
 
 private:
-    alignas(64) std::uint8_t randomPool_[BUFFER_SIZE];
-    std::atomic<std::size_t> cursor_{0};
-    std::mutex refillMutex_;
+    std::uint8_t randomPool_[BUFFER_SIZE];
+    std::size_t  cursor_{0};
 };
 
 } // namespace WFX::Utils

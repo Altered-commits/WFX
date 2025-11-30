@@ -2,6 +2,7 @@
 
 #include "utils/logger/logger.hpp"
 #include <cstring>
+#include <limits>
 
 // Some OS level tools for randomization
 #if defined(_WIN32)
@@ -154,33 +155,24 @@ bool RandomPool::GetBytes(std::uint8_t* out, std::size_t len)
     if(!out || len == 0 || len > BUFFER_SIZE)
         return false;
 
-    for(int attempt = 0; attempt < MAX_RETRIES; ++attempt)
-    {
-        std::size_t oldPos = cursor_.fetch_add(len, std::memory_order_acq_rel);
-        if(oldPos + len <= BUFFER_SIZE)
-        {
-            memcpy(out, randomPool_ + oldPos, len);
-            return true;
-        }
+    // If not enough space in pool, refill
+    if(cursor_ + len > BUFFER_SIZE) {
+        if(!RefillBytes())
+            return false;
 
-        // Another thread might've refilled already, double-check
-        if(cursor_.load(std::memory_order_acquire) >= BUFFER_SIZE)
-        {
-            if(!RefillBytes())
-                return false;
-        }
-        
-        // Let other threads move forward slightly, reduces lock contention
-        std::this_thread::yield();
+        // If still can't fit, fail (should never happen)
+        if(len > BUFFER_SIZE)
+            return false;
     }
 
-    return false;
+    std::memcpy(out, randomPool_ + cursor_, len);
+    cursor_ += len;
+    return true;
 }
 
 // Main shit
 bool RandomPool::RefillBytes()
 {
-    std::lock_guard<std::mutex> lock(refillMutex_);
 #if defined(_WIN32)
     if(BCryptGenRandom(nullptr, randomPool_, static_cast<ULONG>(BUFFER_SIZE), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
         return false;
@@ -220,7 +212,7 @@ bool RandomPool::RefillBytes()
             totalRead += n;
     }
 #endif
-    cursor_.store(0, std::memory_order_release);
+    cursor_ = 0;
     return true;
 }
 

@@ -1,15 +1,9 @@
-#ifndef WFX_INC_ASYNC_ROUTES_HPP
-#define WFX_INC_ASYNC_ROUTES_HPP
-
-/*
- * Contains the sugar syntax for async functions
- * While i could've defined all these inside of http/routes.hpp, decided it was cleaner to define-
- * -them here. They will get included anyways later on
- */
+#ifndef WFX_INC_ASYNC_RUNTIME_HPP
+#define WFX_INC_ASYNC_RUNTIME_HPP
 
 #include "interface.hpp"
 #include "core/core.hpp"
-#include "core/macros.hpp"
+#include "utils/logger/logger.hpp"
 #include <tuple>
 
 namespace Async {
@@ -77,7 +71,7 @@ inline AsyncPtr MakeAsync(Fn&& fn, Args&&... args)
     auto ptr = __WFXApi->GetAsyncAPIV1()->RegisterCallback(
                 __WFXApi->GetHttpAPIV1()->GetGlobalPtrData(), std::move(coro)
             );
-    
+
     if(ptr)
         ptr->Resume();
 
@@ -94,33 +88,28 @@ inline AsyncPtr Call(Fn&& fn, Args&&... args)
 }
 
 // Await returns whether to yield or not. True means we need to yield, False means no need to [yield / handle error]-
-// -function was completed in sync. It also increments 'self' state by 1 on every call.
+// -function was completed in sync
 // IMPORTANT: THIS FUNCTION EXPECTS POINTER TO CONNECTION CONTEXT BE SET VIA 'SetGlobalPtrData' BEFORE BEING INVOKED
-template<typename T>
-inline bool Await(AsyncPtr self, T&& asyncCall) noexcept
+inline bool Await(AsyncPtr self, AsyncPtr callResult) noexcept
 {
-    static_assert(Async::IsCoroutinePtrV<T>, "Async::Await() requires callable to return 'AsyncPtr'.");
-
     if(self->IsYielded())
-        WFX_ABORT("Async::Await() called while coroutine still yielded from previous await")
+        WFX::Utils::Logger::GetInstance().Fatal(
+            "Async::Await() called while coroutine was still yielded from previous await"
+        );
 
-    self->IncState();
-
-    AsyncPtr result = asyncCall;
-
-    if(!result) {
+    if(!callResult) {
         self->SetError(Error::INTERNAL_FAILURE);
         goto __CallComplete;
     }
 
-    if(!result->IsFinished()) {
+    if(!callResult->IsFinished()) {
         self->SetYielded(true);
         return true;
     }
 
     // If the async completed instantly but failed, propagate error
-    if(result->HasError())
-        self->SetError(result->GetError());
+    if(callResult->HasError())
+        self->SetError(callResult->GetError());
 
 __CallComplete:
     __WFXApi->GetAsyncAPIV1()->PopCallback(__WFXApi->GetHttpAPIV1()->GetGlobalPtrData());
@@ -129,4 +118,4 @@ __CallComplete:
 
 } // namespace Async
 
-#endif // WFX_INC_ASYNC_ROUTES_HPP
+#endif // WFX_INC_ASYNC_RUNTIME_HPP

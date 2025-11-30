@@ -5,12 +5,6 @@ namespace WFX::Http {
 
 using namespace WFX::Utils; // For 'Logger'
 
-Router& Router::GetInstance()
-{
-    static Router router;
-    return router;
-}
-
 const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, HttpCallbackType handler)
 {
     if(path.empty() || path[0] != '/')
