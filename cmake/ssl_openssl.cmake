@@ -14,6 +14,16 @@ endif()
 # -------------------- LINUX --------------------
 message(STATUS "OpenSSL: Linux detected. Configuring custom OpenSSL build")
 
+# Get the number of cores we can use for parallelizing build
+include(ProcessorCount)
+ProcessorCount(NPROC)
+if(NPROC EQUAL 0)
+    set(NPROC 1)
+endif()
+
+# Find the actual 'make' program (ignore Ninja)
+find_program(MAKE_EXE NAMES make gmake REQUIRED)
+
 # Set a directory within the build folder for the installation artifacts
 set(OPENSSL_INSTALL_DIR ${CMAKE_BINARY_DIR}/openssl_lts-install)
 
@@ -61,11 +71,12 @@ ExternalProject_Add(openssl_lts_build
             --openssldir=<INSTALL_DIR>
             --libdir=lib
 
+    # NOTE: Use ${MAKE_EXE} instead of ${CMAKE_MAKE_PROGRAM} to prevent Ninja related errors
     # Pass the parallel job count to the sub-make
-    BUILD_COMMAND ${CMAKE_MAKE_PROGRAM} build_libs
+    BUILD_COMMAND ${MAKE_EXE} -j${NPROC} build_libs
 
     # Also pass it to the install command
-    INSTALL_COMMAND ${CMAKE_MAKE_PROGRAM} install_dev
+    INSTALL_COMMAND ${MAKE_EXE} -j${NPROC} install_dev
     
     # Final installation directory
     INSTALL_DIR ${OPENSSL_INSTALL_DIR}

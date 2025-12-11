@@ -68,17 +68,17 @@ target_compile_options(wfx PRIVATE
 
     # Release (GCC)
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:
-        -O3 -ffunction-sections -fdata-sections -fvisibility=hidden -flto -fmerge-all-constants
+        -O3 -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants
     >
 
     # Release (Clang / AppleClang)
     $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:
-        -O3 -ffunction-sections -fdata-sections -fvisibility=hidden -flto -fmerge-all-constants
+        -O3 -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants
     >
 
     # Release (Intel oneAPI / icx)
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:IntelLLVM>>:
-        -O3 -ffunction-sections -fdata-sections -fvisibility=hidden -flto -fmerge-all-constants -xHost
+        -O3 -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants -xHost
     >
 
     # Release (MSVC)
@@ -90,7 +90,7 @@ target_compile_options(wfx PRIVATE
 target_link_options(wfx PRIVATE
     # Release (GCC / Clang / AppleClang / Intel)
     $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:IntelLLVM>>>:
-        -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto
+        -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto
     >
 
     # Release (MSVC)
