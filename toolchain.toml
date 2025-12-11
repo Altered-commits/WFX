@@ -1,8 +1,0 @@
-[Compiler]
-name    = "g++"
-ccmd    = "g++"
-lcmd    = "g++"
-cargs   = "-std=c++17 -O2 -flto -fvisibility=hidden -fvisibility-inlines-hidden -fno-rtti -fno-exceptions -ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c"
-largs   = "-shared -fPIC -flto -Wl,--gc-sections -Wl,--strip-all"
-objflag = "-o "
-dllflag = "-o "
