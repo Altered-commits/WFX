@@ -1,0 +1,82 @@
+name: WFX CI Filter
+
+on:
+  workflow_call:
+    outputs:
+      should_run:
+        description: "Whether CI should run or nah"
+        value: ${{ jobs.filter.outputs.should_run }}
+
+jobs:
+  filter:
+    name: CI Filter
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.filter.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      - name: Determine diff SHAs
+        id: shas
+        run: |
+          # Handle Pull Requests
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          
+          # Handle Pushes
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.event.after }}"
+            
+            # Handle new branch creation (base is 000000...)
+            if [[ $BASE =~ ^0+$ ]]; then
+              BASE=$(git rev-parse HEAD^)
+            fi
+          fi
+
+          echo "BASE=$BASE" >> $GITHUB_OUTPUT
+          echo "HEAD=$HEAD" >> $GITHUB_OUTPUT
+
+      - name: Determine whether to run CI
+        id: filter
+        run: |
+          BASE="${{ steps.shas.outputs.BASE }}"
+          HEAD="${{ steps.shas.outputs.HEAD }}"
+
+          # Get list of changed files
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+
+          # If nothing changed, skip
+          if [ -z "$CHANGED" ]; then
+            echo "should_run=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Add newline to prevent merging with git's existing rules
+          echo "" >> .git/info/exclude
+
+          # Setup the custom ignore rules
+          # We append .ciignore to git's local exclude file so check-ignore uses it
+          if [ -f ".ciignore" ]; then
+            cat .ciignore >> .git/info/exclude
+          fi
+
+          # Check changed files against the ignore rules
+          # git check-ignore outputs files that match the ignore rules
+          IGNORED=$(echo "$CHANGED" | git check-ignore --stdin --no-index || true)
+
+          # Count lines
+          NUM_CHANGED=$(echo "$CHANGED" | grep -c '^' || true)
+          NUM_IGNORED=$(echo "$IGNORED" | grep -c '^' || true)
+
+          echo "Changed: $NUM_CHANGED, Ignored: $NUM_IGNORED"
+
+          if [ "$NUM_CHANGED" -eq "$NUM_IGNORED" ]; then
+            echo "All changes are ignored."
+            echo "should_run=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=1" >> "$GITHUB_OUTPUT"
+          fi

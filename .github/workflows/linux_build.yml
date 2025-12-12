@@ -7,8 +7,13 @@ on:
     branches: [dev, main]
 
 jobs:
+  ci_filter:
+    uses: ./.github/workflows/ci_filter.yml
+
   build:
     name: Linux (${{ matrix.compiler }})
+    needs: ci_filter
+    if: needs.ci_filter.outputs.should_run == '1'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -54,12 +59,20 @@ jobs:
     name: WFX Linux Build Success
     runs-on: ubuntu-latest
     if: always()
-    needs: [build] # Wait for the 'build' matrix to finish
+    needs: [build, ci_filter] # Wait for the 'build' matrix to finish and 'ci_filter' output
     steps:
       - name: Check Status
         run: |
+          # If filter returned 0, we skipped build, treat as success
+          if [[ "${{ needs.ci_filter.outputs.should_run }}" == "0" ]]; then
+            echo "Build skipped by filter. Marking as success."
+            exit 0
+          fi
+
+          # If we ran, check for failures in the matrix
           if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "Build matrix failed."
             exit 1
           fi
+
           echo "All builds passed!"
