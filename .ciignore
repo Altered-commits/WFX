@@ -1,0 +1,25 @@
+# Documentation
+README.md
+CHANGELOG.md
+LICENSE
+CONTRIBUTING.md
+
+# CI / GitHub workflows
+.github/workflows/*
+
+# Config files (if purely comments or minor formatting)
+*.yml
+*.yaml
+*.toml
+*.ini
+*.cfg
+
+# Examples / tutorials / notes
+examples/*
+docs/*
+*.md
+*.txt
+
+# Misc
+.todo
+test/

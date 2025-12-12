@@ -16,8 +16,7 @@ No logs, no confetti, just a binary sitting there opening its eyes for the first
 
 ## Architecture
 
-Everything runs on one event loop.  
-Epoll / IoUring / IOCP is the heartbeat.  
+Everything runs on one event loop [Epoll / IoUring / IOCP]. Flow is quite simple: request -> event-loop (read from socket) -> core-engine (runs callbacks and creates response) -> event-loop (write to socket)  
 
 ## Folder Structure
 
@@ -37,12 +36,17 @@ Each shared module is self-contained and linked into the core runtime.
 
 ## Build
 
+Some dependencies which need to be resolved before building engine:
+
+- **Linux:** `sudo apt install -y cmake build-essential ninja-build`
+- **C++ Standard:** C++17
+
 Follow each command step by step to build the engine binary:
 
 ```bash
  - git clone https://github.com/Altered-commits/WFX.git
  - cd wfx
- - cmake -S . -B build
+ - cmake -S . -B build -G Ninja
  - cmake --build build
 ```
 
@@ -53,16 +57,6 @@ Now that the engine binary has been created, follow these steps to use `wfx`:
 #### Linux / macOS
 ```bash
  - mv wfx ..
- - cd ..
-```
-#### Windows (PowerShell)
-```bash
- - Move-Item wfx ..
- - Set-Location ..
-```
-#### Windows (CMD)
-```bash
- - move wfx ..
  - cd ..
 ```
 
