@@ -2,9 +2,11 @@
 README.md
 CHANGELOG.md
 LICENSE
+NOTICES.md
 CONTRIBUTING.md
 
 # CI / GitHub workflows
+.ciignore
 .github/workflows/*
 
 # Config files (if purely comments or minor formatting)
@@ -20,6 +22,9 @@ docs/*
 *.md
 *.txt
 
-# Misc
+# Misc / Binary artifacts
 .todo
 test/
+wfx
+wfx.toml
+toolchain.toml

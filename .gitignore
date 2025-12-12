@@ -11,3 +11,8 @@ Release/
 
 # Internal
 ignore/
+
+# Binary artifacts
+wfx
+wfx.toml
+toolchain.toml

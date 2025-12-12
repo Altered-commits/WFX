@@ -55,6 +55,9 @@ jobs:
             exit 0
           fi
 
+          # Add newline to prevent merging with git's existing rules
+          echo "" >> .git/info/exclude
+
           # Setup the custom ignore rules
           # We append .ciignore to git's local exclude file so check-ignore uses it
           if [ -f ".ciignore" ]; then
@@ -63,7 +66,7 @@ jobs:
 
           # Check changed files against the ignore rules
           # git check-ignore outputs files that match the ignore rules
-          IGNORED=$(echo "$CHANGED" | git check-ignore --stdin || true)
+          IGNORED=$(echo "$CHANGED" | git check-ignore --stdin --no-index || true)
 
           # Count lines
           NUM_CHANGED=$(echo "$CHANGED" | grep -c '^' || true)
