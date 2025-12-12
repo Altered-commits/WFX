@@ -9,6 +9,7 @@ on:
 
 jobs:
   filter:
+    name: CI Filter
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.filter.outputs.should_run }}
