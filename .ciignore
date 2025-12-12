@@ -10,6 +10,7 @@ CONTRIBUTING.md
 .github/workflows/*
 
 # Config files (if purely comments or minor formatting)
+.gitignore
 *.yml
 *.yaml
 *.toml

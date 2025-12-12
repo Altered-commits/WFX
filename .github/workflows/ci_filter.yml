@@ -68,6 +68,12 @@ jobs:
           # git check-ignore outputs files that match the ignore rules
           IGNORED=$(echo "$CHANGED" | git check-ignore --stdin --no-index || true)
 
+          TRIGGERING_FILES=$(echo "$CHANGED" | grep -v -x -F "$IGNORED")
+          echo "----------------------------"
+          echo "FILES TRIGGERING THE BUILD:"
+          echo "$TRIGGERING_FILES"
+          echo "----------------------------"
+
           # Count lines
           NUM_CHANGED=$(echo "$CHANGED" | grep -c '^' || true)
           NUM_IGNORED=$(echo "$IGNORED" | grep -c '^' || true)
