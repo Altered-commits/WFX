@@ -154,7 +154,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, int port)
 
 void EpollConnectionHandler::SetEngineCallbacks(ReceiveCallback onData, CompletionCallback onComplete)
 {
-    onReceive_  = std::move(onData);
+    onReceive_         = std::move(onData);
     onAsyncCompletion_ = std::move(onComplete);
 }
 
@@ -164,7 +164,8 @@ void EpollConnectionHandler::ResumeReceive(ConnectionContext* ctx)
     if(!EnsureReadReady(ctx))
         return;
 
-    PollAgain(ctx, EventType::EVENT_RECV, EPOLLIN | EPOLLET);
+    // We are ready to data now, set 'eventType' to EVENT_RECV
+    ctx->eventType = EventType::EVENT_RECV;
 }
 
 void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
@@ -192,11 +193,13 @@ void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
 
             if(n > 0)
                 writeMeta->writtenLength += n;
-            
+
+            // Partial progress, wait for event loop to notify when we can send more data
             else if(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                PollAgain(ctx, EventType::EVENT_SEND, EPOLLOUT | EPOLLET);
+                ctx->eventType = EventType::EVENT_SEND;
                 return;
             }
+
             // Connection closed / Fatal error
             else {
                 Close(ctx);
@@ -287,8 +290,7 @@ void EpollConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
 
             // Wait for the event loop to complete the shutdown
             else {
-                std::uint32_t events = ((res == SSLReturn::WANT_READ) ? EPOLLIN : EPOLLOUT) | EPOLLET;
-                PollAgain(ctx, EventType::EVENT_SHUTDOWN, events);
+                ctx->eventType = EventType::EVENT_SHUTDOWN;
                 return;
             }
         }
@@ -309,6 +311,9 @@ void EpollConnectionHandler::Run()
             " Call 'SetEngineCallbacks' before calling 'Run'"
         );
 
+    // Used for special fds like timers, accepts, etc
+    int sfd = 0;
+
     while(running_) {
         int nfds = epoll_wait(epollFd_, events_.get(), maxEvents_, -1);
         if(nfds < 0) {
@@ -320,14 +325,21 @@ void EpollConnectionHandler::Run()
 
         // Handle nfds events which epoll gave us
         for(std::uint32_t i = 0; i < nfds; i++) {
-            int  fd = events_[i].data.fd;
-            auto ev = events_[i].events;
+            std::uint32_t ev   = events_[i].events;
+            std::uint64_t meta = events_[i].data.u64;
+            std::uint32_t gen  = meta >> 32;
+
+            // Existing connection, handle it
+            if(gen > 0)
+                goto __HandleExistingConnection;
+
+            sfd = events_[i].data.fd;
 
             // Handle timeouts timers
-            if(fd == timeoutTimerFd_) {
-                // We just need to drain the fd, we dont care about the 'expirations' value
+            if(sfd == timeoutTimerFd_) {
+                // We just need to drain the sfd, we dont care about the 'expirations' value
                 std::uint64_t expirations = 0;
-                (void)read(fd, &expirations, sizeof(expirations));
+                (void)read(sfd, &expirations, sizeof(expirations));
 
                 // Calculate elapsed time since the server started in seconds
                 std::uint64_t nowSec = NowMs() / 1000;
@@ -339,9 +351,9 @@ void EpollConnectionHandler::Run()
             }
 
             // Handle async timers
-            if(fd == asyncTimerFd_) {
+            if(sfd == asyncTimerFd_) {
                 std::uint64_t expirations = 0;
-                (void)read(fd, &expirations, sizeof(expirations));
+                (void)read(sfd, &expirations, sizeof(expirations));
 
                 std::uint64_t newTick = NowMs();
                 std::uint64_t connId  = 0;
@@ -365,7 +377,7 @@ void EpollConnectionHandler::Run()
             }
 
             // Accept new connections
-            if(fd == listenFd_) {
+            if(sfd == listenFd_) {
                 while(true) {
                     sockaddr_in addr{};
                     socklen_t len = sizeof(addr);
@@ -407,17 +419,24 @@ void EpollConnectionHandler::Run()
                     }
 
                     // Set connection info
-                    ctx->socket    = clientFd;
-                    ctx->connInfo  = tmpIp;
+                    ctx->socket   = clientFd;
+                    ctx->connInfo = tmpIp;
                     
                     numConnectionsAlive_++;
-                    WrapAccept(ctx, clientFd);
+                    WrapAccept(ctx);
                 }
                 continue;
             }
-            
-            // Handle existing connections
-            auto* ctx = reinterpret_cast<ConnectionContext*>(events_[i].data.ptr);
+
+        __HandleExistingConnection:
+            // Get connection context
+            std::uint32_t idx = meta & 0xFFFFFFFF;
+            ConnectionContext* ctx = &connections_[idx];
+
+            // If the slot's current generation doesn't match the event's generation, it means-
+            // -this event is for a dead connection
+            if(ctx->generationId != gen) 
+                continue;
 
             // SSL handshake in progress
             if(ctx->eventType == EventType::EVENT_HANDSHAKE) {
@@ -425,29 +444,25 @@ void EpollConnectionHandler::Run()
 
                 switch(hsResult) {
                     case SSLReturn::SUCCESS:
-                        // Handshake done, switch to normal receive
-                        PollAgain(ctx, EventType::EVENT_RECV, EPOLLIN | EPOLLET);
+                        // Handshake done, switch to EVENT_RECV as we are ready to read data
+                        ctx->eventType = EventType::EVENT_RECV;
 
-                        // Immediately read if EPOLLIN is set
+                        // Try to immediately read if we have any pending requests
                         if(ev & EPOLLIN)
                             Receive(ctx);
+
                         break;
 
+                    // Handshake isn't finished, wait for more events
                     case SSLReturn::WANT_READ:
-                        // Need more input: wait for EPOLLIN
-                        PollAgain(ctx, EventType::EVENT_HANDSHAKE, EPOLLIN | EPOLLET);
-                        break;
-
                     case SSLReturn::WANT_WRITE:
-                        // Need to write handshake data: wait for EPOLLOUT
-                        PollAgain(ctx, EventType::EVENT_HANDSHAKE, EPOLLOUT | EPOLLET);
                         break;
 
+                    // Any error or closed connection
                     case SSLReturn::CLOSED:
                     case SSLReturn::SYSCALL:
                     case SSLReturn::FATAL:
                     default:
-                        // Any error or closed connection
                         Close(ctx);
                         break;
                 }
@@ -460,19 +475,19 @@ void EpollConnectionHandler::Run()
                 auto res = sslHandler_->Shutdown(ctx->sslConn);
 
                 switch(res) {
+                    // Shutdown still needs time, wait for more data
+                    case SSLReturn::WANT_READ:
+                    case SSLReturn::WANT_WRITE:
+                        break;
+
+                    // Success or Failure, manually shutdown the connection
+                    // Cannot call 'Close' cuz its not needed simply
                     case SSLReturn::SUCCESS:
                     case SSLReturn::FATAL:
+                    default:
                         ctx->sslConn = nullptr;
                         epoll_ctl(epollFd_, EPOLL_CTL_DEL, ctx->socket, nullptr);
                         ReleaseConnection(ctx);
-                        break;
-
-                    case SSLReturn::WANT_READ:
-                        PollAgain(ctx, EventType::EVENT_SHUTDOWN, EPOLLIN | EPOLLET);
-                        break;
-
-                    case SSLReturn::WANT_WRITE:
-                        PollAgain(ctx, EventType::EVENT_SHUTDOWN, EPOLLOUT | EPOLLET);
                         break;
                 }
                 continue;
@@ -483,7 +498,11 @@ void EpollConnectionHandler::Run()
                 continue;
             }
 
-            if(ev & EPOLLIN) {
+            // If the 'ctx->eventType' is NOT EVENT_RECV, its most probably:
+            //  - I forgot to set it somewhere
+            //  - We are doing other task and client is trying to send more data
+            // In any case, we just ignore it
+            if((ev & EPOLLIN) && ctx->eventType == EventType::EVENT_RECV) {
                 // Check per ip request rate BEFORE processing anything
                 if(!ipLimiter_.AllowRequest(ctx->connInfo)) {
                     Write(ctx, HttpError::tooManyRequests);
@@ -578,7 +597,14 @@ ConnectionContext* EpollConnectionHandler::GetConnection()
     if(idx < 0)
         return nullptr;
 
-    return &connections_[idx];
+    auto* ctx = &connections_[idx];
+    ctx->generationId++;
+
+    // If it wraps to 0, bump it to 1 cuz 0 is reserved for identifying fds such as Listen/Timer
+    if(ctx->generationId == 0)
+        ctx->generationId = 1;
+
+    return ctx;
 }
 
 void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx)
@@ -727,9 +753,11 @@ void EpollConnectionHandler::Receive(ConnectionContext* ctx)
         }
         // res < 0
         else {
-            // Done reading for now
-            if(errno == EAGAIN || errno == EWOULDBLOCK)
+            // Done reading for now, wait for more data in future
+            if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                ctx->eventType = EventType::EVENT_RECV;
                 break;
+            }
             
             // Fatal error
             Close(ctx);
@@ -772,12 +800,14 @@ void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
                 return;
             }
 
-            // Partial progress, wait for EPOLLOUT again
+            // Partial progress, wait for event loop to notify us when it wants more data
             if(errno == EAGAIN || errno == EWOULDBLOCK)
-                PollAgain(ctx, EventType::EVENT_SEND_FILE, EPOLLOUT | EPOLLET);
+                ctx->eventType = EventType::EVENT_SEND_FILE;
+
+            // Fatal error, close connection
             else
                 Close(ctx);
-            
+
             return;
         }
 
@@ -920,22 +950,6 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     else Close(ctx);
 }
 
-void EpollConnectionHandler::PollAgain(ConnectionContext* ctx, EventType eventType, std::uint32_t events)
-{
-    ctx->eventType = eventType;
-
-    epoll_event ev{};
-    ev.events   = events;
-    ev.data.ptr = ctx;
-
-    // If epoll fails: Only force close on real errors (ignore EBADF/ENOENT which can happen during race)
-    if(
-        epoll_ctl(epollFd_, EPOLL_CTL_MOD, ctx->socket, &ev) < 0
-        && (errno != EBADF && errno != ENOENT)
-    )
-        Close(ctx, true);
-}
-
 void EpollConnectionHandler::UpdateAsyncTimer()
 {
     TimerNode* min = timerHeap_.GetMin();
@@ -964,10 +978,19 @@ void EpollConnectionHandler::UpdateAsyncTimer()
     }
 }
 
-void EpollConnectionHandler::WrapAccept(ConnectionContext* ctx, int clientFd)
+void EpollConnectionHandler::WrapAccept(ConnectionContext* ctx)
 {
+    // Poll once, then we just won't touch epoll_ctl again till we close connection
+    // We will use 'ctx->eventType' to control the flow of data pretty much, preventing-
+    // -any sort of race condition and such
     epoll_event cev{};
-    cev.data.ptr = ctx;
+    cev.events   = EPOLLIN | EPOLLOUT | EPOLLET;
+
+    // Pack GenerationID (High 32) and Index (Low 32)
+    std::uint32_t idx = static_cast<std::uint32_t>(ctx - connections_.get());
+    cev.data.u64 = (static_cast<std::uint64_t>(ctx->generationId) << 32) | idx;
+
+    int clientFd = ctx->socket;
 
     if(useHttps_) {
         ctx->sslConn = sslHandler_->Wrap(clientFd);
@@ -979,32 +1002,27 @@ void EpollConnectionHandler::WrapAccept(ConnectionContext* ctx, int clientFd)
         // Try handshake immediately
         SSLReturn hsResult = sslHandler_->Handshake(ctx->sslConn);
 
-        // Handshake done, go to normal receive
-        if(hsResult == SSLReturn::SUCCESS) {
-            ctx->eventType = EventType::EVENT_RECV;
-            cev.events = EPOLLIN | EPOLLET;
-        }
-        // Wait for read
-        else if(hsResult == SSLReturn::WANT_READ) {
-            ctx->eventType = EventType::EVENT_HANDSHAKE;
-            cev.events = EPOLLIN | EPOLLET;
-        }
-        // Wait for write
-        else if(hsResult == SSLReturn::WANT_WRITE) {
-            ctx->eventType = EventType::EVENT_HANDSHAKE;
-            cev.events = EPOLLOUT | EPOLLET;
-        } 
-        // Handshake failed or closed
-        else {
-            Close(ctx);
-            return;
+        // Handshake done, check if its finished or still remaining
+        switch(hsResult)
+        {
+            case SSLReturn::SUCCESS:
+                ctx->eventType = EventType::EVENT_RECV;
+                break;
+
+            case SSLReturn::WANT_READ:
+            case SSLReturn::WANT_WRITE:
+                ctx->eventType = EventType::EVENT_HANDSHAKE;
+                break;
+            
+            // Handshake failed or connection closed
+            default:
+                Close(ctx);
+                return;
         }
     }
-    else {
-        // Plain HTTP
+    // Plain HTTP
+    else
         ctx->eventType = EventType::EVENT_RECV;
-        cev.events = EPOLLIN | EPOLLET;
-    }
 
     if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, clientFd, &cev) < 0) {
         Close(ctx);

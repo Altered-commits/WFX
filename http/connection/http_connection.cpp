@@ -73,6 +73,7 @@ void ConnectionContext::ResetContext()
     eventType          = EventType::EVENT_ACCEPT;
     parseState         = 0;
     trackBytes         = 0;
+    socket             = WFX_INVALID_SOCKET;
 }
 
 void ConnectionContext::ClearContext()

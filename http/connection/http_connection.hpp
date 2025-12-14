@@ -163,7 +163,9 @@ struct ConnectionContext : public ConnectionTag {
     WFX::Utils::RWBuffer rwBuffer;                 // 16 bytes
 
     WFXSocket       socket             = -1;       // 4 | 8 bytes
-    StreamGenerator streamGenerator    = {};       // 8 | 16 bytes
+    std::uint32_t   generationId       = 1;        // 4 bytes (0 is specially reserved)
+                                                   // 4 bytes padded
+    StreamGenerator streamGenerator    = {};       // 8 bytes
     HttpRequest*    requestInfo        = nullptr;  // 8 bytes
     HttpResponse*   responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
     FileInfo*       fileInfo           = nullptr;  // 8 bytes

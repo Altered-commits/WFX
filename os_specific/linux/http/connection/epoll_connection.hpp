@@ -60,10 +60,9 @@ private: // Helper Functions
     void               Receive(ConnectionContext* ctx);
     void               SendFile(ConnectionContext* ctx);
     void               ResumeStream(ConnectionContext* ctx);
-    void               PollAgain(ConnectionContext* ctx, EventType eventType, std::uint32_t events);
     void               UpdateAsyncTimer();
     
-    void               WrapAccept(ConnectionContext* ctx, int clientFd);
+    void               WrapAccept(ConnectionContext* ctx);
     ssize_t            WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
     ssize_t            WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len);
     ssize_t            WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);

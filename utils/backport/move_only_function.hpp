@@ -1,8 +1,8 @@
 #ifndef WFX_UTILS_MOVE_ONLY_FUNCTION_HPP
 #define WFX_UTILS_MOVE_ONLY_FUNCTION_HPP
 
-#include <memory>
-#include <utility>
+#include <type_traits>
+#include "utils/logger/logger.hpp"
 
 namespace WFX::Utils {
 
@@ -32,31 +32,36 @@ class MoveOnlyFunction<R(Args...)> {
                 return f(std::forward<Args>(args)...);
         }
 
+        // Helper for 'InvokeConst'
+        template<typename Func>
+        static R Call(Func&& func, Args&&... args)
+        {
+            if constexpr(std::is_void_v<R>)
+                std::forward<Func>(func)(std::forward<Args>(args)...);
+            else
+                return std::forward<Func>(func)(std::forward<Args>(args)...);
+        }
+
         // This version must NOT call f() if its not const callable
         R InvokeConst(Args&&... args) const override
         {
-            auto call = [&]<typename Func>(Func&& func) -> R {
-                if constexpr(std::is_void_v<R>)
-                    std::forward<Func>(func)(std::forward<Args>(args)...);
-                else
-                    return std::forward<Func>(func)(std::forward<Args>(args)...);
-            };
-
             // Callable supports const operator()
             if constexpr(std::is_invocable_v<const F&, Args...>)
-                return call(f);
+                return Call(f, std::forward<Args>(args)...);
 
             // Safe fallback for mutable lambdas
             else
-                return call(const_cast<F&>(f));
+                return Call(const_cast<F&>(f), std::forward<Args>(args)...);
         }
     };
 
-    std::unique_ptr<Base> impl_;
+    Base* impl_ = nullptr;
 
 public:
+    // vvv Constructors and Destructor vvv
     // Support for Late-Initialization
     MoveOnlyFunction() noexcept = default;
+
     // Implicit construction from any move-only callable
     template<typename F, typename = std::enable_if_t<
             !std::is_same_v<std::decay_t<F>, MoveOnlyFunction> &&
@@ -64,32 +69,62 @@ public:
         >
     >
     MoveOnlyFunction(F&& f)
-        : impl_(std::make_unique<Impl<std::decay_t<F>>>(std::forward<F>(f))) {}
+        : impl_(new Impl<std::decay_t<F>>(std::forward<F>(f))) {}
 
-    MoveOnlyFunction(MoveOnlyFunction&&) noexcept = default;
-    MoveOnlyFunction& operator=(MoveOnlyFunction&&) noexcept = default;
+    ~MoveOnlyFunction()
+    {
+        delete impl_;
+    }
 
-    MoveOnlyFunction(const MoveOnlyFunction&) = delete;
+    // vvv Move Constructor and Operator vvv
+    MoveOnlyFunction(MoveOnlyFunction&& other) noexcept
+        : impl_(other.impl_)
+    {
+        other.impl_ = nullptr;
+    }
+
+    MoveOnlyFunction& operator=(MoveOnlyFunction&& other) noexcept
+    {
+        if(this != &other) {
+            delete impl_;
+            impl_ = other.impl_;
+            other.impl_ = nullptr;
+        }
+        return *this;
+    }
+
+    // Copying is not allowed
+    MoveOnlyFunction(const MoveOnlyFunction&)            = delete;
     MoveOnlyFunction& operator=(const MoveOnlyFunction&) = delete;
 
+public:
     R operator()(Args... args)
     {
+        if(!impl_)
+            Logger::GetInstance().Fatal("[MoveOnlyFunction]: 'operator()' called but function is nullptr");
+
         return impl_->Invoke(std::forward<Args>(args)...);
     }
 
     // Const call overload
     R operator()(Args... args) const
     {
+        if(!impl_)
+            Logger::GetInstance().Fatal("[MoveOnlyFunction]: 'operator() const' called but function is nullptr");
+
         return impl_->InvokeConst(std::forward<Args>(args)...);
     }
 
-    operator bool() const noexcept {
-        return static_cast<bool>(impl_);
+    operator bool() const noexcept
+    {
+        return impl_ != nullptr;
     }
 
     // Extras
-    void Reset() noexcept {
-        impl_.reset();
+    void Reset() noexcept
+    {
+        delete impl_;
+        impl_ = nullptr;
     }
 };
 

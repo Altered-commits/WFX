@@ -102,7 +102,10 @@ void Logger::PrintArg(FILE* out, T&& arg)
     else if constexpr(std::is_same_v<U, std::string_view>)
         std::fprintf(out, "%.*s", static_cast<int>(arg.size()), arg.data());
 
-    else if constexpr(std::is_same_v<U, char> || std::is_same_v<U, std::int8_t> || std::is_same_v<U, std::uint8_t>)
+    else if constexpr(std::is_same_v<U, bool>)
+        std::fputs(arg ? "true" : "false", out);
+
+    else if constexpr(std::is_same_v<U, char>)
         std::fputc(arg, out);
 
     else if constexpr(std::is_integral_v<U>) {
