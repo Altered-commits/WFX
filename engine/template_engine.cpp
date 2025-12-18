@@ -298,7 +298,7 @@ void TemplateEngine::PreCompileTemplates()
             logger_.Info("[TemplateEngine]: Staging dynamic template for compilation: ", relPath);
             // Create a unique, C compatible function name
             std::string funcName = 
-                StringSanitizer::NormalizePathToIdentifier(relPath, dynamicTemplateFuncPrefix_);
+                StringCanonical::NormalizePathToIdentifier(relPath, dynamicTemplateFuncPrefix_);
 
             // Define path for the new .cpp file
             std::string cppPath = dynamicCxxOutputDir + "/" + relPath + ".cpp";
@@ -375,7 +375,7 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
         std::string relPath = std::string(tmpl.filePath.begin() + inputDir.size(), tmpl.filePath.end());
         relPath.erase(0, relPath.find_first_not_of("/\\"));
 
-        std::string symbol = StringSanitizer::NormalizePathToIdentifier(relPath, dynamicTemplateFuncPrefix_);
+        std::string symbol = StringCanonical::NormalizePathToIdentifier(relPath, dynamicTemplateFuncPrefix_);
 
         void* rawSym = dlsym(handle, symbol.c_str());
         const char* dlsymErr = dlerror();

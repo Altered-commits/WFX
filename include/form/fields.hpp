@@ -15,86 +15,81 @@ using ValidatorFn = bool (*)(std::string_view, const void*);
 template<typename T>
 using SanitizerFn = bool (*)(std::string_view, const void*, T&);
 
-// vvv Builtin Form Fields vvv
+// vvv Builtin Form Rules vvv
 struct Text {
-    std::uint32_t min             = 0;
-    std::uint32_t max             = 65535;
-    bool          ascii           = false;
-    ValidatorFn   customValidator = nullptr;
+    std::uint32_t min   = 0;
+    std::uint32_t max   = 65535;
+    bool          ascii = false;
 };
 
 struct Email  {
-    bool        strict          = true;
-    ValidatorFn customValidator = nullptr;
+    bool strict = true;
 };
 
 struct Int {
-    std::int64_t min             = INT64_MIN;
-    std::int64_t max             = INT64_MAX;
-    ValidatorFn  customValidator = nullptr;
+    std::int64_t min = INT64_MIN;
+    std::int64_t max = INT64_MAX;
 };
 
 struct UInt {
-    std::uint64_t min             = 0;
-    std::uint64_t max             = UINT64_MAX;
-    ValidatorFn   customValidator = nullptr;
+    std::uint64_t min = 0;
+    std::uint64_t max = UINT64_MAX;
 };
 
 struct Float {
-    double      min             = -1e308;
-    double      max             = 1e308;
-    ValidatorFn customValidator = nullptr;
+    double min = -1e308;
+    double max = 1e308;
 };
 
 // vvv Form Type Traits vvv
 template<typename Rule>
 struct DecayedType;
 
-template<> struct DecayedType<Text>  { using type = std::string_view; };
-template<> struct DecayedType<Email> { using type = std::string_view; };
-template<> struct DecayedType<Int>   { using type = std::int64_t;     };
-template<> struct DecayedType<UInt>  { using type = std::uint64_t;    };
-template<> struct DecayedType<Float> { using type = double;           };
+template<> struct DecayedType<Text>  { using Type = std::string_view; };
+template<> struct DecayedType<Email> { using Type = std::string_view; };
+template<> struct DecayedType<Int>   { using Type = std::int64_t;     };
+template<> struct DecayedType<UInt>  { using Type = std::uint64_t;    };
+template<> struct DecayedType<Float> { using Type = double;           };
 
 // vvv Field Descriptor vvv
 template<typename Rule>
 struct FieldDesc {
-    using RawType = typename DecayedType<Rule>::type;
+    using RawType = typename DecayedType<Rule>::Type;
 
-    std::string_view     name;
     Rule                 rule{};
+    ValidatorFn          validator = nullptr;
     SanitizerFn<RawType> sanitizer = nullptr;
 
-    constexpr FieldDesc CustomSanitize(SanitizerFn<RawType> fn) const
+    [[nodiscard]]
+    constexpr FieldDesc CustomSanitizer(SanitizerFn<RawType> fn) const & noexcept
     {
         FieldDesc copy = *this;
         copy.sanitizer = fn;
         return copy;
     }
 
-    constexpr FieldDesc Validator(ValidatorFn fn) const
+    [[nodiscard]]
+    constexpr FieldDesc CustomSanitizer(SanitizerFn<RawType> fn) && noexcept
+    {
+        sanitizer = fn;
+        return std::move(*this);
+    }
+
+    [[nodiscard]]
+    constexpr FieldDesc CustomValidator(ValidatorFn fn) const & noexcept
     {
         FieldDesc copy = *this;
-        copy.rule.customValidator = fn;
+        copy.validator = fn;
         return copy;
     }
+
+    [[nodiscard]]
+    constexpr FieldDesc CustomValidator(ValidatorFn fn) && noexcept
+    {
+        validator = fn;
+        return std::move(*this);
+    }
 };
-
-// vvv Factory Functions vvv
-template<typename Rule>
-constexpr auto Field(const char* name, Rule rule)
-{
-    return FieldDesc<Rule>{ name, rule, nullptr };
-}
-
-template<typename... Fields>
-struct FieldList { std::tuple<Fields...> fields; };
-
-template<typename... Fields>
-constexpr auto MakeFields(Fields... f)
-{
-    return FieldList<Fields...>{ std::make_tuple(f...) };
-}
 
 } // namespace Form
 

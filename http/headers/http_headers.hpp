@@ -25,14 +25,16 @@ template<typename KeyType, typename ValType>
 class HttpHeaders {
 public:
     using HeaderMapType = std::unordered_map<KeyType, ValType, CaseInsensitiveHash, CaseInsensitiveEqual>;
+    using HeaderResult  = std::pair<bool, const ValType*>;
 
     HttpHeaders();
 
-    void    SetHeader(KeyType key, ValType value);
-    bool    HasHeader(const KeyType& key) const;
-    ValType GetHeader(const KeyType& key) const;
-    void    RemoveHeader(const KeyType& key);
-    void    Clear();
+    void         SetHeader(KeyType key, ValType value);
+    bool         HasHeader(const KeyType& key) const;
+    ValType      GetHeader(const KeyType& key) const;
+    HeaderResult CheckAndGetHeader(const KeyType& key) const;
+    void         RemoveHeader(const KeyType& key);
+    void         Clear();
 
     HeaderMapType& GetHeaderMap();
     const HeaderMapType& GetHeaderMap() const;

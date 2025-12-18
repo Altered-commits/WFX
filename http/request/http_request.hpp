@@ -17,10 +17,11 @@ using ContextMap = std::unordered_map<std::string, std::any>;
 struct HttpRequest {
     HttpMethod       method;
     HttpVersion      version;
+    std::string_view path;
+    std::string_view body;
     RequestHeaders   headers;
     ContextMap       context;
     PathSegments     pathSegments;
-    std::string_view path;
 
 public: // Copying is strictly not allowed
     HttpRequest(const HttpRequest&)            = delete;

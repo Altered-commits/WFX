@@ -347,7 +347,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
         std::string_view token = TrimView(header.substr(start, end - start));
 
         // CLOSE
-        if(StringSanitizer::CaseInsensitiveCompare(token, "close")) {
+        if(StringCanonical::InsensitiveStringCompare(token, "close")) {
             if(mask & ConnectionHeader::KEEP_ALIVE)
                 return ConnectionHeader::ERROR; // Mutually exclusive
 
@@ -355,7 +355,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
         }
 
         // KEEP-ALIVE
-        else if(StringSanitizer::CaseInsensitiveCompare(token, "keep-alive")) {
+        else if(StringCanonical::InsensitiveStringCompare(token, "keep-alive")) {
             if(mask & ConnectionHeader::CLOSE)
                 return ConnectionHeader::ERROR; // Mutually exclusive
 
@@ -363,7 +363,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
         }
 
         // UPGRADE
-        else if(StringSanitizer::CaseInsensitiveCompare(token, "upgrade"))
+        else if(StringCanonical::InsensitiveStringCompare(token, "upgrade"))
             mask |= ConnectionHeader::UPGRADE;
 
         // UNKNOWN
