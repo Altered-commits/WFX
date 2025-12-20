@@ -69,9 +69,6 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         [](HttpResponse* backend, const Json* json) {  // SendJsonConstRefFn
             backend->SendJson(*json);
         },
-        SendJsonRvalueFn{[](HttpResponse* backend, Json&& json) {  // SendJsonRvalueFn
-            backend->SendJson(std::move(json));
-        }},
         [](HttpResponse* backend, const char* cstr, bool autoHandle404) {  // SendFileCStrFn
             backend->SendFile(cstr, autoHandle404);
         },

@@ -207,9 +207,9 @@ void TemplateEngine::PreCompileTemplates()
     if(!fs.DirectoryExists(staticOutputDir.c_str()) && !fs.CreateDirectory(staticOutputDir, true))
         logger_.Fatal("[TemplateEngine]: Failed to create static directory: ", staticOutputDir);
 
-    // Dynamic templates have 2 folders, their C++ representation in cpp/ and compiled obj files in objs/
+    // Dynamic templates have 2 folders, their C++ representation in cxx/ and compiled obj files in objs/
     if(!fs.DirectoryExists(dynamicCxxOutputDir.c_str()) && !fs.CreateDirectory(dynamicCxxOutputDir, true))
-        logger_.Fatal("[TemplateEngine]: Failed to create dynamic-cpp directory: ", dynamicCxxOutputDir);
+        logger_.Fatal("[TemplateEngine]: Failed to create dynamic-cxx directory: ", dynamicCxxOutputDir);
 
     if(!fs.DirectoryExists(dynamicObjOutputDir.c_str()) && !fs.CreateDirectory(dynamicObjOutputDir, true))
         logger_.Fatal("[TemplateEngine]: Failed to create dynamic-obj directory: ", dynamicObjOutputDir);
@@ -256,22 +256,15 @@ void TemplateEngine::PreCompileTemplates()
 
         // Partial tag can exist, check its existence first
         if(inSize >= partialTagSize_) {        
-            if(in->Read(temp, partialTagSize_) < 0) {
+            if(in->ReadAt(temp, partialTagSize_, 0) < 0) {
                 errors++;
-                logger_.Error("[TemplateEngine]: Failed to read the first 14 bytes");
+                logger_.Error("[TemplateEngine]: Failed to read the first 13 bytes");
                 return;
             }
 
             // No need to compile
             if(StartsWith(temp, partialTag_))
                 return;
-
-            // Seek back to start to not miss those bytes we skipped
-            if(!in->Seek(0)) {
-                errors++;
-                logger_.Error("[TemplateEngine]: Failed to revert back to the start, lost 14 bytes");
-                return;
-            }
         }
 
         auto out = fs.OpenFileWrite(outPath.c_str());
@@ -441,7 +434,9 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
 
             // If current frame had an extends file, push it now
             if(!ctx.currentExtendsName.empty()) {
-                PushFile(ctx, ctx.currentExtendsName);
+                if(!PushFile(ctx, ctx.currentExtendsName))
+                    return { TemplateType::FAILURE, 0 };
+
                 ctx.currentExtendsName.clear();
             }
             continue;
@@ -472,6 +467,7 @@ __ContinueReading:
                 // Not a tag
                 if(!SafeWrite(ctx.io, frame.carry.c_str(), frame.carry.size()))
                     return { TemplateType::FAILURE, 0 };
+
                 frame.carry.clear();
                 goto __DefaultChunkProcessing;
             }
@@ -500,7 +496,7 @@ __ContinueReading:
 
             tagEnd = bodyView.find("%}");
             if(tagEnd == std::string_view::npos) {
-                // So the min chunk size is about 512 bytes, and maxTagLength_ is like what, 270?
+                // So the min chunk size is about 512 bytes, and maxTagLength_ is like what, 300?
                 // And ur telling me that we just started this chunk and we couldn't find the tag end?
                 // Dawg fuck no
                 logger_.Error(
@@ -573,8 +569,10 @@ __DefaultChunkProcessing:
             }
 
             // Write everything before tag as literal
+            // Either to block
             if(ctx.inBlock && isExtending)
                 ctx.currentBlockContent.append(bodyView.data(), tagStart);
+            // Or to file directly
             else if(
                 tagStart > 0
                 && !skipLiterals
@@ -623,7 +621,12 @@ __DefaultChunkProcessing:
             // Preserve the dynamic tags for future compilation
             if(tagResult == TagResult::PASSTHROUGH_DYNAMIC) {
                 ctx.foundDynamicTag = true;
-                if(!skipLiterals && !SafeWrite(ctx.io, tagView.data(), tagView.size()))
+                // Either saved to block
+                if(ctx.inBlock && isExtending)
+                    ctx.currentBlockContent.append(tagView);
+
+                // Or written to file
+                else if(!skipLiterals && !SafeWrite(ctx.io, tagView.data(), tagView.size()))
                     return { TemplateType::FAILURE, 0 };
             }
 
@@ -715,8 +718,7 @@ Tag TemplateEngine::ExtractTag(std::string_view line)
 
 TemplateEngine::TagResult TemplateEngine::ProcessTag(
     CompilationContext& context, std::string_view tagView
-)
-{
+) {
     auto [tagName, tagArgs] = ExtractTag(tagView);
 
     // Empty tags are not allowed
@@ -803,12 +805,23 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(
                 return TagResult::FAILURE;
             }
 
+            // We do not allow nested block statements, if we are inside of a block, fail it
+            if(context.inBlock) {
+                logger_.Error(
+                    "[TemplateEngine].[ParsingError]: Nested block statements are not allowed, but found {% block ", tagArgs,
+                    "%} inside of {% block ", context.currentBlockName, "%}"
+                );
+                return TagResult::FAILURE;
+            }
+
             std::string blockName = std::string(tagArgs);
 
             // Try to find the current block in the block list, if u can, substitute it
             auto it = context.childBlocks.find(blockName);
             if(it != context.childBlocks.end()) {
-                SafeWrite(context.io, it->second.data(), it->second.size());
+                if(!SafeWrite(context.io, it->second.data(), it->second.size()))
+                    return TagResult::FAILURE;
+
                 context.skipUntilFlag = true; // Now just skip everything until endblock
                 return TagResult::SUCCESS;
             }
@@ -848,7 +861,10 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(
             TrimInline(context.currentBlockContent);
 
             context.inBlock = false;
-            context.childBlocks[std::move(context.currentBlockName)] = std::move(context.currentBlockContent);
+            context.childBlocks.emplace(
+                std::move(context.currentBlockName),
+                std::move(context.currentBlockContent)
+            );
             context.currentBlockName.clear();
             context.currentBlockContent.clear();
 
@@ -883,9 +899,13 @@ bool TemplateEngine::FlushWrite(IOContext& ctx, bool force)
     if(ctx.offset == 0)
         return true;
 
-    if(ctx.file->Write(ctx.buffer.get(), ctx.offset)
-        != static_cast<std::int64_t>(ctx.offset))
+    if(
+        ctx.file->Write(ctx.buffer.get(), ctx.offset)
+        != static_cast<std::int64_t>(ctx.offset)
+    ) {
+        logger_.Error("[TemplateEngine]: 'FlushWrite' failed to write data to current file");
         return false;
+    }
 
     ctx.offset = 0;
     return true;

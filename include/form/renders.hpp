@@ -15,8 +15,10 @@ static inline void RenderInputAttributes(std::string& preRenderedForm, const Tex
         preRenderedForm += "minlength=\"" + std::to_string(r.min) + "\" ";
     if(r.max)
         preRenderedForm += "maxlength=\"" + std::to_string(r.max) + "\" ";
+
+    // Strict printable characters
     if(r.ascii)
-        preRenderedForm += "pattern=\"[\\x00-\\x7F]*\" ";
+        preRenderedForm += "pattern=\"[\\x20-\\x7E]*\" ";
 }
 
 static inline void RenderInputAttributes(std::string& preRenderedForm, const Email&)

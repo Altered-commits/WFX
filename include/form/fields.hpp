@@ -15,28 +15,33 @@ using ValidatorFn = bool (*)(std::string_view, const void*);
 template<typename T>
 using SanitizerFn = bool (*)(std::string_view, const void*, T&);
 
-// vvv Builtin Form Rules vvv
-struct Text {
-    std::uint32_t min   = 0;
-    std::uint32_t max   = 65535;
-    bool          ascii = false;
+// All common / required rules to exist in every rule
+struct BaseRule {
+    bool required = true;
 };
 
-struct Email  {
+// vvv Builtin Form Rules vvv
+struct Text : BaseRule {
+    bool          ascii = false;
+    std::uint32_t min   = 0;
+    std::uint32_t max   = 65535;
+};
+
+struct Email : BaseRule {
     bool strict = true;
 };
 
-struct Int {
+struct Int : BaseRule {
     std::int64_t min = INT64_MIN;
     std::int64_t max = INT64_MAX;
 };
 
-struct UInt {
+struct UInt : BaseRule {
     std::uint64_t min = 0;
     std::uint64_t max = UINT64_MAX;
 };
 
-struct Float {
+struct Float : BaseRule {
     double min = -1e308;
     double max = 1e308;
 };

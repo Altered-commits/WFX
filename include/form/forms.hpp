@@ -6,7 +6,15 @@
 #include "sanitizers.hpp"
 #include "renders.hpp"
 #include "http/aliases.hpp"
+#include "third_party/json/json.hpp"
 #include <array>
+
+// The magic key is purely for SSR json use
+// Do not use this key anywhere else
+#define FORM_SCHEMA_JSON_KEY "__\x01"
+
+// For ease of use :)
+using Json = nlohmann::json;
 
 namespace Form {
 
@@ -27,7 +35,8 @@ constexpr auto Field(const char* name, Rule rule)
 // vvv Wrapper for sanitized value vvv
 template<typename T>
 struct CleanedValue {
-    T value{};
+    T    value{};
+    bool present = false;
 };
 
 // vvv Tuple Builder vvv
@@ -72,19 +81,10 @@ public:
         static_assert(N > 1, "FormSchema.formName cannot be empty");
 
         // Avoid too many reallocs
-        preRenderedForm.reserve(512);
-
-        // Pre-render the form into a string so its fast when we need to SSR
-        preRenderedForm += "<form class=\"wfx-form-";
-        preRenderedForm += this->formName;
-        preRenderedForm += "\" data-form=\"";
-        preRenderedForm += this->formName;
-        preRenderedForm += "\">\n";
+        preRenderedFields.reserve(256);
 
         // Render each field
         RenderFields(std::make_index_sequence<FieldCount>{});
-
-        preRenderedForm += "</form>\n";
     }
 
 public: // Main Functions
@@ -125,9 +125,10 @@ public: // Main Functions
         );
     }
 
+    // Returns view to pre-rendered fields. NOTE: <form></form> needs to be written by user
     std::string_view Render() const
     {
-        return preRenderedForm;
+        return preRenderedFields;
     }
 
 private: // Helper Functions
@@ -179,6 +180,18 @@ private: // Helper Functions
         CleanedValue<typename Field::RawType>& out
     ) const
     {
+        // Presence check FIRST
+        if(in.empty()) {
+            if(fd.rule.required)
+                return false;   // Missing required field
+
+            // Optional field
+            out.present = false;
+            return true;
+        }
+
+        out.present = true;
+
         // Validator
         if(!fd.validator(in, &fd.rule))
             return false;
@@ -216,36 +229,73 @@ private: // Rendering
         const auto& fd   = std::get<I>(fieldRules);
 
         // Label
-        preRenderedForm += "  <label for=\"wfx-";
-        preRenderedForm += formName;
-        preRenderedForm += '-';
-        preRenderedForm += name;
-        preRenderedForm += "\">";
-        preRenderedForm += name;
-        preRenderedForm += "</label>\n";
+        preRenderedFields += "  <label for=\"";
+        preRenderedFields += formName;
+        preRenderedFields += "__";
+        preRenderedFields += name;
+        preRenderedFields += "\">";
+        preRenderedFields += name;
+        preRenderedFields += "</label>\n";
 
         // Input start
-        preRenderedForm += "  <input id=\"wfx-";
-        preRenderedForm += formName;
-        preRenderedForm += '-';
-        preRenderedForm += name;
-        preRenderedForm += "\" name=\"";
-        preRenderedForm += name;
-        preRenderedForm += "\" ";
+        preRenderedFields += "  <input id=\"";
+        preRenderedFields += formName;
+        preRenderedFields += "__";
+        preRenderedFields += name;
+        preRenderedFields += "\" name=\"";
+        preRenderedFields += name;
+        preRenderedFields += "\" ";
 
         // Rule attributes
-        RenderInputAttributes(preRenderedForm, fd.rule);
+        RenderInputAttributes(preRenderedFields, fd.rule);
 
         // Close input
-        preRenderedForm += "/>\n";
+        preRenderedFields += "/>\n";
     }
 
 private: // Storage
     std::string_view formName;
     NamesArray       fieldNames;
     FieldsTuple      fieldRules;
-    std::string      preRenderedForm;
+    std::string      preRenderedFields;
 };
+
+// vvv Function for wrapping form as a pointer (so json doesn't copy fields during construction) vvv
+// Totally optional, use only for SSR context
+template<typename... Fields>
+inline Json FormToJson(const FormSchema<Fields...>& form)
+{
+    static_assert(!std::is_rvalue_reference_v<decltype(form)>,
+                  "FormToJson: 'form' cannot be a rvalue, it must strictly be lvalue");
+
+    auto renderWrapper = [](const void* formPtr) -> std::string_view {
+        return static_cast<const FormSchema<Fields...>*>(formPtr)->Render();
+    };
+
+    return {
+        FORM_SCHEMA_JSON_KEY,
+        reinterpret_cast<std::uintptr_t>(+renderWrapper),
+        reinterpret_cast<std::uintptr_t>(&form)
+    };
+}
+
+// NOTE: 'nullptr' check is assumed to be done before passing in 'Json*'
+inline std::string_view JsonToFormRender(const Json* json)
+{
+    // Invalid or not SSR form
+    if((json->size() != 3) || ((*json)[0].get<std::string>() != FORM_SCHEMA_JSON_KEY))
+        return {};
+
+    // Extract pointers
+    auto fnPtr   = reinterpret_cast<std::string_view(*)(const void*)>((*json)[1].get<std::uintptr_t>());
+    auto formPtr = reinterpret_cast<const void*>((*json)[2].get<std::uintptr_t>());
+
+    if(!fnPtr || !formPtr)
+        return {};
+
+    // Call type-erased render
+    return fnPtr(formPtr);
+}
 
 } // namespace Form
 

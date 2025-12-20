@@ -30,4 +30,3 @@ To Fix:
 2. Batch syscalls (for receving and sending data) instead of spamming them every request
 3. Timer wheel shouldn't expire connections inline, or for larger count it will stall backend pipeline
 4. ADD PROPER ERROR CHECKING FOR ASYNC TIMER OPERATIONS (High failure rate rn at high concurrency)  [Partially fixed]
-5. Optimize epoll_ctl usage for epoll_connection.cpp, instead of calling it everytime, we should chain buffers

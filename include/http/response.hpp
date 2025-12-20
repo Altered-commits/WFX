@@ -30,12 +30,11 @@ public:
     }
 
     // SendText overloads
-    void SendText(const char* cstr)      { httpApi_->SendTextCStr(backend_, cstr); }
-    void SendText(std::string&& str)     { httpApi_->SendTextMove(backend_, std::move(str)); }
+    void SendText(const char* cstr)  { httpApi_->SendTextCStr(backend_, cstr); }
+    void SendText(std::string&& str) { httpApi_->SendTextMove(backend_, std::move(str)); }
 
     // SendJson overloads
-    void SendJson(const Json& j)         { httpApi_->SendJsonConstRef(backend_, &j); }
-    void SendJson(Json&& j)              { httpApi_->SendJsonMove(backend_, std::move(j)); }
+    void SendJson(const Json& j) { httpApi_->SendJsonConstRef(backend_, &j); }
 
     // SendFile overloads
     void SendFile(const char* path, bool autoHandle404 = true)   { httpApi_->SendFileCStr(backend_, path, autoHandle404); }
