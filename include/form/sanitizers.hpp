@@ -1,11 +1,10 @@
 #ifndef WFX_INC_FORM_SANITIZERS_HPP
 #define WFX_INC_FORM_SANITIZERS_HPP
 
-#include <string_view>
-#include <cstdint>
-
 #include "fields.hpp"
 #include "utils/backport/string.hpp"
+#include <cstdint>
+#include <string_view>
 
 namespace Form {
 
@@ -29,11 +28,10 @@ static inline bool DefaultSanitizeInt(std::string_view sv, const void* fieldPtr,
     const Int& r = *static_cast<const Int*>(fieldPtr);
 
     // All necessary checks are done in 'StrToInt64'
-    std::int64_t val = 0;
-    if(!WFX::Utils::StrToInt64(sv, val))
+    if(!WFX::Utils::StrToInt64(sv, out))
         return false;
 
-    return (val >= r.min && val <= r.max);
+    return (out >= r.min && out <= r.max);
 }
 
 // Strict conversion. This handles both validation and sanitizing
@@ -42,11 +40,10 @@ static inline bool DefaultSanitizeUInt(std::string_view sv, const void* fieldPtr
     const UInt& r = *static_cast<const UInt*>(fieldPtr);
 
     // All necessary checks are done in 'StrToUInt64'
-    std::uint64_t val = 0;
-    if(!WFX::Utils::StrToUInt64(sv, val))
+    if(!WFX::Utils::StrToUInt64(sv, out))
         return false;
 
-    return (val >= r.min && val <= r.max);
+    return (out >= r.min && out <= r.max);
 }
 
 // Strict conversion. This handles both validation and sanitizing
@@ -58,20 +55,27 @@ static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPt
 
     char* end = nullptr;
     errno = 0;
+
     double v = std::strtod(sv.data(), &end);
 
-    if(errno != 0)                   return false;
-    if(end != sv.data() + sv.size()) return false;
+    if(
+        errno != 0
+        || end != sv.data() + sv.size()
+        || v < r.min
+        || v > r.max
+    )
+        return false;
 
-    return (v >= r.min && v <= r.max);
+    out = v;
+    return true;
 }
 
 // vvv Dispatchers vvv
-static inline SanitizerFn<std::string_view> DefaultSanitizerFor(const Text&)  { return DefaultSanitizeText;  }
-static inline SanitizerFn<std::string_view> DefaultSanitizerFor(const Email&) { return DefaultSanitizeEmail; }
-static inline SanitizerFn<std::int64_t>     DefaultSanitizerFor(const Int&)   { return DefaultSanitizeInt;   }
-static inline SanitizerFn<std::uint64_t>    DefaultSanitizerFor(const UInt&)  { return DefaultSanitizeUInt;  }
-static inline SanitizerFn<double>           DefaultSanitizerFor(const Float&) { return DefaultSanitizeFloat; }
+static constexpr SanitizerFn<std::string_view> DefaultSanitizerFor(const Text&)  { return DefaultSanitizeText;  }
+static constexpr SanitizerFn<std::string_view> DefaultSanitizerFor(const Email&) { return DefaultSanitizeEmail; }
+static constexpr SanitizerFn<std::int64_t>     DefaultSanitizerFor(const Int&)   { return DefaultSanitizeInt;   }
+static constexpr SanitizerFn<std::uint64_t>    DefaultSanitizerFor(const UInt&)  { return DefaultSanitizeUInt;  }
+static constexpr SanitizerFn<double>           DefaultSanitizerFor(const Float&) { return DefaultSanitizeFloat; }
 
 } // namespace Form
 

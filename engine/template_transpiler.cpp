@@ -865,7 +865,7 @@ using WFX::Core::BaseTemplateGenerator;
 // Helper Functions
 using WFX::Core::SafeGetJson;
 
-)", 367);
+)", 369);
     if(!writeResult) {
         logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to write cxx header to: ", outCxxPath);
         return false;

@@ -57,7 +57,6 @@ using SendTemplateCStrFn      = void (*)(HttpResponse* backend, const char* cstr
 
 // Special rvalue overload
 using SendTextRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&)>;
-using SendJsonRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, Json&&)>;
 using SendFileRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&, bool)>;
 using SendTemplateRvalueFn    = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&, Json&&)>;
 
@@ -89,7 +88,6 @@ struct HTTP_API_TABLE {
 
     // SendJson overloads
     SendJsonConstRefFn      SendJsonConstRef;
-    SendJsonRvalueFn        SendJsonMove;
 
     // SendFile overloads
     SendFileCStrFn          SendFileCStr;

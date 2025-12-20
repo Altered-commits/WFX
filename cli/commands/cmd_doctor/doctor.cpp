@@ -37,11 +37,11 @@ constexpr CompilerConfig BUILD_COMPILER{
     "msvc", "cl", "link",
     "/Fo:", "/OUT:",     // objFlag, dllFlag
     {                    // prod
-        "/std:c++17 /O2 /GL /GS /EHsc /MD /Gw /Gy /I. /Iwfx/include /Iwfx /c",
+        "/std:c++17 /O2 /GL /GS /EHsc /MD /Gw /Gy /I. /IWFX/include /IWFX /c",
         "/DLL /LTCG /OPT:REF /OPT:ICF /DEBUG:OFF"
     },
     {                    // debug
-        "/std:c++17 /Od /EHsc /MDd /I. /Iwfx/include /Iwfx /c",
+        "/std:c++17 /Od /EHsc /MDd /I. /IWFX/include /IWFX /c",
         "/DLL /DEBUG"
     }
 };
@@ -51,11 +51,11 @@ constexpr CompilerConfig BUILD_COMPILER{
     "-o ", "-o ",
     {
         "-std=c++17 -fPIC -O3 -flto=auto -fno-plt -fvisibility=hidden -fvisibility-inlines-hidden "
-        "-ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c",
+        "-ffunction-sections -fdata-sections -I. -IWFX/include -IWFX -c",
         "-shared -fPIC -flto=auto -Wl,--gc-sections -Wl,--strip-all"
     },
     {
-        "-std=c++17 -fPIC -O0 -I. -Iwfx/include -Iwfx -c",
+        "-std=c++17 -fPIC -O0 -I. -IWFX/include -IWFX -c",
         "-shared -fPIC"
     }
 };
@@ -65,11 +65,11 @@ constexpr CompilerConfig BUILD_COMPILER{
     "-o ", "-o ",
     {
         "-std=c++17 -fPIC -O3 -flto=auto -fno-plt -fvisibility=hidden -fvisibility-inlines-hidden "
-        "-ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c",
+        "-ffunction-sections -fdata-sections -I. -IWFX/include -IWFX -c",
         "-shared -fPIC -flto=auto -Wl,--gc-sections -Wl,--strip-all"
     },
     {
-        "-std=c++17 -fPIC -O0 -I. -Iwfx/include -Iwfx -c",
+        "-std=c++17 -fPIC -O0 -I. -IWFX/include -IWFX -c",
         "-shared -fPIC"
     }
 };
@@ -79,11 +79,11 @@ constexpr CompilerConfig BUILD_COMPILER{
     "-o ", "-o ",
     {
         "-std=c++17 -fPIC -O3 -flto=auto -fno-plt -fvisibility=hidden -fvisibility-inlines-hidden "
-        "-ffunction-sections -fdata-sections -I. -Iwfx/include -Iwfx -c",
+        "-ffunction-sections -fdata-sections -I. -IWFX/include -IWFX -c",
         "-shared -fPIC -flto=auto -Wl,--gc-sections -Wl,--strip-all"
     },
     {
-        "-std=c++17 -fPIC -O0 -I. -Iwfx/include -Iwfx -c",
+        "-std=c++17 -fPIC -O0 -I. -IWFX/include -IWFX -c",
         "-shared -fPIC"
     }
 };

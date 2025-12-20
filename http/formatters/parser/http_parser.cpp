@@ -78,7 +78,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
             auto contentLengthHeader = request.headers.GetHeader("Content-Length");
             auto encodingHeader      = request.headers.GetHeader("Transfer-Encoding");
 
-            bool hasExpectHeader        = !expectHeader.empty() && StringSanitizer::CaseInsensitiveCompare(expectHeader, "100-continue");
+            bool hasExpectHeader        = !expectHeader.empty() && StringCanonical::InsensitiveStringCompare(expectHeader, "100-continue");
             bool hasContentLengthHeader = !contentLengthHeader.empty();
             bool hasEncodingHeader      = !encodingHeader.empty();
 
@@ -148,7 +148,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
             // Data is chunked / gzip / whatever [future support]
             if(hasEncodingHeader) {
                 // Only 'chunked' is supported for now
-                if(!StringSanitizer::CaseInsensitiveCompare(encodingHeader, "chunked"))
+                if(!StringCanonical::InsensitiveStringCompare(encodingHeader, "chunked"))
                     return HttpParseState::PARSE_ERROR;
 
                 // Parser will not try to buffer the full body, instead user will handle chunks
@@ -219,7 +219,7 @@ bool HttpParser::ParseRequest(const char* data, std::size_t size, std::size_t& p
     outRequest.path = std::string_view(data + pathStart, pathEnd - pathStart);
 
     // Normalize the path, reject if its malformed
-    if(!StringSanitizer::NormalizeURIPathInplace(outRequest.path))
+    if(!StringCanonical::NormalizeURIPathInplace(outRequest.path))
         return false;
 
     std::string_view versionStr = line.substr(pathEnd + 1);
@@ -277,7 +277,7 @@ bool HttpParser::ParseBody(const char* data, std::size_t size, std::size_t& pos,
     if(pos > size || contentLen > size || pos + contentLen > size)
         return false;
 
-    outRequest.SetContext("body", std::string_view{data + pos, contentLen});
+    outRequest.body = std::string_view{data + pos, contentLen};
     pos += contentLen;
     return true;
 }

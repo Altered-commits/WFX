@@ -20,7 +20,7 @@ bool CaseInsensitiveEqual::operator()(const T1& lhs, const T2& rhs) const
         (std::is_same_v<std::decay_t<T2>, std::string> || std::is_same_v<std::decay_t<T2>, std::string_view>),
         "CaseInsensitiveEqual: both operands must be std::string or std::string_view"
     );
-    return WFX::Utils::StringSanitizer::CTInsensitiveStringCompare(lhs, rhs);
+    return WFX::Utils::StringCanonical::CTInsensitiveStringCompare(lhs, rhs);
 }
 
 template<typename K, typename V>
@@ -48,6 +48,17 @@ V HttpHeaders<K, V>::GetHeader(const K& key) const
 {
     auto it = headers_.find(key);
     return it != headers_.end() ? it->second : V{};
+}
+
+template<typename K, typename V>
+typename HttpHeaders<K, V>::HeaderResult
+HttpHeaders<K, V>::CheckAndGetHeader(const K& key) const
+{
+    auto it = headers_.find(key);
+    if(it != headers_.end())
+        return { true, &it->second };
+
+    return { false, nullptr };
 }
 
 template<typename K, typename V>

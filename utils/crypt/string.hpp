@@ -6,19 +6,21 @@
 
 namespace WFX::Utils {
 
-namespace StringSanitizer {
-    std::uint8_t ToLowerAscii(std::uint8_t c);
+namespace StringCanonical {
+    std::uint8_t ToLowerAscii(std::uint8_t c) noexcept;
 
-    // Constant time comparisions
-    bool CTStringCompare(std::string_view lhs, std::string_view rhs);
-    bool CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs);
+    // Comparisions
+    bool CTStringCompare(std::string_view lhs, std::string_view rhs)            noexcept;
+    bool CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs) noexcept;
+    bool InsensitiveStringCompare(std::string_view lhs, std::string_view rhs)   noexcept;
 
-    bool CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs);
-
-    /* NOTE: 'path' buffer must be a valid writable buffer */
-    bool        NormalizeURIPathInplace(std::string_view& path);
-    std::string NormalizePathToIdentifier(std::string_view path, std::string_view prefix);
-} // namespace StringSanitizer
+    // Normalizations
+    /* NOTE: 'path' must be a valid writable buffer */
+    bool        NormalizeURIPathInplace(std::string_view& path)                           noexcept;
+    std::string NormalizePathToIdentifier(std::string_view path, std::string_view prefix) noexcept;
+    /* NOTE: 'buf' must be a valid writable buffer */
+    bool        DecodePercentInplace(std::string_view& buf)                               noexcept;
+} // namespace StringCanonical
 
 } // namespace WFX::Utils
 

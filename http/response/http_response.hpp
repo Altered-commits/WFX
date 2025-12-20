@@ -40,7 +40,6 @@ public:
     void SendText(std::string&& str);
 
     void SendJson(const Json& j);
-    void SendJson(Json&& j);
 
     void SendFile(const char* cstr, bool autoHandle404);
     void SendFile(std::string&& path, bool autoHandle404);

@@ -3,7 +3,7 @@
 #include "engine/template_engine.hpp"
 #include "http/common/http_detector.hpp"
 #include "http/connection/http_connection.hpp"
-#include "include/third_party/json/json.hpp"
+#include "form/forms.hpp"
 #include "utils/filecache/filecache.hpp"
 #include "utils/filesystem/filesystem.hpp"
 #include "utils/backport/string.hpp"
@@ -67,11 +67,6 @@ void HttpResponse::SendText(std::string&& str)
 void HttpResponse::SendJson(const Json& j)
 {
     SetTextBody(std::move(j.dump()), CONTENT_TYPE_JSON);
-}
-
-void HttpResponse::SendJson(Json&& j)
-{
-    SetTextBody(std::move(j).dump(), CONTENT_TYPE_JSON);
 }
 
 // vvv FILE vvv
@@ -292,13 +287,21 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
                         continue;
                     }
 
-                    // Get the string representation of json value
-                    // The reason why we check for a string value specifically is because JSON includes-
-                    // -quote (") around string when u call dump, instead just get the string directly
-                    if(vc->value->is_string())
-                        carry = vc->value->get<std::string>();
-                    else
-                        carry = vc->value->dump();
+                    const Json* jsonValue = vc->value;
+
+                    // Json value can be interpreted in 3 ways
+                    //  - String      : Get it as is, do not serialize it (Serializing it includes quotes around string)
+                    //  - Form pointer: Defined as { FORM_SCHEMA_JSON_KEY, <deref_ptr>, <form_ptr> }
+                    //  - Others      : Dump() the value as is
+                    if(jsonValue->is_string())
+                        carry = jsonValue->get<std::string>();
+                    else {
+                        auto sv = Form::JsonToFormRender(jsonValue);
+                        if(!sv.empty())
+                            carry = sv;
+                        else
+                            carry = jsonValue->dump();
+                    }
 
                     currentType   = TemplateChunkType::VARIABLE;
                     currentOffset = 0;

@@ -203,7 +203,7 @@ private: // Nested helper types for the parser
         // Optimization ig
         std::unordered_map<std::string, std::uint32_t> varNameMap;
         std::unordered_map<std::size_t, std::uint32_t> rpnMap;
-        std::map<Value, std::uint32_t>                 constMap;
+        std::unordered_map<Value, std::uint32_t>       constMap;
         std::vector<RPNBytecode>                       rpnPool;
         std::vector<std::string>                       staticVarNames;
         std::vector<Value>                             staticConstants;

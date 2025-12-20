@@ -20,11 +20,11 @@ namespace HashUtils {
 
 // vvv HASHERS vvv
 namespace Hasher {
-    std::uint64_t SipHash24(const std::uint8_t* data, std::uint64_t len, const std::uint8_t key[16]);
-    std::uint64_t SipHash24(std::string_view data, const std::uint8_t key[16]);
+    std::uint64_t SipHash24(const std::uint8_t* data, std::uint64_t len, const std::uint8_t key[16]) noexcept;
+    std::uint64_t SipHash24(std::string_view data, const std::uint8_t key[16])                       noexcept;
 
-    std::uint64_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::uint64_t len);
-    std::uint64_t Fnv1aCaseInsensitive(std::string_view data);
+    std::uint64_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::uint64_t len) noexcept;
+    std::uint64_t Fnv1aCaseInsensitive(std::string_view data)                       noexcept;
 } // namespace Hasher
 
 // vvv TRUE RANDOMIZER vvv

@@ -35,8 +35,8 @@
     }
 
 // vvv Await vvv
-#define CoAwait(awaitable, onError)               CoAwaitHelper(awaitable, static_cast<void*>(nullptr), onError, __COUNTER__ + 1)
-#define CoAwaitGet(awaitable, returnVar, onError) CoAwaitHelper(awaitable, &returnVar, onError, __COUNTER__ + 1)
+#define CoAwait(awaitable, onError)            CoAwaitHelper(awaitable, static_cast<void*>(nullptr), onError, __COUNTER__ + 1)
+#define CoFetch(awaitable, returnVar, onError) CoAwaitHelper(awaitable, &returnVar, onError, __COUNTER__ + 1)
 
 // vvv Return vvv
 #define CoReturn(val)                                                                        \

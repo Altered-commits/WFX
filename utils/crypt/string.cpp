@@ -6,13 +6,13 @@
 namespace WFX::Utils {
 
 // Char Utilities
-std::uint8_t StringSanitizer::ToLowerAscii(std::uint8_t c)
+std::uint8_t StringCanonical::ToLowerAscii(std::uint8_t c) noexcept
 {
     return (c >= 'A' && c <= 'Z') ? (c | 0x20) : c;
 }
 
 // String Utilties
-bool StringSanitizer::CTStringCompare(std::string_view lhs, std::string_view rhs)
+bool StringCanonical::CTStringCompare(std::string_view lhs, std::string_view rhs) noexcept
 {
     if(lhs.size() != rhs.size()) return false;
 
@@ -23,7 +23,7 @@ bool StringSanitizer::CTStringCompare(std::string_view lhs, std::string_view rhs
     return result == 0;
 }
 
-bool StringSanitizer::CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs)
+bool StringCanonical::CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs) noexcept
 {
     if(lhs.size() != rhs.size()) return false;
 
@@ -39,7 +39,7 @@ bool StringSanitizer::CTInsensitiveStringCompare(std::string_view lhs, std::stri
     return result == 0;
 }
 
-bool StringSanitizer::CaseInsensitiveCompare(std::string_view lhs, std::string_view rhs)
+bool StringCanonical::InsensitiveStringCompare(std::string_view lhs, std::string_view rhs) noexcept
 {
     if(lhs.size() != rhs.size())
         return false;
@@ -52,7 +52,7 @@ bool StringSanitizer::CaseInsensitiveCompare(std::string_view lhs, std::string_v
 }
 
 // Path normalization
-bool StringSanitizer::NormalizeURIPathInplace(std::string_view& path)
+bool StringCanonical::NormalizeURIPathInplace(std::string_view& path) noexcept
 {
     // Sanity check
     if(path.size() == 0 || path.data() == nullptr)
@@ -140,7 +140,7 @@ bool StringSanitizer::NormalizeURIPathInplace(std::string_view& path)
     return true;
 }
 
-std::string StringSanitizer::NormalizePathToIdentifier(std::string_view path, std::string_view prefix)
+std::string StringCanonical::NormalizePathToIdentifier(std::string_view path, std::string_view prefix) noexcept
 {
     static const char* hex = "0123456789abcdef";
     std::string out;
@@ -157,6 +157,43 @@ std::string StringSanitizer::NormalizePathToIdentifier(std::string_view path, st
         }
     }
     return out;
+}
+
+// Percent normalization
+bool StringCanonical::DecodePercentInplace(std::string_view& buf_) noexcept
+{
+    if(buf_.empty())
+        return true;
+
+    char*       buf = const_cast<char*>(buf_.data());
+    std::size_t len = buf_.size();
+    std::size_t idx = 0;
+
+    for(std::size_t r = 0; r < len; ++r) {
+        char c = buf[r];
+
+        if(c == '+')
+            buf[idx++] = ' ';
+        
+        else if(c == '%') {
+            if(r + 2 >= len)
+                return false;
+
+            std::uint8_t hi = UInt8FromHexChar(static_cast<std::uint8_t>(buf[r + 1]));
+            std::uint8_t lo = UInt8FromHexChar(static_cast<std::uint8_t>(buf[r + 2]));
+
+            if((hi | lo) == 0xFF)
+                return false;
+
+            buf[idx++] = static_cast<char>((hi << 4) | lo);
+            r += 2;
+        }
+        else
+            buf[idx++] = c;
+    }
+
+    buf_ = std::string_view(buf, idx);
+    return true;
 }
 
 } // namespace WFX::Utils

@@ -1,10 +1,9 @@
 #ifndef WFX_INC_FORM_VALIDATORS_HPP
 #define WFX_INC_FORM_VALIDATORS_HPP
 
-#include <cstdlib>
-
 #include "fields.hpp"
 #include "utils/backport/string.hpp"
+#include <cstdlib>
 
 namespace Form {
 
@@ -34,7 +33,7 @@ static inline bool DefaultValidateEmail(std::string_view sv, const void* fieldPt
     // ASCII-only check
     if(r.strict) {
         for(unsigned char c : sv)
-            if (c > 127) return false;
+            if(c > 127) return false;
     }
 
     // Find '@'
@@ -101,11 +100,11 @@ static inline bool DefaultValidateFloat(std::string_view sv, const void* fieldPt
 }
 
 // vvv Dispatchers vvv
-static inline ValidatorFn DefaultValidatorFor(const Text&)  { return DefaultValidateText;  }
-static inline ValidatorFn DefaultValidatorFor(const Email&) { return DefaultValidateEmail; }
-static inline ValidatorFn DefaultValidatorFor(const Int&)   { return DefaultValidateInt;   }
-static inline ValidatorFn DefaultValidatorFor(const UInt&)  { return DefaultValidateUInt;  }
-static inline ValidatorFn DefaultValidatorFor(const Float&) { return DefaultValidateFloat; }
+static constexpr ValidatorFn DefaultValidatorFor(const Text&)  { return DefaultValidateText;  }
+static constexpr ValidatorFn DefaultValidatorFor(const Email&) { return DefaultValidateEmail; }
+static constexpr ValidatorFn DefaultValidatorFor(const Int&)   { return DefaultValidateInt;   }
+static constexpr ValidatorFn DefaultValidatorFor(const UInt&)  { return DefaultValidateUInt;  }
+static constexpr ValidatorFn DefaultValidatorFor(const Float&) { return DefaultValidateFloat; }
 
 } // namespace Form
 
