@@ -2,15 +2,16 @@
 
 > Scene opens: two developers staring at a terminal. One of them hasn't slept in 36 hours :(
 
-**Dev 1:** Dawg... what even *is* this thing?<br>
-**Dev 2:** Haven't you heard about it?<br>
-**Dev 1:** No? Tf is WFX?<br>
-**Dev 2:** Weird Framework<br>
-**Dev 1:** ...wat?<br>
-**Dev 2:** eXactly (.\_.)<br>
-**Dev 1:** (.\_.)<br>
+**Dev 1:** Dawg... what even *is* this thing?  
+**Dev 2:** Haven't you heard about it?  
+**Dev 1:** No? Tf is WFX?  
+**Dev 2:** Weird Framework  
+**Dev 1:** ...wat?  
+**Dev 2:** eXactly (.\_.)  
+**Dev 1:** (.\_.)  
 
-**Silence...** <br>The fans sound like a jet engine. The build somehow finishes.
+**Silence...**   
+The fans sound like a jet engine. The build somehow finishes.
 Somewhere, a socket coughs itself awake.
 No logs, no confetti, just a binary sitting there opening its eyes for the first time.
 
@@ -20,19 +21,19 @@ Everything runs on one event loop [Epoll / IoUring / IOCP]. Flow is quite simple
 
 ## Folder Structure
 
-**cli/** - command-line tools: build, new, dev, doctor<br>
-**config/** - TOML loader<br>
-**engine/** - runtime core, template execution<br>
-**http/** - routing, parser, serializer, response machinery, etc.<br>
-**os_specific/** - Linux and Windows platform code<br>
-**shared/** - internal shared logic<br>
-**include/** - public headers for user extensions<br>
+**cli/** - command-line tools: build, new, dev, doctor  
+**config/** - TOML loader  
+**engine/** - runtime core, template execution  
+**http/** - routing, parser, serializer, response machinery, etc.  
+**os_specific/** - Linux and Windows platform code  
+**shared/** - internal shared logic  
+**include/** - public headers for user extensions  
 
 ## Shared Libraries (`lib/`)
 
 Each shared module is self-contained and linked into the core runtime.
 
-- **utils/** - logging, crypto, memory, file I/O, etc.<br>
+- **utils/** - logging, crypto, memory, file I/O, etc.  
 
 ## Build
 

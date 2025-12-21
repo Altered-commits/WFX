@@ -21,9 +21,8 @@ To implement (In no specific order):
 11. Streaming (Done: Outbound, Inbound remaining)
 12. .env (Done)
 13. Server <-> Server request-response handling
-14. Async (Partially done)
-15. Async middleware
-16. Form handling
+14. Async (Done)
+16. Form handling (Done)
 
 To Fix:
 1. Cache files < 4KB, don't use TransmitFile / sendfile on every single file

@@ -1,9 +1,9 @@
 # Contributing to WFX
 
-I'm surprised you actually decided to contribute to this 'whatever' of a project. Thank you 'user'.<br>
-So some guidelines and stuff to get you an idea (I don't even remember half the stuff but yeah).<br>
+I'm surprised you actually decided to contribute to this 'whatever' of a project. Thank you 'user'.  
+So some guidelines and stuff to get you an idea (I don't even remember half the stuff but yeah).  
 
-Note: See the [README](https://github.com/Altered-commits/WFX/new/altered/dev#build) for build instructions.<br>
+Note: See the [README](https://github.com/Altered-commits/WFX/new/altered/dev#build) for build instructions.  
 
 Fork the repo and open PRs to `dev`. `main` and `dev` are protected. Work freely in your fork or personal branch.
 

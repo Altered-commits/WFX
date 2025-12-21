@@ -1,0 +1,102 @@
+# Engine Commands
+
+The `wfx` command-line interface (CLI) provides several commands to interact with WFX, create projects, manage builds, and run the development server. Below is a detailed explanation of each command and its options.
+
+---
+
+## `wfx new`
+
+Create a new WFX project.
+
+**Usage:**
+
+```bash
+./wfx new <project_name>
+```
+
+`<project_name>`: Required. Name of the project to create.
+
+If no project name is provided, WFX will display an error.
+
+---
+
+## `wfx doctor`
+
+Verify system requirements for the current workspace.
+
+**Usage:**
+
+```bash
+./wfx doctor
+```
+
+This command inspects the environment, compiler, toolchain, and other prerequisites to ensure WFX can build and run projects correctly.
+
+---
+
+## `wfx build`
+
+Pre-build various parts of the project, such as templates or source code.
+
+**Usage:**
+
+```bash
+./wfx build <target> [options]
+```
+
+##### Compulsory Arguments
+
+| Argument       | Description                                                          |
+|----------------|----------------------------------------------------------------------|
+| &lt;target&gt; | Specify which part of the project to build: `templates` or `source`. |
+
+##### Optional Flags
+
+| Flag       | Description                                |
+|------------|--------------------------------------------|
+| --debug    | Build in debug mode with no optimizations. |
+
+**Example:**
+
+```bash
+./wfx build source
+```
+
+---
+
+## `wfx dev`
+
+Start the WFX development server.
+
+**Usage:**
+
+```bash
+./wfx dev [options]
+```
+
+##### Optional Flags
+
+| Option               | Description                 | Default   | Requires value? |
+|----------------------|-----------------------------|-----------|-----------------|
+|--host	               | Host to bind	             | 127.0.0.1 | Yes             |
+|--port	               | Port to bind	             | 8080      | Yes             |
+|--no-cache	           | Disable all caching	     |     –     | No              |
+|--no-source-cache	   | Disable build cache	     |     –     | No              |
+|--no-template-cache   | Disable template cache	     |     –     | No              |
+|--use-https	       | Enable HTTPS connection	 |     –     | No              |
+|--https-port-override | Override default HTTPS port |     –     | No              |
+|--debug	           | Enable runtime debugging	 |     –     | No              |
+
+##### Additional Information
+- **Default** specifies the value used by WFX when the option is not explicitly provided.
+- **Requires value?** indicates whether an option must be followed by a value (for example, `--port 3000`) or can be used as a standalone flag (for example, `--debug`).
+- `--no-cache` cannot be combined with `--no-source-cache` or `--no-template-cache`.
+- `--use-https` by default uses port 443.
+- `--https-port-override` overrides the HTTPS port using the value provided via `--port`.
+
+**Example:**
+
+```bash
+./wfx dev --host 0.0.0.0 --port 3000 --use-https --https-port-override
+```
+This starts the development server on all interfaces, port 3000 and HTTPS enabled.

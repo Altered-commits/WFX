@@ -1,0 +1,37 @@
+site_name: WFX Documentation
+site_description: Explicit, low-level C++ web framework
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: indigo
+    accent: cyan
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+    - content.tabs.link
+
+extra_css:
+  - css/code_format.css
+
+markdown_extensions:
+  - admonition
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting_started/installation.md
+    - First Program: getting_started/first-program.md
+  - Core Concepts:
+    - Project Structure: core_concepts/project_structure.md
+    - Engine Commands: core_concepts/engine_commands.md
+    - WFX Settings: core_concepts/wfx_toml.md
+    - Toolchain Settings: core_concepts/toolchain_toml.md
+  - API Reference:
+    - Overview: api_reference/overview.md
