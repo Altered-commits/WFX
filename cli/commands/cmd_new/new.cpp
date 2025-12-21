@@ -35,7 +35,7 @@ static void ScaffoldProject(const std::string& projectName)
     // 2. Create essential config
     CreateFile(base / "wfx.toml", R"([Project]
 project_name    = ")" + projectName + R"("
-middleware_list = ["Logger"]    # Order of middleware registered by either User or Engine
+middleware_list = []    # Order of middleware registered by either User or Engine
 
 [Network]
 send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)
@@ -49,7 +49,7 @@ max_body_size                = 8192    # Max size of request body (in bytes)
 header_timeout               = 15      # Max time limit for entire header to arrive (in seconds)
 body_timeout                 = 20      # Max time limit for entire body to arrive (in seconds)
 idle_timeout                 = 40      # Max time limit for a connection to stay idle (in seconds)
-max_connections              = 10000   # Max total concurrent connections (Rounded up to the nearest multiple of 64)
+max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
 max_connections_per_ip       = 20      # Per-IP connection cap
 max_request_burst_per_ip     = 10      # Initial request tokens per IP
 max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
@@ -95,7 +95,7 @@ template_chunk_size = 16384  # Max chunk size to read / write at once when compi
 cache_chunk_size    = 2048   # Max chunk size to read / write from template cache file (in bytes)
 )");
 
-    // Default route
+    // 3. Bridge between engine and user code
     CreateFile(projBase / "src/api_entry.cpp", R"(#include <shared/apis/master_api.hpp>
 #include <shared/utils/deferred_init_vector.hpp>
 #include <shared/utils/compiler_macro.hpp>
@@ -139,8 +139,26 @@ extern "C" {
     }
 })");
 
-    // 3. Create example template and static asset
-    CreateFile(projBase / "templates/index.html", R"(<html><body><h1>Hello from WFX Template</h1></body></html>)");
+    // 4. Code example
+    CreateFile(projBase / "src/main.cpp", R"cxx(#include <http/routes.hpp>
+
+WFX_GET("/", [](Request& req, Response& res) {
+    res.SendTemplate("index.html");
+});
+
+WFX_GET("/text", [](Request& req, Response& res) {
+    res.SendText("Hello from WFX :)");
+});
+
+WFX_GET("/json", [](Request& req, Response& res) {
+    res.SendJson(Json::object({
+        {"WFX says", "Hello :)"}
+    }));
+});
+)cxx");
+
+    // 5. Create example template and static asset
+    CreateFile(projBase / "templates/index.html", R"(<html><head><link rel="stylesheet" href="/public/style.css"></head><body><h1>Hello from WFX Template</h1><script src="/public/script.js"></script></body></html>)");
     CreateFile(projBase / "public/style.css", "body { font-family: sans-serif; }");
     CreateFile(projBase / "public/script.js", "console.log(\"Hello from WFX\")");
 

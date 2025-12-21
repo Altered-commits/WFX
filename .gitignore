@@ -2,6 +2,7 @@
 .vscode
 
 # Build files
+build/
 BuildMinGW/
 BuildGCC/
 BuildGCCDebug/
@@ -16,3 +17,6 @@ ignore/
 wfx
 wfx.toml
 toolchain.toml
+
+# Python env
+.venv/

@@ -1,0 +1,8 @@
+.code-format {
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    border: 1px solid #aaaaaa6f;
+    padding: 8px;
+    border-radius: 5px;
+    overflow-x: auto;
+}
