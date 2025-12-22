@@ -21,15 +21,15 @@ struct NetworkConfig {
     std::uint32_t bufferIncrSize     = 4 * 1024;
 
     std::uint32_t maxHeaderTotalSize    = 8 * 1024;
-    std::uint32_t maxHeaderTotalCount   = 64;
     std::uint32_t maxBodyTotalSize      = 8 * 1024;
+    std::uint16_t maxHeaderTotalCount   = 64;
     std::uint16_t headerReserveHintSize = 512;
 
     std::uint16_t headerTimeout = 15;
     std::uint16_t bodyTimeout   = 20;
     std::uint16_t idleTimeout   = 60;
 
-    std::uint32_t maxConnections      = 10000;
+    std::uint32_t maxConnections      = 2000;
     std::uint32_t maxConnectionsPerIp = 20;
     std::uint32_t maxRequestBurstSize = 10;
     std::uint32_t maxTokensPerSecond  = 5;
