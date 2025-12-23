@@ -51,8 +51,8 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Network", "recv_buffer_incr",            networkConfig.bufferIncrSize);
         ExtractValue(tbl, "Network", "header_reserve_hint",         networkConfig.headerReserveHintSize);
         ExtractValue(tbl, "Network", "max_header_size",             networkConfig.maxHeaderTotalSize);
-        ExtractValue(tbl, "Network", "max_header_count",            networkConfig.maxHeaderTotalCount);
         ExtractValue(tbl, "Network", "max_body_size",               networkConfig.maxBodyTotalSize);
+        ExtractValue(tbl, "Network", "max_header_count",            networkConfig.maxHeaderTotalCount);
         ExtractValue(tbl, "Network", "header_timeout",              networkConfig.headerTimeout);
         ExtractValue(tbl, "Network", "body_timeout",                networkConfig.bodyTimeout);
         ExtractValue(tbl, "Network", "idle_timeout",                networkConfig.idleTimeout);

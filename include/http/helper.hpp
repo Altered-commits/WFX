@@ -38,8 +38,9 @@ HttpCallbackType MakeHttpCallbackFromLambda(Lambda&& cb)
 
 // vvv Middleware Stuff vvv
 template<typename T>
-inline MiddlewareEntry MakeMiddlewareEntry(T&& funcOrEntry, std::uint8_t handle = MiddlewareType::LINEAR)
-{
+inline MiddlewareEntry MakeMiddlewareEntry(
+    T&& funcOrEntry, std::uint8_t handle = static_cast<std::uint8_t>(MiddlewareType::LINEAR)
+) {
     using Request = WFX::Http::HttpRequest;
     using RawT    = std::decay_t<T>;
 
