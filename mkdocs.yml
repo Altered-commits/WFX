@@ -23,12 +23,15 @@ extra_css:
 
 markdown_extensions:
   - admonition
+  - pymdownx.highlight:
+      use_pygments: true
+  - pymdownx.superfences
 
 nav:
   - Home: index.md
   - Getting Started:
     - Installation: getting_started/installation.md
-    - First Program: getting_started/first-program.md
+    - First Program: getting_started/first_program.md
   - Core Concepts:
     - Project Structure: core_concepts/project_structure.md
     - Engine Commands: core_concepts/engine_commands.md
@@ -36,3 +39,6 @@ nav:
     - Toolchain Settings: core_concepts/toolchain_toml.md
   - API Reference:
     - Overview: api_reference/overview.md
+    - Request & Response: api_reference/request_and_response.md
+    - Routing: api_reference/routing.md
+    - Middleware: api_reference/middleware.md

@@ -29,13 +29,9 @@ dllflag = "-o "
 </pre>
 
 - `name`: Human-readable identifier for the compiler. Used internally for logging, display, and tracking purposes; it does not affect the actual build process.
-
 - `ccmd`: Command-line invocation for compiling `.cpp` files to `.o` objects.
-
 - `lcmd`: Command-line invocation for linking object files into executables or libraries.
-
 - `objflag`: Compiler flag to specify the output object file. Typically `-o`.
-
 - `dllflag`: Compiler flag to specify the output shared library. Typically `-o`.
 
 ## `[Compiler.Prod]`
@@ -49,7 +45,6 @@ largs = "-shared -fPIC -flto=auto -Wl,--gc-sections -Wl,--strip-all"
 </pre>
 
 - `cargs`: Compiler flags for production: enables C++17, optimizations, link-time optimization, hidden visibility, and proper include paths. Produces `.o` files.
-
 - `largs`: Linker flags for production: produces shared libraries, strips unused sections, and enables LTO for maximum performance.
 
 ## `[Compiler.Debug]`
@@ -63,5 +58,4 @@ largs = "-shared -fPIC"
 </pre>
 
 - `cargs`: Compiler flags for debugging: disables optimizations, includes debug info, produces `.o` files.
-
 - `largs`: Linker flags for debug: produces shared libraries without optimizations, keeping symbols readable for debugging.
