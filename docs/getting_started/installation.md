@@ -92,4 +92,4 @@ Other distributions may require equivalent packages.</p>
 
 ---
 
-Continue to **[Your First WFX Program](first-program.md)**
+Continue to **[Your First WFX Program](first_program.md)**

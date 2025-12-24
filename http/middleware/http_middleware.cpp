@@ -13,21 +13,19 @@ void HttpMiddleware::RegisterMiddleware(MiddlewareName name, MiddlewareEntry mw)
     auto&& [it, inserted] = middlewareFactories_.emplace(name, std::move(mw));
     if(!inserted) {
         auto& logger = WFX::Utils::Logger::GetInstance();
-        logger.Warn("[HttpMiddleware]: Duplicate registration attempt for middleware '", name, "'. Ignoring this one");
+        logger.Fatal("[HttpMiddleware]: Duplicate registration attempt for middleware '", name, '\'');
     }
 }
 
 void HttpMiddleware::RegisterPerRouteMiddleware(const TrieNode* node, MiddlewareStack mwStack)
 {
     auto& logger = WFX::Utils::Logger::GetInstance();
-    if(!node) {
-        logger.Warn("[HttpMiddleware]: Route node is nullptr. Ignoring this one");
-        return;
-    }
+    if(!node)
+        logger.Fatal("[HttpMiddleware]: Route node is nullptr for per-route middleware registeration");
 
     auto&& [it, inserted] = middlewarePerRouteCallbacks_.emplace(node, std::move(mwStack));
     if(!inserted)
-        logger.Warn("[HttpMiddleware]: Duplicate registration attempt for route node '", (void*)node, "'. Ignoring this one");
+        logger.Fatal("[HttpMiddleware]: Duplicate registration attempt for route node '", (void*)node, '\'');
     else
         FixInternalLinks(it->second);
 }
@@ -72,23 +70,21 @@ void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareConfigOrder order)
         std::string_view name = nameStr;
 
         // Duplicate middleware name from config
-        if(!loadedNames.insert(name).second) {
-            logger.Warn(
+        if(!loadedNames.insert(name).second)
+            logger.Fatal(
                 "[HttpMiddleware]: Middleware '",
                 name,
-                "' is listed multiple times in config. Skipping duplicate"
+                "' is listed multiple times in config"
             );
-            continue;
-        }
 
         auto it = middlewareFactories_.find(name);
         if(it != middlewareFactories_.end())
             middlewareGlobalCallbacks_.push_back(std::move(it->second));
         else
-            logger.Warn(
+            logger.Fatal(
                 "[HttpMiddleware]: Middleware '",
                 name,
-                "' was listed in config but has not been registered. This may be a typo or missing registration. Skipped"
+                "' was listed in config but has not been registered. This may be a typo or missing registration"
             );
     }
 

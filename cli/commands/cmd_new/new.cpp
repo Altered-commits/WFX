@@ -41,7 +41,6 @@ middleware_list = []    # Order of middleware registered by either User or Engin
 send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
-file_cache_size              = 20      # Max number of files kept in memory cache (LFU)
 header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
 max_header_size              = 8192    # Max total size of all headers (in bytes)
 max_header_count             = 64      # Max number of headers allowed
@@ -90,7 +89,7 @@ file_chunk_size  = 65536  # How big of a file chunk to send at once
 max_events       = 1024   # How many events should epoll handle at a time
 
 [Misc]
-file_cache_size     = 20     # Number of files cached for efficiency
+file_cache_size     = 20     # Number of files cached for efficiency (LFU)
 template_chunk_size = 16384  # Max chunk size to read / write at once when compiling templates (in bytes)
 cache_chunk_size    = 2048   # Max chunk size to read / write from template cache file (in bytes)
 )");

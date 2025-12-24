@@ -81,9 +81,9 @@
 /*
  * Note: Used inside of function so typing style would be PascalCase not UPPER_SNAKE_CASE
  */
-#define GetPathAsString(path) std::get<std::string_view>(path)
-#define GetPathAsInt(path)    std::get<std::int64_t>(path)
-#define GetPathAsUInt(path)   std::get<std::uint64_t>(path)
-#define GetPathAsUUID(path)   std::get<WFX::Utils::UUID>(path)
+#define GetSegmentAsString(segment) std::get<std::string_view>(segment)
+#define GetSegmentAsInt(segment)    std::get<std::int64_t>(segment)
+#define GetSegmentAsUInt(segment)   std::get<std::uint64_t>(segment)
+#define GetSegmentAsUUID(segment)   std::get<WFX::Utils::UUID>(segment)
 
 #endif // WFX_INC_HTTP_ROUTE_MACROS_HPP
