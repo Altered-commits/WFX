@@ -14,11 +14,22 @@ endif()
 # -------------------- LINUX --------------------
 message(STATUS "OpenSSL: Linux detected. Configuring custom OpenSSL build")
 
+# Get the running OS
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" OPENSSL_OS)
+
+# Get the CPU architecture
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" OPENSSL_ARCH)
+
+set(OPENSSL_TARGET "${OPENSSL_OS}-${OPENSSL_ARCH}")
+
 # Get the number of cores we can use for parallelizing build
 include(ProcessorCount)
 ProcessorCount(NPROC)
-if(NPROC EQUAL 0)
+
+if(NPROC LESS_EQUAL 4)
     set(NPROC 1)
+elseif(NPROC GREATER 16)
+    set(NPROC 16)
 endif()
 
 # Find the actual 'make' program (ignore Ninja)
@@ -46,7 +57,7 @@ ExternalProject_Add(openssl_lts_build
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env "CFLAGS=${OPENSSL_OPT_FLAGS}"
         <SOURCE_DIR>/Configure
             # Target platform / core features
-            linux-x86_64          # Explicitly set the target architecture
+            ${OPENSSL_TARGET}     # Explicitly set the target architecture
             enable-ktls           # Enable Kernel TLS offloading
             enable-asm            # Enable hand-optimized assembly routines for performance
             enable-ec_nistp_64_gcc_128 # Enable specific optimizations for NIST P-curves

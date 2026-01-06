@@ -1,8 +1,9 @@
 #include "config.hpp"
 #include "config_helper.hpp"
 
-#include <thread>
-#include <algorithm>
+#ifdef _WIN32
+    #include <thread>
+#endif
 
 namespace WFX::Core {
 

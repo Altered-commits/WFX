@@ -3,7 +3,15 @@
 
 #include "utils/logger/logger.hpp"
 #include <cstring>
-#include <immintrin.h>
+
+#if defined(_MSC_VER)
+    #include <intrin.h>
+    #define PREFETCH_T3(ptr) _mm_prefetch(reinterpret_cast<const char*>(ptr), _MM_HINT_T0)
+#elif defined(__GNUC__) || defined(__clang__)
+    #define PREFETCH_T3(ptr) __builtin_prefetch((ptr), 0, 3)
+#else
+    #define PREFETCH_T3(ptr) ((void)0)
+#endif
 
 #undef max
 
@@ -70,7 +78,7 @@ void HashShard<K, V>::Resize(std::size_t newCapacity)
         while(probe < MAX_PROBE_LIMIT) {
             std::size_t pos    = (idx + probe) & (newCapacity - 1);
             Entry&      target = newEntries[pos];
-            _mm_prefetch(reinterpret_cast<const char*>(&newEntries[(pos + 1) & (newCapacity - 1)]), _MM_HINT_T0);
+            PREFETCH_T3(reinterpret_cast<const char*>(&newEntries[(pos + 1) & (newCapacity - 1)]));
 
             if(!target.occupied) {
                 currentEntry.probeLength = static_cast<std::uint8_t>(probe);
@@ -146,7 +154,7 @@ bool HashShard<K, V>::Emplace(const K& key, V&& value)
         std::size_t pos = (idx + probe) & mask;
         Entry& entry    = entries_[pos];
 
-        _mm_prefetch(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]), _MM_HINT_T0);
+        PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
 
         if(!entry.occupied) {
             newEntry.probeLength = static_cast<std::uint8_t>(probe);
@@ -189,7 +197,7 @@ bool HashShard<K, V>::Insert(const K& key, const V& value)
         std::size_t pos   = (idx + probe) & mask;
         Entry&      entry = entries_[pos];
 
-        _mm_prefetch(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]), _MM_HINT_T0);
+        PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
 
         if(!entry.occupied) {
             newEntry.probeLength = static_cast<std::uint8_t>(probe);
@@ -256,7 +264,7 @@ V* HashShard<K, V>::GetOrInsert(const K& inputKey, const V& defaultValue)
         std::size_t pos   = (idx + probe) & mask;
         Entry&      entry = entries_[pos];
 
-        _mm_prefetch(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]), _MM_HINT_T0);
+        PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
 
         if(!entry.occupied) {
             newEntry.probeLength = static_cast<std::uint8_t>(probe);
