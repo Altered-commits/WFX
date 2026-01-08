@@ -55,6 +55,6 @@
 #define CoSetError(err)  __AsyncSelf->SetError(err)
 
 #define CoVariable(type, name, ...) \
-    auto& name = __AsyncSelf->PersistLocal(#name).InitOrGet<type>(__VA_ARGS__)
+    auto& name = __AsyncSelf->PersistLocal(#name).InitOrGet<type>(__VA_ARGS__);
 
 #endif // WFX_INC_ASYNC_MACROS_HPP

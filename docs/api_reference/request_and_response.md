@@ -225,6 +225,14 @@ Below are the primary methods exposed by `Response`.
     res.SendFile("static/index.html");
     ```
 
+    !!! important
+        The provided path must be either:
+
+        - an absolute path, or
+        - a path **relative to the engine's working directory**.
+
+        Relative paths are resolved against the engine location itself, **not** the caller's source file or project root.
+
 - **`SendTemplate(...)`**  
     Renders and sends a template. The appropriate content type (`text/html`) is set internally.
 
@@ -248,10 +256,36 @@ Below are the primary methods exposed by `Response`.
     }));
     ```
 
+    !!! tip
+        For detailed information about template syntax, compilation, rendering modes, and data binding,
+        see the [**Templates**](templates.md) section.
+
 - **`Stream(StreamGenerator generator, bool streamChunked = true)`**  
     Initiates a streaming response. The provided generator is repeatedly called by the networking backend whenever it is ready to accept more data. This allows incremental or large responses to be sent without buffering the entire payload in memory.
 
     **Important**: `Stream` does not set `Content-Type` header internally.
+
+    **Definitions**:
+    ```cpp
+    enum class StreamAction {
+        CONTINUE,             // Continue streaming
+        STOP_AND_ALIVE_CONN,  // Stop streaming and keep the connection alive
+        STOP_AND_CLOSE_CONN   // Stop streaming and close the connection
+    };
+
+    struct StreamResult {
+        std::size_t  writtenBytes; // Number of bytes written into buffer
+        StreamAction action;       // Action to take after this invocation
+    };
+
+    struct StreamBuffer {
+        char*       buffer; // Writable buffer provided by the engine
+        std::size_t size;   // Size of the buffer in bytes
+    };
+
+    // Streaming generator signature
+    using StreamGenerator = MoveOnlyFunction<StreamResult(StreamBuffer)>;
+    ```
 
     **Example**:
     ```cpp

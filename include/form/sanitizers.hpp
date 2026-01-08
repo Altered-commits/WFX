@@ -8,22 +8,29 @@
 
 namespace Form {
 
+// vvv Helper Aliases vvv
+using TextOutputType  = DecayedType<Text>::Type;
+using EmailOutputType = DecayedType<Email>::Type;
+using IntOutputType   = DecayedType<Int>::Type;
+using UIntOutputType  = DecayedType<UInt>::Type;
+using FloatOutputType = DecayedType<Float>::Type;
+
 // No processing needed, validation handles everything
-static inline bool DefaultSanitizeText(std::string_view sv, const void* _, std::string_view& out)
+static inline bool DefaultSanitizeText(std::string_view sv, const void* _, TextOutputType& out)
 {
     out = sv;
     return true;
 }
 
 // Same as text. Real email normalization goes in user's custom sanitizer
-static inline bool DefaultSanitizeEmail(std::string_view sv, const void* _, std::string_view& out)
+static inline bool DefaultSanitizeEmail(std::string_view sv, const void* _, EmailOutputType& out)
 {
     out = sv;
     return true;
 }
 
 // Strict conversion. This handles both validation and sanitizing
-static inline bool DefaultSanitizeInt(std::string_view sv, const void* fieldPtr, std::int64_t& out)
+static inline bool DefaultSanitizeInt(std::string_view sv, const void* fieldPtr, IntOutputType& out)
 {
     const Int& r = *static_cast<const Int*>(fieldPtr);
 
@@ -35,7 +42,7 @@ static inline bool DefaultSanitizeInt(std::string_view sv, const void* fieldPtr,
 }
 
 // Strict conversion. This handles both validation and sanitizing
-static inline bool DefaultSanitizeUInt(std::string_view sv, const void* fieldPtr, std::uint64_t& out)
+static inline bool DefaultSanitizeUInt(std::string_view sv, const void* fieldPtr, UIntOutputType& out)
 {
     const UInt& r = *static_cast<const UInt*>(fieldPtr);
 
@@ -47,7 +54,7 @@ static inline bool DefaultSanitizeUInt(std::string_view sv, const void* fieldPtr
 }
 
 // Strict conversion. This handles both validation and sanitizing
-static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPtr, double& out)
+static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPtr, FloatOutputType& out)
 {
     const Float& r = *static_cast<const Float*>(fieldPtr);
     if(sv.empty())
@@ -71,11 +78,11 @@ static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPt
 }
 
 // vvv Dispatchers vvv
-static constexpr SanitizerFn<std::string_view> DefaultSanitizerFor(const Text&)  { return DefaultSanitizeText;  }
-static constexpr SanitizerFn<std::string_view> DefaultSanitizerFor(const Email&) { return DefaultSanitizeEmail; }
-static constexpr SanitizerFn<std::int64_t>     DefaultSanitizerFor(const Int&)   { return DefaultSanitizeInt;   }
-static constexpr SanitizerFn<std::uint64_t>    DefaultSanitizerFor(const UInt&)  { return DefaultSanitizeUInt;  }
-static constexpr SanitizerFn<double>           DefaultSanitizerFor(const Float&) { return DefaultSanitizeFloat; }
+static constexpr SanitizerFn<TextOutputType>  DefaultSanitizerFor(const Text&)  { return DefaultSanitizeText;  }
+static constexpr SanitizerFn<EmailOutputType> DefaultSanitizerFor(const Email&) { return DefaultSanitizeEmail; }
+static constexpr SanitizerFn<IntOutputType>   DefaultSanitizerFor(const Int&)   { return DefaultSanitizeInt;   }
+static constexpr SanitizerFn<UIntOutputType>  DefaultSanitizerFor(const UInt&)  { return DefaultSanitizeUInt;  }
+static constexpr SanitizerFn<FloatOutputType> DefaultSanitizerFor(const Float&) { return DefaultSanitizeFloat; }
 
 } // namespace Form
 

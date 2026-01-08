@@ -18,18 +18,62 @@ using Json = nlohmann::json;
 
 namespace Form {
 
-// vvv Factory Functions vvv
+// vvv Field Builders vvv
+template<typename Rule>
+class FieldBuilder {
+public: // Helper Aliases
+    using DescType = FieldDesc<Rule>;
+    using PairType = std::pair<std::string_view, DescType>;
+
+public: // Constructor
+    constexpr FieldBuilder(const char* name, Rule rule)
+        : pair_{
+            std::string_view{name},
+            FieldDesc<Rule>{
+                rule,
+                DefaultValidatorFor(rule),
+                DefaultSanitizerFor(rule)
+            }
+        }
+    {}
+
+public: // Helper Functions
+    constexpr FieldBuilder& CustomValidator(ValidatorFn v) &
+    {
+        pair_.second.validator = v;
+        return *this;
+    }
+
+    constexpr FieldBuilder&& CustomValidator(ValidatorFn v) &&
+    {
+        pair_.second.validator = v;
+        return std::move(*this);
+    }
+
+    constexpr FieldBuilder& CustomSanitizer(SanitizerFn<typename DescType::RawType> s) &
+    {
+        pair_.second.sanitizer = s;
+        return *this;
+    }
+
+    constexpr FieldBuilder&& CustomSanitizer(SanitizerFn<typename DescType::RawType> s) &&
+    {
+        pair_.second.sanitizer = s;
+        return std::move(*this);
+    }
+
+public: // Getters
+    constexpr std::string_view GetName() const & { return pair_.first; }
+    constexpr DescType&& GetDesc()            && { return std::move(pair_.second); }
+
+private: // Storage
+    PairType pair_;
+};
+
 template<typename Rule>
 constexpr auto Field(const char* name, Rule rule)
 {
-    return std::pair<std::string_view, FieldDesc<Rule>>(
-        std::string_view{name},
-        FieldDesc<Rule>{
-            rule,
-            DefaultValidatorFor(rule),
-            DefaultSanitizerFor(rule)
-        }
-    );
+    return FieldBuilder{name, std::move(rule)};
 }
 
 // vvv Wrapper for sanitized value vvv
@@ -57,31 +101,30 @@ enum class FormError : std::uint8_t {
 template<typename... Fields>
 struct FormSchema {
     /*
-     * Fields is std::pair consisting of FieldName + FieldDesc<Rule>, hence the 'Fields::second_type'
-     * Created by 'Field' function inside of 'fields.hpp'
+     * Fields is 'FieldBuilder' returned by 'Field' function
      */
 public: // Aliases
     static constexpr std::size_t FieldCount = sizeof...(Fields);
 
     // Stored
-    using FieldsTuple = std::tuple<typename Fields::second_type...>;
+    using FieldsTuple = std::tuple<typename Fields::DescType...>;
     using NamesArray  = std::array<std::string_view, FieldCount>;
 
     // Helper
-    using CleanedType = typename CleanedTupleFor<typename Fields::second_type...>::Type;
+    using CleanedType = typename CleanedTupleFor<typename Fields::DescType...>::Type;
     using InputType   = std::array<std::string_view, FieldCount>;
 
 public:
     template<std::size_t N>
     constexpr FormSchema(const char (&formName)[N], Fields&&... f)
         : formName{ formName, N - 1 },
-          fieldNames{ f.first... },
-          fieldRules{ std::move(f.second)... }
+        fieldNames{ f.GetName()... },
+        fieldRules{ std::move(f).GetDesc()... }
     {
         static_assert(N > 1, "FormSchema.formName cannot be empty");
 
         // Avoid too many reallocs
-        preRenderedFields.reserve(256);
+        preRenderedFields.reserve(FieldCount * 100);
 
         // Render each field
         RenderFields(std::make_index_sequence<FieldCount>{});

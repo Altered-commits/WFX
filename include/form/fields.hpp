@@ -64,36 +64,6 @@ struct FieldDesc {
     Rule                 rule{};
     ValidatorFn          validator = nullptr;
     SanitizerFn<RawType> sanitizer = nullptr;
-
-    [[nodiscard]]
-    constexpr FieldDesc CustomSanitizer(SanitizerFn<RawType> fn) const & noexcept
-    {
-        FieldDesc copy = *this;
-        copy.sanitizer = fn;
-        return copy;
-    }
-
-    [[nodiscard]]
-    constexpr FieldDesc CustomSanitizer(SanitizerFn<RawType> fn) && noexcept
-    {
-        sanitizer = fn;
-        return std::move(*this);
-    }
-
-    [[nodiscard]]
-    constexpr FieldDesc CustomValidator(ValidatorFn fn) const & noexcept
-    {
-        FieldDesc copy = *this;
-        copy.validator = fn;
-        return copy;
-    }
-
-    [[nodiscard]]
-    constexpr FieldDesc CustomValidator(ValidatorFn fn) && noexcept
-    {
-        validator = fn;
-        return std::move(*this);
-    }
 };
 
 } // namespace Form

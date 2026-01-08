@@ -17,7 +17,13 @@ No logs, no confetti, just a binary sitting there opening its eyes for the first
 
 ## Architecture
 
-Everything runs on one event loop [Epoll / IoUring / IOCP]. Flow is quite simple: request -> event-loop (read from socket) -> core-engine (runs callbacks and creates response) -> event-loop (write to socket)  
+Everything runs on a single event loop (epoll / io_uring / IOCP).  
+Request flow:
+
+- socket read -> event loop
+- event loop -> core engine (execute callbacks, build response)
+- core engine -> event loop
+- event loop -> socket write
 
 ## Folder Structure
 
@@ -35,30 +41,19 @@ Each shared module is self-contained and linked into the core runtime.
 
 - **utils/** - logging, crypto, memory, file I/O, etc.  
 
-## Build
+## Getting Started
 
-Some dependencies which need to be resolved before building engine:
+> [!NOTE]
+> WFX requires a native build and is not distributed as a prebuilt binary.
 
-- **Linux:** `sudo apt install -y cmake build-essential ninja-build`
-- **C++ Standard:** C++17
+All documentation is hosted and kept up to date here:
 
-Follow each command step by step to build the engine binary:
+**https://altered-commits.github.io/WFX/**
 
-```bash
- - git clone https://github.com/Altered-commits/WFX.git
- - cd wfx
- - cmake -S . -B build -G Ninja
- - cmake --build build
-```
+**Key entry points**:
 
-Now that the engine binary has been created, follow these steps to use `wfx`:
+- **Getting Started / Build**  
+  https://altered-commits.github.io/WFX/getting_started/installation/
 
-#### OS-Specific Commands
-
-#### Linux / macOS
-```bash
- - mv wfx ..
- - cd ..
-```
-
-Now you can start using `wfx` :)
+- **Project Structure**  
+  https://altered-commits.github.io/WFX/core_concepts/project_structure/

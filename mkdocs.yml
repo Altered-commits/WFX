@@ -42,3 +42,7 @@ nav:
     - Request & Response: api_reference/request_and_response.md
     - Routing: api_reference/routing.md
     - Middleware: api_reference/middleware.md
+    - Constructor: api_reference/constructor.md
+    - Async: api_reference/async.md
+    - Templates: api_reference/templates.md
+    - Forms: api_reference/forms.md
