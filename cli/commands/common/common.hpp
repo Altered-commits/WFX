@@ -5,10 +5,19 @@
     #include <Windows.h>
 #endif
 
+#include <cstdint>
+
 namespace WFX::CLI {
 
+enum class CxxCompilationOption: std::uint8_t {
+    SOURCE_ONLY,
+    TEMPLATES_ONLY,
+    ALL,
+};
+
 // vvv Common Stuff vvv
-void HandleUserSrcCompilation(const char* dllDir, const char* dllPath);
+void HandleBuildDirectory();
+void HandleUserCxxCompilation(CxxCompilationOption = CxxCompilationOption::ALL);
 
 // vvv OS Specific Stuff vvv
 #ifdef _WIN32

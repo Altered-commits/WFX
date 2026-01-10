@@ -139,6 +139,20 @@ void LinuxFile::OpenExisting(int fd, std::size_t size, bool cached)
 }
 
 // vvv File Manipulation vvv
+bool LinuxFileSystem::CreateFile(const char *path) const
+{
+    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    if(fd >= 0) {
+        close(fd);
+        return true; // Created
+    }
+
+    if(errno == EEXIST)
+        return true; // Already exists
+
+    return false;
+}
+
 bool LinuxFileSystem::FileExists(const char* path) const
 {
     struct stat st{};
@@ -227,31 +241,48 @@ bool LinuxFileSystem::CreateDirectory(std::string path, bool recurseParentDir) c
     if(path.empty())
         return false;
 
-    // Trim trailing slash if present
-    std::size_t len = path.size();
-    if(len > 1 && path[len - 1] == '/')
-        len--;
+    // Trim trailing slash (except "/")
+    if(path.size() > 1 && path.back() == '/')
+        path.pop_back();
 
-    // If not recursive, just try once
+    // Non-recursive
     if(!recurseParentDir) {
-        std::string tmp(path.substr(0, len)); // Small one-off for syscall
-        return mkdir(tmp.c_str(), 0755) == 0 || errno == EEXIST;
+        errno = 0;
+        return mkdir(path.c_str(), 0755) == 0 || errno == EEXIST;
     }
 
     bool ok = true;
-    std::size_t pos = 0;
+    const char* data = path.c_str();
+    std::size_t len  = path.size();
 
-    // Walk through path and mkdir each subpath
-    for(std::size_t i = 1; i <= len; ++i) {
-        if(i == len || path[i] == '/') {
-            std::size_t subLen = i;
-            if(subLen == 0) continue;
+    // Reusable buffer
+    std::string tmp;
+    tmp.reserve(len);
 
-            std::string tmp(path.data(), subLen);
-            if(mkdir(tmp.c_str(), 0755) != 0 && errno != EEXIST) {
-                ok = false;
-                break;
+    std::size_t start = 0;
+
+    // Absolute path handling
+    if(data[0] == '/') {
+        tmp.push_back('/');
+        start = 1;
+    }
+
+    for(std::size_t i = start; i <= len; ++i) {
+        if(i == len || data[i] == '/') {
+            if(i > start) {
+                tmp.append(data + start, i - start);
+
+                errno = 0;
+                if(mkdir(tmp.c_str(), 0755) != 0 && errno != EEXIST) {
+                    ok = false;
+                    break;
+                }
             }
+
+            if(i < len)
+                tmp.push_back('/');
+
+            start = i + 1;
         }
     }
 

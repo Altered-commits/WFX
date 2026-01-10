@@ -19,174 +19,7 @@ TemplateEngine& TemplateEngine::GetInstance()
 }
 
 // vvv Main Functions vvv
-bool TemplateEngine::LoadTemplatesFromCache()
-{
-    auto& config = Config::GetInstance();
-    auto& fs     = FileSystem::GetFileSystem();
-
-    // Whether to call 'LoadDynamicTemplatesFromLib()' or not
-    bool hasDynamicElement = false;
-
-    std::string   cacheFile = config.projectConfig.projectName + cacheFile_;
-    std::uint16_t chunkSize = config.miscConfig.cacheChunkSize;
-
-    auto inCache = fs.OpenFileRead(cacheFile.c_str(), true);
-    // No cache, tell server to recompile templates
-    if(!inCache)
-        return false;
-
-    templates_.clear();
-    IOContext ctx = { std::move(inCache), chunkSize };
-
-    std::uint64_t totalTemplates = 0;
-    std::int64_t  bytesRead = 0;
-
-    // Lambda to read primitive values safely from buffer, refilling if needed
-    auto ReadValue = [&](void* dst, std::size_t size) -> bool {
-        std::size_t copied = 0;
-        char* outPtr = static_cast<char*>(dst);
-
-        while(copied < size) {
-            if(ctx.offset >= static_cast<std::uint32_t>(bytesRead)) {
-                bytesRead = ctx.file->Read(ctx.buffer.get(), chunkSize);
-                ctx.offset = 0;
-                if(bytesRead <= 0)
-                    return false;
-            }
-
-            std::size_t available = bytesRead - ctx.offset;
-            std::size_t toCopy    = std::min(size - copied, available);
-
-            std::memcpy(outPtr + copied, ctx.buffer.get() + ctx.offset, toCopy);
-
-            copied     += toCopy;
-            ctx.offset += toCopy;
-        }
-        return true;
-    };
-
-    // Read number of templates
-    if(!ReadValue(&totalTemplates, sizeof(totalTemplates)))
-        goto __Failure;
-
-    // Format given in 'SaveTemplatesToCache' function: Line 121
-    for(std::uint64_t i = 0; i < totalTemplates; ++i) {
-        std::uint64_t relLen = 0;
-        if(!ReadValue(&relLen, sizeof(relLen)))       goto __Failure;
-
-        std::string relPath(relLen, '\0');
-        if(!ReadValue(relPath.data(), relLen))        goto __Failure;
-
-        std::uint8_t typeInt = 0;
-        if(!ReadValue(&typeInt, sizeof(typeInt)))     goto __Failure;
-
-        std::uint64_t sizeBytes = 0;
-        if(!ReadValue(&sizeBytes, sizeof(sizeBytes))) goto __Failure;
-
-        std::uint64_t fullLen = 0;
-        if(!ReadValue(&fullLen, sizeof(fullLen)))     goto __Failure;
-
-        std::string fullPath(fullLen, '\0');
-        if(!ReadValue(fullPath.data(), fullLen))      goto __Failure;
-
-        if(static_cast<TemplateType>(typeInt) == TemplateType::DYNAMIC)
-            hasDynamicElement = true;
-
-        templates_.emplace(
-            std::move(relPath),
-            TemplateMeta{static_cast<TemplateType>(typeInt), sizeBytes, std::move(fullPath)}
-        );
-    }
-
-    logger_.Info("[TemplateEngine]: Successfully loaded template data from cache.bin");
-
-    // Dynamic templates currently have to be loaded from user_templates.so file
-    if(hasDynamicElement)
-        LoadDynamicTemplatesFromLib();
-
-    return true;
-
-__Failure:
-    logger_.Error("[TemplateEngine]: Failed to read template data from cache.bin");
-    ctx.file->Close();
-
-    // We don't want corrupted cache lying around randomly
-    if(!fs.DeleteFile(cacheFile.c_str()))
-        logger_.Error("[TemplateEngine]: Failed to delete corrupted cache.bin");
-
-    return false;
-}
-
-void TemplateEngine::SaveTemplatesToCache()
-{
-    if(!resaveCacheFile_)
-        return;
-
-    auto& config = Config::GetInstance();
-    auto& fs     = FileSystem::GetFileSystem();
-
-    std::string   cacheFile = config.projectConfig.projectName + cacheFile_;
-    std::uint16_t chunkSize = config.miscConfig.cacheChunkSize;
-
-    auto outCache = fs.OpenFileWrite(cacheFile.c_str(), true);
-    if(!outCache) {
-        logger_.Error("[TemplateEngine]: Failed to open cache file for writing: ", cacheFile);
-        return;
-    }
-    /*
-     * Format of cache.bin:
-     * - uint64_t: Number of templates
-     * - [for each template:]
-     *     - uint64_t: Length of relative path
-     *     - char[]:   Relative path
-     *     - uint8_t:  TemplateType enum value
-     *     - uint64_t: Size of the template file in bytes
-     *     - uint64_t: Length of full path
-     *     - char[]:   Full path
-     */
-    IOContext ctx = { std::move(outCache), chunkSize };
-
-    // 1) Number of templates
-    std::uint64_t numTemplates = templates_.size();
-    if(!SafeWrite(ctx, &numTemplates, sizeof(numTemplates)))
-        return;
-
-    // 2. Serialize each template; the lambda handles flushing automatically.
-    for(const auto& [relativePath, meta] : templates_) {
-        // Write Relative Path (key)
-        std::uint64_t relativePathLen = relativePath.length();
-        if(!SafeWrite(ctx, &relativePathLen, sizeof(relativePathLen))) goto __Failure;
-        if(!SafeWrite(ctx, relativePath.data(), relativePathLen))      goto __Failure;
-
-        // Write Template Meta (value)
-        auto typeAsInt    = static_cast<std::uint8_t>(meta.type);
-        auto templateSize = static_cast<std::uint64_t>(meta.size);
-        if(!SafeWrite(ctx, &typeAsInt, sizeof(typeAsInt)))             goto __Failure;
-        if(!SafeWrite(ctx, &templateSize, sizeof(templateSize)))       goto __Failure;
-
-        // Write Full Path (from payload)
-        std::uint64_t filePathLen = meta.filePath.length();
-        if(!SafeWrite(ctx, &filePathLen, sizeof(filePathLen)))         goto __Failure;
-        if(!SafeWrite(ctx, meta.filePath.data(), filePathLen))         goto __Failure;
-    }
-
-    // Any extra data which still remains, flush it
-    if(!FlushWrite(ctx, true))
-        goto __Failure;
-
-    logger_.Info("[TemplateEngine]: Successfully wrote template data to cache.bin");
-    return;
-
-__Failure:
-    logger_.Error("[TemplateEngine]: Failed to write template data to cache.bin");
-    ctx.file->Close();
-
-    // We don't want corrupted cache lying around randomly
-    if(!fs.DeleteFile(cacheFile.c_str()))
-        logger_.Error("[TemplateEngine]: Failed to delete corrupted cache.bin");
-}
-
-void TemplateEngine::PreCompileTemplates()
+TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 {
     auto& fs     = FileSystem::GetFileSystem();
     auto& config = Config::GetInstance();
@@ -195,8 +28,7 @@ void TemplateEngine::PreCompileTemplates()
     std::size_t        errors              = 0;
     const std::string& inputDir            = config.projectConfig.templateDir;
     const std::string  staticOutputDir     = config.projectConfig.projectName + staticFolder_;
-    const std::string  dynamicCxxOutputDir = config.projectConfig.projectName + dynamicCxxFolder_;
-    const std::string  dynamicObjOutputDir = config.projectConfig.projectName + dynamicObjFolder_;
+    const std::string  dynamicCxxOutputDir = config.projectConfig.projectName + dynamicFolder_;
 
     // For partial tag checking. If u see it, don't compile the .html file
     // + 1 is redundant btw, but im still keeping it to cover my paranoia
@@ -207,14 +39,11 @@ void TemplateEngine::PreCompileTemplates()
     if(!fs.DirectoryExists(staticOutputDir.c_str()) && !fs.CreateDirectory(staticOutputDir, true))
         logger_.Fatal("[TemplateEngine]: Failed to create static directory: ", staticOutputDir);
 
-    // Dynamic templates have 2 folders, their C++ representation in cxx/ and compiled obj files in objs/
+    // Dynamic templates have their C++ representation in dynamic/ folder
     if(!fs.DirectoryExists(dynamicCxxOutputDir.c_str()) && !fs.CreateDirectory(dynamicCxxOutputDir, true))
         logger_.Fatal("[TemplateEngine]: Failed to create dynamic-cxx directory: ", dynamicCxxOutputDir);
-
-    if(!fs.DirectoryExists(dynamicObjOutputDir.c_str()) && !fs.CreateDirectory(dynamicObjOutputDir, true))
-        logger_.Fatal("[TemplateEngine]: Failed to create dynamic-obj directory: ", dynamicObjOutputDir);
     
-    logger_.Info("[TemplateEngine]: Starting template precompilation from: ", inputDir);
+    logger_.Info("[TemplateEngine]: Starting template compilation from: ", inputDir);
 
     // Traverse the entire template directory looking for .html files
     // Then compile those html files into /build/templates/(static | dynamic)/
@@ -306,17 +135,13 @@ void TemplateEngine::PreCompileTemplates()
         }
     });
 
-    if(errors > 0)
+    if(errors > 0) {
         logger_.Warn("[TemplateEngine]: Template compilation complete with ", errors, " error(s)");
-    else {
-        // Nice, now compile the cpp file to dll now (IF 'hasDynamicElement' is true)
-        // And load them as well for use
-        if(hasDynamicElement) {
-            CompileCxxToLib(dynamicCxxOutputDir, dynamicObjOutputDir);
-            LoadDynamicTemplatesFromLib();
-        }
-        logger_.Info("[TemplateEngine]: Template compilation completed successfully");
+        return TemplateCompilationResult{false, false};
     }
+
+    logger_.Info("[TemplateEngine]: Template compilation completed successfully");
+    return TemplateCompilationResult{true, hasDynamicElement};
 }
 
 TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
@@ -331,7 +156,7 @@ TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
 // vvv Helper Functions vvv
 void TemplateEngine::LoadDynamicTemplatesFromLib()
 {
-    // Load the user_templates.[dll/so] from <project>/build/dlls/
+    // Load the user_templates.[dll/so] from <project>/build/
     // Now its the callers responsibility to make sure it exists, if it doesn't-
     // -we go boom boom
     auto& fs = FileSystem::GetFileSystem();

@@ -48,6 +48,7 @@ public:
     virtual ~BaseFileSystem() = default;
 
     // File Manipulation
+    virtual bool        CreateFile(const char* path)                 const = 0;
     virtual bool        FileExists(const char* path)                 const = 0;
     virtual bool        DeleteFile(const char* path)                 const = 0;
     virtual bool        RenameFile(const char* from, const char* to) const = 0;

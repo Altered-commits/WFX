@@ -24,11 +24,9 @@ void Config::LoadCoreSettings(std::string_view path)
         auto tbl = toml::parse_file(path);
 
         // vvv Project vvv
-        ExtractValueOrFatal(tbl, "Project", "project_name", projectConfig.projectName);
+        ExtractValueOrFatal(tbl, "Project", "build_dir", projectConfig.buildDir);
+        ExtractValueOrFatal(tbl, "Project", "build_use_ninja", projectConfig.buildUsesNinja);
         ExtractStringArrayOrFatal(tbl, "Project", "middleware_list", projectConfig.middlewareList);
-        
-        projectConfig.publicDir   = projectConfig.projectName + "/public";
-        projectConfig.templateDir = projectConfig.projectName + "/templates";
 
         // vvv ENV vvv
         ExtractValueOrFatal(tbl, "ENV", "env_path", envConfig.envPath);
@@ -108,23 +106,15 @@ void Config::LoadCoreSettings(std::string_view path)
     }
 }
 
-void Config::LoadToolchainSettings(std::string_view path, bool isDebug)
+void Config::LoadFinalSettings(const std::string &projectDir)
 {
-    try {
-        auto tbl = toml::parse_file(path);
+    // Its our job to set some of the project configuration (as we have that info)
+    projectConfig.projectName = projectDir;
+    projectConfig.publicDir   = projectDir + "/public";
+    projectConfig.templateDir = projectDir + "/templates";
 
-        ExtractValueOrFatal(tbl, "Compiler", "ccmd",    toolchainConfig.ccmd);
-        ExtractValueOrFatal(tbl, "Compiler", "lcmd",    toolchainConfig.lcmd);
-        ExtractValueOrFatal(tbl, "Compiler", "objflag", toolchainConfig.objFlag);
-        ExtractValueOrFatal(tbl, "Compiler", "dllflag", toolchainConfig.dllFlag);
-
-        const char* sec = isDebug ? "Compiler.Debug" : "Compiler.Prod";
-        ExtractValueOrFatal(tbl, sec, "cargs", toolchainConfig.cargs);
-        ExtractValueOrFatal(tbl, sec, "largs", toolchainConfig.largs);
-    }
-    catch(const toml::parse_error& err) {
-        Logger::GetInstance().Fatal("[Config]: File -> 'toolchain.toml', Error -> ", err.what());
-    }
+    // Right now projectConfig 'buildDir' is folder name only, make it actual dir
+    projectConfig.buildDir = projectDir + '/' + projectConfig.buildDir;
 }
 
 } // namespace WFX::Core

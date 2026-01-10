@@ -32,7 +32,7 @@ struct ServerConfig {
     }
 };
 
-int RunDevServer(const ServerConfig& cfg);
+int RunServer(const std::string& project, const ServerConfig& cfg);
 
 }  // namespace WFX::CLI
 

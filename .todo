@@ -1,11 +1,11 @@
 # SERVICES
 wfx new	    Scaffold new project
-wfx dev	    Start dev server (auto-reload)
+wfx run	    Start WFX server
 wfx build	Build parts of WFX
-wfx doctor	Check requirements for WFX
+wfx doctor	Check requirements for WFX (Deprecated)
 
 To implement (In no specific order):
-1. Auto user code compiling into dll (Done)
+1. User project build system (Reworked)
 2. Middleware (Done)
 3. HTTPS (Done)
 4. Per route middleware (Done)
