@@ -42,6 +42,7 @@ private:
 class LinuxFileSystem : public BaseFileSystem {
 public:
     // File Manipulation
+    bool        CreateFile(const char* path)                 const override;
     bool        FileExists(const char* path)                 const override;
     bool        DeleteFile(const char* path)                 const override;
     bool        RenameFile(const char* from, const char* to) const override;

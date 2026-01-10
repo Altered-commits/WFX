@@ -1,4 +1,4 @@
-#include "dev.hpp"
+#include "run.hpp"
 
 #include "cli/commands/common/common.hpp"
 #include "config/config.hpp"
@@ -22,13 +22,18 @@ namespace WFX::CLI {
 using namespace WFX::Http;  // For 'WFXGlobalState', ...
 using namespace WFX::Utils; // For 'Logger', 'BufferPool', 'FileCache', ...
 
-int RunDevServer(const ServerConfig& cfg)
+int RunServer(const std::string& project, const ServerConfig& cfg)
 {
     auto& logger      = Logger::GetInstance();
     auto& config      = Config::GetInstance();
     auto& fs          = FileSystem::GetFileSystem();
     auto& globalState = GetGlobalState();
     auto& osConfig    = config.osSpecificConfig;
+    auto& projConfig  = config.projectConfig;
+
+    // Sanity check project directory existence
+    if(!fs.DirectoryExists(project.c_str()))
+        logger.Fatal("[WFX]: '", project, "' directory does not exist");
 
 #ifdef _WIN32
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
@@ -43,17 +48,15 @@ int RunDevServer(const ServerConfig& cfg)
     engine.Stop();
 #else
     // -------------------- LOADING PHASE --------------------
-    config.LoadCoreSettings("wfx.toml");
-    config.LoadToolchainSettings("toolchain.toml", cfg.GetFlag(ServerFlags::USE_DEBUG));
+    config.LoadCoreSettings(project + "/wfx.toml");
+    config.LoadFinalSettings(project);
 
     EnvConfig envConfig;
     envConfig.SetFlag(EnvFlags::REQUIRE_OWNER_UID);
     envConfig.SetFlag(EnvFlags::REQUIRE_PERMS_600);
 
     if(Dotenv::LoadFromFile(config.envConfig.envPath, envConfig))
-        logger.Info("[WFX-Master]: Loaded .env successfully");
-    else
-        logger.Info("[WFX-Master]: Failed to load .env");
+        logger.Info("[WFX-Master]: Loaded '.env' successfully");
 
     // -------------------- INITIALIZING PHASE --------------------
     signal(SIGINT, HandleMasterSignal);
@@ -63,31 +66,21 @@ int RunDevServer(const ServerConfig& cfg)
     if(!RandomPool::GetInstance().GetBytes(globalState.sslKey.data(), globalState.sslKey.size()))
         logger.Fatal("[WFX-Master]: Failed to initialize SSL key");
 
-    // -------------------- TEMPLATE COMPILATION PHASE --------------------
+    // -------------------- TEMPLATE / USER CODE COMPILATION PHASE --------------------
+    HandleBuildDirectory();
+
     auto& templateEngine = TemplateEngine::GetInstance();
-    
-    bool recompileViaFlag = cfg.GetFlag(ServerFlags::NO_TEMPLATE_CACHE);
-    bool recompile        = recompileViaFlag || !templateEngine.LoadTemplatesFromCache();
-    
-    if(recompile) {
-        logger.Info(
-            recompileViaFlag
-            ? "[WFX-Master]: --no-template-cache flag detected, compiling templates"
-            : "[WFX-Master]: Re-compiling templates"
-        );
-        templateEngine.PreCompileTemplates();
+    auto [success, hasDynamic] = templateEngine.PreCompileTemplates();
+
+    // Compile only user source
+    if(!success || !hasDynamic)
+        HandleUserCxxCompilation(CxxCompilationOption::SOURCE_ONLY);
+
+    // Compile both source + templates
+    else {
+        HandleUserCxxCompilation();
+        templateEngine.LoadDynamicTemplatesFromLib();
     }
-
-    // -------------------- USER CODE COMPILATION PHASE --------------------
-    const std::string dllDir      = config.projectConfig.projectName + "/build/dlls/";
-    const char*       dllDirCStr  = dllDir.c_str();
-    const std::string dllPath     = dllDir + "user_entry.so";
-    const char*       dllPathCStr = dllPath.c_str();
-
-    if(cfg.GetFlag(ServerFlags::NO_BUILD_CACHE) || !fs.FileExists(dllPathCStr))
-        HandleUserSrcCompilation(dllDirCStr, dllPathCStr);
-    else
-        logger.Info("[WFX-Master]: File already exists, skipping user code compilation");
 
     // Switch ports if we enable https and we don't want to override https default port
     bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
@@ -101,6 +94,7 @@ int RunDevServer(const ServerConfig& cfg)
     logger.SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
 
     // -------------------- WORKERS SPAWNING PHASE --------------------
+    const std::string dllDir = projConfig.buildDir + "/user_entry.so";
     for(int i = 0; i < osConfig.workerProcesses; i++) {
         pid_t pid = fork();
 
@@ -115,7 +109,7 @@ int RunDevServer(const ServerConfig& cfg)
             BufferPool::GetInstance().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
             FileCache::GetInstance().Init(config.miscConfig.fileCacheSize);
 
-            WFX::Core::CoreEngine engine{dllPathCStr, useHttps};
+            WFX::Core::CoreEngine engine{dllDir.c_str(), useHttps};
             globalState.enginePtr = &engine;
 
             signal(SIGTERM, HandleWorkerSignal);
@@ -152,9 +146,6 @@ int RunDevServer(const ServerConfig& cfg)
     for(int i = 0; i < osConfig.workerProcesses; i++)
         waitpid(globalState.workerPids[i], nullptr, 0);
 #endif // _WIN32
-
-    // Before shutdown, write template cache to cache.bin for future use
-    templateEngine.SaveTemplatesToCache();
 
     logger.Info("[WFX-Master]: Shutdown successfully");
     return 0;

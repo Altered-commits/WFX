@@ -19,91 +19,78 @@ using namespace WFX::Utils; // For ...
 using namespace WFX::Core;  // For 'Config'
 
 // vvv Common Stuff vvv
-void HandleUserSrcCompilation(const char* dllDir, const char* dllPath)
+void HandleBuildDirectory()
 {
-    auto& fs     = FileSystem::GetFileSystem();
-    auto& proc   = ProcessUtils::GetInstance();
-    auto& logger = Logger::GetInstance();
-    auto& config = Config::GetInstance();
+    auto& fs            = FileSystem::GetFileSystem();
+    auto& logger        = Logger::GetInstance();
+    auto& projectConfig = Config::GetInstance().projectConfig;
+    
+    // Short circuit if build/ directory already exists
+    // Any unwanted changes inside of build/ is solely users fault
+    if(fs.DirectoryExists(projectConfig.buildDir.c_str()))
+        return;
 
-    const std::string& projName  = config.projectConfig.projectName;
-    const auto&        toolchain = config.toolchainConfig;
-    const std::string  srcDir    = projName + "/src";
-    const std::string  objDir    = projName + "/build/objs";
+    std::string intDir   = projectConfig.projectName + "/intermediate/dynamic";
+    std::string intDummy = intDir + "/dummy.cpp";
 
-    if(!fs.DirectoryExists(srcDir.c_str()))
-        logger.Fatal("[WFX-Master]: Failed to locate 'src' directory inside of '", projName, "/src'.");
+    // If intermediate directory doesn't exist, handle its creation (to ensure cmake succeeds)
+    if(!fs.DirectoryExists(intDir.c_str())) {
+        if(!fs.CreateDirectory(std::move(intDir)))
+            logger.Fatal(
+                "[WFX-Master]: Failed to create intermediate directory (needed for CMake to work)"
+            );
 
-    if(!fs.CreateDirectory(objDir))
-        logger.Fatal("[WFX-Master]: Failed to create obj dir: ", objDir, '.');
+        if(!fs.CreateFile(intDummy.c_str())) {
+            // Cleanup the intermediate/ directory
+            if(!fs.DeleteDirectory((projectConfig.projectName + "/intermediate").c_str()))
+                logger.Error("[WFX-Master]: Failed to delete intermediate/ (incoming 'Fatal' error)");
 
-    if(!fs.CreateDirectory(dllDir))
-        logger.Fatal("[WFX-Master]: Failed to create dll dir: ", dllDir, '.');
-
-    // Prebuild fixed portions of compiler and linker commands
-    const std::string compilerBase = toolchain.ccmd + " " + toolchain.cargs + " ";
-    const std::string objPrefix    = toolchain.objFlag + "\"";
-    const std::string dllLinkTail  = toolchain.largs + " " + toolchain.dllFlag + "\"" + dllPath + '"';
-
-    std::string linkCmd = toolchain.lcmd + " ";
-
-    // Recurse through src/ files
-    fs.ListDirectory(srcDir, true, [&](const std::string& cppFile) {
-        if(!EndsWith(cppFile.c_str(), ".cpp") &&
-            !EndsWith(cppFile.c_str(), ".cxx") &&
-            !EndsWith(cppFile.c_str(), ".cc")) return;
-
-        logger.Info("[WFX-Master]: Compiling src/ file: ", cppFile);
-
-        // Construct relative path
-        std::string relPath = cppFile.substr(srcDir.size());
-        if(!relPath.empty() && (relPath[0] == '/' || relPath[0] == '\\'))
-            relPath.erase(0, 1);
-
-        // Replace .cpp with .obj
-        std::string objFile = objDir + "/" + relPath;
-        objFile.replace(objFile.size() - 4, 4, ".obj");
-
-        // Ensure obj subdir exists
-        std::size_t slash = objFile.find_last_of("/\\");
-        if(slash != std::string::npos) {
-            std::string dir = objFile.substr(0, slash);
-            if(!fs.DirectoryExists(dir.c_str()) && !fs.CreateDirectory(dir))
-                logger.Fatal("[WFX-Master]: Failed to create obj subdirectory: ", dir);
+            logger.Fatal(
+                "[WFX-Master]: Failed to create intermediate dummy (needed for CMake to work)"
+            );
         }
-
-        // Construct compile command
-        std::string compileCmd = compilerBase + "\"" + cppFile + "\" " + objPrefix + objFile + "\"";
-        auto result = proc.RunProcess(compileCmd);
-        if(result.exitCode != 0)
-            logger.Fatal("[WFX-Master]: Compilation failed for: ", cppFile, ". OS code: ", result.osCode);
-
-        // Append obj to link command
-        linkCmd += "\"" + objFile + "\" ";
-    });
-
-    // Get any libs which need to be linked to user dll
-    auto libList = fs.ListDirectory("wfx/lib", false);
-
-    // Final linking
-    // If any libraries exist, give linker the path to the libraries
-    if(!libList.empty()) {
-#ifndef _WIN32
-        // POSIX (Linux/macOS), TODO: Don't hardcode this, have some setting inside of toolchain.toml
-        linkCmd += " \"-Wl,-rpath,wfx/lib\" ";
-#endif
-        for(const auto& libPath : libList)
-            linkCmd += " \"" + libPath + "\" ";
     }
 
-    // Final link command
-    linkCmd += dllLinkTail;
+    auto& proc = ProcessUtils::GetInstance();
 
-    auto linkResult = proc.RunProcess(linkCmd);
-    if(linkResult.exitCode != 0)
-        logger.Fatal("[WFX-Master]: Linking failed. DLL not created. OS code: ", linkResult.osCode);
+    // Now do the fancy cmake command and run it
+    std::string cmakeInitCommand = "cmake -S " + projectConfig.projectName + "/ -B " + projectConfig.buildDir;
+    if(projectConfig.buildUsesNinja)
+        cmakeInitCommand += " -G Ninja";
 
-    logger.Info("[WFX-Master]: User project successfully compiled to ", dllDir);
+    auto initResult = proc.RunProcess(cmakeInitCommand);
+    if(initResult.exitCode != 0)
+        logger.Fatal("[WFX-Master]: CMake init failed. Exit code: ", initResult.exitCode);
+
+    logger.Info("[WFX-Master]: CMake initialized successfully");
+}
+
+void HandleUserCxxCompilation(CxxCompilationOption opt)
+{
+    /*
+     * Handles both src and template cxx compilation with one single build directory
+     */
+    auto& proc          = ProcessUtils::GetInstance();
+    auto& logger        = Logger::GetInstance();
+    auto& projectConfig = Config::GetInstance().projectConfig;
+
+    std::string cmakeBuildCommand = "cmake --build " + projectConfig.buildDir;
+
+    switch(opt) {    
+        case CxxCompilationOption::SOURCE_ONLY:
+            cmakeBuildCommand += " --target user_entry";
+            break;
+        case CxxCompilationOption::TEMPLATES_ONLY:
+            cmakeBuildCommand += " --target user_templates";
+            break;
+        // Ignore everything else
+    }
+
+    auto buildResult = proc.RunProcess(cmakeBuildCommand);
+    if(buildResult.exitCode != 0)
+        logger.Fatal("[WFX-Master]: CMake build failed. Exit code: ", buildResult.exitCode);
+
+    logger.Info("[WFX-Master]: User project successfully compiled");
 }
 
 // vvv OS Specific Stuff vvv

@@ -7,11 +7,15 @@
 
 namespace WFX::Core {
 
-// Every struct represents a section of configuration
+// Every struct represents a section of configuration (except three below)
 struct ProjectConfig {
-    std::string projectName;
-    std::string publicDir;
-    std::string templateDir;
+    std::string projectName; // --
+    std::string publicDir;   //  | These will be set from within the master process
+    std::string templateDir; // --
+
+    bool        buildUsesNinja = true;
+    std::string buildDir       = "build"; // Will be converted to dir in master process
+
     std::vector<std::string> middlewareList;
 };
 
@@ -86,15 +90,6 @@ struct MiscConfig {
     std::uint32_t templateChunkSize = 16 * 1024;
 };
 
-struct ToolchainConfig {
-    std::string ccmd;
-    std::string lcmd;
-    std::string cargs;
-    std::string largs;
-    std::string objFlag;
-    std::string dllFlag;
-};
-
 // Main Config loader
 // TODO: Add checks for maxRecvBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
 class Config final {
@@ -103,7 +98,7 @@ public: // Access
 
 public: // Load from TOML
     void LoadCoreSettings(std::string_view path);
-    void LoadToolchainSettings(std::string_view path, bool isDebug);
+    void LoadFinalSettings(const std::string& projectDir);
 
 public: // Main storage space for configurations
     ProjectConfig    projectConfig;
@@ -112,7 +107,6 @@ public: // Main storage space for configurations
     SSLConfig        sslConfig;
     OSSpecificConfig osSpecificConfig;
     MiscConfig       miscConfig;
-    ToolchainConfig  toolchainConfig;
 
 private:
     Config()  = default;
