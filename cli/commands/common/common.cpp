@@ -54,7 +54,7 @@ void HandleBuildDirectory()
     auto& proc = ProcessUtils::GetInstance();
 
     // Now do the fancy cmake command and run it
-    std::string cmakeInitCommand = "cmake -S " + projectConfig.projectName + "/ -B " + projectConfig.buildDir;
+    std::string cmakeInitCommand = "cmake -S " + projectConfig.projectName + " -B " + projectConfig.buildDir;
     if(projectConfig.buildUsesNinja)
         cmakeInitCommand += " -G Ninja";
 
