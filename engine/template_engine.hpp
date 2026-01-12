@@ -5,7 +5,7 @@
 #include "config/config.hpp"
 #include "legacy/lexer.hpp"
 #include "utils/logger/logger.hpp"
-#include "utils/filesystem/filesystem.hpp"
+#include "utils/fileops/filesystem.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -271,16 +271,16 @@ private:
     TemplateEngine& operator=(TemplateEngine&&)      = delete;
 
 private: // For ease of use across functions
-    constexpr static std::string_view partialTag_     = "{% partial %}";
-    constexpr static std::size_t      partialTagSize_ = partialTag_.size();
+    constexpr static std::string_view PARTIAL_TAG      = "{% partial %}";
+    constexpr static std::size_t      PARTIAL_TAG_SIZE = PARTIAL_TAG.size();
+    constexpr static std::size_t      MAX_TAG_LENGTH   = 300;
 
-    constexpr static std::size_t      maxTagLength_   = 300;
+    constexpr static const char*      TEMPLATE_LIB_PATH   = "/build/user_templates.so";
+    constexpr static const char*      TEMPLATE_CACHE_PATH = "/intermediate/template.wfxmeta";
+    constexpr static const char*      STATIC_FOLDER       = "/intermediate/static";
+    constexpr static const char*      DYNAMIC_FOLDER      = "/intermediate/dynamic";
 
-    constexpr static const char*      templateLib_   = "/build/user_templates.so";
-    constexpr static const char*      staticFolder_  = "/intermediate/static";
-    constexpr static const char*      dynamicFolder_ = "/intermediate/dynamic";
-
-    constexpr static const char*      dynamicTemplateFuncPrefix_ = "__TmplSM_";
+    constexpr static const char*      DYNAMIC_FUNC_PREFIX = "__TmplSM_";
 
 private: // Storage
     Logger& logger_ = Logger::GetInstance();
@@ -300,10 +300,6 @@ private: // Storage
         {"for",      TagType::FOR},
         {"endfor",   TagType::ENDFOR}
     };
-
-    // We don't want to save template data to cache.bin always, only save it if we-
-    // -compile the templates, in which case there might be a chance the data is modified
-    bool resaveCacheFile_ = false;
 
     // CRITICAL WARNING: The data in this map MUST be treated as immutable after initial-
     // -population. Internal engine code may store string_views that point directly to the-

@@ -28,10 +28,10 @@ User code doesn't need global namespaces unless you wish to create them (like wh
 
 - **Namespaces / Classes / Structs / Enums / Function identifier:** `PascalCase`
 - **Variables / Function parameters / Locals:** `camelCase`
-- **Globals / Constants / Enum values:** `UPPER_SNAKE_CASE`
+- **Globals / Constants / Enum values:** `SCREAMING_SNAKE_CASE`
 - **Internal engine-facing symbols:** prefix `__` (this is a bit debatable for now, use sparingly)
 
-**Formatting:** 4 spaces, no tabs. Braces: same line for everything except function definitions (unless u wish to write entire function in a single line).
+**Formatting:** 4 spaces, no tabs. Braces: same line for **almost** everything except function definitions (unless u wish to write entire function in a single line).
 
 **Example:**
 

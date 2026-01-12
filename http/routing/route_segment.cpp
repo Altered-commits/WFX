@@ -62,8 +62,7 @@ std::string_view RouteSegment::ToString() const
     if(auto key = GetStaticKey())
         return "<static>";
     else {
-        switch(GetParamType())
-        {
+        switch(GetParamType()) {
             case ParamType::UINT:   return "<uint>";
             case ParamType::INT:    return "<int>";
             case ParamType::STRING: return "<str>";

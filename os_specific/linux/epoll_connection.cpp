@@ -865,8 +865,7 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     // Refresh timeout everytime a chunk is sent
     RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 
-    switch(streamResult.action)
-    {
+    switch(streamResult.action) {
         case StreamAction::CONTINUE:
         {
             // The actual rwbuffer allows chunks only upto uint32 max only, if its 0 or > uint32 max-
@@ -1003,8 +1002,7 @@ void EpollConnectionHandler::WrapAccept(ConnectionContext* ctx)
         SSLReturn hsResult = sslHandler_->Handshake(ctx->sslConn);
 
         // Handshake done, check if its finished or still remaining
-        switch(hsResult)
-        {
+        switch(hsResult) {
             case SSLReturn::SUCCESS:
                 ctx->eventType = EventType::EVENT_RECV;
                 break;

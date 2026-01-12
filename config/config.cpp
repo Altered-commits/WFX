@@ -24,9 +24,12 @@ void Config::LoadCoreSettings(std::string_view path)
         auto tbl = toml::parse_file(path);
 
         // vvv Project vvv
-        ExtractValueOrFatal(tbl, "Project", "build_dir", projectConfig.buildDir);
-        ExtractValueOrFatal(tbl, "Project", "build_use_ninja", projectConfig.buildUsesNinja);
         ExtractStringArrayOrFatal(tbl, "Project", "middleware_list", projectConfig.middlewareList);
+
+        // vvv Build vvv
+        ExtractValueOrFatal(tbl, "Build", "dir_name",            buildConfig.buildDir);
+        ExtractValueOrFatal(tbl, "Build", "preferred_config",    buildConfig.buildType);
+        ExtractValueOrFatal(tbl, "Build", "preferred_generator", buildConfig.buildGenerator);
 
         // vvv ENV vvv
         ExtractValueOrFatal(tbl, "ENV", "env_path", envConfig.envPath);
@@ -106,7 +109,7 @@ void Config::LoadCoreSettings(std::string_view path)
     }
 }
 
-void Config::LoadFinalSettings(const std::string &projectDir)
+void Config::LoadFinalSettings(const std::string& projectDir)
 {
     // Its our job to set some of the project configuration (as we have that info)
     projectConfig.projectName = projectDir;
@@ -114,7 +117,7 @@ void Config::LoadFinalSettings(const std::string &projectDir)
     projectConfig.templateDir = projectDir + "/templates";
 
     // Right now projectConfig 'buildDir' is folder name only, make it actual dir
-    projectConfig.buildDir = projectDir + '/' + projectConfig.buildDir;
+    buildConfig.buildDir = projectDir + '/' + buildConfig.buildDir;
 }
 
 } // namespace WFX::Core

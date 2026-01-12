@@ -12,23 +12,15 @@ struct ProcessResult {
     std::uint32_t osCode   = 0; // On Windows it is used with GetLastError
 };
 
-class BaseProcessUtils {
-public:
-    // NOTE: 'cmd' must be mutable string
-    virtual ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory = "") const = 0;
-    virtual ProcessResult RunProcess(
-        const std::string& executable, const std::string& args, const std::string& workingDirectory = ""
-    ) const = 0;
-};
+namespace ProcessUtils {
 
-class ProcessUtils final {
-public:
-    static BaseProcessUtils& GetInstance();
+// NOTE: 'cmd' must be mutable string
+ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory = "");
+ProcessResult RunProcess(
+    const std::string& executable, const std::string& args, const std::string& workingDirectory = ""
+);
 
-private:
-    ProcessUtils()  = delete;
-    ~ProcessUtils() = delete;
-};
+} // namespace ProcessUtils
 
 } // namespace WFX::Utils
 

@@ -7,7 +7,7 @@
 #include "http/common/http_global_state.hpp"
 #include "utils/dotenv/dotenv.hpp"
 #include "utils/logger/logger.hpp"
-#include "utils/filesystem/filesystem.hpp"
+#include "utils/fileops/filesystem.hpp"
 #include "utils/backport/string.hpp"
 
 #ifdef _WIN32
@@ -26,13 +26,12 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
 {
     auto& logger      = Logger::GetInstance();
     auto& config      = Config::GetInstance();
-    auto& fs          = FileSystem::GetFileSystem();
     auto& globalState = GetGlobalState();
     auto& osConfig    = config.osSpecificConfig;
-    auto& projConfig  = config.projectConfig;
+    auto& buildConfig = config.buildConfig;
 
     // Sanity check project directory existence
-    if(!fs.DirectoryExists(project.c_str()))
+    if(!FileSystem::DirectoryExists(project.c_str()))
         logger.Fatal("[WFX]: '", project, "' directory does not exist");
 
 #ifdef _WIN32
@@ -94,7 +93,7 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     logger.SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
 
     // -------------------- WORKERS SPAWNING PHASE --------------------
-    const std::string dllDir = projConfig.buildDir + "/user_entry.so";
+    const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
     for(int i = 0; i < osConfig.workerProcesses; i++) {
         pid_t pid = fork();
 

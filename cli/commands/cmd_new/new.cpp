@@ -163,9 +163,12 @@ intermediate/
 
     // 2. Create essential config
     CreateFile(projBase / "wfx.toml", R"([Project]
-build_dir       = "build"
-build_use_ninja = true
 middleware_list = []    # Order of middleware registered by either User or Engine
+
+[Build]
+dir_name            = "build"          # Build directory used by CMake
+preferred_config    = "Debug"          # Active build configuration (must match CMake: Debug / Release)
+preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure the build directory
 
 [Network]
 send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)

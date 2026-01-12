@@ -11,8 +11,7 @@ const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, 
     if(path.empty() || path[0] != '/')
         Logger::GetInstance().Fatal("[Router]: Path is either empty or does not start with '/'.");
 
-    switch(method)
-    {
+    switch(method) {
         case HttpMethod::GET:
             return getRoutes_.Insert(path, std::move(handler));
 
@@ -37,8 +36,7 @@ const TrieNode* Router::MatchRoute(HttpMethod method, std::string_view path, Pat
     // Strip query string before matching
     std::string_view queryStrippedPath = path.substr(0, path.find('?'));
 
-    switch(method)
-    {
+    switch(method) {
         case HttpMethod::GET:
             return getRoutes_.Match(queryStrippedPath, outSegments);
         case HttpMethod::POST:
