@@ -1,10 +1,10 @@
 #include "template_engine.hpp"
 
 #include "config/config.hpp"
+#include "utils/fileops/filemeta.hpp"
 #include "utils/backport/string.hpp"
 #include "utils/crypt/string.hpp"
 #include <cstring>
-#include <deque>
 
 #if defined(__linux__)
     #include <dlfcn.h>
@@ -21,41 +21,68 @@ TemplateEngine& TemplateEngine::GetInstance()
 // vvv Main Functions vvv
 TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 {
-    auto& fs     = FileSystem::GetFileSystem();
-    auto& config = Config::GetInstance();
+    auto& projectConfig = Config::GetInstance().projectConfig;
 
     bool               hasDynamicElement   = false;
     std::size_t        errors              = 0;
-    const std::string& inputDir            = config.projectConfig.templateDir;
-    const std::string  staticOutputDir     = config.projectConfig.projectName + staticFolder_;
-    const std::string  dynamicCxxOutputDir = config.projectConfig.projectName + dynamicFolder_;
+    const std::string& inputDir            = projectConfig.templateDir;
+    const std::string  staticOutputDir     = projectConfig.projectName + staticFolder_;
+    const std::string  dynamicCxxOutputDir = projectConfig.projectName + dynamicFolder_;
 
     // For partial tag checking. If u see it, don't compile the .html file
     // + 1 is redundant btw, but im still keeping it to cover my paranoia
     char temp[partialTagSize_ + 1] = { 0 };
-    
-    resaveCacheFile_ = true;
 
-    if(!fs.DirectoryExists(staticOutputDir.c_str()) && !fs.CreateDirectory(staticOutputDir, true))
+    // Cache file to not compile templates everytime
+    FileMeta fileMeta{projectConfig.projectName + templateCache_};
+    switch(fileMeta.Load())
+    {
+        case FileMetaStatus::SUCCESS:
+            break;
+
+        case FileMetaStatus::CORRUPTED:
+        case FileMetaStatus::NOT_FOUND:
+        case FileMetaStatus::TOO_LARGE:
+        case FileMetaStatus::TOO_MANY_ENTRIES:
+            fileMeta.Clear();
+            resaveCacheFile_ = true;
+            logger_.Warn(
+                "[TemplateEngine]: Template cache file was either corrupted, too large or not found, "
+                "engine will rebuild the cache"
+            );
+            break;
+
+        case FileMetaStatus::IO_ERROR:
+            logger_.Fatal("[TemplateEngine]: IO error while trying to read template cache");
+        default:
+            logger_.Fatal("[TemplateEngine]: Unhandled return case for template cache");
+    }
+
+    if(
+        !FileSystem::DirectoryExists(staticOutputDir.c_str())
+        && !FileSystem::CreateDirectory(staticOutputDir, true)
+    )
         logger_.Fatal("[TemplateEngine]: Failed to create static directory: ", staticOutputDir);
 
     // Dynamic templates have their C++ representation in dynamic/ folder
-    if(!fs.DirectoryExists(dynamicCxxOutputDir.c_str()) && !fs.CreateDirectory(dynamicCxxOutputDir, true))
+    if(
+        !FileSystem::DirectoryExists(dynamicCxxOutputDir.c_str())
+        && !FileSystem::CreateDirectory(dynamicCxxOutputDir, true)
+    )
         logger_.Fatal("[TemplateEngine]: Failed to create dynamic-cxx directory: ", dynamicCxxOutputDir);
     
     logger_.Info("[TemplateEngine]: Starting template compilation from: ", inputDir);
 
     // Traverse the entire template directory looking for .html files
-    // Then compile those html files into /build/templates/(static | dynamic)/
-    fs.ListDirectory(inputDir, true, [&](std::string inPath) {
+    FileSystem::ListDirectory(inputDir, true, [&](std::string inPath) {
         if(!EndsWith(inPath, ".html") && !EndsWith(inPath, ".htm"))
             return;
         
         logger_.Info("[TemplateEngine]: Compiling template: ", inPath);
 
         // Strip leading slash cuz we will use this as key inside of templates_ map
-        // We expect that user inside of SendTemplate function inputs path without leading slash
-        // And because SendTemplate uses templates_ map, we cannot use leading slash
+        // We expect that user, inside of 'SendTemplate' function, inputs path without leading slash
+        // And because 'SendTemplate' uses templates_ map, we cannot use leading slash
         std::string relPath = std::string(inPath.begin() + inputDir.size(), inPath.end());
         relPath.erase(0, relPath.find_first_not_of("/\\"));
 
@@ -66,12 +93,15 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 
         // Ensure target directory exists
         std::string relOutputDir = outPath.substr(0, outPath.find_last_of("/\\"));
-        if(!fs.DirectoryExists(relOutputDir.c_str()) && !fs.CreateDirectory(relOutputDir, true)) {
+        if(
+            !FileSystem::DirectoryExists(relOutputDir.c_str())
+            && !FileSystem::CreateDirectory(relOutputDir, true)
+        ) {
             logger_.Error("[TemplateEngine]: Failed to create template output directory: ", staticOutputDir);
             return;
         }
 
-        auto in = fs.OpenFileRead(inPath.c_str());
+        auto in = FileSystem::OpenFileRead(inPath.c_str());
         if(!in) {
             errors++;
             logger_.Error("[TemplateEngine]: Failed to open input template file: ", inPath);
@@ -96,7 +126,7 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                 return;
         }
 
-        auto out = fs.OpenFileWrite(outPath.c_str());
+        auto out = FileSystem::OpenFileWrite(outPath.c_str());
         if(!out) {
             errors++;
             logger_.Error("[TemplateEngine]: Failed to open output template file: ", outPath);
@@ -144,27 +174,15 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
     return TemplateCompilationResult{true, hasDynamicElement};
 }
 
-TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
-{
-    auto templateMeta = templates_.find(std::move(relPath));
-    if(templateMeta != templates_.end())
-        return &(templateMeta->second);
-
-    return nullptr;
-}
-
-// vvv Helper Functions vvv
 void TemplateEngine::LoadDynamicTemplatesFromLib()
 {
-    // Load the user_templates.[dll/so] from <project>/build/
+    // Load the user_templates.[dll/so/dylib] from <project>/build/
     // Now its the callers responsibility to make sure it exists, if it doesn't-
     // -we go boom boom
-    auto& fs = FileSystem::GetFileSystem();
-
     const std::string inputDir = config_.projectConfig.projectName + staticFolder_;
     const std::string dllPath  = config_.projectConfig.projectName + templateLib_;
 
-    if(!fs.FileExists(dllPath.c_str()))
+    if(!FileSystem::FileExists(dllPath.c_str()))
         logger_.Fatal("[TemplateEngine]: Dynamic template loader couldn't find ", dllPath);
 
 #if defined(_WIN32)
@@ -198,7 +216,7 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
         void* rawSym = dlsym(handle, symbol.c_str());
         const char* dlsymErr = dlerror();
         if(!rawSym || dlsymErr)
-            logger_.Fatal("[TemplateEngine]: Failed to find ", symbol, " in template SO. Error: ",
+            logger_.Fatal("[TemplateEngine]: Failed to find '", symbol, "' in template lib. Error: ",
                         (dlsymErr ? dlsymErr : "symbol not found"));
 
         // Each function returns a unique_ptr to generator class as defined by 'TemplateCreatorFn'
@@ -211,6 +229,16 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
     logger_.Info("[TemplateEngine]: Successfully initialized dynamic template module(s): ", dllPath);
 }
 
+TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
+{
+    auto templateMeta = templates_.find(std::move(relPath));
+    if(templateMeta != templates_.end())
+        return &(templateMeta->second);
+
+    return nullptr;
+}
+
+// vvv Helper Functions vvv
 TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate)
 {
     std::uint32_t      chunkSize = Config::GetInstance().miscConfig.templateChunkSize;
@@ -485,12 +513,11 @@ __DefaultChunkProcessing:
 // vvv Helper Functions vvv
 bool TemplateEngine::PushFile(CompilationContext& context, const std::string& relPath)
 {
-    auto& fs     = FileSystem::GetFileSystem();
     auto& config = Config::GetInstance();
 
     std::string fullPath = config.projectConfig.templateDir + "/" + relPath;
 
-    BaseFilePtr newFile = fs.OpenFileRead(fullPath.c_str());
+    BaseFilePtr newFile = FileSystem::OpenFileRead(fullPath.c_str());
     if(!newFile) {
         logger_.Error("[TemplateEngine]: Cannot open include '", fullPath, '\'');
         return false;

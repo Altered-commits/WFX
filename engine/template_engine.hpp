@@ -5,7 +5,7 @@
 #include "config/config.hpp"
 #include "legacy/lexer.hpp"
 #include "utils/logger/logger.hpp"
-#include "utils/filesystem/filesystem.hpp"
+#include "utils/fileops/filesystem.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -277,6 +277,7 @@ private: // For ease of use across functions
     constexpr static std::size_t      maxTagLength_   = 300;
 
     constexpr static const char*      templateLib_   = "/build/user_templates.so";
+    constexpr static const char*      templateCache_ = "/intermediate/template.wfxmeta";
     constexpr static const char*      staticFolder_  = "/intermediate/static";
     constexpr static const char*      dynamicFolder_ = "/intermediate/dynamic";
 
@@ -301,8 +302,8 @@ private: // Storage
         {"endfor",   TagType::ENDFOR}
     };
 
-    // We don't want to save template data to cache.bin always, only save it if we-
-    // -compile the templates, in which case there might be a chance the data is modified
+    // We don't want to save template data to `templateCache_` always, only save it under-
+    // -under certain conditions in which templates maybe modified
     bool resaveCacheFile_ = false;
 
     // CRITICAL WARNING: The data in this map MUST be treated as immutable after initial-

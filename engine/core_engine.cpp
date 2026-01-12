@@ -7,7 +7,7 @@
 #include "http/formatters/serializer/http_serializer.hpp"
 #include "shared/apis/master_api.hpp"
 #include "utils/backport/string.hpp"
-#include "utils/filesystem/filesystem.hpp"
+#include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 
 #if defined(__linux__)

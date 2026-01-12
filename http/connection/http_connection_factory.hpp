@@ -7,12 +7,12 @@
 #include <memory>
 
 #ifdef _WIN32
-    #include "os_specific/windows/http/connection/iocp_connection.hpp"
+    #include "os_specific/windows/iocp_connection.hpp"
 #else
     #ifdef WFX_LINUX_USE_IO_URING
-        #include "os_specific/linux/http/connection/io_uring_connection.hpp"
+        #include "os_specific/linux/io_uring_connection.hpp"
     #else
-        #include "os_specific/linux/http/connection/epoll_connection.hpp"
+        #include "os_specific/linux/epoll_connection.hpp"
     #endif
 #endif
 

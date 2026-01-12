@@ -830,8 +830,7 @@ bool TemplateEngine::GenerateCxxFromIR(
     const std::string& funcName
 )
 {
-    auto& fs      = FileSystem::GetFileSystem();
-    auto  outFile = fs.OpenFileWrite(outCxxPath.c_str());
+    auto outFile = FileSystem::OpenFileWrite(outCxxPath.c_str());
 
     if(!outFile) {
         logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to open output file: ", outCxxPath);
@@ -1065,10 +1064,8 @@ bool TemplateEngine::GenerateCxxFromTemplate(
     const std::string& inHtmlPath, const std::string& outCxxPath, const std::string& funcName
 )
 {
-    auto& fs = FileSystem::GetFileSystem();
-
     std::uint32_t chunkSize = config_.miscConfig.templateChunkSize;
-    BaseFilePtr   inFile    = fs.OpenFileRead(inHtmlPath.c_str(), true);
+    BaseFilePtr   inFile    = FileSystem::OpenFileRead(inHtmlPath.c_str(), true);
     
     TranspilationContext ctx{std::move(inFile), chunkSize};
 

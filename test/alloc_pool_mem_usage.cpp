@@ -1,8 +1,8 @@
 /*
- * Build: g++ -O3 -pthread test/alloc_pool_mem_usage.cpp utils/fixed_pool/fixed_pool.cpp -o alloc_bench
+ * Build: g++ -O3 -pthread test/alloc_pool_mem_usage.cpp utils/pool/fixed_pool.cpp -o alloc_bench
  */
 
-#include "../utils/fixed_pool/fixed_pool.hpp"
+#include "../utils/pool/fixed_pool.hpp"
 
 #include <thread>
 #include <vector>

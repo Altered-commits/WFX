@@ -13,9 +13,8 @@ int BuildProject(const std::string& project, const std::string& buildType, bool 
     // Used by pretty much everything so yeah
     auto& config = Config::GetInstance();
     auto& logger = Logger::GetInstance();
-    auto& fs     = FileSystem::GetFileSystem();
 
-    if(!fs.DirectoryExists(project.c_str()))
+    if(!FileSystem::DirectoryExists(project.c_str()))
         logger.Fatal("[WFX]: '", project, "' directory does not exist");
 
     logger.Info("[WFX]: Build mode: ", isDebug ? "debug" : "prod");

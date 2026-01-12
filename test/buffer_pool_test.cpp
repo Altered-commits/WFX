@@ -18,7 +18,7 @@
 #include <atomic>
 #include <random>
 
-#include "../utils/buffer_pool/buffer_pool.hpp"
+#include "../utils/pool/buffer_pool.hpp"
 
 using namespace WFX::Utils;
 

@@ -13,10 +13,13 @@ struct ProjectConfig {
     std::string publicDir;   //  | These will be set from within the master process
     std::string templateDir; // --
 
-    bool        buildUsesNinja = true;
-    std::string buildDir       = "build"; // Will be converted to dir in master process
-
     std::vector<std::string> middlewareList;
+};
+
+struct BuildConfig {
+    std::string buildDir       = "build";          // Will be converted to dir in master process
+    std::string buildGenerator = "Unix Makefiles";
+    std::string buildType      = "Debug";
 };
 
 struct NetworkConfig {
@@ -102,6 +105,7 @@ public: // Load from TOML
 
 public: // Main storage space for configurations
     ProjectConfig    projectConfig;
+    BuildConfig      buildConfig;
     NetworkConfig    networkConfig;
     ENVConfig        envConfig;
     SSLConfig        sslConfig;
