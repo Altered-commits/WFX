@@ -93,8 +93,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
     // Main shit
     HttpParseState state = HttpParser::Parse(ctx);
 
-    switch(state)
-    {
+    switch(state) {
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
         case HttpParseState::PARSE_INCOMPLETE_BODY:
             ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
@@ -224,8 +223,7 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
 
     auto&& [serializeResult, bodyView] = HttpSerializer::SerializeToBuffer(res, ctx->rwBuffer);
 
-    switch(serializeResult)
-    {
+    switch(serializeResult) {
         case SerializeResult::SERIALIZE_SUCCESS:
             if(res.IsFileOperation())
                 connHandler_->WriteFile(ctx, std::move(bodyView));

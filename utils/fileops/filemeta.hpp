@@ -6,15 +6,20 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include <tuple>
 
 namespace WFX::Utils {
 
-using FileMetadata = std::tuple<
-    std::uint64_t, // Size
-    std::uint64_t, // Modified time
-    std::string    // Hash
->;
+struct FileMetadata {
+    FileMetadata() = default;
+
+    FileMetadata(std::int64_t mt, std::string&& hs)
+        : modifiedTime(mt), hash(std::move(hs))
+    {}
+
+    std::string  hash{};
+    std::int64_t modifiedTime{0};
+    bool         hit{false}; // Only for runtime usage
+};
 
 // For ease of use :)
 using FileBuffer  = std::vector<char>;
@@ -38,7 +43,7 @@ public: // Main functions
     FileMetaStatus Load();
     FileMetaStatus Save() const;
 
-    FileMetadata* Get(const std::string&);
+    FileMetadata* Get(const std::string& file, bool processHit = true);
     void          Set(std::string file, FileMetadata meta);
 
     void Erase(const std::string& file);
@@ -48,12 +53,12 @@ private: // Helper functions
     std::size_t FindSeparator(const FileBuffer& buffer, std::size_t idx);
 
 private: // Constexpr stuff
-    constexpr static std::size_t allocThreshold_ = 1024 * 1024; // 1 MB
-    constexpr static std::size_t entryThreshold_ = 5000;        // 5000 entries
-    constexpr static std::size_t minimumEntries_ = 32;          // 32 entries expected at minimum
-    constexpr static std::size_t lineSize_       = 120;         // 120 bytes per metadata
-    constexpr static std::size_t bufferEnd_      = std::numeric_limits<std::size_t>::max();
-    constexpr static char        fieldSeparator_ = '\x1F';
+    constexpr static std::size_t ALLOC_THRESHOLD = 1024 * 1024; // 1 MB
+    constexpr static std::size_t ENTRY_THRESHOLD = 5000;        // 5000 entries
+    constexpr static std::size_t MINIMUM_ENTRIES = 32;          // 32 entries expected at minimum
+    constexpr static std::size_t LINE_SIZE       = 120;         // 120 bytes per metadata
+    constexpr static std::size_t BUFFER_END      = std::numeric_limits<std::size_t>::max();
+    constexpr static char        FIELD_SEPARATOR = '\x1F';
 
 private: // Storage
     std::string filePath_;

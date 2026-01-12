@@ -2,6 +2,7 @@
     #include "windows/filemanip.hpp"
 #else
     #include "linux/filemanip.hpp"
+#include "filesystem.hpp"
 #endif
 
 namespace WFX::Utils {
@@ -81,6 +82,41 @@ std::size_t GetFileSize(const char* path)
         return static_cast<std::size_t>(st.st_size);
 
     return 0;
+#endif
+}
+
+bool GetFileStats(const char* path, FileStats& out)
+{
+#ifdef _WIN32
+    ...
+#else
+    struct stat st{};
+    if(stat(path, &st) != 0)
+        return false;
+
+    out.size = st.st_size;
+
+#if defined(__APPLE__)
+    auto sec  = st.st_mtimespec.tv_sec;
+    auto nsec = st.st_mtimespec.tv_nsec;
+#else
+    auto sec  = st.st_mtim.tv_sec;
+    auto nsec = st.st_mtim.tv_nsec;
+#endif
+
+    out.modifiedNs = static_cast<std::int64_t>(sec) * 1'000'000'000LL +
+                     static_cast<std::int64_t>(nsec);
+
+    if S_ISREG(st.st_mode)
+        out.type = FileType::REG;
+    else if S_ISDIR(st.st_mode)
+        out.type = FileType::DIR;
+    else if S_ISLNK(st.st_mode)
+        out.type = FileType::LNK;
+    else
+        out.type = FileType::OTHER;
+
+    return true;
 #endif
 }
 

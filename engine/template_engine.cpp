@@ -23,37 +23,37 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 {
     auto& projectConfig = Config::GetInstance().projectConfig;
 
+    bool               resaveCacheFile     = false;
     bool               hasDynamicElement   = false;
+    bool               setCacheStats       = false;
     std::size_t        errors              = 0;
     const std::string& inputDir            = projectConfig.templateDir;
-    const std::string  staticOutputDir     = projectConfig.projectName + staticFolder_;
-    const std::string  dynamicCxxOutputDir = projectConfig.projectName + dynamicFolder_;
+    const std::string  staticOutputDir     = projectConfig.projectName + STATIC_FOLDER;
+    const std::string  dynamicCxxOutputDir = projectConfig.projectName + DYNAMIC_FOLDER;
 
     // For partial tag checking. If u see it, don't compile the .html file
     // + 1 is redundant btw, but im still keeping it to cover my paranoia
-    char temp[partialTagSize_ + 1] = { 0 };
+    char temp[PARTIAL_TAG_SIZE + 1] = { 0 };
 
     // Cache file to not compile templates everytime
-    FileMeta fileMeta{projectConfig.projectName + templateCache_};
-    switch(fileMeta.Load())
-    {
+    FileMeta fileMeta{projectConfig.projectName + TEMPLATE_CACHE_PATH};
+    switch(fileMeta.Load()) {
         case FileMetaStatus::SUCCESS:
             break;
 
+        case FileMetaStatus::IO_ERROR:
         case FileMetaStatus::CORRUPTED:
         case FileMetaStatus::NOT_FOUND:
         case FileMetaStatus::TOO_LARGE:
         case FileMetaStatus::TOO_MANY_ENTRIES:
             fileMeta.Clear();
-            resaveCacheFile_ = true;
+            resaveCacheFile = true;
             logger_.Warn(
                 "[TemplateEngine]: Template cache file was either corrupted, too large or not found, "
                 "engine will rebuild the cache"
             );
             break;
 
-        case FileMetaStatus::IO_ERROR:
-            logger_.Fatal("[TemplateEngine]: IO error while trying to read template cache");
         default:
             logger_.Fatal("[TemplateEngine]: Unhandled return case for template cache");
     }
@@ -75,10 +75,39 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 
     // Traverse the entire template directory looking for .html files
     FileSystem::ListDirectory(inputDir, true, [&](std::string inPath) {
+        // Reset this flag every iteration so we don't accidentally set random files in cache
+        setCacheStats = false;
+
         if(!EndsWith(inPath, ".html") && !EndsWith(inPath, ".htm"))
             return;
         
-        logger_.Info("[TemplateEngine]: Compiling template: ", inPath);
+        logger_.Info("[TemplateEngine]: Found template: ", inPath);
+
+        // Cache checking
+        FileStats     diskStats  = {};
+        FileMetadata* cacheStats = fileMeta.Get(inPath);
+
+        if(FileSystem::GetFileStats(inPath.c_str(), diskStats)) {
+            if(cacheStats) {
+                // Basic check, did file modified time change? if not, then no need to compile this file
+                if(diskStats.modifiedNs == cacheStats->modifiedTime)
+                    return;
+    
+                // Rn we don't check for hash and all, just modified time
+                // Later we check for other cool shit
+                resaveCacheFile = true;
+                setCacheStats = true;
+                logger_.Info("[TemplateEngine]: Template modified, recompiling");
+            }
+            // No cache stats available, set it at the end of processing
+            else
+                setCacheStats = true;
+        }
+        else
+            logger_.Warn(
+                "[TemplateEngine]: Failed to check [disk / cache] stats for file: ", inPath.c_str(),
+                ". Continuing with full compilation"
+            );
 
         // Strip leading slash cuz we will use this as key inside of templates_ map
         // We expect that user, inside of 'SendTemplate' function, inputs path without leading slash
@@ -97,7 +126,9 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
             !FileSystem::DirectoryExists(relOutputDir.c_str())
             && !FileSystem::CreateDirectory(relOutputDir, true)
         ) {
-            logger_.Error("[TemplateEngine]: Failed to create template output directory: ", staticOutputDir);
+            logger_.Error(
+                "[TemplateEngine]: Failed to create template output directory: ", staticOutputDir
+            );
             return;
         }
 
@@ -114,15 +145,15 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
             return;
 
         // Partial tag can exist, check its existence first
-        if(inSize >= partialTagSize_) {        
-            if(in->ReadAt(temp, partialTagSize_, 0) < 0) {
+        if(inSize >= PARTIAL_TAG_SIZE) {        
+            if(in->ReadAt(temp, PARTIAL_TAG_SIZE, 0) < 0) {
                 errors++;
                 logger_.Error("[TemplateEngine]: Failed to read the first 13 bytes");
                 return;
             }
 
             // No need to compile
-            if(StartsWith(temp, partialTag_))
+            if(StartsWith(temp, PARTIAL_TAG))
                 return;
         }
 
@@ -135,11 +166,13 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 
         // TODO: Delete template build if compilation failed
         auto [type, outSize] = CompileTemplate(std::move(in), std::move(out));
-        if(type == TemplateType::FAILURE)
+        if(type == TemplateType::FAILURE) {
             errors++;
+            return;
+        }
         
         // Add it to our template map
-        else if(type == TemplateType::STATIC)
+        if(type == TemplateType::STATIC)
             templates_.emplace(
                 std::move(relPath), TemplateMeta{type, outSize, std::move(outPath)}
             );
@@ -150,20 +183,44 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
             logger_.Info("[TemplateEngine]: Staging dynamic template for compilation: ", relPath);
             // Create a unique, C compatible function name
             std::string funcName = 
-                StringCanonical::NormalizePathToIdentifier(relPath, dynamicTemplateFuncPrefix_);
+                StringCanonical::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
 
             // Define path for the new .cpp file
             std::string cppPath = dynamicCxxOutputDir + "/" + relPath + ".cpp";
 
             // Create cxx representation of templates now
-            if(!GenerateCxxFromTemplate(outPath, cppPath, funcName))
+            if(!GenerateCxxFromTemplate(outPath, cppPath, funcName)) {
                 errors++;
-            else
-                templates_.emplace(
-                    std::move(relPath), TemplateMeta{type, outSize, std::move(outPath)}
-                );
+                return;
+            }
+
+            // Store the newly generated cxx data
+            templates_.emplace(
+                std::move(relPath), TemplateMeta{type, outSize, std::move(outPath)}
+            );
         }
+
+        // Either new file or existing file has been updated
+        if(setCacheStats)
+            fileMeta.Set(std::move(inPath), {
+                diskStats.modifiedNs,
+                "" // Hash will be used later on
+            });
     });
+
+    // We will save cache files regardless of errors
+    if(resaveCacheFile) {
+        // Finally, save the cache, if OS allows us to :)
+        switch(fileMeta.Save()) {
+            case FileMetaStatus::SUCCESS:
+                logger_.Info("[TemplateEngine]: Saved template cache file successfully");
+                break;
+
+            default:
+                logger_.Warn("[TemplateEngine]: IO error while saving template cache file."
+                            " Cache will be stale :(");
+        }
+    }
 
     if(errors > 0) {
         logger_.Warn("[TemplateEngine]: Template compilation complete with ", errors, " error(s)");
@@ -179,8 +236,8 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
     // Load the user_templates.[dll/so/dylib] from <project>/build/
     // Now its the callers responsibility to make sure it exists, if it doesn't-
     // -we go boom boom
-    const std::string inputDir = config_.projectConfig.projectName + staticFolder_;
-    const std::string dllPath  = config_.projectConfig.projectName + templateLib_;
+    const std::string inputDir = config_.projectConfig.projectName + STATIC_FOLDER;
+    const std::string dllPath  = config_.projectConfig.projectName + TEMPLATE_LIB_PATH;
 
     if(!FileSystem::FileExists(dllPath.c_str()))
         logger_.Fatal("[TemplateEngine]: Dynamic template loader couldn't find ", dllPath);
@@ -211,7 +268,7 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
         std::string relPath = std::string(tmpl.filePath.begin() + inputDir.size(), tmpl.filePath.end());
         relPath.erase(0, relPath.find_first_not_of("/\\"));
 
-        std::string symbol = StringCanonical::NormalizePathToIdentifier(relPath, dynamicTemplateFuncPrefix_);
+        std::string symbol = StringCanonical::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
 
         void* rawSym = dlsym(handle, symbol.c_str());
         const char* dlsymErr = dlerror();
@@ -305,10 +362,10 @@ __ContinueReading:
         if(frame.firstRead) {
             frame.firstRead = false;
             if(
-                frame.bytesRead >= partialTagSize_
-                && StartsWith(std::string_view(bufPtr, partialTagSize_), partialTag_)
+                frame.bytesRead >= PARTIAL_TAG_SIZE
+                && StartsWith(std::string_view(bufPtr, PARTIAL_TAG_SIZE), PARTIAL_TAG)
             )
-                frame.readOffset += partialTagSize_ + 1;
+                frame.readOffset += PARTIAL_TAG_SIZE + 1;
         }
 
         // CASE 1: Tag incomplete from previous frame
@@ -332,11 +389,11 @@ __ContinueReading:
                 frame.readOffset += 1;
 
                 // Check max length
-                if(frame.carry.size() > maxTagLength_) {
+                if(frame.carry.size() > MAX_TAG_LENGTH) {
                     logger_.Error(
                     "[TemplateEngine].[ParsingError]: OC (split); Length of the tag: '",
                     frame.carry,
-                    "' crosses the maxTagLength_ limit which is ", maxTagLength_
+                    "' crosses the MAX_TAG_LENGTH limit which is ", MAX_TAG_LENGTH
                 );
                     return { TemplateType::FAILURE, 0 };
                 }
@@ -349,7 +406,7 @@ __ContinueReading:
 
             tagEnd = bodyView.find("%}");
             if(tagEnd == std::string_view::npos) {
-                // So the min chunk size is about 512 bytes, and maxTagLength_ is like what, 300?
+                // So the min chunk size is about 512 bytes, and MAX_TAG_LENGTH is like what, 300?
                 // And ur telling me that we just started this chunk and we couldn't find the tag end?
                 // Dawg fuck no
                 logger_.Error(
@@ -360,13 +417,13 @@ __ContinueReading:
             }
 
             // Found tag end in this chunk, but before we append, check the length of tag
-            // It cannot cross maxTagLength_
+            // It cannot cross MAX_TAG_LENGTH
             std::size_t appendCount = tagEnd + 2;
-            if(frame.carry.size() + appendCount > maxTagLength_) {
+            if(frame.carry.size() + appendCount > MAX_TAG_LENGTH) {
                 logger_.Error(
                     "[TemplateEngine].[ParsingError]: OC; Length of the tag: '",
                     frame.carry,
-                    "' crosses the 'maxTagLength_' limit which is ", maxTagLength_
+                    "' crosses the 'MAX_TAG_LENGTH' limit which is ", MAX_TAG_LENGTH
                 );
                 return { TemplateType::FAILURE, 0 };
             }
@@ -452,13 +509,13 @@ __DefaultChunkProcessing:
 
             tagView = {bodyView.data(), tagEnd + 2};
 
-            // Tag cannot be larger than 'maxTagLength_', so uk people don't just 'accidentally'-
+            // Tag cannot be larger than 'MAX_TAG_LENGTH', so uk people don't just 'accidentally'-
             // -make it a billion bytes :)
-            if(tagView.size() > maxTagLength_) {
+            if(tagView.size() > MAX_TAG_LENGTH) {
                 logger_.Error(
                     "[TemplateEngine].[ParsingError]: IC; Length of the tag: '",
                     tagView,
-                    "' crosses the 'maxTagLength_' limit which is ", maxTagLength_
+                    "' crosses the 'MAX_TAG_LENGTH' limit which is ", MAX_TAG_LENGTH
                 );
                 return { TemplateType::FAILURE, 0 };
             }
@@ -593,8 +650,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(
         goto __Failure;
 
     // Some dictionary type shit
-    switch(it->second)
-    {
+    switch(it->second) {
         case TagType::INCLUDE:
         {
             if(tagArgs.empty()) {

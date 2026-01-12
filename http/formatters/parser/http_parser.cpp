@@ -34,8 +34,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
     HttpRequest& request = *ctx->requestInfo;
 
     // Our very cool State Machine handling different states of parser
-    switch(static_cast<HttpParseState>(ctx->GetParseState()))
-    {
+    switch(static_cast<HttpParseState>(ctx->GetParseState())) {
         // In the case of it being idle, and some data arrives, we can safely fallthrough
         // As this only gets called if any data exists or arrives
         case HttpParseState::PARSE_IDLE:

@@ -20,6 +20,19 @@ using FileCallback  = std::function<void(std::string)>;
 using DirectoryList = std::vector<std::string>;
 using BaseFilePtr   = std::unique_ptr<BaseFile>;
 
+enum class FileType : uint8_t {
+    REG,
+    DIR,
+    LNK,
+    OTHER,
+};
+
+struct FileStats {
+    std::uint64_t size       = 0;               // File size in bytes
+    std::int64_t  modifiedNs = 0;               // Last modification time (In nanoseconds)
+    FileType      type       = FileType::OTHER; // File kind
+};
+
 class BaseFile {
 public:
     virtual ~BaseFile() = default;
@@ -51,6 +64,7 @@ bool        FileExists(const char* path);
 bool        DeleteFile(const char* path);
 bool        RenameFile(const char* from, const char* to);
 std::size_t GetFileSize(const char* path);
+bool        GetFileStats(const char* path, FileStats& out);
 
 // Open file for reading/writing: returns RAII-wrapped BaseFile
 BaseFilePtr OpenFileRead(const char* path, bool inBinaryMode = false);

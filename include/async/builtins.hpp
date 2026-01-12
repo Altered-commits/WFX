@@ -10,8 +10,7 @@ inline AsyncPtr SleepFor(std::uint32_t delayMs) noexcept
 {
     return Async::MakeAsync<void>(
         [](AsyncPtr self, std::uint32_t delayMs) {
-            switch(self->GetState())
-            {
+            switch(self->GetState()) {
                 // This will be called only once, to schedule a delay
                 // If registering fails, it will just finish on the spot, no async is generated, error set
                 // Error is propagated to the caller via 'Await'

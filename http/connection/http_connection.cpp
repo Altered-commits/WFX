@@ -9,8 +9,7 @@ WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
 {
     ipType = other.ipType;
 
-    switch(ipType)
-    {
+    switch(ipType) {
         case AF_INET:
             memcpy(&ip.v4, &other.ip.v4, sizeof(in_addr));
             break;
