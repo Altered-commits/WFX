@@ -18,7 +18,7 @@ This section will guide you through installing all necessary dependencies, setti
 
 - **C++17** (g++, clang++)
 - **CMake 3.20+**
-- **Ninja build system**
+- **Ninja build system** (optional, recommended)
 - **Git**
 - **Python 3.x** (for MkDocs and documentation, optional)
 
@@ -28,17 +28,26 @@ Other distributions may require equivalent packages.</p>
 <strong>Ubuntu / Debian</strong>
 <pre class="code-format">
 - sudo apt update
-- sudo apt install -y build-essential cmake ninja-build git
+- sudo apt install -y build-essential cmake git
+
+# Optional (recommended)
+- sudo apt install -y ninja-build
 </pre>
 
 <strong>Fedora</strong>
 <pre class="code-format">
-- sudo dnf install -y gcc-c++ cmake ninja-build git
+- sudo dnf install -y gcc-c++ cmake git
+
+# Optional (recommended)
+- sudo dnf install -y ninja-build
 </pre>
 
 <strong>Arch Linux</strong>
 <pre class="code-format">
-- sudo pacman -S --needed base-devel cmake ninja git
+- sudo pacman -S --needed base-devel cmake git
+
+# Optional (recommended)
+- sudo pacman -S ninja
 </pre>
 
 ### Steps
@@ -61,8 +70,25 @@ Other distributions may require equivalent packages.</p>
 
   <li>
     <strong>Configure and build WFX</strong>
+
+    <p>
+      Choose one of the following build methods:
+    </p>
+
+    <p>
+      <strong>Option A (recommended): Build with Ninja</strong><br>
+      Provides faster build times and better parallelism
+    </p>
     <pre class="code-format">
 - cmake -S . -B build -G Ninja
+- cmake --build build</pre>
+
+    <p>
+      <strong>Option B: Build with the default CMake generator</strong><br>
+      Use this option if Ninja is not installed
+    </p>
+    <pre class="code-format">
+- cmake -S . -B build
 - cmake --build build</pre>
   </li>
 

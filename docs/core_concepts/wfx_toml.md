@@ -10,7 +10,7 @@ This page defines **all supported `wfx.toml` configuration options** in WFX.
     WFX currently does **not validate value ranges or semantics**.
     It only checks for the **presence of certain required keys** (marked with `*`).
     If a required key is missing, startup fails.
-    If a value is invalid but syntactically correct, behavior is **undefined and entirely the user’s responsibility**.
+    If a value is invalid but syntactically correct, behavior is **undefined and entirely the user's responsibility**.
 
 ---
 
@@ -20,18 +20,36 @@ Project-level configuration. This section is **mandatory**.
 
 <pre class="code-format">
 [Project]
-project_name    = "my_proj" # String
-middleware_list = []        # Array of strings
+middleware_list = [] # Array of strings
 </pre>
-
-- `project_name`*: Logical project identifier. Must match the project folder name. Used to derive internal paths:
-    - publicDir = `<project_name>`/public
-    - templateDir = `<project_name>`/templates
 
 - `middleware_list`*: Ordered list of middleware identifiers.
     - Order matters: middleware executes exactly in declaration order
     - Middleware list may be empty, but the key itself must exist
     - Used to register both engine-provided and user-defined middleware
+
+---
+
+## `[Build]`
+
+This section of the configuration file controls how WFX manages builds for your project.  
+All values are **mandatory**.
+
+<pre class="code-format">
+[Build]
+dir_name            = "build"          # String
+preferred_config    = "Debug"          # String
+preferred_generator = "Unix Makefiles" # String
+</pre>
+
+- `dir_name`*  
+  The folder where CMake will place all generated build files. This path is relative to the project folder.
+
+- `preferred_config`*  
+  The default build configuration (e.g., `"Debug"` for development builds or `"Release"` for optimized production builds).  
+
+- `preferred_generator`*  
+  The default CMake generator to use (e.g., `Unix Makefiles`, `Ninja`).  
 
 ---
 
