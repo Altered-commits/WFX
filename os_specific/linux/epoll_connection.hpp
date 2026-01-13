@@ -7,8 +7,7 @@
 #include "http/connection/http_connection.hpp"
 #include "http/limits/ip_limiter/ip_limiter.hpp"
 #include "http/ssl/http_ssl.hpp"
-#include "utils/filecache/filecache.hpp"
-#include "utils/buffer_pool/buffer_pool.hpp"
+#include "utils/fileops/filecache.hpp"
 #include "utils/timer/timer_wheel/timer_wheel.hpp"
 #include "utils/timer/timer_heap/timer_heap.hpp"
 

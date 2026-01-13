@@ -14,9 +14,9 @@ Release/
 ignore/
 
 # Binary artifacts
+lib/
 wfx
 wfx.toml
-toolchain.toml
 
 # Python env
 .venv/

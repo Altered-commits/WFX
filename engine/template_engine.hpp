@@ -5,7 +5,7 @@
 #include "config/config.hpp"
 #include "legacy/lexer.hpp"
 #include "utils/logger/logger.hpp"
-#include "utils/filesystem/filesystem.hpp"
+#include "utils/fileops/filesystem.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -29,6 +29,11 @@ struct TemplateMeta {
     TemplateGeneratorPtr gen{nullptr}; // For dynamic templates only
 };
 
+struct TemplateCompilationResult {
+    bool success    = false;
+    bool hasDynamic = false;
+};
+
 // <Type, FileSize>
 using TemplateResult = std::pair<TemplateType, std::size_t>;
 using BufferPtr      = std::unique_ptr<char[]>;
@@ -38,10 +43,9 @@ class TemplateEngine final {
 public:
     static TemplateEngine& GetInstance();
 
-    bool          LoadTemplatesFromCache(); // ---
-    void          SaveTemplatesToCache();   //   | -> To be called in master process only
-    void          PreCompileTemplates();    // ---
-    TemplateMeta* GetTemplate(std::string&& relPath);
+    TemplateCompilationResult PreCompileTemplates();          // -|
+    void                      LoadDynamicTemplatesFromLib();  // -| > To be called in master process only
+    TemplateMeta*             GetTemplate(std::string&& relPath);
 
 private: // Nested helper types for the parser
     enum class TagType : std::uint8_t {
@@ -82,9 +86,9 @@ private: // Nested helper types for the parser
         PUSH_CONST,
         PUSH_VAR,
         OP_GET_ATTR,
+        OP_NOT,
         OP_AND,
         OP_OR,
-        OP_NOT,
         OP_EQ,
         OP_NEQ,
         OP_GT,
@@ -218,7 +222,6 @@ private: // Nested helper types for the parser
     };
 
 private: // Helper functions
-    void           LoadDynamicTemplatesFromLib();
     TemplateResult CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate);
     bool           PushFile(CompilationContext& context, const std::string& relPath);
     Tag            ExtractTag(std::string_view line);
@@ -249,11 +252,6 @@ private: // Transpiler Functions (Impl in template_transpiler.cpp)
         const std::string& inHtmlPath, const std::string& outCxxPath, const std::string& funcName
     );
 
-    // Final DLL Generator (If going down the path of template compilation)
-    void CompileCxxToLib(
-        const std::string& inCxxDir, const std::string& inObjDir
-    );
-
     // Helper Functions
     RPNOpCode     TokenToOpCode(Legacy::TokenType type);
     std::uint64_t HashBytecode(const RPNBytecode& rpn);
@@ -273,18 +271,16 @@ private:
     TemplateEngine& operator=(TemplateEngine&&)      = delete;
 
 private: // For ease of use across functions
-    constexpr static std::string_view partialTag_     = "{% partial %}";
-    constexpr static std::size_t      partialTagSize_ = partialTag_.size();
+    constexpr static std::string_view PARTIAL_TAG      = "{% partial %}";
+    constexpr static std::size_t      PARTIAL_TAG_SIZE = PARTIAL_TAG.size();
+    constexpr static std::size_t      MAX_TAG_LENGTH   = 300;
 
-    constexpr static std::size_t      maxTagLength_   = 300;
+    constexpr static const char*      TEMPLATE_LIB_PATH   = "/build/user_templates.so";
+    constexpr static const char*      TEMPLATE_CACHE_PATH = "/intermediate/template.wfxmeta";
+    constexpr static const char*      STATIC_FOLDER       = "/intermediate/static";
+    constexpr static const char*      DYNAMIC_FOLDER      = "/intermediate/dynamic";
 
-    constexpr static const char*      templateLib_      = "/build/dlls/user_templates.so";
-    constexpr static const char*      cacheFile_        = "/build/templates/cache.bin";
-    constexpr static const char*      staticFolder_     = "/build/templates/static";
-    constexpr static const char*      dynamicCxxFolder_ = "/build/templates/dynamic/cxx";
-    constexpr static const char*      dynamicObjFolder_ = "/build/templates/dynamic/objs";
-
-    constexpr static const char*      dynamicTemplateFuncPrefix_ = "__TmplSM_";
+    constexpr static const char*      DYNAMIC_FUNC_PREFIX = "__TmplSM_";
 
 private: // Storage
     Logger& logger_ = Logger::GetInstance();
@@ -304,10 +300,6 @@ private: // Storage
         {"for",      TagType::FOR},
         {"endfor",   TagType::ENDFOR}
     };
-
-    // We don't want to save template data to cache.bin always, only save it if we-
-    // -compile the templates, in which case there might be a chance the data is modified
-    bool resaveCacheFile_ = false;
 
     // CRITICAL WARNING: The data in this map MUST be treated as immutable after initial-
     // -population. Internal engine code may store string_views that point directly to the-

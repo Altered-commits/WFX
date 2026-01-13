@@ -3,6 +3,7 @@
 #include "utils/process/process.hpp"
 #include "utils/crypt/hash.hpp"
 #include "utils/backport/string.hpp"
+#include "shared/utils/compiler_macro.hpp"
 
 namespace WFX::Core {
 
@@ -829,8 +830,7 @@ bool TemplateEngine::GenerateCxxFromIR(
     const std::string& funcName
 )
 {
-    auto& fs      = FileSystem::GetFileSystem();
-    auto  outFile = fs.OpenFileWrite(outCxxPath.c_str());
+    auto outFile = FileSystem::OpenFileWrite(outCxxPath.c_str());
 
     if(!outFile) {
         logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to open output file: ", outCxxPath);
@@ -1064,10 +1064,8 @@ bool TemplateEngine::GenerateCxxFromTemplate(
     const std::string& inHtmlPath, const std::string& outCxxPath, const std::string& funcName
 )
 {
-    auto& fs = FileSystem::GetFileSystem();
-
     std::uint32_t chunkSize = config_.miscConfig.templateChunkSize;
-    BaseFilePtr   inFile    = fs.OpenFileRead(inHtmlPath.c_str(), true);
+    BaseFilePtr   inFile    = FileSystem::OpenFileRead(inHtmlPath.c_str(), true);
     
     TranspilationContext ctx{std::move(inFile), chunkSize};
 
@@ -1075,80 +1073,6 @@ bool TemplateEngine::GenerateCxxFromTemplate(
         return false;
 
     return GenerateCxxFromIR(ctx, outCxxPath, funcName);
-}
-
-void TemplateEngine::CompileCxxToLib(const std::string& inCxxDir, const std::string& outObjDir)
-{
-    auto& fs   = FileSystem::GetFileSystem();
-    auto& proc = ProcessUtils::GetInstance();
-
-    auto& toolchain = config_.toolchainConfig;
-
-    // Input .cpp files will be from 'inCxxDir'
-    // The final .dll / .so will be compiled to <project>/build/dlls/ folder (Name: user_templates.[so/dll])
-    // The final .obj will be compiled to 'inObjDir'
-    const std::string dllDir  = config_.projectConfig.projectName + "/build/dlls";
-    const std::string dllPath = dllDir + "/user_templates.so";
-
-    if(!fs.DirectoryExists(inCxxDir.c_str()))
-        logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Failed to locate: ", inCxxDir);
-
-    if(!fs.CreateDirectory(outObjDir))
-        logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Failed to create obj dir: ", outObjDir);
-
-    if(!fs.CreateDirectory(dllDir))
-        logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Failed to create dll dir: ", dllDir);
-
-    // Prebuild fixed portions of compiler and linker commands
-    const std::string compilerBase = toolchain.ccmd + " " + toolchain.cargs + " ";
-    const std::string objPrefix    = toolchain.objFlag + "\"";
-    const std::string dllLinkTail  = toolchain.largs + " " + toolchain.dllFlag + "\"" + dllPath + '"';
-
-    std::string linkCmd = toolchain.lcmd + " ";
-
-    // Recurse through src/ files
-    fs.ListDirectory(inCxxDir, true, [&](const std::string& cppFile) {
-        if(!EndsWith(cppFile.c_str(), ".cpp") &&
-            !EndsWith(cppFile.c_str(), ".cxx") &&
-            !EndsWith(cppFile.c_str(), ".cc")) return;
-
-        logger_.Info("[TemplateEngine].[CodeGen:OUT]: Compiling cxx/ file: ", cppFile);
-
-        // Construct relative path
-        std::string relPath = cppFile.substr(inCxxDir.size());
-        if(!relPath.empty() && (relPath[0] == '/' || relPath[0] == '\\'))
-            relPath.erase(0, 1);
-
-        // Replace .cpp with .obj
-        std::string objFile = outObjDir + "/" + relPath;
-        objFile.replace(objFile.size() - 4, 4, ".obj");
-
-        // Ensure obj subdir exists
-        std::size_t slash = objFile.find_last_of("/\\");
-        if(slash != std::string::npos) {
-            std::string dir = objFile.substr(0, slash);
-            if(!fs.DirectoryExists(dir.c_str()) && !fs.CreateDirectory(dir))
-                logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Failed to create obj subdirectory: ", dir);
-        }
-
-        // Construct compile command
-        std::string compileCmd = compilerBase + "\"" + cppFile + "\" " + objPrefix + objFile + "\"";
-        auto result = proc.RunProcess(compileCmd);
-        if(result.exitCode != 0)
-            logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Compilation failed for: ", cppFile, ". OS code: ", result.osCode);
-
-        // Append obj to link command
-        linkCmd += "\"" + objFile + "\" ";
-    });
-
-    // Final link command
-    linkCmd += dllLinkTail;
-
-    auto linkResult = proc.RunProcess(linkCmd);
-    if(linkResult.exitCode != 0)
-        logger_.Fatal("[TemplateEngine].[CodeGen:OUT]: Linking failed. DLL not created. OS code: ", linkResult.osCode);
-
-    logger_.Info("[TemplateEngine].[CodeGen:OUT]: Templates successfully compiled to ", dllDir);
 }
 
 //  vvv Helper Functions vvv
@@ -1167,7 +1091,7 @@ TemplateEngine::RPNOpCode TemplateEngine::TokenToOpCode(Legacy::TokenType type)
         case Legacy::TOKEN_DOT:  return RPNOpCode::OP_GET_ATTR;
         default:
             logger_.Fatal("[TemplateEngine].[CodeGen:EP]: Unknown operator type: ", (int)type);
-            return RPNOpCode::OP_AND; // Just to suppress compiler warning
+            WFX_UNREACHABLE;
     }
 }
 

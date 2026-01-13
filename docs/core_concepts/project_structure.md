@@ -18,6 +18,12 @@ A freshly generated WFX project looks like this:
 &lt;your_workspace&gt;/
 ├─ &lt;your_project_name&gt;/
 │  ├─ build/
+│  ├─ intermediate/
+│  │
+│  ├─ public/
+│  │  ├─ style.css
+│  │  └─ script.js
+│  │
 │  ├─ src/
 │  │  ├─ main.cpp
 │  │  └─ api_entry.cpp
@@ -25,15 +31,13 @@ A freshly generated WFX project looks like this:
 │  ├─ templates/
 │  │  └─ index.html
 │  │
-│  └─ public/
-│     ├─ style.css
-│     └─ script.js
+│  ├─ .gitignore
+│  ├─ CMakeLists.txt
+│  └─ wfx.toml
 │
 ├─ WFX/
 │  └─ (engine source code)
 │
-├─ wfx.toml
-├─ toolchain.toml
 └─ wfx
 </pre>
 
@@ -48,11 +52,22 @@ Everything inside this folder belongs to your WFX project.
 
 ---
 
-### `build/`
+### `build/`, `intermediate/`
 
 Contains generated build artifacts which are created and managed automatically by WFX and the build system.
 
-This directory can be safely deleted at any time and **must not be edited manually**.
+These directories are generated automatically and **must never be edited manually**.
+
+While they can be safely deleted at any time, it is strongly recommended to delete **both directories together** rather than deleting one and leaving the other behind.
+
+---
+
+### `public/`
+
+This folder contains all files that are publicly accessible. This includes CSS, JavaScript, images, and any other static assets. Files placed here are automatically served by WFX when a request hits the **/public/** route, and can be accessed directly via that route regardless of whether they are referenced by any template (`.html`).
+
+!!! warning
+    Do not place any sensitive or private files in this folder. All content here is publicly visible. This directory is strictly for static assets meant to be accessible by anyone, and the system assumes no responsibility for accidental exposure.
 
 ---
 
@@ -60,11 +75,11 @@ This directory can be safely deleted at any time and **must not be edited manual
 
 This directory contains all C++ source files that implement your application logic.
 
-By default, main.cpp is provided with a few example routes to demonstrate basic functionality. You are free to modify or remove this file as needed. You may also add any number of additional C++ source files and subdirectories inside `src/`.
+By default, **main.cpp** is provided with a few example routes to demonstrate basic functionality. You are free to modify or remove this file as needed. You may also add any number of additional C++ source files and subdirectories inside `src/`.
 
 The WFX build system automatically discovers and compiles all `.cpp` files located under `src/`, including those inside nested folders. File and directory naming is entirely up to you, with one exception: **api_entry.cpp**.
 
-**api_entry.cpp** is a special, engine-required file and must not be modified or deleted. It is used internally by WFX to wire application code into the engine.
+**api_entry.cpp** is a special, engine-required file and **must NOT be modified or deleted**. It is used internally by WFX to wire application code into the engine.
 
 ---
 
@@ -76,12 +91,28 @@ No other file types - such as CSS, JavaScript, or images - should be placed here
 
 ---
 
-### `public/`
+### `.gitignore`
 
-This folder contains all files that are publicly accessible. This includes CSS, JavaScript, images, and any other static assets. Files placed here are automatically served by WFX when a request hits the **/public/** route, and can be accessed directly via that route regardless of whether they are referenced by any template (`.html`).
+The `.gitignore` file controls which files and directories are excluded from version control.  
+It comes preconfigured to ignore generated directories such as `build/` and `intermediate/` by default.
 
-!!! warning "Important"
-    Do not place any sensitive or private files in this folder. All content here is publicly visible. This directory is strictly for static assets meant to be accessible by anyone, and the system assumes no responsibility for accidental exposure.
+You are free to modify `.gitignore` as needed to suit your workflow (for example, to ignore editor files, local configs, or additional generated artifacts).
+
+---
+
+### `CMakeLists.txt`
+`CMakeLists.txt` defines how your project is configured and built using CMake.
+
+!!! warning
+    **Do not modify this file unless you know exactly what you are doing.**  
+    Incorrect changes may break the build system or cause undefined behavior.  
+    If you need custom build logic, it is recommended to understand the existing configuration first before making any changes.
+
+---
+
+### `wfx.toml`
+
+The `wfx.toml` file is the main configuration file for the entire project. It defines settings for both your project and the WFX engine. This file is required for the project to function correctly and should be version-controlled.
 
 ---
 
@@ -93,38 +124,16 @@ In most cases, you do not need to modify anything in this directory. It is meant
 
 ---
 
-## `wfx.toml`
-
-The `wfx.toml` file is the main configuration file for the entire workspace. It defines settings for both your project and the WFX engine, and its scope is workspace-wide by design. This file is required for the project to function correctly and should be version-controlled.
-
-!!! note    
-    Currently, WFX supports only one project per workspace/namespace. Make sure to structure your workspace accordingly, as multiple projects in the same namespace are not supported.
-
----
-
-## `toolchain.toml`
-
-Generated automatically by running:
-
-```bash
-./wfx doctor
-```
-
-It stores compiler and toolchain settings used by WFX during builds.
-
-!!! warning "Caution"
-    This file can be modified if you know exactly what you are doing and understand the implications of changing compiler or linker flags. Incorrect modifications may break builds or produce unstable binaries. For most users, it is recommended to leave this file as-is.
-
 ## `wfx`
 
-The `wfx` file is the compiled engine and command-line interface for WFX, built from the `WFX/` folder using CMake. It powers most of the framework's functionality, including project creation, workspace checks, running the development server, and so on.
+The `wfx` file is the compiled engine and command-line interface for WFX, built from the `WFX/` folder using CMake. It powers most of the framework's functionality, including project creation, running the server, and so on.
 
 Common commands include:
 
 ```bash
- * build    -   Pre-Build various parts of WFX
- * doctor   -   Verify system requirements
- * dev      -   Start WFX dev server
+ * build    -   Pre-build various parts of WFX
+ * doctor   -   Verify system requirements (Deprecated)
+ * run      -   Start WFX server
  * new      -   Create a new WFX project
 ```
 
@@ -135,8 +144,4 @@ Common commands include:
 Now that you have an overview of the project structure, you can start exploring how to work with WFX:
 
 - **Engine Commands**: Learn how `wfx` CLI works. See [Engine Commands](engine_commands.md) for details.  
-- **Configuration**: Understand and modify `wfx.toml` to customize project settings. See [WFX Settings](wfx_toml.md) for details.  
-- **Toolchain**: Learn how `toolchain.toml` affects compilation and build behavior. See [Toolchain Settings](toolchain_toml.md) for details.  
-
-!!! tip
-    Most daily work happens in your project folder. Avoid modifying `WFX/` or engine-related files unless you know exactly what you are doing.
+- **Configuration**: Understand and modify `wfx.toml` to customize project settings. See [WFX Settings](wfx_toml.md) for details.

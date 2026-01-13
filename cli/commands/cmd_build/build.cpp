@@ -8,36 +8,37 @@ namespace WFX::CLI {
 
 using namespace WFX::Core; // For 'TemplateEngine', 'Config'
 
-// Supported build types: 'templates', 'source', ...
-constexpr static const char* BUILD_TEMPLATES = "templates";
-constexpr static const char* BUILD_SOURCE    = "source";
-
-int BuildProject(const std::string& buildType, bool isDebug)
+int BuildProject(const std::string& project, const std::string& buildType, bool isDebug)
 {
     // Used by pretty much everything so yeah
     auto& config = Config::GetInstance();
     auto& logger = Logger::GetInstance();
 
+    if(!FileSystem::DirectoryExists(project.c_str()))
+        logger.Fatal("[WFX]: '", project, "' directory does not exist");
+
     logger.Info("[WFX]: Build mode: ", isDebug ? "debug" : "prod");
 
-    config.LoadCoreSettings("wfx.toml");
-    config.LoadToolchainSettings("toolchain.toml", isDebug);
+    config.LoadCoreSettings(project + "/wfx.toml");
+    config.LoadFinalSettings(project);
 
-    if(buildType == BUILD_TEMPLATES) {
+    HandleBuildDirectory();
+
+    if(buildType == "templates") {
         auto& templateEngine = TemplateEngine::GetInstance();
 
-        templateEngine.PreCompileTemplates();
-        templateEngine.SaveTemplatesToCache();
+        auto [success, hasDynamic] = templateEngine.PreCompileTemplates();
+        if(!success)
+            return 1;
+
+        if(hasDynamic)
+            HandleUserCxxCompilation(CxxCompilationOption::TEMPLATES_ONLY);
 
         return 0;
     }
 
-    if(buildType == BUILD_SOURCE) {
-        // Copied directly from dev.cpp
-        const std::string dllDir  = config.projectConfig.projectName + "/build/dlls/";
-        const std::string dllPath = dllDir + "user_entry.so";
-
-        HandleUserSrcCompilation(dllDir.c_str(), dllPath.c_str());
+    if(buildType == "source") {
+        HandleUserCxxCompilation(CxxCompilationOption::SOURCE_ONLY);
         return 0;
     }
 

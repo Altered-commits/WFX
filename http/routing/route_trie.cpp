@@ -54,8 +54,7 @@ const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& out
             else if(child.IsParam()) {
                 ParamType type = child.GetParamType();
 
-                switch(type)
-                {
+                switch(type) {
                     case ParamType::UINT:
                     {
                         std::uint64_t val;

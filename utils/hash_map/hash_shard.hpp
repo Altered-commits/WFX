@@ -1,7 +1,7 @@
 #ifndef WFX_UTILS_HASH_SHARD_HPP
 #define WFX_UTILS_HASH_SHARD_HPP
 
-#include "utils/buffer_pool/buffer_pool.hpp"
+#include "utils/pool/buffer_pool.hpp"
 #include "utils/math/math.hpp"
 
 #include <mutex>

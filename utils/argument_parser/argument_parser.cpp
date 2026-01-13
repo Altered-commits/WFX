@@ -18,7 +18,7 @@ int ArgumentParser::Parse(int argc, char* argv[])
 {
     if(argc < 2) {
         PrintUsage();
-        return 1;
+        return 0;
     }
 
     std::string commandName = argv[1];

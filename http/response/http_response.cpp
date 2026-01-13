@@ -4,8 +4,8 @@
 #include "http/common/http_detector.hpp"
 #include "http/connection/http_connection.hpp"
 #include "form/forms.hpp"
-#include "utils/filecache/filecache.hpp"
-#include "utils/filesystem/filesystem.hpp"
+#include "utils/fileops/filecache.hpp"
+#include "utils/fileops/filesystem.hpp"
 #include "utils/backport/string.hpp"
 #include "utils/logger/logger.hpp"
 
@@ -146,7 +146,7 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
                 .SendText("[ST]_2Internal Error");
             return;
         }
-        auto inFile = FileSystem::GetFileSystem().OpenFileExisting(fd, static_cast<std::size_t>(size));
+        auto inFile = FileSystem::OpenFileExisting(fd, static_cast<std::size_t>(size));
         if(!inFile) {
             Status(HttpStatus::INTERNAL_SERVER_ERROR)
                 .SendText("[ST]_3Internal Error");
@@ -364,12 +364,11 @@ void HttpResponse::SetTextBody(std::string&& text, const char* contentType)
 bool HttpResponse::ValidateFileSend(std::string_view path, bool autoHandle404, const char* funcName)
 {
     auto& logger = Logger::GetInstance();
-    auto& fs     = FileSystem::GetFileSystem();
 
     if(!std::holds_alternative<std::monostate>(body))
         logger.Fatal("[HttpResponse]: ", funcName, " called after body already set");
 
-    if(autoHandle404 && !fs.FileExists(path.data())) {
+    if(autoHandle404 && !FileSystem::FileExists(path.data())) {
         Status(HttpStatus::NOT_FOUND)
             .SendText("File not found");
         return false;
@@ -380,11 +379,9 @@ bool HttpResponse::ValidateFileSend(std::string_view path, bool autoHandle404, c
 
 void HttpResponse::PrepareFileHeaders(std::string_view path)
 {
-    auto& fs = FileSystem::GetFileSystem();
-
     operationType_ = OperationType::FILE;
 
-    std::uint64_t    fileSize = fs.GetFileSize(path.data());
+    std::uint64_t    fileSize = FileSystem::GetFileSize(path.data());
     std::string_view mime     = MimeDetector::DetectMimeFromExt(path);
 
     headers.SetHeader("Content-Length", UInt64ToStr(fileSize));

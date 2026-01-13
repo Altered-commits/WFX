@@ -2,7 +2,6 @@
 #define WFX_HTTP_IP_LIMITER_HPP
 
 #include "../base_limiter.hpp"
-#include "utils/buffer_pool/buffer_pool.hpp"
 #include "utils/hash_map/hash_shard.hpp"
 
 namespace WFX::Http {

@@ -18,23 +18,12 @@ Run the following command in your terminal (replace `<project_name>` with your o
 
 This will generate a full project folder structure for you.
 
-### 2. Initialize the toolchain
-
-In the same terminal, run:
-
-```bash
-./wfx doctor
-```
-
-This will generate `toolchain.toml` required for building and running the project. This is a one-time process (as long as `toolchain.toml` isn't deleted).
-
-
-### 3. Run the development server
+### 2. Run the WFX server
 
 To start the server, run this final command:
 
 ```bash
-./wfx dev
+./wfx run <project_name>
 ```
 
 By default:

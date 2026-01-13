@@ -32,10 +32,143 @@ static void ScaffoldProject(const std::string& projectName)
     fs::create_directories(projBase / "public");
     fs::create_directories(projBase / "templates");
 
+    // 1.1 Build config
+    CreateFile(projBase / "CMakeLists.txt", R"(cmake_minimum_required(VERSION 3.24)
+
+project(user_plugin)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Output directory
+set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
+
+# --------------------------------------------------
+# Compile configuration
+# --------------------------------------------------
+function(configure_compile target)
+    target_include_directories(${target} PRIVATE
+        "${CMAKE_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/../WFX/include"
+        "${CMAKE_SOURCE_DIR}/../WFX"
+    )
+
+    if(MSVC)
+        target_compile_options(${target} PRIVATE
+            /EHsc /Gw /Gy
+            $<$<CONFIG:Release>:/O2 /GL /MD>
+            $<$<CONFIG:Debug>:/Od /MDd>
+        )
+    else()
+        target_compile_options(${target} PRIVATE
+            -fPIC
+            $<$<CONFIG:Release>:
+                -O3
+                -fvisibility=hidden
+                -fvisibility-inlines-hidden
+                -ffunction-sections
+                -fdata-sections
+            >
+            $<$<CONFIG:Debug>:-O0>
+        )
+
+        set_target_properties(${target} PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN YES
+        )
+    endif()
+endfunction()
+
+# --------------------------------------------------
+# Shared-library link configuration
+# --------------------------------------------------
+function(configure_shared target)
+    if(MSVC)
+        target_link_options(${target} PRIVATE
+            /DLL
+            $<$<CONFIG:Release>:/LTCG /OPT:REF /OPT:ICF /DEBUG:OFF>
+            $<$<CONFIG:Debug>:/DEBUG>
+        )
+
+        set_target_properties(${target} PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
+        )
+    else()
+        target_link_options(${target} PRIVATE
+            -shared
+            -fPIC
+            -Wl,-rpath,../WFX/lib
+        )
+
+        if(APPLE)
+            target_link_options(${target} PRIVATE
+                $<$<CONFIG:Release>:-Wl,-dead_strip>
+            )
+        else()
+            target_link_options(${target} PRIVATE
+                $<$<CONFIG:Release>:
+                    -Wl,--gc-sections
+                    -Wl,--strip-all
+                >
+            )
+        endif()
+
+        set_target_properties(${target} PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
+        )
+    endif()
+
+    set_target_properties(${target} PROPERTIES
+        PREFIX ""
+        RUNTIME_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
+    )
+endfunction()
+
+# vvv USER ENTRY (always defined) vvv
+file(GLOB_RECURSE USER_ENTRY_SOURCES
+    CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/*.cpp"
+)
+
+add_library(user_entry SHARED ${USER_ENTRY_SOURCES})
+configure_compile(user_entry)
+configure_shared(user_entry)
+
+# vvv USER TEMPLATES (Engine guarantees directory + source exists) vvv
+file(GLOB_RECURSE USER_TEMPLATE_SOURCES
+    CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/intermediate/dynamic/*.cpp"
+)
+
+add_library(user_templates SHARED ${USER_TEMPLATE_SOURCES})
+configure_compile(user_templates)
+configure_shared(user_templates)
+
+# -----------
+# | Summary |
+# -----------
+message(STATUS "================ Build Configuration ================")
+message(STATUS "Targets available:")
+message(STATUS "  - user_entry")
+message(STATUS "  - user_templates")
+message(STATUS "Output directory: ${OUTPUT_DIR}")
+message(STATUS "=====================================================")
+)");
+
+    // 1.2. Git ignore file
+    CreateFile(projBase / ".gitignore", R"(# Build artifacts
+build/
+intermediate/
+)");
+
     // 2. Create essential config
-    CreateFile(base / "wfx.toml", R"([Project]
-project_name    = ")" + projectName + R"("
+    CreateFile(projBase / "wfx.toml", R"([Project]
 middleware_list = []    # Order of middleware registered by either User or Engine
+
+[Build]
+dir_name            = "build"          # Build directory used by CMake
+preferred_config    = "Debug"          # Active build configuration (must match CMake: Debug / Release)
+preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure the build directory
 
 [Network]
 send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)
@@ -169,7 +302,7 @@ int CreateProject(const std::string& projectName)
     const std::filesystem::path projectPath = std::filesystem::current_path() / projectName;
 
     if(fs::exists(projectPath))
-        Logger::GetInstance().Fatal("[WFX]: Project already exists: ", projectPath);
+        Logger::GetInstance().Fatal("[WFX]: Project already exists: ", projectPath.c_str());
 
     ScaffoldProject(projectName);
     return 0;
