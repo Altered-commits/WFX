@@ -36,7 +36,6 @@ nav:
     - Project Structure: core_concepts/project_structure.md
     - Engine Commands: core_concepts/engine_commands.md
     - WFX Settings: core_concepts/wfx_toml.md
-    - Toolchain Settings: core_concepts/toolchain_toml.md
   - API Reference:
     - Overview: api_reference/overview.md
     - Request & Response: api_reference/request_and_response.md
