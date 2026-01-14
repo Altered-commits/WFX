@@ -11,13 +11,13 @@
 #define WFX_MW_INSTANCE(id) WFX_CONCAT(WFXMiddlewareInst_, id)
 
 // Generate once
-#define WFX_INTERNAL_MW_REGISTER_IMPL(name, handle, callback, uniq)    \
+#define WFX_INTERNAL_MW_REGISTER_IMPL(name, callback, uniq)            \
     namespace {                                                        \
         struct WFX_MW_CLASS(uniq) {                                    \
             WFX_MW_CLASS(uniq)() {                                     \
                 WFX::Shared::__WFXDeferredMiddleware.emplace_back([] { \
                     __WFXApi->GetHttpAPIV1()->RegisterMiddleware(      \
-                        name, MakeMiddlewareEntry(callback, handle)    \
+                        name, MakeMiddlewareEntry(callback)            \
                     );                                                 \
                 });                                                    \
             }                                                          \
@@ -26,20 +26,13 @@
 
 #define WFX_INTERNAL_MW_REGISTER(name, callback)                       \
     WFX_INTERNAL_MW_REGISTER_IMPL(                                     \
-        name, static_cast<std::uint8_t>(MiddlewareType::LINEAR),       \
-        callback, __COUNTER__                                          \
+        name, callback, __COUNTER__                                    \
     )
 
-#define WFX_INTERNAL_MW_REGISTER_EX(name, handle, callback)            \
-    WFX_INTERNAL_MW_REGISTER_IMPL(name, handle, callback, __COUNTER__)
-
 // vvv User friendly Macros vvv
-#define WFX_MIDDLEWARE(name, cb)             WFX_INTERNAL_MW_REGISTER(name, cb)
-#define WFX_MIDDLEWARE_EX(name, handle, cb)  WFX_INTERNAL_MW_REGISTER_EX(name, handle, cb)
+#define WFX_MIDDLEWARE(name, cb) WFX_INTERNAL_MW_REGISTER(name, cb)
 
 // vvv Helper Macros vvv
-#define WFX_MW_LIST(...)      MakeMiddlewareFromFunctions(__VA_ARGS__)
-#define WFX_MW_HANDLE(...)    MakeMiddlewareHandle(__VA_ARGS__)
-#define WFX_MW_ENTRY(cb, ...) MiddlewareEntry{ .mw = cb, .handled = MakeMiddlewareHandle(__VA_ARGS__) }
+#define WFX_MW_LIST(...) MakeMiddlewareFromFunctions(__VA_ARGS__)
 
 #endif // WFX_INC_HTTP_MIDDLEWARE_MACROS_HPP

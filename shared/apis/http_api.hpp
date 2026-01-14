@@ -32,12 +32,12 @@ struct HttpAPIDataV1 {
 // vvv All aliases for clarity vvv
 // Routing
 using RegisterRouteFn         = void (*)(HttpMethod method, std::string_view path, HttpCallbackType callback);
-using RegisterRouteExFn       = void (*)(HttpMethod method, std::string_view path, MiddlewareStack mwStack, HttpCallbackType callback);
+using RegisterRouteExFn       = void (*)(HttpMethod method, std::string_view path, HttpMiddlewareStack mwStack, HttpCallbackType callback);
 using PushRoutePrefixFn       = void (*)(std::string_view prefix);
 using PopRoutePrefixFn        = void (*)();
 
 // Middleware
-using RegisterMiddlewareFn    = void (*)(std::string_view name, MiddlewareEntry callback);
+using RegisterMiddlewareFn    = void (*)(std::string_view name, HttpMiddlewareType callback);
 
 // Response control
 using SetStatusFn             = void (*)(HttpResponse* backend, HttpStatus status);

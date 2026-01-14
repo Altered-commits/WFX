@@ -25,7 +25,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
 
             (void)__GlobalHttpDataV1.router->RegisterRoute(method, path, std::move(cb));
         },
-        [](HttpMethod method, std::string_view path, MiddlewareStack mwStack, HttpCallbackType cb) { // RegisterRouteEx
+        [](HttpMethod method, std::string_view path, HttpMiddlewareStack mwStack, HttpCallbackType cb) { // RegisterRouteEx
             if(!__GlobalHttpDataV1.router || !__GlobalHttpDataV1.middleware)
                 Logger::GetInstance().Fatal("[HttpAPI]: Router or Middleware was nullptr for 'RegisterRouteEx'");
 
@@ -46,7 +46,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         },
 
         // Middleware
-        [](std::string_view name, MiddlewareEntry cb) { // RegisterMiddleware
+        [](std::string_view name, HttpMiddlewareType cb) { // RegisterMiddleware
             if(!__GlobalHttpDataV1.middleware)
                 Logger::GetInstance().Fatal("[HttpAPI]: Middleware was nullptr for 'RegisterMiddleware'");
 

@@ -37,38 +37,23 @@ HttpCallbackType MakeHttpCallbackFromLambda(Lambda&& cb)
 }
 
 // vvv Middleware Stuff vvv
-template<typename T>
-inline MiddlewareEntry MakeMiddlewareEntry(
-    T&& funcOrEntry, std::uint8_t handle = static_cast<std::uint8_t>(MiddlewareType::LINEAR)
-) {
+template<typename Lambda>
+inline HttpMiddlewareType MakeMiddlewareEntry(Lambda&& cb)
+{
     using Request = WFX::Http::HttpRequest;
-    using RawT    = std::decay_t<T>;
-
-    // User passed a MiddlewareEntry directly, return it as is
-    if constexpr(std::is_same_v<RawT, MiddlewareEntry>)
-        return std::forward<T>(funcOrEntry);
-
-    // Create the entry and return it
-    MiddlewareEntry entry{};
-    entry.handled = handle;
+    using RawT    = std::decay_t<Lambda>;
 
     // Sync middleware
-    if constexpr(std::is_invocable_r_v<MiddlewareAction, RawT, Request&, Response&, MiddlewareMeta>) {
-        entry.mw = SyncMiddlewareType{std::forward<T>(funcOrEntry)};
-        return entry;
-    }
+    if constexpr(std::is_invocable_r_v<MiddlewareAction, RawT, Request&, Response&>)
+        return SyncMiddlewareType{std::forward<Lambda>(cb)};
 
     // Async middleware
-    else if constexpr(std::is_invocable_r_v<void, RawT, AsyncPtr, Request&, Response&, MiddlewareMeta>) {
-        entry.mw = AsyncMiddlewareType{
-            [
-                cb = std::forward<T>(funcOrEntry)
-            ]
-            (Request& req, Response& res, MiddlewareMeta meta) mutable -> AsyncPtr {
-                return Async::MakeAsync<MiddlewareAction>(std::forward<T>(cb), std::ref(req), res, meta); 
+    else if constexpr(std::is_invocable_r_v<void, RawT, AsyncPtr, Request&, Response&>) {
+        return AsyncMiddlewareType{
+            [cb = std::forward<Lambda>(cb)](Request& req, Response& res) mutable -> AsyncPtr {
+                return Async::MakeAsync<MiddlewareAction>(std::forward<Lambda>(cb), std::ref(req), res); 
             }
         };
-        return entry;
     }
 
     else
@@ -76,32 +61,22 @@ inline MiddlewareEntry MakeMiddlewareEntry(
         static_assert(
             std::false_type::value,
             "[UserSide:Http-Middleware]: Invalid middleware type. Expected either:\n"
-            "  - A sync middleware:  MiddlewareAction(Request&, Response&, MiddlewareMeta)\n"
-            "  - An async middleware: void(AsyncPtr, Request&, Response&, MiddlewareMeta)\n"
-            "  - A MiddlewareEntry struct\n"
+            "  - A sync middleware: MiddlewareAction(Request&, Response&)\n"
+            "  - An async middleware: void(AsyncPtr, Request&, Response&)\n"
         );
 }
 
-template<typename... FunctionOrEntry>
-inline MiddlewareStack MakeMiddlewareFromFunctions(FunctionOrEntry&&... mws)
+template<typename... Lambda>
+inline HttpMiddlewareStack MakeMiddlewareFromFunctions(Lambda&&... mws)
 {
-    MiddlewareStack stack;
+    HttpMiddlewareStack stack;
     stack.reserve(sizeof...(mws));
 
     (stack.emplace_back(
-        MakeMiddlewareEntry(std::forward<FunctionOrEntry>(mws))
+        MakeMiddlewareEntry(std::forward<Lambda>(mws))
     ), ...);
 
     return stack;
-}
-
-template<typename... Ts>
-inline constexpr std::uint8_t MakeMiddlewareHandle(Ts... ts)
-{
-    static_assert((std::is_same_v<Ts, MiddlewareType> && ...),
-                "[UserSide:Http-Middleware]: 'MakeMiddlewareHandle' only accepts MiddlewareType");
-
-    return (static_cast<std::uint8_t>(ts) | ...);
 }
 
 #endif // WFX_INC_HTTP_HELPER_HPP

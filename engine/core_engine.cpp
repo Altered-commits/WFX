@@ -182,17 +182,14 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
                     goto __HandleResponse;
                 }
 
-                // Before handing of control to 'HandleSuccess', setup ctx->trackAsync state for use
-                auto& trackAsync = ctx->trackAsync;
-                trackAsync.SetMType(MiddlewareType::LINEAR);
-
+                // Hand over control to HandleSuccess
                 HandleSuccess(ctx, node);
 
                 // One important thing btw, 'HandleSuccess' requires 'node', which uk is fine
                 // The issue is, scheduler will not have access to 'node' nor it can query it (even if it can-
                 // -its just not performant). So we set req.context to contain this 'node' IF AND ONLY IF we haven't-
                 // -reached ExecutionLevel::RESPONSE, cuz till then 'node' is still required by 'HandleSuccess'
-                if(trackAsync.GetELevel() != ExecutionLevel::RESPONSE)
+                if(ctx->trackAsync.GetELevel() != ExecutionLevel::RESPONSE)
                     reqInfo.SetContext("__IntrnlCtx_RouteNode", node);
 
                 return;
@@ -264,7 +261,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx, const TrieNode* node)
         goto __HandleResponse;
 
     if(eLevel == ExecutionLevel::MIDDLEWARE) {
-        auto [success, ptr] = middleware_.ExecuteMiddleware(node, req, userRes, ctx, {});
+        auto [success, ptr] = middleware_.ExecuteMiddleware(node, req, userRes, ctx);
 
         if(!success) {
             // For failure, just handle response and be done with
