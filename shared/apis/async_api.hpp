@@ -1,7 +1,7 @@
 #ifndef WFX_SHARED_ASYNC_API_HPP
 #define WFX_SHARED_ASYNC_API_HPP
 
-#include "async/interface.hpp"
+#include <cstdint>
 
 // Fwd declare stuff
 namespace WFX::Http {
@@ -22,19 +22,10 @@ struct AsyncAPIDataV1 {
 };
 
 // vvv All aliases for clarity vvv
-using RegisterCallbackFn     = Async::CoroutineRawPtr (*)(void*, Async::CoroutinePtr&&);
-using PopCallbackFn          = void                   (*)(void*);
-using ResumeRecentCallbackFn = bool                   (*)(void*);
-
-using RegisterAsyncTimerFn   = bool (*)(void*, std::uint32_t);
+using RegisterAsyncTimerFn = bool (*)(void*, std::uint32_t);
 
 // vvv API declarations vvv
 struct ASYNC_API_TABLE {
-    // vvv Base Operations vvv
-    RegisterCallbackFn     RegisterCallback;
-    PopCallbackFn          PopCallback;
-    ResumeRecentCallbackFn ResumeRecentCallback;
-
     // vvv Async Operations vvv
     RegisterAsyncTimerFn   RegisterAsyncTimer;
 

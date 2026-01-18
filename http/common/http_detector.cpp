@@ -232,6 +232,17 @@ inline const std::unordered_map<std::string_view, std::string_view> ExtFromMime 
     {"video/x-matroska", "mkv"}, {"video/quicktime", "mov"}, {"video/x-msvideo", "avi"}, {"video/x-flv", "flv"}
 };
 
+inline const std::unordered_map<std::string_view, std::string_view> PortFromProtocol = {
+    {"http", "80"}, {"https", "443"}, {"ws", "80"}, {"wss", "443"}, {"ftp", "21"},
+    {"ftps", "990"}, {"sftp", "22"}, {"ssh", "22"}, {"telnet", "23"}, {"smtp", "25"},
+    {"smtps", "465"}, {"imap", "143"}, {"imaps", "993"}, {"pop3", "110"}, {"pop3s", "995"},
+    {"ldap", "389"}, {"ldaps", "636"}, {"nntp", "119"}, {"nntps", "563"}, {"rtsp", "554"},
+    {"sip", "5060"}, {"sips", "5061"}, {"xmpp", "5222"}, {"xmpps", "5223"}, {"mqtt", "1883"},
+    {"mqtts", "8883"}, {"redis", "6379"}, {"rediss", "6380"}, {"mysql", "3306"},
+    {"postgres", "5432"}, {"mongodb", "27017"}, {"amqp", "5672"}, {"amqps", "5671"},
+    {"grpc", "50051"}, {"grpc+tls", "50052"}, {"kafka", "9092"}, {"kafkas", "9093"}
+};
+
 // vvv Helper function vvv
 static inline std::string_view ExtractExtension(std::string_view path)
 {
@@ -241,7 +252,7 @@ static inline std::string_view ExtractExtension(std::string_view path)
     return path.substr(pos + 1);
 }
 
-// vvv Function Defs vvvv
+// vvv MimeDetector vvvv
 std::string_view MimeDetector::DetectMimeFromExt(std::string_view path)
 {
     std::string_view ext = ExtractExtension(path);
@@ -255,6 +266,13 @@ std::string_view MimeDetector::DetectExtFromMime(std::string_view mime)
 {
     auto it = ExtFromMime.find(mime);
     return (it != ExtFromMime.end()) ? it->second : std::string_view{};
+}
+
+// vvv PortDetector vvv
+std::string_view PortDetector::DetectFromProtocol(std::string_view protocol)
+{
+    auto it = PortFromProtocol.find(protocol);
+    return (it != PortFromProtocol.end()) ? it->second : std::string_view{};
 }
 
 } // namespace WFX::Http

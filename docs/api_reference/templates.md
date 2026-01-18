@@ -290,7 +290,7 @@ res.SendTemplate("users.html", Json::object({
 
 ### Includes
 
-`include` inserts another template **verbatim** at **compile time**.
+`include` inserts another template **verbatim at compile time**.
 
 **Template example**:
 ```html

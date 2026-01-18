@@ -22,7 +22,7 @@ public: // Main Stuff
 private: // Internal Functions
     void HandleRequest(ConnectionContext* ctx);
     void HandleResponse(ConnectionContext* ctx);
-    void HandleSuccess(ConnectionContext* ctx, const TrieNode* node);
+    void HandleSuccess(ConnectionContext* ctx);
 
 private: // Helper Functions
     void         FinishRequest(ConnectionContext* ctx);

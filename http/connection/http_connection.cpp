@@ -60,7 +60,7 @@ const char* WFXIpAddress::GetIpType() const
 void ConnectionContext::ResetContext()
 {
     rwBuffer.ResetBuffer();
-    coroStack.clear();
+    parentCoro.Reset();
     
     if(requestInfo)  { delete requestInfo;  requestInfo  = nullptr; }
     if(responseInfo) { delete responseInfo; responseInfo = nullptr; }
@@ -78,7 +78,7 @@ void ConnectionContext::ResetContext()
 void ConnectionContext::ClearContext()
 {
     rwBuffer.ClearBuffer();
-    coroStack.clear();
+    parentCoro.Reset();
 
     if(requestInfo)  requestInfo->ClearInfo();
     if(responseInfo) responseInfo->ClearInfo();
@@ -116,45 +116,59 @@ ConnectionState ConnectionContext::GetConnectionState() const
     return static_cast<ConnectionState>(connectionState);
 }
 
-bool ConnectionContext::IsAsyncOperation()
+bool ConnectionContext::IsAsyncOperation() const
 {
-    return !coroStack.empty();
+    return static_cast<bool>(parentCoro);
 }
 
-bool ConnectionContext::TryFinishCoroutines()
+Async::Status ConnectionContext::TryFinishCoroutines()
 {
+    /*
+     * So return value logic is simple:
+     *  - NONE means ignore it and move on
+     *  - COMPLETED means serialize the response
+     *  - OTHERS are just errors
+     */
     // Sanity checks, is the connection still alive or no
     if(GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
-        return false;
+        return Async::Status::NONE;
 
-    // Already completed
-    if(coroStack.empty())
-        return true;
+    // Something went wrong uk
+    if(!static_cast<bool>(parentCoro))
+        return Async::Status::NONE;
 
     // THE MOST IMPORTANT THING, ASYNC FUNCTIONS EXPECT US TO SET CTX (current connection context)-
-    // -VIA HTTP API. AND WE WILL SET IT TO NULLPTR ONCE WE ARE DONE USING IT, WE DON'T WANT DANGLING-
-    // -POINTERS
+    // -VIA HTTP API
     auto httpApi = WFX::Shared::GetHttpAPIV1();
     httpApi->SetGlobalPtrData(this);
 
-    // Execute from top to bottom, each of it is stateless
-    // Now if it hasn't finished after resuming, break out of the loop, -
-    // -do not try to finish rest of it as they depend on each other
-    while(!coroStack.empty()) {
-        auto& coro = coroStack.back();
-        coro->Resume();
+    // Resume the parent coroutine and check for:
+    //  - completion status
+    //  - any error which may have propagated
+    parentCoro.Resume();
+    if(!parentCoro.IsFinished())
+        return Async::Status::NONE;
 
-        if(coro->IsFinished())
-            coroStack.pop_back(); // Remove finished coroutine
-        else {
-            httpApi->SetGlobalPtrData(nullptr);
-            return false;
-        }
+    // WE WILL SET IT TO NULLPTR ONCE WE ARE DONE USING IT, WE DON'T WANT DANGLING POINTERS
+    httpApi->SetGlobalPtrData(nullptr);
+
+    auto eLevel = trackAsync.GetELevel();
+
+    if(eLevel == ExecutionLevel::MIDDLEWARE) {
+        auto& promise = parentCoro.GetPromise<Async::Promise<MiddlewareAction>>();
+        if(promise.error_ != Async::Status::NONE)
+            return promise.error_;
+
+        // For middleware, we need to set the action ourselves (inside of trackAsync)
+        *trackAsync.GetMAction() = promise.value_;
+    }
+    else {
+        auto err = parentCoro.GetPromise<Async::Promise<void>>().error_;
+        if(err != Async::Status::NONE)
+            return err;
     }
 
-    // We finished all the stuff, signal caller to handle response creation now
-    httpApi->SetGlobalPtrData(nullptr);
-    return true;
+    return Async::Status::COMPLETED;
 }
 
 } // namespace WFX::Http

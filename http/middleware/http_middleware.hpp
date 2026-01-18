@@ -18,8 +18,8 @@ using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, HttpMiddleware
 
 // 1st parameter is whether we successfully executed all middleware or no
 // 2nd parameter is for async functionality
-using MiddlewareResult         = std::pair<bool, AsyncPtr>;
-using MiddlewareFunctionResult = std::pair<MiddlewareAction, AsyncPtr>;
+using MiddlewareResult         = std::pair<bool, AsyncMiddlewareAction>;
+using MiddlewareFunctionResult = std::pair<MiddlewareAction, AsyncMiddlewareAction>;
 
 class HttpMiddleware {
 public:
@@ -31,7 +31,7 @@ public:
     void RegisterPerRouteMiddleware(const TrieNode* node, HttpMiddlewareStack mwStack);
 
     MiddlewareResult ExecuteMiddleware(
-        const TrieNode* node, HttpRequest& req, Response& res, ConnectionContext* ctx
+        const TrieNode* node, HttpRequest& req, Response res, ConnectionContext* ctx
     );
 
     // Using std::string because TOML loader returns vector<string>
@@ -45,10 +45,10 @@ private:
 
 private: // Helper functions
     MiddlewareResult ExecuteHelper(
-        HttpRequest& req, Response& res, HttpMiddlewareStack& stack, ConnectionContext* ctx
+        HttpRequest& req, Response res, HttpMiddlewareStack& stack, ConnectionContext* ctx
     );
     MiddlewareFunctionResult ExecuteFunction(
-        ConnectionContext* ctx, HttpMiddlewareType& entry, HttpRequest& req, Response& res
+        ConnectionContext* ctx, HttpMiddlewareType& entry, HttpRequest& req, Response res
     );
 
 private:

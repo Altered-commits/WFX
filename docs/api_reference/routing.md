@@ -16,7 +16,7 @@ Routes can be **sync or async**, but this page only covers **sync** routes.
     Using a temporary or short-lived string (e.g., a locally created `std::string`) will cause undefined behavior and may crash the server.
 
     - Routes defined by the developer are not fully validated by WFX.  
-    While incoming request paths are normalized and checked thoroughly, WFX does **not** validate the route definitions themselves.  
+    While **incoming request paths are normalized and checked thoroughly**, WFX does **not** validate the route definitions themselves.  
     Defining unsafe or nonsensical paths (e.g., containing `../..`) can lead to undefined behavior.  
     Ensure all route paths are correctly and safely specified.
 

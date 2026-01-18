@@ -72,6 +72,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
             cfg.port = port;
 
             // Set flags based on CLI options
+            if(options.count("--pin-to-cpu") > 0)          cfg.SetFlag(CLI::ServerFlags::PIN_TO_CPU);
             if(options.count("--use-https") > 0)           cfg.SetFlag(CLI::ServerFlags::USE_HTTPS);
             if(options.count("--https-port-override") > 0) cfg.SetFlag(CLI::ServerFlags::OVERRIDE_HTTPS_PORT);
             if(options.count("--debug") > 0)               cfg.SetFlag(CLI::ServerFlags::USE_DEBUG);
@@ -80,6 +81,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
         });
     parser.AddOption("run", "--host",                "Host to bind",                false, "127.0.0.1", false);
     parser.AddOption("run", "--port",                "Port to bind",                false, "8080",      false);
+    parser.AddOption("run", "--pin-to-cpu",          "Pin worker to CPU core",      true,  "",          false);
     parser.AddOption("run", "--use-https",           "Use HTTPS connection",        true,  "",          false);
     parser.AddOption("run", "--https-port-override", "Override default HTTPS port", true,  "",          false);
     parser.AddOption("run", "--debug",               "For runtime debugging",       true,  "",          false);

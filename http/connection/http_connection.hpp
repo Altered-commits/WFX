@@ -6,7 +6,6 @@
 #include "utils/backport/move_only_function.hpp"
 #include "utils/crypt/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
-#include "async/interface.hpp"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -77,7 +76,6 @@ enum class ConnectionState : std::uint8_t {
 // Forward declare it so compilers won't cry
 struct ConnectionContext;
 
-using CoroutineStack     = std::vector<Async::CoroutinePtr>;
 using ReceiveCallback    = std::function<void(ConnectionContext*)>;
 using CompletionCallback = std::function<void(ConnectionContext*)>;
 
@@ -163,16 +161,16 @@ struct ConnectionContext : public ConnectionTag {
     void*                sslConn       = nullptr;  // 8 bytes
     WFX::Utils::RWBuffer rwBuffer;                 // 16 bytes
 
-    WFXSocket       socket             = -1;       // 4 | 8 bytes
-    std::uint32_t   generationId       = 1;        // 4 bytes (0 is specially reserved)
-                                                   // 4 bytes padded
-    StreamGenerator streamGenerator    = {};       // 8 bytes
-    HttpRequest*    requestInfo        = nullptr;  // 8 bytes
-    HttpResponse*   responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
-    FileInfo*       fileInfo           = nullptr;  // 8 bytes
-    WFXIpAddress    connInfo;                      // 20 bytes
-    std::uint32_t   expectedBodyLength = 0;        // 4 bytes
-    CoroutineStack  coroStack;                     // 24 bytes
+    WFXSocket          socket             = -1;       // 4 | 8 bytes
+    std::uint32_t      generationId       = 1;        // 4 bytes (0 is specially reserved)
+                                                      // 4 bytes padded
+    StreamGenerator    streamGenerator    = {};       // 8 bytes
+    HttpRequest*       requestInfo        = nullptr;  // 8 bytes
+    HttpResponse*      responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
+    FileInfo*          fileInfo           = nullptr;  // 8 bytes
+    WFXIpAddress       connInfo;                      // 20 bytes
+    std::uint32_t      expectedBodyLength = 0;        // 4 bytes
+    Async::GenericTask parentCoro{};                  // 8 bytes
 
 public: // Helper functions
     void ResetContext();
@@ -184,8 +182,8 @@ public: // Helper functions
     HttpParseState  GetParseState()      const;
     ConnectionState GetConnectionState() const;
 
-    bool IsAsyncOperation();
-    bool TryFinishCoroutines();
+    bool          IsAsyncOperation() const;
+    Async::Status TryFinishCoroutines();
 };
 static_assert(sizeof(ConnectionContext) <= 128, "ConnectionContext must STRICTLY be less than or equal to 128 bytes.");
 

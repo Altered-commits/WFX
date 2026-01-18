@@ -10,6 +10,10 @@ namespace MimeDetector {
     std::string_view DetectExtFromMime(std::string_view mime);
 } // namespace MimeDetector
 
+namespace PortDetector {
+    std::string_view DetectFromProtocol(std::string_view protocol);
+}
+
 } // namespace WFX::Http
 
 #endif // WFX_HTTP_MIME_HPP

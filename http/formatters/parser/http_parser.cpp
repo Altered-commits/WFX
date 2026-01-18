@@ -9,7 +9,19 @@ namespace WFX::Http {
 using namespace WFX::Utils; // For 'I have no idea'
 using namespace WFX::Core; // For 'Config'
 
-HttpParseState HttpParser::Parse(ConnectionContext* ctx)
+namespace HttpParser {
+
+// vvv Function signatures vvv
+bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
+bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestHeaders& outHeaders);
+bool ParseBody(const char* data, std::size_t size, std::size_t& pos, std::size_t contentLen, HttpRequest& outRequest);
+
+bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from, std::size_t& outNextPos, std::string_view& outLine);
+bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos);
+std::string_view Trim(std::string_view sv);
+
+// vvv Function definitions vvv
+HttpParseState Parse(ConnectionContext* ctx)
 {
     ReadMetadata* readMeta = ctx->rwBuffer.GetReadMeta();
     const char*   data     = ctx->rwBuffer.GetReadData();
@@ -192,7 +204,7 @@ HttpParseState HttpParser::Parse(ConnectionContext* ctx)
 }
 
 // vvv Parse Helpers vvv
-bool HttpParser::ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest)
+bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest)
 {
     std::size_t nextPos = 0;
     std::string_view line;
@@ -229,7 +241,7 @@ bool HttpParser::ParseRequest(const char* data, std::size_t size, std::size_t& p
     return true;
 }
 
-bool HttpParser::ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestHeaders& outHeaders)
+bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestHeaders& outHeaders)
 {
     std::size_t headerCount = 0;
     std::size_t nextPos     = 0;
@@ -270,7 +282,7 @@ bool HttpParser::ParseHeaders(const char* data, std::size_t size, std::size_t& p
     return true;
 }
 
-bool HttpParser::ParseBody(const char* data, std::size_t size, std::size_t& pos, std::size_t contentLen, HttpRequest& outRequest)
+bool ParseBody(const char* data, std::size_t size, std::size_t& pos, std::size_t contentLen, HttpRequest& outRequest)
 {
     // Overflow check: position + contentLen must be within bounds
     if(pos > size || contentLen > size || pos + contentLen > size)
@@ -282,7 +294,7 @@ bool HttpParser::ParseBody(const char* data, std::size_t size, std::size_t& pos,
 }
 
 // vvv Helpers vvv
-bool HttpParser::SafeFindCRLF(const char* data, std::size_t size, std::size_t from,
+bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from,
                                 std::size_t& outNextPos, std::string_view& outLine)
 {
     if(from >= size)
@@ -298,7 +310,7 @@ bool HttpParser::SafeFindCRLF(const char* data, std::size_t size, std::size_t fr
     return true;
 }
 
-bool HttpParser::SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos)
+bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos)
 {
     if(size < 4 || from >= size - 3)
         return false;
@@ -317,7 +329,7 @@ bool HttpParser::SafeFindHeaderEnd(const char* data, std::size_t size, std::size
     return false;
 }
 
-std::string_view HttpParser::Trim(std::string_view sv)
+std::string_view Trim(std::string_view sv)
 {
     std::size_t start = 0;
     while(start < sv.size() && (sv[start] == ' ' || sv[start] == '\t'))
@@ -330,4 +342,6 @@ std::string_view HttpParser::Trim(std::string_view sv)
     return sv.substr(start, end - start);
 }
 
-} // WFX::Http
+} // namespace HttpParser
+
+} // namespace WFX::Http

@@ -12,6 +12,7 @@ using Json = nlohmann::json;
 namespace WFX::Http {
     class Router;
     class HttpMiddleware;
+    class HttpConnectionHandler;
 }
 
 namespace WFX::Shared {
@@ -24,9 +25,10 @@ enum class HttpAPIVersion : std::uint8_t {
 
 // Data internally used by Http API
 struct HttpAPIDataV1 {
-    Router*         router     = nullptr;
-    HttpMiddleware* middleware = nullptr;
-    void*           data       = nullptr;  // Any data type erased
+    Router*                router      = nullptr;
+    HttpMiddleware*        middleware  = nullptr;
+    HttpConnectionHandler* connHandler = nullptr;
+    void*                  data        = nullptr;  // Any data type erased
 };
 
 // vvv All aliases for clarity vvv
@@ -62,6 +64,9 @@ using SendTemplateRvalueFn    = WFX::Utils::MoveOnlyFunction<void(HttpResponse*,
 
 // Stream API
 using StreamFn = void (*)(HttpResponse* backend, StreamGenerator generator, bool streamChunked);
+
+// Endpoint API
+using AllocateEndpointFn = std::uint32_t (*)(std::string_view url);
 
 // Data API
 using SetGlobalPtrDataFn = void  (*)(void*);
@@ -100,6 +105,9 @@ struct HTTP_API_TABLE {
     // Stream API
     StreamFn                Stream;
 
+    // Endpoint API
+    AllocateEndpointFn      AllocateEndpoint;
+
     // Data API
     SetGlobalPtrDataFn      SetGlobalPtrData;
     GetGlobalPtrDataFn      GetGlobalPtrData;
@@ -110,7 +118,7 @@ struct HTTP_API_TABLE {
 
 // vvv Getter & Initializers vvv
 const HTTP_API_TABLE* GetHttpAPIV1();
-void                  InitHttpAPIV1(Router*, HttpMiddleware*);
+void                  InitHttpAPIV1(HttpConnectionHandler*, Router*, HttpMiddleware*);
 
 } // namespace WFX::Shared
 

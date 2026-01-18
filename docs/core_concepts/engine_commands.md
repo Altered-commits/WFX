@@ -84,6 +84,7 @@ Start the WFX server.
 |----------------------|-----------------------------|-----------|-----------------|
 |--host	               | Host to bind	             | 127.0.0.1 | Yes             |
 |--port	               | Port to bind	             | 8080      | Yes             |
+|--pin-to-cpu          | Pin workers to CPU cores    |     -     | no              |
 |--use-https	       | Enable HTTPS connection	 |     –     | No              |
 |--https-port-override | Override default HTTPS port |     –     | No              |
 |--debug	           | Currently a **no-op**  	 |     –     | No              |

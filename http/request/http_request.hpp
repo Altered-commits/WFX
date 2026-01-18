@@ -8,6 +8,9 @@
 #include <string>
 #include <any>
 
+// Forward declare engine to access cool internal stuff
+namespace WFX::Core { class CoreEngine; }
+
 // Just defines the structure of request
 namespace WFX::Http {
 
@@ -32,8 +35,9 @@ public: // Copying is strictly not allowed
 public: // Helper functions
     void ClearInfo()
     {
+        routeNode_ = nullptr;
         headers.Clear();
-        // pathSegments.clear(); NOTE: Cleared by WFX::Http::Router by default 
+        pathSegments.clear(); 
         context.clear();
     }
 
@@ -49,8 +53,14 @@ public: // Helper functions
         auto it = context.find(key);
         if(it == context.end())
             return nullptr;
-        
-        return std::any_cast<T>(&(it->second));
+
+        auto p = std::any_cast<T>(&(it->second));
+
+        // Stored value is T (which is a pointer), so std::any_cast gives T*, collapse T* -> T
+        if constexpr(std::is_pointer_v<T>)
+            return p ? *p : nullptr;
+        else
+            return p;
     }
 
     template<typename T>
@@ -60,13 +70,24 @@ public: // Helper functions
         if(!slot.has_value())
             slot = std::forward<T>(value);
 
-        return std::any_cast<T>(&slot);
+        auto p = std::any_cast<T>(&slot);
+
+        // Stored value is T (which is a pointer), so std::any_cast gives T*, collapse T* -> T
+        if constexpr(std::is_pointer_v<T>)
+            return p ? *p : nullptr;
+        else
+            return p;
     }
 
     void EraseContext(const std::string& key) noexcept
     {
         context.erase(key);
     }
+
+private:
+    const void* routeNode_ = nullptr;
+
+    friend class WFX::Core::CoreEngine;
 };
 
 } // namespace WFX::Http

@@ -233,6 +233,7 @@ void EpollConnectionHandler::WriteFile(ConnectionContext* ctx, std::string path)
 {
     // Before we proceed, ensure stuffs ready for file operation
     if(!EnsureFileReady(ctx, std::move(path))) {
+        ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
         Write(ctx, HttpError::internalError);
         return;
     }
@@ -364,8 +365,19 @@ void EpollConnectionHandler::Run()
                     // Well, we are done with our timer operation so yeah
                     ctx->isAsyncTimerOperation = 0;
 
-                    if(ctx->TryFinishCoroutines())
-                        onAsyncCompletion_(ctx);
+                    switch(ctx->TryFinishCoroutines()) {
+                        case Async::Status::COMPLETED:
+                            onAsyncCompletion_(ctx);
+                            break;
+
+                        // Errors
+                        case Async::Status::TIMER_FAILURE:
+                        case Async::Status::IO_FAILURE:
+                        case Async::Status::INTERNAL_FAILURE:
+                            ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+                            Write(ctx, HttpError::internalError);
+                            break;
+                    }
                 }
 
                 // Because the async timer is one shot, update it just in case there exists more async-
@@ -505,8 +517,8 @@ void EpollConnectionHandler::Run()
             if((ev & EPOLLIN) && ctx->eventType == EventType::EVENT_RECV) {
                 // Check per ip request rate BEFORE processing anything
                 if(!ipLimiter_.AllowRequest(ctx->connInfo)) {
+                    ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
                     Write(ctx, HttpError::tooManyRequests);
-                    Close(ctx);
                     continue;
                 }
                 Receive(ctx);
@@ -777,7 +789,6 @@ void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
     // If not, its UB. GG
     if(!ctx->fileInfo) {
         logger_.Warn("[Epoll]: SendFile expects ctx->fileInfo to be set, got nullptr");
-        ctx->ClearContext();
         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
         Write(ctx, HttpError::internalError);
         return;

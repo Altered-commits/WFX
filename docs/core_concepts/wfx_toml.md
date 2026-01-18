@@ -1,6 +1,6 @@
 # WFX Settings
 
-This page defines **all supported `wfx.toml` configuration options** in WFX.
+This page defines all supported `wfx.toml` configuration options in WFX.
 
 !!! note
     - All settings in this page are applied **per worker process**, not globally. For example, if `max_connections` is set to `2000` and WFX is running with `4` worker processes, the effective maximum connection capacity is `2000 × 4 = 8000` concurrent connections.
@@ -97,16 +97,16 @@ max_requests_per_ip_per_sec  = 5       # 32-bit Unsigned Integer
 ### Connections
 
 - `max_connections`  
-  Maximum number of **simultaneous connections handled by a single worker process**.  
+  Maximum number of simultaneous connections handled by a single worker process.  
   Internally, WFX rounds this value **up to the nearest multiple of 64** for efficiency.  
   This is a hard cap; once reached, new connections are rejected by that worker.
 
 - `max_connections_per_ip`  
-  Maximum number of **simultaneous connections allowed from a single IP address per worker process**.  
+  Maximum number of simultaneous connections allowed from a single IP address per worker process.  
   This prevents one client from consuming all available connections.
 
 - `max_request_burst_per_ip`  
-  The number of requests an IP address is allowed to send **immediately** without being throttled.  
+  The number of requests an IP address is allowed to send immediately without being throttled.  
   Think of this as a bucket of tokens given to each IP when it first connects.
 
 - `max_requests_per_ip_per_sec`  
@@ -133,7 +133,7 @@ env_path = "..." # String (Path to .env file)
 ## `[SSL]`
 
 TLS configuration. This section is **only used when WFX is running in HTTPS mode**.
-When **HTTPS** is enabled, certificate paths are **mandatory**; all other settings are **optional**.
+When HTTPS is enabled, certificate paths are **mandatory**; all other settings are **optional**.
 
 <pre class="code-format">
 [SSL]
@@ -157,28 +157,28 @@ security_level       = 2               # Integer (0 - 5 only)
 ### Cipher Suites
 
 - `tls13_ciphers`  
-  This lists the preferred **encryption methods** for TLS 1.3 connections, separated by colons.  
+  This lists the preferred encryption methods for TLS 1.3 connections, separated by colons.  
   **Example**: `"TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256"` tells WFX to first try `TLS_AES_128_GCM_SHA256` with the client, and only if the client doesn't support it, it will fall back to `TLS_CHACHA20_POLY1305_SHA256`.
 
 - `tls12_ciphers`  
-  Same as above but for **TLS 1.2 connections**. These ciphers define how the server and client encrypt and verify data during the handshake.  
+  Same as above but for TLS 1.2 connections. These ciphers define how the server and client encrypt and verify data during the handshake.  
   **Example**: `"ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384"`
 
 - `curves`  
-  Determines the order of **Elliptic Curve Diffie-Hellman (ECDHE) curves** used for key exchange.  
+  Determines the order of Elliptic Curve Diffie-Hellman (ECDHE) curves used for key exchange.  
   **Example**: `"X25519:P-256"` tells WFX to try X25519 first, then P-256. This affects speed and security of the handshake.
 
 ### TLS Behavior
 
 - `enable_session_cache`  
-  When enabled, WFX stores TLS session information on the server so clients can **reconnect faster without doing a full handshake**.  
+  When enabled, WFX stores TLS session information on the server so clients can reconnect faster without doing a full handshake.  
   **Example**: a returning client can skip the expensive key exchange, improving speed at the cost of more RAM usage.
 
 - `session_cache_size`  
   Maximum memory size allocated for caching TLS session data. When this limit is reached, older sessions are evicted, causing returning clients to perform a full TLS handshake again.
 
 - `enable_ktls`  
-  Uses **Kernel TLS**, which offloads encryption tasks to the OS kernel for higher performance. Older versions of kernel may not fully support this feature.
+  Uses Kernel TLS, which offloads encryption tasks to the OS kernel for higher performance. Older versions of kernel may not fully support this feature.
 
 ### Protocol & Security
 
@@ -187,7 +187,7 @@ security_level       = 2               # Integer (0 - 5 only)
   **Example**: `2` means TLS 1.2 or higher only; older clients using TLS 1.0 or 1.1 will be rejected for security reasons.
 
 - `security_level`  
-  OpenSSL security strictness (0–5). Higher values enforce **stronger algorithms, longer keys, and stricter certificate checks**.  
+  OpenSSL security strictness (0–5). Higher values enforce stronger algorithms, longer keys, and stricter certificate checks.  
   **Example**: `2` is a reasonable default, while `5` is extremely strict and may block older clients.
 
 ---

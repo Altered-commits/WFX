@@ -1,6 +1,6 @@
 # Installation
 
-!!! note "Note"
+!!! important
     WFX currently supports **Linux only**.
 
     - Linux: ✅ Supported
@@ -20,7 +20,6 @@ This section will guide you through installing all necessary dependencies, setti
 - **CMake 3.20+**
 - **Ninja build system** (optional, recommended)
 - **Git**
-- **Python 3.x** (for MkDocs and documentation, optional)
 
 <p>The following commands install required tools on common Linux distributions.
 Other distributions may require equivalent packages.</p>
@@ -106,6 +105,67 @@ Other distributions may require equivalent packages.</p>
     You should see <strong>WFX</strong> being printed.
   </li>
 </ol>
+
+### Documentation (Optional)
+
+This section explains how to build and preview the WFX documentation locally.
+
+Documentation is built using **MkDocs Material**.  
+Do **not** install plain `mkdocs`; it is missing required features and extensions used by this project.
+
+!!! note
+    Documentation can be built on **Linux, macOS, and Windows**, even though WFX itself currently supports Linux only.
+
+<strong>Requirements</strong>
+
+- **Python 3.8+**
+- **pip**
+
+Verify Python is available:
+
+<pre class="code-format">
+- python3 --version
+</pre>
+
+<strong>Virtual environment setup</strong>
+
+Creating a virtual environment is <strong>strongly recommended on all platforms</strong> to ensure reproducible documentation builds and to avoid dependency conflicts.
+
+<strong>Linux / macOS</strong>
+<pre class="code-format">
+- python3 -m venv .venv
+- source .venv/bin/activate
+</pre>
+
+<strong>Windows (PowerShell)</strong>
+<pre class="code-format">
+- python -m venv .venv
+- .venv\Scripts\Activate.ps1
+</pre>
+
+<strong>Install dependencies</strong>
+
+Install <strong>MkDocs Material</strong> (not plain MkDocs):
+
+<pre class="code-format">
+- pip install mkdocs-material
+</pre>
+
+This package includes all required themes, extensions, and plugins used by WFX documentation.
+
+<strong>Serve the documentation locally</strong>
+
+From the repository root:
+
+<pre class="code-format">
+- mkdocs serve
+</pre>
+
+Then open your browser at:
+
+<pre class="code-format">
+- http://127.0.0.1:8000
+</pre>
 
 ---
 

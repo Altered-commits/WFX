@@ -1,7 +1,7 @@
 # Async
 
 WFX async is a **manual, explicit coroutine system** built on top of a small runtime interface.  
-There is **no compiler magic** and **no hidden scheduler**. What you write is exactly what runs.
+There is no compiler magic and no hidden scheduler. What you write is exactly what runs.
 
 Async in WFX is **state-machine–driven**, resumable, and strictly controlled by the engine.
 
@@ -139,7 +139,7 @@ private: // Internals
 
         It is **highly recommended** to use variables that survive yields, such as those stored via `PersistLocal`, or any mechanism that guarantees the variable lives until the coroutine finishes.
 
-CoroutineBase is small and efficient (<=16 bytes) and forms the foundation for all WFX async operations.
+`Async::CoroutineBase` is small and efficient (<=16 bytes) and forms the foundation for all WFX async operations.
 
 ### `AsyncPtr`
 
@@ -199,7 +199,7 @@ template<typename Ret, typename Fn, typename... Args>
 inline AsyncPtr MakeAsync(Fn&& fn, Args&&... args);
 ```
 
-`MakeAsync` is the **core async primitive**. It creates a coroutine by pairing:
+`MakeAsync` is the core async primitive. It creates a coroutine by pairing:
 
 - a **callable** (`Fn`): the coroutine body
 - a set of **arguments** (`Args...`): data retained for the coroutine's entire lifetime
@@ -252,7 +252,7 @@ void(AsyncPtr self, Args... args)
 **Examples**:
 
 The following examples **do not use the async macro system**.
-They intentionally show **manual async control flow** to make the behavior of `Async::MakeAsync`, return values, and coroutine lifetime **fully explicit**.
+They intentionally show manual async control flow to make the behavior of `Async::MakeAsync`, return values, and coroutine lifetime fully explicit.
 
 The **same examples will be shown later using the macro system**, once the underlying mechanics are understood.
 
@@ -588,15 +588,15 @@ void ExampleCoroutine(AsyncPtr self)
 
 **Explanation**:
 
-This switch-case + `GetState()` / `IncState()` pattern forms the **core of WFX's coroutine machinery**:
+This switch-case + `GetState()` / `IncState()` pattern forms the core of WFX's coroutine machinery:
 
 - Each `case` represents a step in the coroutine.
 - `Async::Await` is called for an awaited operation.
     - If it returns `true`, the coroutine **yields**.
-    - `IncState()` increments the state so that when resumed, the switch jumps to the **next step automatically**.
+    - `IncState()` increments the state so that when resumed, the switch jumps to the next step automatically.
 - `PersistLocal` stores variables across yields.
 - When the awaited coroutine finishes synchronously (`Await` returns `false`), execution **falls through** to the next case immediately.
-- This creates a **single-threaded, state-driven async flow** without blocking the engine, giving synchronous-looking code an **asynchronous execution model**.
+- This creates a single-threaded, state-driven async flow without blocking the engine, giving synchronous-looking code an asynchronous execution model.
 
 ### `Async::SafeCastReturnPtr`
 

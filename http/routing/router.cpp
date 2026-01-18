@@ -28,11 +28,6 @@ const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, 
 
 const TrieNode* Router::MatchRoute(HttpMethod method, std::string_view path, PathSegments& outSegments) const
 {
-    // We will always assume that the segments we receive will contain data as-
-    // -we are working in a keep-alive supported architecture, so the previous data needs-
-    // -to be cleaned out
-    outSegments.clear();
-
     // Strip query string before matching
     std::string_view queryStrippedPath = path.substr(0, path.find('?'));
 

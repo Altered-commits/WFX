@@ -31,7 +31,7 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     auto& buildConfig = config.buildConfig;
 
     // Sanity check project directory existence
-    if(!FileSystem::DirectoryExists(project.c_str()))
+    if(!FileSystem::DirectoryExists(project.c_str())) 
         logger.Fatal("[WFX]: '", project, "' directory does not exist");
 
 #ifdef _WIN32
@@ -81,10 +81,11 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
         templateEngine.LoadDynamicTemplatesFromLib();
     }
 
-    // Switch ports if we enable https and we don't want to override https default port
+    bool pinToCpu = cfg.GetFlag(ServerFlags::PIN_TO_CPU);
     bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
     bool ohp      = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
-
+    
+    // Switch ports if we enable https and we don't want to override https default port
     int port = useHttps && !ohp ? 443 : cfg.port;
     logger.Info("[WFX-Master]: Dev server running at ",
                 useHttps ? "https://" : "http://", cfg.host, ':', port);
@@ -116,7 +117,8 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
             signal(SIGPIPE, SIG_IGN); // We will handle it internally
             signal(SIGHUP, SIG_IGN);  // Terminals should not kill workers
 
-            PinWorkerToCPU(i);
+            if(pinToCpu)
+                PinWorkerToCPU(i);
 
             engine.Listen(cfg.host, port);
             return 0;

@@ -3,8 +3,7 @@
 Middleware in WFX provides a mechanism to intercept and control request processing **before a route handler may be invoked**, including the ability to short-circuit execution entirely.  
 Typical use cases include authentication, authorization, logging, request preprocessing, and early rejection of requests.
 
-Middleware can be registered globally or per-route.  
-This page documents **synchronous middleware only**. Async middleware is covered separately.
+Middleware can be registered globally or per-route. This page documents both **sync and async middleware**.
 
 !!! important
     Middleware requires the user to always include the following header at the top of the file:
@@ -49,13 +48,13 @@ Registration is done using macros and follows the same deferred initialization m
 
 ```cpp
 // Using a lambda
-WFX_MIDDLEWARE("auth", [](Request& req, Response& res, MiddlewareMeta _) {
+WFX_MIDDLEWARE("auth", [](Request& req, Response& res) {
     /* ... */
     return MiddlewareAction::CONTINUE; // mandatory
 });
 
 // Using a function
-MiddlewareAction AuthMiddleware(Request& req, Response& res, MiddlewareMeta _)
+MiddlewareAction AuthMiddleware(Request& req, Response& res)
 {
     /* ... */
     return MiddlewareAction::CONTINUE; // mandatory
@@ -69,9 +68,6 @@ The above code:
 - Registers a middleware under a string identifier.
 - Registration occurs during static initialization and is finalized at engine startup.
 - The name is used to define the execution order of middleware via the `[Project] middleware_list` section in `wfx.toml`.
-- The `MiddlewareMeta` parameter can be ignored for now.  
-  It exists for advanced execution models (such as streaming middleware).  
-  Standard request/response middleware does not require it, and inbound streaming support is planned for the future.
 
 !!! note
     Middleware registration and configuration follow these rules:
@@ -81,28 +77,36 @@ The above code:
 
     2. If a middleware name is listed in `[Project] middleware_list` but **no corresponding middleware is registered in user code**, the server will fail to start with a fatal error.
 
-    3. Middleware names must be unique:
+    3. Middleware **names must be unique**:
         
         - Duplicate names in `[Project] middleware_list` result in a fatal error.
         - Duplicate middleware registrations in user code also result in a fatal error.
 
-    4. Middleware executes strictly in the order specified in `[Project] middleware_list`.
+    4. Middleware **executes strictly in the order specified** in `[Project] middleware_list`.
 
-## Extended Middleware
+## Async Middleware
+
+Async middleware allows middleware logic to suspend execution without blocking the event loop.  
+This is intended for operations that may **suspend execution**, such as time-based delays, I/O-bound work (database queries, external API calls), rate limiting, or deferred validation logic.  
+Async middleware follows the **same registration, ordering, and return semantics** as synchronous middleware.  
+The only difference is that execution occurs inside a coroutine.
 
 **Example**:
-
 ```cpp
-WFX_MIDDLEWARE_EX(
-    "auth",
-    WFX_MW_HANDLE(MiddlewareType::STREAM_CHUNK, MiddlewareType::STREAM_END),
-    AuthMiddleware
-);
+WFX_MIDDLEWARE("RequestCooldown", [](CoSelf, Request& _, Response& res) {
+    CoStart
+
+    CoAwait(Async::SleepFor(2000), {
+        res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
+            .SendText("Internal Server Error - M");
+    })
+
+    CoReturn(MiddlewareAction::CONTINUE)
+
+    CoEnd
+})
 ```
 
-- Allows explicitly specifying the middleware handling behavior.
-- Use this when fine-grained control over middleware execution is required.
-
-!!! warning
-    The `_EX` variant will be explained in detail once true inbound streaming support is added.  
-    For now, this feature is not ready for use and should be avoided.
+!!! note
+    For a deeper understanding of how coroutines work in WFX, including the `CoStart`, `CoAwait`, and `CoReturn` macros,
+    see the **[Async](async.md)** page.

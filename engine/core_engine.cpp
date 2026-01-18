@@ -1,6 +1,5 @@
 #include "core_engine.hpp"
 
-#include "async/interface.hpp"
 #include "http/response.hpp"
 #include "http/common/http_error_msgs.hpp"
 #include "http/formatters/parser/http_parser.hpp"
@@ -33,7 +32,7 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 
     // Initialize API backend before anything else
-    WFX::Shared::InitHttpAPIV1(&router_, &middleware_);
+    WFX::Shared::InitHttpAPIV1(connHandler_.get(), &router_, &middleware_);
     WFX::Shared::InitAsyncAPIV1(connHandler_.get());
 
     // Load user's DLL file which we compiled / is cached
@@ -52,22 +51,7 @@ void CoreEngine::Listen(const std::string& host, int port)
             this->HandleRequest(ctx);
         },
         [this](ConnectionContext* ctx) {
-            bool inResponse = (ctx->trackAsync.GetELevel() == ExecutionLevel::RESPONSE);
-            const TrieNode* route = nullptr;
-
-            if(!inResponse) {
-                const TrieNode* const* ptr =
-                    ctx->requestInfo->GetContext<const TrieNode*>("__IntrnlCtx_RouteNode");
-
-                if(!ptr || !*ptr)
-                    logger_.Fatal(
-                        "[CoreEngine]: RouteNode context missing/null inside 'CompletionCallback'"
-                    );
-
-                route = *ptr;
-            }
-
-            this->HandleSuccess(ctx, route);
+            this->HandleSuccess(ctx);
         }
     );
     connHandler_->Run();
@@ -183,14 +167,8 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
                 }
 
                 // Hand over control to HandleSuccess
-                HandleSuccess(ctx, node);
-
-                // One important thing btw, 'HandleSuccess' requires 'node', which uk is fine
-                // The issue is, scheduler will not have access to 'node' nor it can query it (even if it can-
-                // -its just not performant). So we set req.context to contain this 'node' IF AND ONLY IF we haven't-
-                // -reached ExecutionLevel::RESPONSE, cuz till then 'node' is still required by 'HandleSuccess'
-                if(ctx->trackAsync.GetELevel() != ExecutionLevel::RESPONSE)
-                    reqInfo.SetContext("__IntrnlCtx_RouteNode", node);
+                reqInfo.routeNode_ = node;
+                HandleSuccess(ctx);
 
                 return;
             }
@@ -246,11 +224,12 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     }
 }
 
-void CoreEngine::HandleSuccess(ConnectionContext* ctx, const TrieNode* node)
+void CoreEngine::HandleSuccess(ConnectionContext* ctx)
 {
     auto* httpApi = WFX::Shared::GetHttpAPIV1();
     auto& req     = *ctx->requestInfo;
     auto& res     = *ctx->responseInfo;
+    auto* node    = static_cast<const TrieNode*>(req.routeNode_);
 
     Response userRes{&res, httpApi};
 
@@ -261,14 +240,20 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx, const TrieNode* node)
         goto __HandleResponse;
 
     if(eLevel == ExecutionLevel::MIDDLEWARE) {
-        auto [success, ptr] = middleware_.ExecuteMiddleware(node, req, userRes, ctx);
+        auto [success, task] = middleware_.ExecuteMiddleware(node, req, userRes, ctx);
 
         if(!success) {
             // For failure, just handle response and be done with
-            if(!ptr)
+            // Later this will be properly handled
+            if(!task) {
+                res.ClearInfo();
+                res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
+                    .SendText("Internal Server Error: CE - CF1");
                 goto __HandleResponse;
+            }
 
             // Its async, let scheduler do its job at the backend
+            ctx->parentCoro = std::move(task);
             FinishRequest(ctx);
             return;
         }
@@ -292,26 +277,27 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx, const TrieNode* node)
         httpApi->SetGlobalPtrData(static_cast<void*>(ctx));
 
         auto coro = async(req, userRes);
-        if(!coro)
-            logger_.Fatal("[CoreEngine]: Null coroutine detected in active connection context, aborting");
-
-        coro->Resume();
+        coro.Resume();
 
         // Reset to remove any dangling references
         httpApi->SetGlobalPtrData(nullptr);
 
         // (Async path)
-        if(!coro->IsFinished()) {
+        if(!coro.IsFinished()) {
+            ctx->parentCoro = std::move(coro);
             FinishRequest(ctx);
             return;
         }
 
-        // So if coroutine is done, then the user defined lambda should be the only thing-
-        // -existing inside of 'ctx->coroStack'. If anything else remains, thats a big no no
-        if(ctx->coroStack.size() > 1)
-            logger_.Fatal(
-                "[CoreEngine]: Coroutine stack imbalance detected after async user callback execution, aborting"
-            );
+        // (Sync path)
+        // Check for errors which may have propagated
+        auto err = coro.GetResult();
+        if(err != Async::Status::NONE) {
+            res.ClearInfo();
+            res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
+                .SendText("Internal Server Error: CE - CF2");
+        }
+        // No errors, finish the request
     }
 
 __HandleResponse:

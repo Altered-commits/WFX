@@ -8,8 +8,7 @@ namespace WFX::CLI {
     
 // Just to keep stuff tidy
 enum class ServerFlags : std::uint64_t {
-    NO_BUILD_CACHE      = 1ull << 0,
-    NO_TEMPLATE_CACHE   = 1ull << 1,
+    PIN_TO_CPU          = 1ull << 1,
     USE_HTTPS           = 1ull << 2,
     OVERRIDE_HTTPS_PORT = 1ull << 3,
     USE_DEBUG           = 1ull << 4,

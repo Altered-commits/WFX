@@ -15,23 +15,12 @@ enum class SerializeResult : std::uint8_t {
     SERIALIZE_BUFFER_INSUFFICIENT // Buffer is too small to hold the serialized data
 };
 
-using SerializedHttpResponseDeprecated = std::pair<std::string, std::string_view>;
-using SerializedHttpResponse           = std::pair<SerializeResult, std::string>;
+using SerializedHttpResponse = std::pair<SerializeResult, std::string>;
 
-// Being used as a namespace rn, fun again
-class HttpSerializer final {
-public:
-    [[deprecated("Use SerializeToBuffer instead, this function works but doesn't use proper write buffering")]]
-    static SerializedHttpResponseDeprecated Serialize(HttpResponse& res);
-
-    static SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer);
-
-private:
-    HttpSerializer()  = delete;
-    ~HttpSerializer() = delete;
-};
+namespace HttpSerializer {
+    SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer);
+} // namespace HttpSerializer
 
 } // namespace WFX::Http
-
 
 #endif // WFX_HTTP_SERIALIZER_HPP

@@ -20,12 +20,12 @@ To implement (In no specific order):
 10. Timeout (Done)
 11. Streaming (Done: Outbound, Inbound remaining)
 12. .env (Done)
-13. Server <-> Server request-response handling
-14. Async (Done)
+13. Server <-> Server request-response handling (Working on it)
+14. Async (Reworked)
 16. Form handling (Done)
 
 To Fix:
 1. Cache files < 4KB, don't use TransmitFile / sendfile on every single file
 2. Batch syscalls (for receving and sending data) instead of spamming them every request
 3. Timer wheel shouldn't expire connections inline, or for larger count it will stall backend pipeline
-4. ADD PROPER ERROR CHECKING FOR ASYNC TIMER OPERATIONS (High failure rate rn at high concurrency)  [Partially fixed]
+4. ADD PROPER ERROR CHECKING FOR ASYNC TIMER OPERATIONS (low failure rate rn at high concurrency but still)  [Partially fixed]

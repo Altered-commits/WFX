@@ -46,5 +46,5 @@ WFX_CONSTRUCTOR(InitSomething);
 !!! note
     - No execution order guarantees
     - Heavy work inside constructor is allowed, but it will directly increase engine startup time
-    - Do not throw exceptions; they are not handled  
+    - **Do not throw exceptions**; they are not handled  
     If you need to throw, catch and handle them inside the constructor body

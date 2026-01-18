@@ -1,7 +1,7 @@
 #ifndef WFX_HTTP_ROUTE_COMMON_HPP
 #define WFX_HTTP_ROUTE_COMMON_HPP
 
-#include "async/interface.hpp"
+#include "async/task.hpp"
 #include "utils/uuid/uuid.hpp"
 #include "utils/backport/move_only_function.hpp"
 
@@ -60,14 +60,18 @@ enum class MiddlewareLevel : std::uint8_t {
     PER_ROUTE
 };
 
-using SyncMiddlewareType  = MiddlewareAction (*)(WFX::Http::HttpRequest&, Response&);
-using AsyncMiddlewareType = WFX::Utils::MoveOnlyFunction<AsyncPtr(WFX::Http::HttpRequest&, Response&)>;
+using SyncMiddlewareType  = MiddlewareAction (*)(WFX::Http::HttpRequest&, Response);
+using AsyncMiddlewareType = Async::Task<MiddlewareAction> (*)(WFX::Http::HttpRequest&, Response);
 using HttpMiddlewareType  = std::variant<std::monostate, SyncMiddlewareType, AsyncMiddlewareType>;
 using HttpMiddlewareStack = std::vector<HttpMiddlewareType>;
 
 // vvv User Callbacks vvv
-using AsyncCallbackType = WFX::Utils::MoveOnlyFunction<AsyncPtr(WFX::Http::HttpRequest&, Response&)>;  
-using SyncCallbackType  = void (*)(WFX::Http::HttpRequest&, Response&);
+using AsyncCallbackType = Async::Task<void> (*)(WFX::Http::HttpRequest&, Response);  
+using SyncCallbackType  = void (*)(WFX::Http::HttpRequest&, Response);
 using HttpCallbackType  = std::variant<std::monostate, SyncCallbackType, AsyncCallbackType>;
+
+// vvv Some commonly used async aliases vvv
+using AsyncVoid             = Async::Task<void>;
+using AsyncMiddlewareAction = Async::Task<MiddlewareAction>;
 
 #endif // WFX_HTTP_ROUTE_COMMON_HPP
