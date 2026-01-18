@@ -1,0 +1,1698 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../engine_commands/">
+      
+      
+        <link rel="next" href="../../api_reference/overview/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>WFX Settings - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../css/code_format.css">
+    
+      <link rel="stylesheet" href="../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#wfx-settings" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              WFX Settings
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api_reference/overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Project]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Build]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Network]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[Network]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#buffers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Buffers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#headers-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Headers &amp; Body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timeouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timeouts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#env" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [ENV]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ssl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [SSL]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[SSL]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#certificates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Certificates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cipher-suites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cipher Suites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tls-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS Behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#protocol-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Protocol &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Windows]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Linux]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linuxiouring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Linux.IoUring]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linuxepoll" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Linux.Epoll]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#misc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Misc]
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Project]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Build]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Network]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[Network]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#buffers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Buffers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#headers-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Headers &amp; Body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#timeouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timeouts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#env" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [ENV]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ssl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [SSL]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[SSL]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#certificates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Certificates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cipher-suites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cipher Suites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tls-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS Behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#protocol-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Protocol &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Windows]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Linux]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linuxiouring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Linux.IoUring]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linuxepoll" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Linux.Epoll]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#misc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Misc]
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="wfx-settings">WFX Settings</h1>
+<p>This page defines all supported <code>wfx.toml</code> configuration options in WFX.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li>All settings in this page are applied <strong>per worker process</strong>, not globally. For example, if <code>max_connections</code> is set to <code>2000</code> and WFX is running with <code>4</code> worker processes, the effective maximum connection capacity is <code>2000 × 4 = 8000</code> concurrent connections.</li>
+<li>If a setting does not explicitly mention <code>(In bytes)</code>, its value should be interpreted as a count, not a size. For example, <code>file_cache_size</code> represents the number of cached files, while <code>cache_chunk_size</code> and <code>template_chunk_size</code> explicitly specify <code>(In bytes)</code>, meaning their values are treated as byte sizes.</li>
+</ul>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>WFX currently does <strong>not validate value ranges or semantics</strong>.
+It only checks for the <strong>presence of certain required keys</strong> (marked with <code>*</code>).
+If a required key is missing, startup fails.
+If a value is invalid but syntactically correct, behavior is <strong>undefined and entirely the user's responsibility</strong>.</p>
+</div>
+<hr />
+<h2 id="project"><code>[Project]</code></h2>
+<p>Project-level configuration. This section is <strong>mandatory</strong>.</p>
+<pre class="code-format">
+[Project]
+middleware_list = [] # Array of strings
+</pre>
+
+<ul>
+<li><code>middleware_list</code>*: Ordered list of middleware identifiers.<ul>
+<li>Order matters: middleware executes exactly in declaration order</li>
+<li>Middleware list may be empty, but the key itself must exist</li>
+<li>Used to register both engine-provided and user-defined middleware</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="build"><code>[Build]</code></h2>
+<p>This section of the configuration file controls how WFX manages builds for your project.<br />
+All values are <strong>mandatory</strong>.</p>
+<pre class="code-format">
+[Build]
+dir_name            = "build"          # String
+preferred_config    = "Debug"          # String
+preferred_generator = "Unix Makefiles" # String
+</pre>
+
+<ul>
+<li>
+<p><code>dir_name</code>*<br />
+  The folder where CMake will place all generated build files. This path is relative to the project folder.</p>
+</li>
+<li>
+<p><code>preferred_config</code>*<br />
+  The default build configuration (e.g., <code>"Debug"</code> for development builds or <code>"Release"</code> for optimized production builds).  </p>
+</li>
+<li>
+<p><code>preferred_generator</code>*<br />
+  The default CMake generator to use (e.g., <code>Unix Makefiles</code>, <code>Ninja</code>).  </p>
+</li>
+</ul>
+<hr />
+<h2 id="network"><code>[Network]</code></h2>
+<p>Connection-level configuration. All values are <strong>optional</strong>; defaults are applied if omitted.</p>
+<pre class="code-format">
+[Network]
+send_buffer_max              = 2048    # 32-bit Unsigned Integer (In bytes)
+recv_buffer_max              = 16384   # 32-bit Unsigned Integer (In bytes)
+recv_buffer_incr             = 4096    # 32-bit Unsigned Integer (In bytes)
+header_reserve_hint          = 512     # 16-bit Unsigned Integer (In bytes)
+max_header_size              = 8192    # 32-bit Unsigned Integer (In bytes)
+max_body_size                = 8192    # 32-bit Unsigned Integer (In bytes)
+max_header_count             = 64      # 16-bit Unsigned Integer
+header_timeout               = 15      # 16-bit Unsigned Integer (In seconds)
+body_timeout                 = 20      # 16-bit Unsigned Integer (In seconds)
+idle_timeout                 = 40      # 16-bit Unsigned Integer (In seconds)
+max_connections              = 2000    # 32-bit Unsigned Integer
+max_connections_per_ip       = 20      # 32-bit Unsigned Integer
+max_request_burst_per_ip     = 10      # 32-bit Unsigned Integer
+max_requests_per_ip_per_sec  = 5       # 32-bit Unsigned Integer
+</pre>
+
+<h3 id="buffers">Buffers</h3>
+<ul>
+<li><code>send_buffer_max</code>: Max total outbound buffer per connection</li>
+<li><code>recv_buffer_max</code>: Max total inbound buffer per connection</li>
+<li><code>recv_buffer_incr</code>: Growth increment when receive buffer expands</li>
+<li><code>header_reserve_hint</code>: Initial allocation hint for headers</li>
+</ul>
+<h3 id="headers-body">Headers &amp; Body</h3>
+<ul>
+<li><code>max_header_size</code>: Max combined size of all headers</li>
+<li><code>max_header_count</code>: Max number of headers allowed</li>
+<li><code>max_body_size</code>: Max request body size</li>
+</ul>
+<h3 id="timeouts">Timeouts</h3>
+<ul>
+<li><code>header_timeout</code>: Time allowed to fully receive headers</li>
+<li><code>body_timeout</code>: Time allowed to fully receive body</li>
+<li><code>idle_timeout</code>: Max idle time before connection is closed</li>
+</ul>
+<h3 id="connections">Connections</h3>
+<ul>
+<li>
+<p><code>max_connections</code><br />
+  Maximum number of simultaneous connections handled by a single worker process.<br />
+  Internally, WFX rounds this value <strong>up to the nearest multiple of 64</strong> for efficiency.<br />
+  This is a hard cap; once reached, new connections are rejected by that worker.</p>
+</li>
+<li>
+<p><code>max_connections_per_ip</code><br />
+  Maximum number of simultaneous connections allowed from a single IP address per worker process.<br />
+  This prevents one client from consuming all available connections.</p>
+</li>
+<li>
+<p><code>max_request_burst_per_ip</code><br />
+  The number of requests an IP address is allowed to send immediately without being throttled.<br />
+  Think of this as a bucket of tokens given to each IP when it first connects.</p>
+</li>
+<li>
+<p><code>max_requests_per_ip_per_sec</code><br />
+  How fast the token bucket for each IP is refilled, measured in <strong>tokens per second</strong>.<br />
+  Once an IP runs out of tokens, further requests are delayed or rejected until tokens are refilled.</p>
+</li>
+</ul>
+<hr />
+<h2 id="env"><code>[ENV]</code></h2>
+<p>Environment variable loading. This section is <strong>optional</strong>.</p>
+<pre class="code-format">
+[ENV]
+env_path = "..." # String (Path to .env file)
+</pre>
+
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On non-Windows systems, the file must have permission <code>600</code> (meaning that only the file's owner has read and write access).
+Insecure permissions may result in startup failure.</p>
+</div>
+<hr />
+<h2 id="ssl"><code>[SSL]</code></h2>
+<p>TLS configuration. This section is <strong>only used when WFX is running in HTTPS mode</strong>.
+When HTTPS is enabled, certificate paths are <strong>mandatory</strong>; all other settings are <strong>optional</strong>.</p>
+<pre class="code-format">
+[SSL]
+cert_path            = "..."           # String (Path to certificate)
+key_path             = "..."           # String (Path to private key)
+tls13_ciphers        = "..."           # String
+tls12_ciphers        = "..."           # String
+curves               = "X25519:P-256"  # String
+enable_session_cache = true            # Boolean (true or false)
+enable_ktls          = false           # Boolean (true or false)
+session_cache_size   = 32768           # 64-bit Unsigned Integer (In bytes)
+min_proto_version    = 3               # 8-bit Unsigned Integer (1 - 3 only)
+security_level       = 2               # Integer (0 - 5 only)
+</pre>
+
+<h3 id="certificates">Certificates</h3>
+<ul>
+<li><code>cert_path</code>*: PEM-encoded server certificate</li>
+<li><code>key_path</code>*: Private key matching the certificate</li>
+</ul>
+<h3 id="cipher-suites">Cipher Suites</h3>
+<ul>
+<li>
+<p><code>tls13_ciphers</code><br />
+  This lists the preferred encryption methods for TLS 1.3 connections, separated by colons.<br />
+<strong>Example</strong>: <code>"TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256"</code> tells WFX to first try <code>TLS_AES_128_GCM_SHA256</code> with the client, and only if the client doesn't support it, it will fall back to <code>TLS_CHACHA20_POLY1305_SHA256</code>.</p>
+</li>
+<li>
+<p><code>tls12_ciphers</code><br />
+  Same as above but for TLS 1.2 connections. These ciphers define how the server and client encrypt and verify data during the handshake.<br />
+<strong>Example</strong>: <code>"ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384"</code></p>
+</li>
+<li>
+<p><code>curves</code><br />
+  Determines the order of Elliptic Curve Diffie-Hellman (ECDHE) curves used for key exchange.<br />
+<strong>Example</strong>: <code>"X25519:P-256"</code> tells WFX to try X25519 first, then P-256. This affects speed and security of the handshake.</p>
+</li>
+</ul>
+<h3 id="tls-behavior">TLS Behavior</h3>
+<ul>
+<li>
+<p><code>enable_session_cache</code><br />
+  When enabled, WFX stores TLS session information on the server so clients can reconnect faster without doing a full handshake.<br />
+<strong>Example</strong>: a returning client can skip the expensive key exchange, improving speed at the cost of more RAM usage.</p>
+</li>
+<li>
+<p><code>session_cache_size</code><br />
+  Maximum memory size allocated for caching TLS session data. When this limit is reached, older sessions are evicted, causing returning clients to perform a full TLS handshake again.</p>
+</li>
+<li>
+<p><code>enable_ktls</code><br />
+  Uses Kernel TLS, which offloads encryption tasks to the OS kernel for higher performance. Older versions of kernel may not fully support this feature.</p>
+</li>
+</ul>
+<h3 id="protocol-security">Protocol &amp; Security</h3>
+<ul>
+<li>
+<p><code>min_proto_version</code><br />
+  Sets the minimum TLS version allowed.<br />
+<strong>Example</strong>: <code>2</code> means TLS 1.2 or higher only; older clients using TLS 1.0 or 1.1 will be rejected for security reasons.</p>
+</li>
+<li>
+<p><code>security_level</code><br />
+  OpenSSL security strictness (0–5). Higher values enforce stronger algorithms, longer keys, and stricter certificate checks.<br />
+<strong>Example</strong>: <code>2</code> is a reasonable default, while <code>5</code> is extremely strict and may block older clients.</p>
+</li>
+</ul>
+<hr />
+<h2 id="windows"><code>[Windows]</code></h2>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This section will be updated once official Windows support is released.</p>
+</div>
+<hr />
+<h2 id="linux"><code>[Linux]</code></h2>
+<p>Socket and worker configuration for <strong>Linux systems only</strong>. All settings in this section are <strong>optional</strong>.</p>
+<pre class="code-format">
+[Linux]
+worker_processes = 2     # 32-bit Unsigned Integer
+backlog          = 1024  # 32-bit Unsigned Integer
+</pre>
+
+<ul>
+<li>
+<p><code>worker_processes</code><br />
+  Controls how many worker processes WFX starts to handle incoming requests. More workers allow better CPU usage on multi-core systems, but too many can waste memory or cause contention.<br />
+<strong>Guidance</strong>: Start with significantly fewer workers than total CPU cores, leaving ample headroom for the OS, networking, TLS, and background tasks. Increase gradually only after load testing shows CPU saturation.</p>
+</li>
+<li>
+<p><code>backlog</code><br />
+  Sets the maximum number of incoming connections the OS can queue while workers are busy. If this limit is too low, new connections may be rejected during traffic spikes even if the server is healthy.</p>
+</li>
+</ul>
+<h2 id="linuxiouring"><code>[Linux.IoUring]</code></h2>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This section will be updated once official IoUring support is released.</p>
+</div>
+<h2 id="linuxepoll"><code>[Linux.Epoll]</code></h2>
+<p>This is the default Linux networking backend. All settings in this section are <strong>optional</strong>.</p>
+<pre class="code-format">
+[Linux.Epoll]
+max_events = 1024 # 16-bit Unsigned Integer
+</pre>
+
+<ul>
+<li><code>max_events</code><br />
+  Defines how many I/O events <code>epoll_wait</code> can return at once. Higher values allow the server to process more ready connections per loop, while lower values reduce per-iteration work but may increase latency under load.</li>
+</ul>
+<hr />
+<h2 id="misc"><code>[Misc]</code></h2>
+<p>Defines small engine-level limits that do not fit into other categories, mainly related to caching and internal I/O behavior. This section is <strong>optional</strong>.</p>
+<pre class="code-format">
+[Misc]
+file_cache_size     = 20     # 16-bit Unsigned Integer
+cache_chunk_size    = 2048   # 16-bit Unsigned Integer (In bytes)
+template_chunk_size = 16384  # 32-bit Unsigned Integer (In bytes)
+</pre>
+
+<ul>
+<li><code>file_cache_size</code>: Number of files cached in memory (LFU)</li>
+<li><code>template_chunk_size</code>: Max I/O chunk size during template compilation</li>
+<li><code>cache_chunk_size</code>: Max I/O chunk size for template cache files</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

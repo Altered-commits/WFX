@@ -1,0 +1,2136 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../templates/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Forms - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../css/code_format.css">
+    
+      <link rel="stylesheet" href="../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#forms" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Forms
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#form-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Form Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#form-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Form Layers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Form Layers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rules
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rules">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#base-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Base Interface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decayed-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decayed Type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#builtins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Builtins
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cleaning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleaning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cleaning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sanitization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sanitization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#form-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Form Usage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Form Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#parsestatic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ParseStatic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accessing-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accessing data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#form-rendering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Form Rendering
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#form-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Form Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#form-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Form Layers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Form Layers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rules
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Rules">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#base-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Base Interface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#decayed-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decayed Type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#builtins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Builtins
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cleaning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleaning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cleaning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sanitization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sanitization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#form-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Form Usage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Form Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#parsestatic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ParseStatic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accessing-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accessing data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#form-rendering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Form Rendering
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="forms">Forms</h1>
+<p>Forms in WFX provide a <strong>statically-defined, explicit, and deterministic</strong> way to <strong>parse, validate, sanitize, and render</strong> structured user input.<br />
+They are designed to <strong>fail fast</strong>, avoid ambiguity, and prevent malformed data from ever reaching application logic.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>All form functionality in WFX lives inside the <code>Form::</code> namespace.</p>
+<p>To use forms, you <strong>must</strong> include the forms header at the top of your file:
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;core/forms.hpp&gt;</span>
+</code></pre></div></p>
+</div>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>A form in WFX consists of four conceptual layers:</p>
+<ul>
+<li><a href="#schema"><strong>Schema</strong></a>: the static, immutable definition of the form</li>
+<li><a href="#fields"><strong>Fields</strong></a>: named inputs inside the schema</li>
+<li><a href="#rules"><strong>Rules</strong></a>: specifies how each field should be parsed and constrained</li>
+<li><a href="#cleaning"><strong>Cleaning</strong></a>: validation + sanitization (both mandatory, fail as a single step)</li>
+</ul>
+<p>Optionally, forms may also define <strong>rendering</strong> logic for SSR.</p>
+<p>Each layer is explicit and user-controllable.</p>
+<hr />
+<h2 id="form-errors">Form Errors</h2>
+<p>Every form operation results in a <code>FormError</code>.<br />
+Forms <strong>never throw</strong> and <strong>never partially succeed</strong>.</p>
+<div class="highlight"><pre><span></span><code><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">FormError</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">NONE</span><span class="p">,</span>
+<span class="w">    </span><span class="n">UNSUPPORTED_CONTENT_TYPE</span><span class="p">,</span>
+<span class="w">    </span><span class="n">MALFORMED</span><span class="p">,</span>
+<span class="w">    </span><span class="n">CLEAN_FAILED</span>
+<span class="p">};</span>
+</code></pre></div>
+<ul>
+<li><code>NONE</code>: Parsing, validation, and sanitization succeeded</li>
+<li><code>UNSUPPORTED_CONTENT_TYPE</code>: The request either lacks a <code>Content-Type</code> header or uses a type the form system does not support</li>
+<li><code>MALFORMED</code>: The request body could not be decoded into key-value input (e.g. broken URL encoding)</li>
+<li><code>CLEAN_FAILED</code>: One or more fields failed validation or sanitization</li>
+</ul>
+<p>If the error is not <code>NONE</code>, application logic must not continue.</p>
+<hr />
+<h2 id="form-layers">Form Layers</h2>
+<p>Each layer has a single responsibility and a clearly defined failure boundary.
+Understanding these layers is mandatory to use the form system correctly.</p>
+<h3 id="schema"><strong>Schema</strong></h3>
+<p>A <strong>schema</strong> is the complete, immutable definition of a form.</p>
+<p>In WFX, schemas are represented by <code>Form::FormSchema</code> and are intended to be defined statically.</p>
+<p>It is constructed with:</p>
+<ul>
+<li>The form name (<code>const char*</code>)</li>
+<li>One or more <code>Form::Field(...)</code> definitions, <strong>in order</strong></li>
+</ul>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">LoginForm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">FormSchema</span><span class="p">{</span>
+<span class="w">    </span><span class="s">&quot;login&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">Form</span><span class="o">::</span><span class="n">Field</span><span class="p">(</span><span class="s">&quot;username&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">Text</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">ascii</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">}),</span>
+<span class="w">    </span><span class="n">Form</span><span class="o">::</span><span class="n">Field</span><span class="p">(</span><span class="s">&quot;password&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">Text</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">ascii</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">})</span>
+<span class="p">};</span>
+</code></pre></div></p>
+<p>This defines a form schema named <code>login</code> with two text fields.
+This schema is <strong>immutable</strong>. <strong>Fields and rules</strong> cannot be changed later.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p><strong>Field ordering is critical.</strong></p>
+<p>Fields are evaluated <strong>strictly in the order they are defined</strong> inside the schema.<br />
+This order is used for:</p>
+<ul>
+<li>Input parsing and evaluation</li>
+<li>Validation and sanitization</li>
+<li>Cleaned tuple layout</li>
+<li>Field rendering via <code>Render()</code></li>
+</ul>
+<p>Changing field order or introducing mismatches can <strong>invalidate form input</strong>, break tuple access,
+and produce incorrect or unintended rendering output.</p>
+<p>Always define fields in the exact order you expect them to be processed and rendered.</p>
+</div>
+<h3 id="fields"><strong>Fields</strong></h3>
+<p>A <strong>field</strong> represents a single named input expected by the form.</p>
+<p>Fields are declared using the <code>Form::Field</code> factory function and are always part of a schema.<br />
+They do not exist independently.</p>
+<p>A field is constructed with:</p>
+<ul>
+<li>The field name (<code>const char*</code>)</li>
+<li>A rule instance describing the expected input type (e.g. <code>Form::Text</code>, <code>Form::Int</code>)</li>
+</ul>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">Form</span><span class="o">::</span><span class="n">Field</span><span class="p">(</span><span class="s">&quot;username&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">Text</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">ascii</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">})</span>
+</code></pre></div></p>
+<p><strong>Custom Overrides</strong></p>
+<p>All built-in field types provide engine-defined default validators and sanitizers.
+In most cases, no additional configuration is required.</p>
+<p>Chaining functions are provided <strong>only to override</strong> these defaults when needed.</p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Custom validator and sanitizer</span>
+<span class="n">Form</span><span class="o">::</span><span class="n">Field</span><span class="p">(</span><span class="s">&quot;username&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">Text</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">ascii</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">})</span>
+<span class="w">        </span><span class="p">.</span><span class="n">CustomValidator</span><span class="p">(</span><span class="o">&amp;</span><span class="n">MyValidator</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="n">CustomSanitizer</span><span class="p">(</span><span class="o">&amp;</span><span class="n">MySanitizer</span><span class="p">)</span>
+
+<span class="c1">// Or individually</span>
+<span class="n">Form</span><span class="o">::</span><span class="n">Field</span><span class="p">(</span><span class="s">&quot;username&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">Text</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">ascii</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">})</span>
+<span class="w">        </span><span class="p">.</span><span class="n">CustomValidator</span><span class="p">(</span><span class="o">&amp;</span><span class="n">MyValidator</span><span class="p">)</span>
+
+<span class="n">Form</span><span class="o">::</span><span class="n">Field</span><span class="p">(</span><span class="s">&quot;password&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">Text</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">ascii</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">})</span>
+<span class="w">        </span><span class="p">.</span><span class="n">CustomSanitizer</span><span class="p">(</span><span class="o">&amp;</span><span class="n">MySanitizer</span><span class="p">)</span>
+</code></pre></div></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li>Overrides replace the default behavior</li>
+<li>Overrides do not stack; the last override wins</li>
+</ul>
+<p>For details on validators, sanitizers, default behavior, and custom type support,
+see the <a href="#cleaning"><strong>Cleaning</strong></a> section.</p>
+</div>
+<h3 id="rules"><strong>Rules</strong></h3>
+<p>A <strong>rule</strong> defines the expected type and constraints of a field's input.</p>
+<p>Rules are plain configuration objects. They do <strong>not</strong> parse input themselves.
+They are consumed by the form system to perform <strong>validation, sanitization, and rendering</strong>.</p>
+<p>Every field must be constructed with <strong>exactly one rule instance</strong>.</p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">Form</span><span class="o">::</span><span class="n">Int</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">18</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">120</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div></p>
+<h4 id="base-interface"><strong>Base Interface</strong></h4>
+<p>All rules <strong>MUST inherit</strong> the following common property:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">BaseRule</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="n">required</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+<ul>
+<li><code>required = true</code>: input must be present</li>
+<li><code>required = false</code>: input may be omitted</li>
+</ul>
+<h4 id="decayed-type"><strong>Decayed Type</strong></h4>
+<p>Each rule is associated with a <strong>decayed type</strong>, representing the <strong>final C++ type</strong> produced
+by the form system after sanitization and validation.
+This enables <strong>compile-time type safety</strong> for all form operations</p>
+<p>The decayed type is determined via the <code>Form::DecayedType&lt;Rule&gt;</code> trait.</p>
+<h4 id="builtins"><strong>Builtins</strong></h4>
+<p>WFX provides the following built-in rules:</p>
+<ul>
+<li>
+<p><code>Text</code></p>
+<p><strong>Usage</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">Form</span><span class="o">::</span><span class="n">Text</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">ascii</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* true | false */</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">min</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="cm">/* minimum length */</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">max</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="cm">/* maximum length */</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<ul>
+<li><code>ascii</code> (<code>bool</code>): restrict input to ASCII characters only  </li>
+<li><code>min</code> (<code>std::uint32_t</code>): minimum allowed length  </li>
+<li><code>max</code> (<code>std::uint32_t</code>): maximum allowed length  </li>
+</ul>
+<p><strong>Decayed type</strong>: <code>std::string_view</code></p>
+</li>
+<li>
+<p><strong><code>Email</code></strong></p>
+<p><strong>Usage</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">Form</span><span class="o">::</span><span class="n">Email</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">strict</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* true | false */</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<ul>
+<li><code>strict</code> (<code>bool</code>): enable strict email validation rules  </li>
+</ul>
+<p><strong>Decayed type</strong>: <code>std::string_view</code></p>
+</li>
+<li>
+<p><strong><code>Int</code></strong></p>
+<p><strong>Usage</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">Form</span><span class="o">::</span><span class="n">Int</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* minimum value */</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* maximum value */</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<ul>
+<li><code>min</code> (<code>std::int64_t</code>): minimum allowed value  </li>
+<li><code>max</code> (<code>std::int64_t</code>): maximum allowed value  </li>
+</ul>
+<p><strong>Decayed type</strong>: <code>std::int64_t</code></p>
+</li>
+<li>
+<p><strong><code>UInt</code></strong></p>
+<p><strong>Usage</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">Form</span><span class="o">::</span><span class="n">UInt</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* minimum value */</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* maximum value */</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<ul>
+<li><code>min</code> (<code>std::uint64_t</code>): minimum allowed value  </li>
+<li><code>max</code> (<code>std::uint64_t</code>): maximum allowed value  </li>
+</ul>
+<p><strong>Decayed type</strong>: <code>std::uint64_t</code></p>
+</li>
+<li>
+<p><strong><code>Float</code></strong></p>
+<p><strong>Usage</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">Form</span><span class="o">::</span><span class="n">Float</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* minimum value */</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* maximum value */</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<ul>
+<li><code>min</code> (<code>double</code>): minimum allowed value  </li>
+<li><code>max</code> (<code>double</code>): maximum allowed value  </li>
+</ul>
+<p><strong>Decayed type</strong>: <code>double</code></p>
+</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The members shown here are only the members specific to the builtin rule itself.<br />
+All <strong>common members</strong> (e.g. <code>.required</code>, etc.) are defined in the <strong><code>BaseRule</code></strong> struct, which is documented <strong>earlier</strong> in the <em>Base interface</em> section.<br />
+They are <strong>not repeated</strong> for each builtin rule to avoid duplication.<br />
+If a member is not listed here, assume it comes from <strong><code>BaseRule</code></strong> and <strong>still applies</strong>.</p>
+</div>
+<h4 id="custom"><strong>Custom</strong></h4>
+<p>Custom rules may be defined when built-in rules are insufficient.</p>
+<p>A custom rule <strong>must</strong>:</p>
+<ul>
+<li>Inherit from <code>Form::BaseRule</code></li>
+<li>Define its own configuration fields</li>
+<li>Provide a <code>DecayedType</code> specialization mapping the rule to a concrete value type</li>
+<li>Have a default sanitizer and validator available to the engine</li>
+</ul>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">MyRule</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">BaseRule</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="w"> </span><span class="n">limit</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">template</span><span class="o">&lt;&gt;</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Form</span><span class="o">::</span><span class="n">DecayedType</span><span class="o">&lt;</span><span class="n">MyRule</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">using</span><span class="w"> </span><span class="n">Type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>More details on default sanitizers, validators, and how to define them are provided in the <a href="#cleaning"><strong>Cleaning</strong></a> section.</p>
+</div>
+<h3 id="cleaning"><strong>Cleaning</strong></h3>
+<p>The form system processes input in two stages: <strong>validation</strong> and <strong>sanitization</strong>,
+to produce the final C++ value for each field.  </p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>The <strong>order of stages is critical</strong>: <strong>validation runs before sanitization</strong>.<br />
+The form system first checks that input satisfies the rule constraints, then applies sanitization to produce the final C++ value.<br />
+All logic should follow this sequence to ensure correct and type-safe processing.</p>
+</div>
+<h4 id="validation"><strong>Validation</strong></h4>
+<p>Validation is the <strong>first stage</strong> of the cleaning pipeline.<br />
+It determines whether the raw input is <em>acceptable</em> for a given rule <strong>without producing a value</strong>.</p>
+<p>At this stage:</p>
+<ul>
+<li>Input is treated as raw <code>std::string_view</code></li>
+<li>No type conversion is performed</li>
+<li>The rule is accessed via a <strong>type-erased pointer</strong></li>
+<li>The result is a simple success/failure signal</li>
+</ul>
+<p>If validation fails, the pipeline <strong>terminates immediately</strong> and sanitization is never executed.</p>
+<p><strong>Validator signature</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Input: Form data, Form field (type erased)</span>
+<span class="c1">// Output: Validation success via bool return value</span>
+<span class="k">using</span><span class="w"> </span><span class="n">ValidatorFn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="p">)(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="p">);</span>
+</code></pre></div></p>
+<h4 id="sanitization"><strong>Sanitization</strong></h4>
+<p>Sanitization is the <strong>second stage</strong> of the cleaning pipeline.<br />
+It is responsible for <strong>normalizing and converting already-validated input</strong> into a concrete C++ value.</p>
+<p>At this stage:</p>
+<ul>
+<li>Input is still received as <code>std::string_view</code></li>
+<li>Validation has already succeeded</li>
+<li>Type conversion and normalization occur here</li>
+<li>The final decayed C++ value is produced</li>
+</ul>
+<p><strong>Sanitizer signature</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Input: raw field data and a type-erased field pointer</span>
+<span class="c1">// Output: success via bool return value</span>
+<span class="c1">//         sanitized value written to `out` of type T</span>
+<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span>
+<span class="k">using</span><span class="w"> </span><span class="n">SanitizerFn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="p">)(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">input</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">fieldPtr</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="o">&amp;</span><span class="w"> </span><span class="n">out</span><span class="p">);</span>
+</code></pre></div></p>
+<h4 id="custom_1"><strong>Custom</strong></h4>
+<p>Custom rules must explicitly provide <strong>validation</strong> and <strong>sanitization</strong> logic.
+Only the minimum theory required to implement them correctly is covered here.</p>
+<p>A custom rule must expose:</p>
+<ul>
+<li>A <strong>validator</strong> (<code>ValidatorFn</code>)</li>
+<li>A <strong>sanitizer</strong> (<code>SanitizerFn&lt;T&gt;</code>)</li>
+<li>Dispatcher overloads for both</li>
+<li>A <code>DecayedType</code> mapping to the final C++ type</li>
+</ul>
+<p><strong>Example (Defining custom rules)</strong>:
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;form/forms.hpp&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;cctype&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;charconv&gt;</span>
+
+<span class="c1">// Custom Rule</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">HexUInt</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">BaseRule</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">UINT64_MAX</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="c1">// Decayed Type</span>
+<span class="k">template</span><span class="o">&lt;&gt;</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">Form</span><span class="o">::</span><span class="n">DecayedType</span><span class="o">&lt;</span><span class="n">HexUInt</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">using</span><span class="w"> </span><span class="n">Type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="c1">// Validator: Checks that the input is a valid hexadecimal string</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="nf">ValidateHexUInt</span><span class="p">(</span><span class="w"> </span><span class="c1">// Must follow validator signature</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">sv</span><span class="p">,</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">fieldPtr</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">HexUInt</span><span class="o">&amp;</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="n">HexUInt</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">fieldPtr</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">sv</span><span class="p">.</span><span class="n">empty</span><span class="p">())</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="kt">char</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">sv</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">isxdigit</span><span class="p">(</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="o">&gt;</span><span class="p">(</span><span class="n">c</span><span class="p">)))</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Validator Dispatcher</span>
+<span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">ValidatorFn</span><span class="w"> </span><span class="nf">DefaultValidatorFor</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">HexUInt</span><span class="o">&amp;</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">ValidateHexUInt</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Sanitizer: Performs the actual conversion and range checking</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">SanitizeHexUInt</span><span class="p">(</span><span class="w"> </span><span class="c1">// Must follow sanitizer signature</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">sv</span><span class="p">,</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">fieldPtr</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="o">&amp;</span><span class="w"> </span><span class="n">out</span><span class="w">              </span><span class="c1">// Here &#39;T&#39; is our decayed type</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">HexUInt</span><span class="o">&amp;</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="n">HexUInt</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">fieldPtr</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">ptr</span><span class="p">,</span><span class="w"> </span><span class="n">ec</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">from_chars</span><span class="p">(</span>
+<span class="w">        </span><span class="n">sv</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span><span class="w"> </span><span class="n">sv</span><span class="p">.</span><span class="n">data</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">sv</span><span class="p">.</span><span class="n">size</span><span class="p">(),</span><span class="w"> </span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span>
+<span class="w">    </span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">ec</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">errc</span><span class="p">{})</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">value</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">max</span><span class="p">)</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">value</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Sanitizer Dispatcher</span>
+<span class="k">static</span><span class="w"> </span><span class="k">constexpr</span>
+<span class="n">Form</span><span class="o">::</span><span class="n">SanitizerFn</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">DefaultSanitizerFor</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">HexUInt</span><span class="o">&amp;</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">SanitizeHexUInt</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// Now your custom rule is ready to be used :)</span>
+</code></pre></div></p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<ul>
+<li>
+<p>You may intentionally <strong>skip validation</strong> if the same checks would be repeated during sanitization.
+For example, if sanitization already performs string-to-number conversion and failure detection,
+duplicating that work in validation is unnecessary.</p>
+</li>
+<li>
+<p>Avoid hardcoding <code>Form::SanitizerFn&lt;std::uint64_t&gt;</code> or <code>std::uint64_t&amp; out</code>.
+Instead, use <code>Form::SanitizerFn&lt;Form::DecayedType&lt;HexUInt&gt;::Type&gt;</code>.
+This ensures the sanitizer automatically stays correct if the rule’s output type is changed later, without requiring updates in multiple places.</p>
+</li>
+</ul>
+</div>
+<p><strong>Example (Overriding default cleanup logic)</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Perform parsing and checks in sanitization only</span>
+<span class="k">static</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="nf">SanitizeEvenInt</span><span class="p">(</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">sv</span><span class="p">,</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int64_t</span><span class="o">&amp;</span><span class="w"> </span><span class="n">out</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">ptr</span><span class="p">,</span><span class="w"> </span><span class="n">ec</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">from_chars</span><span class="p">(</span>
+<span class="w">        </span><span class="n">sv</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span><span class="w"> </span><span class="n">sv</span><span class="p">.</span><span class="n">data</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">sv</span><span class="p">.</span><span class="n">size</span><span class="p">(),</span><span class="w"> </span><span class="n">out</span>
+<span class="w">    </span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">ec</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">errc</span><span class="p">{})</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="n">out</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// ...</span>
+<span class="n">Form</span><span class="o">::</span><span class="n">Field</span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;count&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">Form</span><span class="o">::</span><span class="n">Int</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="p">}</span>
+<span class="p">)</span>
+<span class="p">.</span><span class="n">CustomSanitizer</span><span class="p">(</span><span class="n">SanitizeEvenInt</span><span class="p">);</span>
+<span class="c1">// ...</span>
+</code></pre></div></p>
+<hr />
+<h2 id="form-usage">Form Usage</h2>
+<p>WFX forms can be parsed in multiple ways, depending on how much control you want.
+If you are unsure which one to use, use <code>Parse</code>.</p>
+<h3 id="parse"><strong>Parse</strong></h3>
+<p><strong><code>Parse</code></strong> automatically selects the correct parsing strategy based on the request headers.</p>
+<p>What it does:</p>
+<ul>
+<li>Reads the <code>Content-Type</code> header</li>
+<li>Chooses the correct parser internally</li>
+<li>Validates and cleans the form</li>
+<li>Produces a fully validated output tuple</li>
+</ul>
+<p>Current support:</p>
+<ul>
+<li><code>application/x-www-form-urlencoded</code></li>
+</ul>
+<p>Future support (no code changes required from you):</p>
+<ul>
+<li><code>multipart/form-data</code></li>
+<li>other form encodings</li>
+</ul>
+<p><strong>Typical Usage</strong>:
+<div class="highlight"><pre><span></span><code><span class="cm">/*</span>
+<span class="cm"> * Parses the login form using the &#39;LoginForm&#39; schema</span>
+<span class="cm"> *</span>
+<span class="cm"> * NOTE: &#39;LoginForm&#39; is assumed to be the one defined in &#39;Schema&#39; section</span>
+<span class="cm"> *        of this documentation</span>
+<span class="cm"> */</span>
+<span class="n">WFX_MIDDLEWARE</span><span class="p">(</span><span class="s">&quot;ParseForm&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">method</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">HttpMethod</span><span class="o">::</span><span class="n">POST</span><span class="p">)</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">MiddlewareAction</span><span class="o">::</span><span class="n">CONTINUE</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">LoginFormSchema</span><span class="o">::</span><span class="n">CleanedType</span><span class="w"> </span><span class="n">output</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">LoginForm</span><span class="p">.</span><span class="n">Parse</span><span class="p">(</span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">output</span><span class="p">)</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">FormError</span><span class="o">::</span><span class="n">NONE</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">BAD_REQUEST</span><span class="p">)</span>
+<span class="w">           </span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">&quot;Invalid form data&quot;</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">MiddlewareAction</span><span class="o">::</span><span class="n">BREAK</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">req</span><span class="p">.</span><span class="n">SetContext</span><span class="p">(</span><span class="s">&quot;login-form&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">output</span><span class="p">));</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">MiddlewareAction</span><span class="o">::</span><span class="n">CONTINUE</span><span class="p">;</span>
+<span class="p">});</span>
+
+<span class="cm">/*</span>
+<span class="cm"> * The parsed form data is stored as a tuple in the request context</span>
+<span class="cm"> * Now we can use the stored form as:</span>
+<span class="cm"> *</span>
+<span class="cm"> *  // Get the form</span>
+<span class="cm"> *  auto form = req.GetContext&lt;LoginFormSchema::CleanedType&gt;(&quot;login-form&quot;);</span>
+<span class="cm"> *     </span>
+<span class="cm"> *  // Accesses the first field in declaration order</span>
+<span class="cm"> *  auto&amp; username = std::get&lt;0&gt;(form);</span>
+<span class="cm"> */</span>
+</code></pre></div></p>
+<h3 id="parsestatic"><strong>ParseStatic</strong></h3>
+<p><strong><code>ParseStatic</code></strong> parses a raw form body directly.
+It does not look at headers and does not guess the format.</p>
+<p>What it does:</p>
+<ul>
+<li>Assumes the body is already <code>application/x-www-form-urlencoded</code> format</li>
+<li>Parses small, in-memory input</li>
+<li>Validates and cleans the form</li>
+</ul>
+<p><strong>Typical Usage</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Same semantics as the previous example, but the form is parsed directly-</span>
+<span class="c1">// -from req.body</span>
+<span class="c1">//</span>
+<span class="c1">// In a real application, you should perform basic sanity checks yourself,-</span>
+<span class="c1">// -such as validating the HTTP method (e.g. POST) and ensuring the-</span>
+<span class="c1">// -&#39;Content-Type&#39; header is present and correct.</span>
+
+<span class="n">LoginFormSchema</span><span class="o">::</span><span class="n">CleanedType</span><span class="w"> </span><span class="n">output</span><span class="p">;</span>
+
+<span class="k">if</span><span class="p">(</span><span class="n">LoginForm</span><span class="p">.</span><span class="n">ParseStatic</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">body</span><span class="p">,</span><span class="w"> </span><span class="n">output</span><span class="p">)</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">FormError</span><span class="o">::</span><span class="n">NONE</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Handle failure</span>
+<span class="p">}</span>
+
+<span class="c1">// Handle success</span>
+</code></pre></div></p>
+<h3 id="accessing-data"><strong>Accessing data</strong></h3>
+<p>On success, all above mentioned methods produce the same output type.</p>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">usertype</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="mi">0</span><span class="o">&gt;</span><span class="p">(</span><span class="n">output</span><span class="p">);</span>
+<span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">passtype</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="mi">1</span><span class="o">&gt;</span><span class="p">(</span><span class="n">output</span><span class="p">);</span>
+
+<span class="c1">// Access value via .value member (More information below)</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">username</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">usertype</span><span class="p">.</span><span class="n">value</span><span class="p">;</span>
+</code></pre></div>
+<ul>
+<li>Access is positional (0-based indexing), based on field definition order</li>
+<li>Output is valid only if parsing succeeded</li>
+</ul>
+<p><strong>Field value semantics (important)</strong></p>
+<p>Each extracted element (e.g. <code>username</code>, <code>password</code>) is <strong>not a raw type</strong>.
+It is a <em>cleaned type wrapper struct</em> with the following members:</p>
+<div class="highlight"><pre><span></span><code><span class="n">field</span><span class="p">.</span><span class="n">value</span>
+<span class="n">field</span><span class="p">.</span><span class="n">present</span>
+</code></pre></div>
+<ul>
+<li>
+<p><code>.value</code>  </p>
+<ul>
+<li>Holds the parsed and validated value</li>
+<li>Type is the <strong>decayed field type</strong> (after sanitization / normalization)</li>
+<li>Safe to read <strong>only if</strong> parsing succeeded</li>
+</ul>
+</li>
+<li>
+<p><code>.present</code>  </p>
+<ul>
+<li>Indicates whether the field was actually provided in the input</li>
+<li>Meaningful <strong>only for optional fields</strong> (<code>.required = false</code>)</li>
+<li>
+<p>Semantics:  </p>
+<ul>
+<li><code>true</code> -&gt; field was present and parsed</li>
+<li><code>false</code> -&gt; field was omitted by the user</li>
+</ul>
+</li>
+<li>
+<p>For required fields, <code>.present</code> is always <code>true</code> on successful parsing</p>
+</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2 id="form-rendering">Form Rendering</h2>
+<p>WFX provides field-level rendering only.</p>
+<p><strong>What Is Rendered</strong></p>
+<p>Each form schema pre-renders its fields at construction time.</p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">html</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LoginForm</span><span class="p">.</span><span class="n">Render</span><span class="p">();</span>
+</code></pre></div>
+<p><strong><code>Render()</code></strong> returns a view to HTML containing:</p>
+<ul>
+<li><code>&lt;label&gt;</code> elements</li>
+<li><code>&lt;input&gt;</code> elements</li>
+<li>One pair per field</li>
+<li>In the exact order the fields were defined</li>
+</ul>
+<p>The output is static, pre-built, and allocation-free at render time.</p>
+<p><strong>What Is Not Rendered</strong></p>
+<p>WFX does not generate:</p>
+<ul>
+<li><code>&lt;form&gt;</code> tags</li>
+<li>Submit buttons</li>
+<li>Custom attributes</li>
+<li>Layout or styling</li>
+</ul>
+<p>These are always the responsibility of the user.</p>
+<p><strong>Typical Usage</strong></p>
+<p><strong>HTML Template</strong>:
+<div class="highlight"><pre><span></span><code><span class="cm">&lt;!-- ... --&gt;</span>
+  <span class="p">&lt;</span><span class="nt">form</span> <span class="na">class</span><span class="o">=</span><span class="s">&quot;login-form&quot;</span> <span class="na">method</span><span class="o">=</span><span class="s">&quot;POST&quot;</span><span class="p">&gt;</span>
+    {% var login_form_fields %}
+
+    <span class="p">&lt;</span><span class="nt">button</span> <span class="na">type</span><span class="o">=</span><span class="s">&quot;submit&quot;</span> <span class="na">class</span><span class="o">=</span><span class="s">&quot;btn-enquire&quot;</span><span class="p">&gt;</span>
+      Enquire Now
+    <span class="p">&lt;/</span><span class="nt">button</span><span class="p">&gt;</span>
+  <span class="p">&lt;/</span><span class="nt">form</span><span class="p">&gt;</span>
+<span class="cm">&lt;!-- ... --&gt;</span>
+</code></pre></div></p>
+<p><strong>C++ Source Code</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// There are two supported ways to pass rendered form fields to templates:</span>
+<span class="c1">//</span>
+<span class="c1">// 1. Using Render()</span>
+<span class="c1">//    - Returns a pre-rendered HTML string_view</span>
+<span class="c1">//    - Simple and straightforward</span>
+<span class="c1">//</span>
+<span class="c1">// 2. Using FormToJson()</span>
+<span class="c1">//    - Avoids an extra copy / allocation</span>
+<span class="c1">//    - Technically more efficient</span>
+<span class="c1">//</span>
+<span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/form&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendTemplate</span><span class="p">(</span><span class="s">&quot;login-page.html&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Json</span><span class="o">::</span><span class="n">object</span><span class="p">({</span>
+<span class="w">        </span><span class="p">{</span><span class="w"> </span><span class="s">&quot;login_form_fields&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">LoginForm</span><span class="p">.</span><span class="n">Render</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="cm">/* ... */</span>
+<span class="w">    </span><span class="p">}));</span>
+<span class="p">});</span>
+
+<span class="c1">// Same result as above, but more optimized</span>
+<span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/form&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendTemplate</span><span class="p">(</span><span class="s">&quot;login-page.html&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Json</span><span class="o">::</span><span class="n">object</span><span class="p">({</span>
+<span class="w">        </span><span class="p">{</span><span class="w"> </span><span class="s">&quot;login_form_fields&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">FormToJson</span><span class="p">(</span><span class="n">LoginForm</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="cm">/* ... */</span>
+<span class="w">    </span><span class="p">}));</span>
+<span class="p">});</span>
+</code></pre></div></p>
+<p><strong>Rendered HTML</strong>:
+<div class="highlight"><pre><span></span><code><span class="cm">&lt;!-- ... --&gt;</span>
+  <span class="p">&lt;</span><span class="nt">form</span> <span class="na">class</span><span class="o">=</span><span class="s">&quot;login-form&quot;</span> <span class="na">method</span><span class="o">=</span><span class="s">&quot;POST&quot;</span><span class="p">&gt;</span>
+    <span class="p">&lt;</span><span class="nt">label</span> <span class="na">for</span><span class="o">=</span><span class="s">&quot;login__username&quot;</span><span class="p">&gt;</span>username<span class="p">&lt;/</span><span class="nt">label</span><span class="p">&gt;</span>
+    <span class="p">&lt;</span><span class="nt">input</span>
+        <span class="na">id</span><span class="o">=</span><span class="s">&quot;login__username&quot;</span>
+        <span class="na">name</span><span class="o">=</span><span class="s">&quot;username&quot;</span>
+        <span class="na">type</span><span class="o">=</span><span class="s">&quot;text&quot;</span>
+        <span class="na">maxlength</span><span class="o">=</span><span class="s">&quot;64&quot;</span>
+        <span class="na">pattern</span><span class="o">=</span><span class="s">&quot;[\x20-\x7E]*&quot;</span>
+    <span class="p">/&gt;</span>
+
+    <span class="p">&lt;</span><span class="nt">label</span> <span class="na">for</span><span class="o">=</span><span class="s">&quot;login__password&quot;</span><span class="p">&gt;</span>password<span class="p">&lt;/</span><span class="nt">label</span><span class="p">&gt;</span>
+    <span class="p">&lt;</span><span class="nt">input</span>
+        <span class="na">id</span><span class="o">=</span><span class="s">&quot;login__password&quot;</span>
+        <span class="na">name</span><span class="o">=</span><span class="s">&quot;password&quot;</span>
+        <span class="na">type</span><span class="o">=</span><span class="s">&quot;text&quot;</span>
+        <span class="na">minlength</span><span class="o">=</span><span class="s">&quot;6&quot;</span>
+        <span class="na">maxlength</span><span class="o">=</span><span class="s">&quot;64&quot;</span>
+        <span class="na">pattern</span><span class="o">=</span><span class="s">&quot;[\x20-\x7E]*&quot;</span>
+    <span class="p">/&gt;</span>
+
+    <span class="p">&lt;</span><span class="nt">button</span> <span class="na">type</span><span class="o">=</span><span class="s">&quot;submit&quot;</span> <span class="na">class</span><span class="o">=</span><span class="s">&quot;btn-enquire&quot;</span><span class="p">&gt;</span>
+      Enquire Now
+    <span class="p">&lt;/</span><span class="nt">button</span><span class="p">&gt;</span>
+  <span class="p">&lt;/</span><span class="nt">form</span><span class="p">&gt;</span>
+<span class="cm">&lt;!-- ... --&gt;</span>
+</code></pre></div></p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>Design notes and guarantees</p>
+<ul>
+<li>
+<p>WFX intentionally renders <strong>only form fields</strong> (labels and inputs), not the <code>&lt;form&gt;</code> element itself.<br />
+This is by design, so you retain full control over CSRF tokens, honeypots, submit buttons,
+layout, and any additional markup outside the fields.</p>
+</li>
+<li>
+<p>Every rendered input uses a stable and predictable <code>id</code> format: <strong><code>&lt;form-schema-name&gt;__&lt;field-name&gt;</code></strong><br />
+This guarantees uniqueness across forms and allows reliable label association and
+client-side scripting without collisions.</p>
+</li>
+</ul>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>WFX currently does <strong>not</strong> validate global uniqueness of form schema names.</p>
+<p>This means the following is allowed but <strong>incorrect</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">LoginForm</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">FormSchema</span><span class="p">{</span><span class="w"> </span><span class="s">&quot;login&quot;</span><span class="p">,</span><span class="w">  </span><span class="cm">/* ... */</span><span class="w"> </span><span class="p">};</span>
+<span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">SigninForm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Form</span><span class="o">::</span><span class="n">FormSchema</span><span class="p">{</span><span class="w"> </span><span class="s">&quot;login&quot;</span><span class="p">,</span><span class="w">  </span><span class="cm">/* ... */</span><span class="w"> </span><span class="p">};</span>
+</code></pre></div>
+<p>Since rendered input IDs are generated using the format
+<strong><code>&lt;form-schema-name&gt;__&lt;field-name&gt;</code></strong>, both schemas above will produce
+<strong>colliding <code>id</code> attributes</strong> in the generated HTML.</p>
+<p>Consequences include:</p>
+<ul>
+<li>Broken <code>&lt;label for="..."&gt;</code> associations</li>
+<li>Undefined behavior in client-side scripts</li>
+<li>Hard-to-debug rendering issues</li>
+</ul>
+<p>Until explicit collision checks are added, it is <strong>your responsibility</strong>
+to ensure all form schema names are globally unique.</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1346 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../overview/">
+      
+      
+        <link rel="next" href="../routing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Request & Response - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../css/code_format.css">
+    
+      <link rel="stylesheet" href="../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#request-response" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Request & Response
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="request-response">Request &amp; Response</h1>
+<p>Understanding how requests and responses work is fundamental to using WFX effectively. This page covers the types and methods you will interact with in user code.</p>
+<hr />
+<h2 id="request">Request</h2>
+<p><code>Request</code> represents an incoming HTTP request. It contains all data associated with the request lifecycle, including metadata, headers, body, and parsed path information. It also exposes a per-request context store that can be used to share data between middleware, routes, and user code.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Although the underlying type is <code>HttpRequest</code>, it is internally aliased to <code>Request</code> for user-facing APIs.<br />
+This is done intentionally to mirror <code>Response</code>, which is also a user-side abstraction, and to keep request and response usage consistent in user code.</p>
+</div>
+<p>Below are the primary members exposed by the <code>Request</code> structure.</p>
+<ul>
+<li>
+<p><strong><code>method</code></strong> - <code>HttpMethod</code><br />
+    Represents the HTTP method of the request (<code>GET</code>, <code>POST</code>, etc.).<br />
+<strong>Read-only</strong>, set by the engine.  </p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">method</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">HttpMethod</span><span class="o">::</span><span class="n">GET</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* handle GET */</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+</li>
+<li>
+<p><strong><code>version</code></strong> - <code>HttpVersion</code><br />
+    HTTP version (<code>HTTP_1_0</code>, <code>HTTP_1_1</code>, <code>HTTP_2_0</code>, etc.).<br />
+<strong>Read-only</strong>, set by the engine.</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">version</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">HttpVersion</span><span class="o">::</span><span class="n">HTTP_1_1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* handle HTTP/1.1 */</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+</li>
+<li>
+<p><strong><code>path</code></strong> - <code>std::string_view</code><br />
+    The requested path as a view into the request buffer.<br />
+    Essentially <strong>read-only</strong>, but can be modified under controlled circumstances as long as you do not exceed the original size. Do not retain references beyond the request lifecycle.</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">path</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">&quot;/login&quot;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* handle login */</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+</li>
+<li>
+<p><strong><code>body</code></strong> - <code>std::string_view</code>
+    Raw request body. For POST/PUT requests, contains the payload.<br />
+    Essentially <strong>read-only</strong>, but can be modified in place as long as you do not exceed the buffer size.</p>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">body</span><span class="p">);</span><span class="w"> </span><span class="c1">// copy if you need to keep it</span>
+</code></pre></div>
+</li>
+<li>
+<p><strong><code>headers</code></strong> - <code>std::unordered_map&lt;std::string_view, std::string_view&gt;</code><br />
+    Represents HTTP headers. Provides lookup and iteration.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// &#39;GetHeader&#39; returns an empty std::string_view if not found</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">ua</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">headers</span><span class="p">.</span><span class="n">GetHeader</span><span class="p">(</span><span class="s">&quot;User-Agent&quot;</span><span class="p">);</span>
+<span class="n">printf</span><span class="p">(</span><span class="s">&quot;User-Agent: %.*s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="p">)</span><span class="n">ua</span><span class="p">.</span><span class="n">size</span><span class="p">(),</span><span class="w"> </span><span class="n">ua</span><span class="p">.</span><span class="n">data</span><span class="p">());</span>
+
+<span class="c1">// You can also use &#39;CheckAndGetHeader&#39; to get a pair {exists?, value}</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">exists</span><span class="p">,</span><span class="w"> </span><span class="n">token</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">headers</span><span class="p">.</span><span class="n">CheckAndGetHeader</span><span class="p">(</span><span class="s">&quot;X-Token&quot;</span><span class="p">);</span>
+<span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="n">exists</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* handle error */</span><span class="w"> </span><span class="p">}</span>
+<span class="k">else</span><span class="w">        </span><span class="p">{</span><span class="w"> </span><span class="cm">/* handle token */</span><span class="w"> </span><span class="p">}</span>
+
+<span class="c1">// Or you can set header, unlikely but possible via &#39;SetHeader&#39;</span>
+<span class="n">req</span><span class="p">.</span><span class="n">headers</span><span class="p">.</span><span class="n">SetHeader</span><span class="p">(</span><span class="s">&quot;My-Value&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WFX&quot;</span><span class="p">);</span>
+</code></pre></div>
+</li>
+<li>
+<p><strong><code>pathSegments</code></strong> - <code>std::vector&lt;std::variant&lt;...&gt;&gt;</code><br />
+    Contains the parsed components of the request path. Each segment represents either a literal path component or a typed route parameter extracted from the URL (for example integers or UUIDs).</p>
+<p>This allows route handlers to access route parameters in a type-safe manner without performing manual string parsing or conversions.</p>
+<p><strong>Example route</strong>:<br />
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/users/&lt;int&gt;/posts/&lt;uint&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Respons</span><span class="o">&amp;</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* ... */</span>
+<span class="p">});</span>
+</code></pre></div></p>
+<p><strong>Incoming request</strong>:<br />
+<code>/users/42/posts/100</code></p>
+<p><strong>Conceptual internal representation</strong>:
+<div class="highlight"><pre><span></span><code><span class="p">[</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="p">{</span><span class="mi">42</span><span class="p">},</span>
+<span class="w">    </span><span class="kt">uint64_t</span><span class="p">{</span><span class="mi">100</span><span class="p">}</span>
+<span class="p">]</span>
+</code></pre></div></p>
+<p><strong>Accessing values manually</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">userId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="kt">int64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">pathSegments</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">postId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="kt">uint64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">pathSegments</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
+</code></pre></div></p>
+<p><strong>Accessing values using segment macros</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">userId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GetSegmentAsInt</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">pathSegments</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">postId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GetSegmentAsUInt</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">pathSegments</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
+</code></pre></div></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The purpose and usage of <code>pathSegments</code> will become much clearer in the Routing section.</p>
+</div>
+</li>
+<li>
+<p><strong><code>context</code></strong> - <code>std::unordered_map&lt;std::string, std::any&gt;</code>
+    Allows storing arbitrary values for the lifetime of the request. It is useful for passing data between middleware and route handlers.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Store a value</span>
+<span class="n">req</span><span class="p">.</span><span class="n">SetContext</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">(</span><span class="s">&quot;user_id&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">42</span><span class="p">);</span>
+
+<span class="c1">// Retrieve a value (returns pointer to value if it exists, else nullptr)</span>
+<span class="k">if</span><span class="p">(</span><span class="k">auto</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">GetContext</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">(</span><span class="s">&quot;user_id&quot;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;User ID: %d</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="o">*</span><span class="n">id</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// Initialize or get value</span>
+<span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">InitOrGetContext</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span><span class="p">(</span><span class="s">&quot;session&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;default_session&quot;</span><span class="p">);</span>
+</code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>While the context map is flexible, it is not cheap. Each entry involves a hash lookup, a std::string key, and a std::any allocation. Avoid storing large objects or excessive transient data in the context. Prefer storing small, well-defined values that are genuinely needed across middleware and handlers. Overusing the context can negatively impact performance and cache locality.</p>
+</div>
+</li>
+</ul>
+<h2 id="response">Response</h2>
+<p><code>Response</code> represents the outgoing HTTP response. It is the primary interface used by application code to control status codes, headers, and the response body sent back to the client.</p>
+<p>It is a <strong>user-facing abstraction</strong>: internally, all operations are forwarded to the engine via provided APIs. Users never interact directly with the underlying response implementation.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code>Response</code> does not own the underlying response object and internally holds pointers to engine-managed state.</p>
+<p>In <strong>synchronous routes</strong>, the <code>Response</code> instance is guaranteed to be valid for the entire duration of the user callback.</p>
+<p>In <strong>asynchronous routes</strong>, this guarantee no longer holds once execution yields. If an async operation needs to continue using the response after yielding, the response state <strong>must be explicitly copied</strong>. This is required because the underlying HTTP response object is only guaranteed to exist while the connection is alive and under engine control.</p>
+<p>This pattern is <strong>not recommended</strong> and should only be used when absolutely necessary. Prefer designing async logic such that the response is finalized within the intended execution scope.</p>
+</div>
+<div class="admonition danger">
+<p class="admonition-title">Danger</p>
+<p><strong>All send and stream operations are single-use per request–response lifecycle.</strong></p>
+<p>Any <code>Send*</code> or <code>Stream*</code> function <strong>must be called exactly once</strong> during a single request–response cycle.<br />
+Calling any send or stream function again within the same cycle is <strong>fatal</strong> and will <strong>terminate the engine</strong>.</p>
+<p>After the request–response lifecycle completes, if the connection is still alive, the engine will automatically reset its internal state, allowing send/stream operations to be used again for the next cycle.</p>
+</div>
+<p>Below are the primary methods exposed by <code>Response</code>.</p>
+<ul>
+<li>
+<p><strong><code>Status(HttpStatus code)</code></strong><br />
+    Sets the HTTP status code for the response.</p>
+<p>Returns a reference to <code>Response</code> to allow chaining.</p>
+<p><strong>Without chaining</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">OK</span><span class="p">);</span>
+<span class="n">res</span><span class="p">.</span><span class="n">Set</span><span class="p">(</span><span class="s">&quot;Location&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;/users/42&quot;</span><span class="p">);</span>
+</code></pre></div></p>
+<p><strong>With chaining</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">CREATED</span><span class="p">)</span>
+<span class="w">    </span><span class="p">.</span><span class="n">Set</span><span class="p">(</span><span class="s">&quot;Location&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;/users/42&quot;</span><span class="p">);</span>
+</code></pre></div></p>
+</li>
+<li>
+<p><strong><code>Set(std::string key, std::string value)</code></strong><br />
+    Sets or overrides an HTTP response header.
+    Both key and value are moved into the response. Header names are treated as-is.  </p>
+<p>Returns a reference to <code>Response</code> to allow chaining.</p>
+<p><strong>Without chaining</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">res</span><span class="p">.</span><span class="n">Set</span><span class="p">(</span><span class="s">&quot;Content-Type&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;application/json&quot;</span><span class="p">);</span>
+<span class="n">res</span><span class="p">.</span><span class="n">Set</span><span class="p">(</span><span class="s">&quot;X-Powered-By&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WFX&quot;</span><span class="p">);</span>
+</code></pre></div></p>
+<p><strong>With chaining</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">res</span><span class="p">.</span><span class="n">Set</span><span class="p">(</span><span class="s">&quot;Content-Type&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;application/json&quot;</span><span class="p">)</span>
+<span class="w">    </span><span class="p">.</span><span class="n">Set</span><span class="p">(</span><span class="s">&quot;X-Powered-By&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WFX&quot;</span><span class="p">);</span>
+</code></pre></div></p>
+</li>
+<li>
+<p><strong><code>SendText(...)</code></strong><br />
+    Sends a plain text response body. The appropriate content type (<code>text/plain</code>) is set internally.</p>
+<p><strong>Overloads</strong>:</p>
+<ul>
+<li><code>SendText(const char* cstr)</code></li>
+<li><code>SendText(std::string&amp;&amp; str)</code></li>
+</ul>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Uses const char* overload</span>
+<span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">&quot;Hello from WFX&quot;</span><span class="p">);</span>
+
+<span class="c1">// Uses std::string overload</span>
+<span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="p">(</span><span class="s">&quot;Dynamic response&quot;</span><span class="p">));</span>
+</code></pre></div></p>
+</li>
+<li>
+<p><strong><code>SendJson(const Json&amp; j)</code></strong><br />
+    Sends a JSON response. The appropriate content type (<code>application/json</code>) is set internally.</p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">res</span><span class="p">.</span><span class="n">SendJson</span><span class="p">(</span><span class="n">Json</span><span class="o">::</span><span class="n">object</span><span class="p">({</span>
+<span class="w">    </span><span class="p">{</span><span class="s">&quot;status&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;ok&quot;</span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="s">&quot;value&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">42</span><span class="p">}</span>
+<span class="p">}));</span>
+</code></pre></div></p>
+</li>
+<li>
+<p><strong><code>SendFile(...)</code></strong><br />
+    Sends a file from disk as the response body. The appropriate content type is handled internally (<strong>based on file extension</strong>).</p>
+<p><strong>Overloads</strong>:</p>
+<ul>
+<li><code>SendFile(const char* path, bool autoHandle404 = true)</code></li>
+<li><code>SendFile(std::string&amp;&amp; path, bool autoHandle404 = true)</code></li>
+</ul>
+<p>If <code>autoHandle404</code> is enabled and the file does not exist, the engine will automatically handle the error response.<br />
+If <code>autoHandle404</code> is disabled and the file does not exist, the networking backend will handle the situation as a fallback. However, this is not recommended, as it is intended only to prevent <strong>undefined behavior or server crashes</strong>, not as a <strong>primary error-handling mechanism</strong>.</p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Uses const char* overload</span>
+<span class="n">res</span><span class="p">.</span><span class="n">SendFile</span><span class="p">(</span><span class="s">&quot;static/index.html&quot;</span><span class="p">);</span>
+</code></pre></div></p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>The provided path must be either:</p>
+<ul>
+<li>an absolute path, or</li>
+<li>a path <strong>relative to the engine's working directory</strong>.</li>
+</ul>
+<p>Relative paths are resolved against the engine location itself, <strong>not</strong> the caller's source file or project root.</p>
+</div>
+</li>
+<li>
+<p><strong><code>SendTemplate(...)</code></strong><br />
+    Renders and sends a template. The appropriate content type (<code>text/html</code>) is set internally.</p>
+<p><strong>Overloads</strong>:</p>
+<ul>
+<li><code>SendTemplate(const char* path, Json&amp;&amp; ctx = {})</code></li>
+<li><code>SendTemplate(std::string&amp;&amp; path, Json&amp;&amp; ctx = {})</code></li>
+</ul>
+<p>The optional JSON context is provided to the template renderer to populate dynamic content.<br />
+If the specified template cannot be found, the engine will automatically send a <strong>404 Template Not Found</strong> response.</p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Uses const char* overload + no JSON context provided (static template)</span>
+<span class="n">res</span><span class="p">.</span><span class="n">SendTemplate</span><span class="p">(</span><span class="s">&quot;index.html&quot;</span><span class="p">);</span>
+
+<span class="c1">// Uses const char* overload + JSON context provied (dynamic template)</span>
+<span class="n">res</span><span class="p">.</span><span class="n">SendTemplate</span><span class="p">(</span><span class="s">&quot;profile.html&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">Json</span><span class="o">::</span><span class="n">object</span><span class="p">({</span>
+<span class="w">    </span><span class="p">{</span><span class="s">&quot;username&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;atomic&quot;</span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="s">&quot;id&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">42</span><span class="p">}</span>
+<span class="p">}));</span>
+</code></pre></div></p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>For detailed information about template syntax, compilation, rendering modes, and data binding,
+see the <a href="../templates/"><strong>Templates</strong></a> section.</p>
+</div>
+</li>
+<li>
+<p><strong><code>Stream(StreamGenerator generator, bool streamChunked = true)</code></strong><br />
+    Initiates a streaming response. The provided generator is repeatedly called by the networking backend whenever it is ready to accept more data. This allows incremental or large responses to be sent without buffering the entire payload in memory.</p>
+<p><strong>Important</strong>: <code>Stream</code> does not set <code>Content-Type</code> header internally.</p>
+<p><strong>Definitions</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">StreamAction</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">CONTINUE</span><span class="p">,</span><span class="w">             </span><span class="c1">// Continue streaming</span>
+<span class="w">    </span><span class="n">STOP_AND_ALIVE_CONN</span><span class="p">,</span><span class="w">  </span><span class="c1">// Stop streaming and keep the connection alive</span>
+<span class="w">    </span><span class="n">STOP_AND_CLOSE_CONN</span><span class="w">   </span><span class="c1">// Stop streaming and close the connection</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">StreamResult</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="w">  </span><span class="n">writtenBytes</span><span class="p">;</span><span class="w"> </span><span class="c1">// Number of bytes written into buffer</span>
+<span class="w">    </span><span class="n">StreamAction</span><span class="w"> </span><span class="n">action</span><span class="p">;</span><span class="w">       </span><span class="c1">// Action to take after this invocation</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">StreamBuffer</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">char</span><span class="o">*</span><span class="w">       </span><span class="n">buffer</span><span class="p">;</span><span class="w"> </span><span class="c1">// Writable buffer provided by the engine</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="w"> </span><span class="n">size</span><span class="p">;</span><span class="w">   </span><span class="c1">// Size of the buffer in bytes</span>
+<span class="p">};</span>
+
+<span class="c1">// Streaming generator signature</span>
+<span class="k">using</span><span class="w"> </span><span class="n">StreamGenerator</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">MoveOnlyFunction</span><span class="o">&lt;</span><span class="n">StreamResult</span><span class="p">(</span><span class="n">StreamBuffer</span><span class="p">)</span><span class="o">&gt;</span><span class="p">;</span>
+</code></pre></div></p>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Streaming a file-like source</span>
+<span class="n">res</span><span class="p">.</span><span class="n">Stream</span><span class="p">([</span>
+<span class="w">    </span><span class="n">offset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="p">{</span><span class="mi">0</span><span class="p">}</span>
+<span class="p">](</span><span class="n">StreamBuffer</span><span class="w"> </span><span class="n">buffer</span><span class="p">)</span><span class="w"> </span><span class="k">mutable</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ReadFromSource</span><span class="p">(</span><span class="n">offset</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">buffer</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">size</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// End of data</span>
+<span class="w">    </span><span class="c1">// Stop streaming and keep the connection alive</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">bytes</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">StreamResult</span><span class="p">{</span>
+<span class="w">            </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">            </span><span class="n">StreamAction</span><span class="o">::</span><span class="n">STOP_AND_ALIVE_CONN</span>
+<span class="w">        </span><span class="p">};</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Continue streaming for more data</span>
+<span class="w">    </span><span class="n">offset</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">bytes</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">StreamResult</span><span class="p">{</span>
+<span class="w">        </span><span class="n">bytes</span><span class="p">,</span>
+<span class="w">        </span><span class="n">StreamAction</span><span class="o">::</span><span class="n">CONTINUE</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="p">},</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span>
+</code></pre></div></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li>Streaming generators are executed under the engine's control. They are invoked only when the networking backend is ready to send data. This model avoids buffering entire responses in memory and provides explicit control over connection lifetime.</li>
+<li>Buffer capacity is controlled by the <code>[Network] send_buffer_max</code> value in <code>wfx.toml</code>.</li>
+</ul>
+</div>
+</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

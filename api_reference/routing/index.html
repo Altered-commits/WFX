@@ -1,0 +1,1348 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../request_and_response/">
+      
+      
+        <link rel="next" href="../middleware/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Routing - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../css/code_format.css">
+    
+      <link rel="stylesheet" href="../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#routing" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Routing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#basic-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic Routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#route-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Route Groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynamic-path-segments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Path Segments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routes-with-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routes with Middleware
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#async-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async Routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#basic-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic Routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#route-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Route Groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynamic-path-segments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Path Segments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routes-with-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routes with Middleware
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#async-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async Routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="routing">Routing</h1>
+<p>WFX provides a <strong>macro-based routing system</strong> that allows registering request handlers in a declarative manner.<br />
+Routes are automatically registered during program initialization through deferred execution, ensuring deterministic order and avoiding manual registration.  </p>
+<p>This page covers both <strong>sync and async</strong> routes.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>Routing requires the user to always include the routing header at the top of the file:
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;http/routes.hpp&gt;</span>
+</code></pre></div></p>
+</div>
+<div class="admonition danger">
+<p class="admonition-title">Danger</p>
+<ul>
+<li>
+<p>The <code>path</code> argument in route and group macros must refer to a string that remains valid for the lifetime of the program.<br />
+Using a temporary or short-lived string (e.g., a locally created <code>std::string</code>) will cause undefined behavior and may crash the server.</p>
+</li>
+<li>
+<p>Routes defined by the developer are not fully validated by WFX.<br />
+While <strong>incoming request paths are normalized and checked thoroughly</strong>, WFX does <strong>not</strong> validate the route definitions themselves.<br />
+Defining unsafe or nonsensical paths (e.g., containing <code>../..</code>) can lead to undefined behavior.<br />
+Ensure all route paths are correctly and safely specified.</p>
+</li>
+</ul>
+</div>
+<hr />
+<h2 id="basic-routes">Basic Routes</h2>
+<p>Routes are defined using method-specific macros:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/health&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">&quot;OK&quot;</span><span class="p">);</span>
+<span class="p">});</span>
+
+<span class="n">WFX_POST</span><span class="p">(</span><span class="s">&quot;/login&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Handle login request</span>
+<span class="p">});</span>
+</code></pre></div>
+<p><code>WFX_GET(path, handler)</code> / <code>WFX_POST(path, handler)</code> - macros corresponding to HTTP methods.</p>
+<ul>
+<li><code>path</code> - the route path as a string literal. Supports dynamic segments (see below).</li>
+<li><code>handler</code> - a callable object or lambda with signature <strong><code>void(Request&amp;, Response)</code></strong>.</li>
+</ul>
+<hr />
+<h2 id="route-groups">Route Groups</h2>
+<p>Route groups allow applying a common prefix to multiple routes:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GROUP_START</span><span class="p">(</span><span class="s">&quot;/api&quot;</span><span class="p">)</span>
+
+<span class="w">    </span><span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/users&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// List users</span>
+<span class="w">    </span><span class="p">});</span>
+
+<span class="w">    </span><span class="n">WFX_POST</span><span class="p">(</span><span class="s">&quot;/users&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Create user</span>
+<span class="w">    </span><span class="p">});</span>
+
+<span class="n">WFX_GROUP_END</span><span class="p">()</span>
+
+<span class="c1">// Now the routes for GET and POST become /api/users</span>
+</code></pre></div>
+<p><code>WFX_GROUP_START(path)</code> - pushes a prefix (<code>path</code>) to all routes within the group.<br />
+<code>WFX_GROUP_END()</code> - pops the last pushed prefix.</p>
+<p>Groups may be nested to form hierarchical route structures.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Each <code>WFX_GROUP_START</code> must be paired with a corresponding <code>WFX_GROUP_END</code>.<br />
+If the number of start and end macros does not match, the server will fail to start and terminate with an error.</p>
+</div>
+<hr />
+<h2 id="dynamic-path-segments">Dynamic Path Segments</h2>
+<p>Routes can include dynamic segments that extract values from the URL. A segment can optionally have a name before the colon (<code>:</code>) for readability, but the name is not required. The engine only uses the segment type for parsing and indexing.</p>
+<p><strong>Helper Macro</strong>:</p>
+<p>WFX provides helper macros to simplify access to dynamic path segments, but all of these operations can also be done manually if needed. The macros are essentially shortcuts for extracting and converting segments.</p>
+<table>
+<thead>
+<tr>
+<th>Macro</th>
+<th>Equivalent Manual Access</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GetSegmentAsString(segment)</code></td>
+<td><code>std::get&lt;std::string_view&gt;(segment)</code></td>
+</tr>
+<tr>
+<td><code>GetSegmentAsInt(segment)</code></td>
+<td><code>std::get&lt;int64_t&gt;(segment)</code></td>
+</tr>
+<tr>
+<td><code>GetSegmentAsUInt(segment)</code></td>
+<td><code>std::get&lt;uint64_t&gt;(segment)</code></td>
+</tr>
+<tr>
+<td><code>GetSegmentAsUUID(segment)</code></td>
+<td><code>std::get&lt;WFX::Utils::UUID&gt;(segment)</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Segment Indexing</strong>:</p>
+<p>Segments are indexed in the order they appear, starting from 0.</p>
+<p>Example with multiple segments:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/user/&lt;id:int&gt;/posts/&lt;pid:int&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">userId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GetSegmentAsInt</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">pathSegments</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">postId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GetSegmentAsInt</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">pathSegments</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
+<span class="p">});</span>
+</code></pre></div>
+<div class="admonition danger">
+<p class="admonition-title">Note</p>
+<ul>
+<li>Out-of-bounds access is not checked by WFX. Attempting to read a segment index that does not exist will cause undefined behavior. Developers are responsible for ensuring segment indices are correct.</li>
+<li>Accessing a <code>/&lt;int&gt;</code> path segment using an incompatible type will cause <code>std::get&lt;&gt;</code> to throw an exception.
+Always extract segments using the correct helper for their declared type (e.g., do not read an <code>int</code> segment as <code>uint</code> or <code>UUID</code>).<br />
+Failing to do so results in unnecessary exceptions and, if unhandled, may crash the server.</li>
+</ul>
+</div>
+<p><strong>Supported Segment Types</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Segment Type</th>
+<th>Helper Macro</th>
+<th>Return Type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>int</td>
+<td><code>GetSegmentAsInt(segment)</code></td>
+<td>int64_t</td>
+</tr>
+<tr>
+<td>uint</td>
+<td><code>GetSegmentAsUInt(segment)</code></td>
+<td>uint64_t</td>
+</tr>
+<tr>
+<td>string</td>
+<td><code>GetSegmentAsString(segment)</code></td>
+<td>std::string_view</td>
+</tr>
+<tr>
+<td>uuid</td>
+<td><code>GetSegmentAsUUID(segment)</code></td>
+<td>WFX::Utils::UUID</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Named segment</span>
+<span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/user/&lt;id:int&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">userId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GetSegmentAsInt</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">pathSegments</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="p">});</span>
+
+<span class="c1">// Unnamed segment (also valid) + manual access</span>
+<span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/user/&lt;int&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int64_t</span><span class="w"> </span><span class="n">userId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="kt">int64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">pathSegments</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="p">});</span>
+</code></pre></div></p>
+<ul>
+<li><code>&lt;id:int&gt;</code> - id is optional; used as a comment for developer understanding.</li>
+<li><code>&lt;int&gt;</code> - valid, same as above but without a name.</li>
+</ul>
+<hr />
+<h2 id="routes-with-middleware">Routes with Middleware</h2>
+<p>WFX allows routes to execute <strong>middleware</strong> before the main handler.<br />
+Middleware can perform tasks such as authentication, logging, or input validation.
+Each route can have its own middleware stack, which is executed in order before the route handler is called.</p>
+<p><strong>Key Points</strong>:</p>
+<ul>
+<li>Middleware must be provided either via <code>WFX_MW_LIST</code> or using <code>MakeMiddlewareFromFunctions</code>.  </li>
+<li>Even if the route uses only a single middleware function, it must be wrapped with one of these helpers.  </li>
+<li>The middleware system requires including <code>&lt;http/middleware.hpp&gt;</code> in your source file.</li>
+</ul>
+<p><strong>Example</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;http/middleware.hpp&gt;</span>
+
+<span class="c1">// &#39;AuthMiddleware&#39; and &#39;SecurityMiddleware&#39; is applied only to this route</span>
+<span class="c1">// It does not affect other routes</span>
+<span class="n">WFX_GET_EX</span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;/secure&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">WFX_MW_LIST</span><span class="p">(</span><span class="n">AuthMiddleware</span><span class="p">,</span><span class="w"> </span><span class="n">SecurityMiddleware</span><span class="p">,</span><span class="w"> </span><span class="p">...),</span>
+<span class="w">    </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">&quot;Protected content&quot;</span><span class="p">);</span><span class="w"> </span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">);</span>
+
+<span class="c1">// Or</span>
+
+<span class="n">WFX_GET_EX</span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;/secure&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">MakeMiddlewareFromFunctions</span><span class="p">(</span><span class="n">AuthMiddleware</span><span class="p">,</span><span class="w"> </span><span class="n">SecurityMiddleware</span><span class="p">,</span><span class="w"> </span><span class="p">...),</span>
+<span class="w">    </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">&quot;Protected content&quot;</span><span class="p">);</span><span class="w"> </span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">);</span>
+</code></pre></div>
+<hr />
+<h2 id="async-routes">Async Routes</h2>
+<p>WFX routes can be declared <strong>async</strong> by returning an async task type (e.g. <code>AsyncVoid</code>).
+This allows the route handler itself to <code>co_await</code> builtins such as <code>SleepFor</code>, database calls, or other async operations.</p>
+<p>The signature is identical to a normal route, except the lambda returns an async coroutine type:</p>
+<div class="highlight"><pre><span></span><code><span class="cm">/*</span>
+<span class="cm"> * NOTE: This header is mandatory when using any builtin async utilities-</span>
+<span class="cm"> *       -such as functions like &#39;SleepFor&#39;. It also brings in the core-</span>
+<span class="cm"> *       -async machinery, including &#39;AsyncVoid&#39; and related types</span>
+<span class="cm"> */</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;async/builtins.hpp&gt;</span>
+
+<span class="n">WFX_GET</span><span class="p">(</span><span class="s">&quot;/async&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">Request</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">AsyncVoid</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">Async</span><span class="o">::</span><span class="n">SleepFor</span><span class="p">(</span><span class="mi">2000</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">Async</span><span class="o">::</span><span class="n">Status</span><span class="o">::</span><span class="n">NONE</span><span class="p">)</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">&quot;Route failed to sleep for 2 seconds :(&quot;</span><span class="p">);</span>
+<span class="w">    </span><span class="k">else</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">&quot;Ok&quot;</span><span class="p">);</span>
+<span class="p">});</span>
+</code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>For a deeper understanding of how builtin coroutines work in WFX,
+see the <strong><a href="../async/">Async</a></strong> page.</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
