@@ -70,7 +70,7 @@ Below are the primary members exposed by the `Request` structure.
 
     **Example route**:  
     ```cpp
-    WFX_GET("/users/<int>/posts/<uint>", [](Request& req, Response& res) {
+    WFX_GET("/users/<int>/posts/<uint>", [](Request& req, Respons& res) {
         /* ... */
     });
     ```

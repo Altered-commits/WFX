@@ -496,7 +496,7 @@ Future support (no code changes required from you):
  * NOTE: 'LoginForm' is assumed to be the one defined in 'Schema' section
  *        of this documentation
  */
-WFX_MIDDLEWARE("ParseForm", [](Request& req, Response& res, MiddlewareMeta _) {
+WFX_MIDDLEWARE("ParseForm", [](Request& req, Response res) {
     if(req.method != HttpMethod::POST)
         return MiddlewareAction::CONTINUE;
 
@@ -653,7 +653,7 @@ These are always the responsibility of the user.
 //    - Avoids an extra copy / allocation
 //    - Technically more efficient
 //
-WFX_GET("/form", [](Request& req, Response& res) {
+WFX_GET("/form", [](Request& req, Response res) {
     res.SendTemplate("login-page.html", Json::object({
         { "login_form_fields", LoginForm.Render() }
         /* ... */
@@ -661,7 +661,7 @@ WFX_GET("/form", [](Request& req, Response& res) {
 });
 
 // Same result as above, but more optimized
-WFX_GET("/form", [](Request& req, Response& res) {
+WFX_GET("/form", [](Request& req, Response res) {
     res.SendTemplate("login-page.html", Json::object({
         { "login_form_fields", Form::FormToJson(LoginForm) }
         /* ... */

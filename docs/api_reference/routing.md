@@ -3,7 +3,7 @@
 WFX provides a **macro-based routing system** that allows registering request handlers in a declarative manner.  
 Routes are automatically registered during program initialization through deferred execution, ensuring deterministic order and avoiding manual registration.  
 
-Routes can be **sync or async**, but this page only covers **sync** routes.
+This page covers both **sync and async** routes.
 
 !!! important
     Routing requires the user to always include the routing header at the top of the file:
@@ -27,11 +27,11 @@ Routes can be **sync or async**, but this page only covers **sync** routes.
 Routes are defined using method-specific macros:
 
 ```cpp
-WFX_GET("/health", [](Request& req, Response& res) {
+WFX_GET("/health", [](Request& req, Response res) {
     res.SendText("OK");
 });
 
-WFX_POST("/login", [](Request& req, Response& res) {
+WFX_POST("/login", [](Request& req, Response res) {
     // Handle login request
 });
 ```
@@ -39,7 +39,7 @@ WFX_POST("/login", [](Request& req, Response& res) {
 `WFX_GET(path, handler)` / `WFX_POST(path, handler)` - macros corresponding to HTTP methods.
 
 - `path` - the route path as a string literal. Supports dynamic segments (see below).
-- `handler` - a callable object or lambda with signature **`void(Request&, Response&)`**.
+- `handler` - a callable object or lambda with signature **`void(Request&, Response)`**.
 
 ---
 
@@ -50,11 +50,11 @@ Route groups allow applying a common prefix to multiple routes:
 ```cpp
 WFX_GROUP_START("/api")
 
-    WFX_GET("/users", [](Request& req, Response& res) {
+    WFX_GET("/users", [](Request& req, Response res) {
         // List users
     });
 
-    WFX_POST("/users", [](Request& req, Response& res) {
+    WFX_POST("/users", [](Request& req, Response res) {
         // Create user
     });
 
@@ -96,7 +96,7 @@ Segments are indexed in the order they appear, starting from 0.
 Example with multiple segments:
 
 ```cpp
-WFX_GET("/user/<id:int>/posts/<pid:int>", [](Request& req, Response& res) {
+WFX_GET("/user/<id:int>/posts/<pid:int>", [](Request& req, Response res) {
     int64_t userId = GetSegmentAsInt(req.pathSegments[0]);
     int64_t postId = GetSegmentAsInt(req.pathSegments[1]);
 });
@@ -120,12 +120,12 @@ WFX_GET("/user/<id:int>/posts/<pid:int>", [](Request& req, Response& res) {
 **Example**:
 ```cpp
 // Named segment
-WFX_GET("/user/<id:int>", [](Request& req, Response& res) {
+WFX_GET("/user/<id:int>", [](Request& req, Response res) {
     int64_t userId = GetSegmentAsInt(req.pathSegments[0]);
 });
 
 // Unnamed segment (also valid) + manual access
-WFX_GET("/user/<int>", [](Request& req, Response& res) {
+WFX_GET("/user/<int>", [](Request& req, Response res) {
     int64_t userId = std::get<int64_t>(req.pathSegments[0]);
 });
 ```
@@ -138,7 +138,8 @@ WFX_GET("/user/<int>", [](Request& req, Response& res) {
 ## Routes with Middleware
 
 WFX allows routes to execute **middleware** before the main handler.  
-Middleware can perform tasks such as authentication, logging, or input validation. Each route can have its own middleware stack, which is executed in order before the route handler is called.
+Middleware can perform tasks such as authentication, logging, or input validation.
+Each route can have its own middleware stack, which is executed in order before the route handler is called.
 
 **Key Points**:
 
@@ -156,7 +157,7 @@ Middleware can perform tasks such as authentication, logging, or input validatio
 WFX_GET_EX(
     "/secure",
     WFX_MW_LIST(AuthMiddleware, SecurityMiddleware, ...),
-    [](Request& req, Response& res) { 
+    [](Request& req, Response res) { 
         res.SendText("Protected content"); 
     }
 );
@@ -166,8 +167,39 @@ WFX_GET_EX(
 WFX_GET_EX(
     "/secure",
     MakeMiddlewareFromFunctions(AuthMiddleware, SecurityMiddleware, ...),
-    [](Request& req, Response& res) { 
+    [](Request& req, Response res) { 
         res.SendText("Protected content"); 
     }
 );
 ```
+
+---
+
+## Async Routes
+
+WFX routes can be declared **async** by returning an async task type (e.g. `AsyncVoid`).
+This allows the route handler itself to `co_await` builtins such as `SleepFor`, database calls, or other async operations.
+
+The signature is identical to a normal route, except the lambda returns an async coroutine type:
+
+```cpp
+/*
+ * NOTE: This header is mandatory when using any builtin async utilities-
+ *       -such as functions like 'SleepFor'. It also brings in the core-
+ *       -async machinery, including 'AsyncVoid' and related types
+ */
+#include <async/builtins.hpp>
+
+WFX_GET("/async", [](Request& req, Response res) -> AsyncVoid {
+    auto err = co_await Async::SleepFor(2000);
+
+    if(err != Async::Status::NONE)
+        res.SendText("Route failed to sleep for 2 seconds :(");
+    else
+        res.SendText("Ok");
+});
+```
+
+!!! tip
+    For a deeper understanding of how builtin coroutines work in WFX,
+    see the **[Async](async.md)** page.

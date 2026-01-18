@@ -48,13 +48,13 @@ Registration is done using macros and follows the same deferred initialization m
 
 ```cpp
 // Using a lambda
-WFX_MIDDLEWARE("auth", [](Request& req, Response& res) {
+WFX_MIDDLEWARE("auth", [](Request& req, Response res) {
     /* ... */
     return MiddlewareAction::CONTINUE; // mandatory
 });
 
 // Using a function
-MiddlewareAction AuthMiddleware(Request& req, Response& res)
+MiddlewareAction AuthMiddleware(Request& req, Response res)
 {
     /* ... */
     return MiddlewareAction::CONTINUE; // mandatory
@@ -93,20 +93,27 @@ The only difference is that execution occurs inside a coroutine.
 
 **Example**:
 ```cpp
-WFX_MIDDLEWARE("RequestCooldown", [](CoSelf, Request& _, Response& res) {
-    CoStart
+/*
+ * NOTE: This header is mandatory when using any builtin async utilities-
+ *       -such as functions like 'SleepFor'. It also brings in the core-
+ *       -async machinery, including 'AsyncMiddlewareAction' and related types
+ */
+#include <async/builtins.hpp>
 
-    CoAwait(Async::SleepFor(2000), {
+WFX_MIDDLEWARE("RequestCooldown", [](Request& _, Response res) -> AsyncMiddlewareAction {
+    auto err = co_await Async::SleepFor(2000);
+
+    if(err != Async::Status::NONE) {
         res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
-            .SendText("Internal Server Error - M");
-    })
+            .SendText("Middleware Failed to sleep for 2 seconds :(");
 
-    CoReturn(MiddlewareAction::CONTINUE)
+        co_return MiddlewareAction::BREAK;
+    }
 
-    CoEnd
+    co_return MiddlewareAction::CONTINUE;
 })
 ```
 
-!!! note
-    For a deeper understanding of how coroutines work in WFX, including the `CoStart`, `CoAwait`, and `CoReturn` macros,
+!!! tip
+    For a deeper understanding of how builtin coroutines work in WFX,
     see the **[Async](async.md)** page.

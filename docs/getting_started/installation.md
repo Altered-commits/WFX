@@ -16,7 +16,7 @@ This section will guide you through installing all necessary dependencies, setti
 
 ### Prerequisites
 
-- **C++17** (g++, clang++)
+- **C++20**
 - **CMake 3.20+**
 - **Ninja build system** (optional, recommended)
 - **Git**
