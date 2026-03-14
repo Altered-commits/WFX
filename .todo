@@ -29,16 +29,3 @@ To Fix:
 2. Batch syscalls (for receving and sending data) instead of spamming them every request
 3. Timer wheel shouldn't expire connections inline, or for larger count it will stall backend pipeline
 4. ADD PROPER ERROR CHECKING FOR ASYNC TIMER OPERATIONS (low failure rate rn at high concurrency but still)  [Partially fixed]
-
-S2S idea:
- - Client sends some request to route
- - Client and endpoint buffers are swapped before beginning the operation
- - Route initiates an endpoint operation (gets connection from pool) and suspends the callback (endpoint points to client and client points to endpoint)
- - Endpoint writes data and receives data
- - Data is processed and blah blah
- - The buffers are swapped and endpoint clears itself (client pointer to endpoint is cleared and vice versa)
- - Client is resumed
-
-In the case:
- - Client disconnects while endpoint is going on, because the pointers haven't been cleared, we can forcefully close the endpoint socket and be done with
- - Endpoint disconnects, either by timeout or it disconnecting, the pointer inside of endpoint pointing to client will not have been cleared, using that pointer, resume the client and send error
