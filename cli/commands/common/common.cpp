@@ -125,8 +125,6 @@ void HandleMasterSignal(int)
 {
     auto& globalState = GetGlobalState();
     globalState.shouldStop = true;
-    
-    Logger::GetInstance().Info("[WFX-Master]: Ctrl+C pressed, shutting down workers...");
 
     if(globalState.workerPGID > 0)
         kill(-globalState.workerPGID, SIGTERM); // Broadcast SIGTERM to all workers
@@ -147,9 +145,9 @@ void HandleWorkerSignal(int)
 void PinWorkerToCPU(int workerIndex) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    
+
     int cpu = workerIndex % sysconf(_SC_NPROCESSORS_ONLN); // Round-Robin
-    
+
     CPU_SET(cpu, &cpuset);
 
     if(sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0)

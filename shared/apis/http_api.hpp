@@ -2,18 +2,11 @@
 #define WFX_SHARED_HTTP_API_HPP
 
 #include "http/constants/http_constants.hpp"
-#include "http/common/http_route_common.hpp"
 #include "third_party/json/json_fwd.hpp"
+#include "shared/http/common.hpp"
 
 // To be consistent with naming
 using Json = nlohmann::json;
-
-// Fwd declare stuff
-namespace WFX::Http {
-    class Router;
-    class HttpMiddleware;
-    class HttpConnectionHandler;
-}
 
 namespace WFX::Shared {
 
@@ -21,6 +14,13 @@ using namespace WFX::Http; // For 'HttpMethod', 'HttpResponse', 'HttpStatus'
 
 enum class HttpAPIVersion : std::uint8_t {
     V1 = 1,
+};
+
+// Endpoint enum
+enum class EndpointTLSConfig : std::uint8_t {
+    AUTO,           // TLS automatically on some preconfigured ports
+    FORCE_REQUIRE,  // Force TLS (Port doesn't matter)
+    FORCE_INSECURE  // Explicitly allow no TLS even on secure ports
 };
 
 // Data internally used by Http API
@@ -66,7 +66,12 @@ using SendTemplateRvalueFn    = WFX::Utils::MoveOnlyFunction<void(HttpResponse*,
 using StreamFn = void (*)(HttpResponse* backend, StreamGenerator generator, bool streamChunked);
 
 // Endpoint API
-using AllocateEndpointFn = std::uint32_t (*)(std::string_view url);
+using AllocateEndpointFn = std::uint16_t (*)(
+    std::string_view url, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig
+);
+using WriteEndpointFn = EndpointStatus (*)(
+    void* ctx, std::uint16_t endpointIndex, const std::byte* ptr, std::uint32_t size
+);
 
 // Data API
 using SetGlobalPtrDataFn = void  (*)(void*);
@@ -107,6 +112,7 @@ struct HTTP_API_TABLE {
 
     // Endpoint API
     AllocateEndpointFn      AllocateEndpoint;
+    WriteEndpointFn         WriteEndpoint;
 
     // Data API
     SetGlobalPtrDataFn      SetGlobalPtrData;

@@ -66,13 +66,20 @@ void ConnectionContext::ResetContext()
     if(responseInfo) { delete responseInfo; responseInfo = nullptr; }
     if(fileInfo)     { delete fileInfo;     fileInfo     = nullptr; }
 
-    __Flags            = 0;
+    // Clear all flags except 'endpointState', tis special
+    const bool keep = endpointState;
+    __Flags = 0;
+    endpointState = keep;
+
+    // Rest of the stuff
     connInfo           = WFXIpAddress{};
     expectedBodyLength = 0;
     eventType          = EventType::EVENT_ACCEPT;
     parseState         = 0;
     trackBytes         = 0;
     socket             = WFX_INVALID_SOCKET;
+    clientContext      = nullptr;
+    endpointContext    = nullptr;
 }
 
 void ConnectionContext::ClearContext()
@@ -90,20 +97,28 @@ void ConnectionContext::ClearContext()
     streamChunked         = 0;
     expectedBodyLength    = 0;
     trackBytes            = 0;
-    // eventType          = EventType::EVENT_ACCEPT;
-    // connInfo           = WFXIpAddress{};
-    // timeoutTick        = 0;
-    // parseState         = 0;
+    clientContext         = nullptr;
+    endpointContext       = nullptr;
 }
 
 void ConnectionContext::SetParseState(HttpParseState newState)
 {
-    parseState = static_cast<std::uint8_t>(newState);
+    parseState = static_cast<std::uint16_t>(newState);
 }
 
 void ConnectionContext::SetConnectionState(ConnectionState newState)
 {
-    connectionState = static_cast<std::uint8_t>(newState);
+    connectionState = static_cast<std::uint16_t>(newState);
+}
+
+void ConnectionContext::SetEndpointState(EndpointState newState)
+{
+    endpointState = static_cast<std::uint16_t>(newState);
+}
+
+void ConnectionContext::SetEndpointStatus(EndpointStatus newStatus)
+{
+    endpointStatus = static_cast<std::uint16_t>(newStatus);
 }
 
 HttpParseState ConnectionContext::GetParseState() const
@@ -114,6 +129,21 @@ HttpParseState ConnectionContext::GetParseState() const
 ConnectionState ConnectionContext::GetConnectionState() const
 {
     return static_cast<ConnectionState>(connectionState);
+}
+
+EndpointState ConnectionContext::GetEndpointState() const
+{
+    return static_cast<EndpointState>(endpointState);
+}
+
+EndpointStatus ConnectionContext::GetEndpointStatus() const
+{
+    return static_cast<EndpointStatus>(endpointStatus);
+}
+
+bool ConnectionContext::IsEndpoint() const
+{
+    return GetEndpointState() != EndpointState::ENDPOINT_NONE;
 }
 
 bool ConnectionContext::IsAsyncOperation() const
@@ -133,18 +163,16 @@ Async::Status ConnectionContext::TryFinishCoroutines()
     if(GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
         return Async::Status::NONE;
 
-    // Something went wrong uk
+    // Handle is somehow fucked up. Either it was completed somehow or idk
+    // Just assume everythings fine yk, life is rainbows and sunshines
     if(!static_cast<bool>(parentCoro))
         return Async::Status::NONE;
 
     // THE MOST IMPORTANT THING, ASYNC FUNCTIONS EXPECT US TO SET CTX (current connection context)-
-    // -VIA HTTP API
+    // -VIA HTTP API, BECAUSE THEY USE IT INTERNALLY
     auto httpApi = WFX::Shared::GetHttpAPIV1();
     httpApi->SetGlobalPtrData(this);
 
-    // Resume the parent coroutine and check for:
-    //  - completion status
-    //  - any error which may have propagated
     parentCoro.Resume();
     if(!parentCoro.IsFinished())
         return Async::Status::NONE;
@@ -152,20 +180,15 @@ Async::Status ConnectionContext::TryFinishCoroutines()
     // WE WILL SET IT TO NULLPTR ONCE WE ARE DONE USING IT, WE DON'T WANT DANGLING POINTERS
     httpApi->SetGlobalPtrData(nullptr);
 
-    auto eLevel = trackAsync.GetELevel();
+    // Check final coroutine status via 'BasePromise' (possible because its inherited) and,-
+    // -if this was middleware, extract 'MiddlewareAction' into the engine pipeline
+    auto& base = parentCoro.GetPromise<Async::BasePromise>();
+    if(base.error_ != Async::Status::NONE)
+        return base.error_;
 
-    if(eLevel == ExecutionLevel::MIDDLEWARE) {
+    if(trackAsync.GetELevel() == ExecutionLevel::MIDDLEWARE) {
         auto& promise = parentCoro.GetPromise<Async::Promise<MiddlewareAction>>();
-        if(promise.error_ != Async::Status::NONE)
-            return promise.error_;
-
-        // For middleware, we need to set the action ourselves (inside of trackAsync)
         *trackAsync.GetMAction() = promise.value_;
-    }
-    else {
-        auto err = parentCoro.GetPromise<Async::Promise<void>>().error_;
-        if(err != Async::Status::NONE)
-            return err;
     }
 
     return Async::Status::COMPLETED;

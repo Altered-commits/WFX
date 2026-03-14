@@ -2,19 +2,12 @@
 
 namespace WFX::Utils {
 
-// vvv Constructor vvv
-TimerHeap::TimerHeap(BufferPool& pool)
-    : idMap_(pool)
-{
-    idMap_.Init(512);
-}
-
 // vvv Main Functions vvv
 bool TimerHeap::Insert(std::uint64_t data, std::uint64_t delay, std::uint64_t delta) noexcept
 {
     // Does data already exist? If so gg, we don't really want duplicate entries
-    std::size_t* existing = idMap_.Get(data);
-    if(existing)
+    auto it = idMap_.find(data);
+    if(it != idMap_.end())
         return false;
 
     // Bucket coalesce
@@ -24,10 +17,7 @@ bool TimerHeap::Insert(std::uint64_t data, std::uint64_t delay, std::uint64_t de
     heap_.emplace_back(TimerNode{data, delay, idx});
 
     // Insert into map, rollback if fails
-    if(!idMap_.Insert(data, idx)) {
-        heap_.pop_back();
-        return false;
-    }
+    idMap_.emplace(data, idx);
 
     FixHeap(idx);
     return true;
@@ -35,42 +25,27 @@ bool TimerHeap::Insert(std::uint64_t data, std::uint64_t delay, std::uint64_t de
 
 bool TimerHeap::Remove(std::uint64_t data) noexcept
 {
-    std::size_t* heapIdx = idMap_.Get(data);
-    // Already removed, treat as success
-    if(!heapIdx)
-        return true;
-
-    std::size_t idx = *heapIdx;
-
-    if(!idMap_.Erase(data))
+    auto it = idMap_.find(data);
+    if(it == idMap_.end())
         return false;
 
+    std::size_t idx = it->second;
     std::size_t lastIdx = heap_.size() - 1;
+
+    idMap_.erase(data);
+
     if(idx != lastIdx) {
-        TimerNode backupTarget = heap_[idx];
-        TimerNode backupLast   = heap_[lastIdx];
+        heap_[idx] = heap_[lastIdx];
+        heap_[idx].heapIdx = idx;
 
-        TimerNode& target = heap_[idx];
-        TimerNode& last   = heap_[lastIdx];
-
-        target         = last;
-        target.heapIdx = idx;
-
-        // Target = last already done
-        if(auto* idxPtr = idMap_.Get(last.data))
-            *idxPtr = idx;
-        else {
-            // If this ever triggers, map is corrupted
-            heap_[idx]     = backupTarget;
-            heap_[lastIdx] = backupLast;
-            idMap_.Insert(backupTarget.data, idx);
-            return false;
-        }
-
-        FixHeap(idx);
+        if(auto it = idMap_.find(heap_[idx].data); it != idMap_.end())
+            it->second = idx;
     }
 
     heap_.pop_back();
+    if(idx < heap_.size())
+        FixHeap(idx);
+
     return true;
 }
 
@@ -79,14 +54,13 @@ bool TimerHeap::PopExpired(std::uint64_t now, std::uint64_t& outData) noexcept
     if(heap_.empty())
         return false;
 
-    TimerNode &min = heap_[0];
+    TimerNode& min = heap_[0];
 
     if(min.delay > now)
         return false;
 
     outData = min.data;
-    Remove(outData);
-    return true;
+    return Remove(outData);
 }
 
 TimerNode* TimerHeap::GetMin() noexcept
@@ -137,11 +111,11 @@ void TimerHeap::SwapNodes(TimerNode& lhs, TimerNode& rhs) noexcept
     lhs.heapIdx = &lhs - &heap_[0];
     rhs.heapIdx = &rhs - &heap_[0];
 
-    if(auto* idxPtr = idMap_.Get(lhs.data))
-        *idxPtr = lhs.heapIdx;
+    if(auto it = idMap_.find(lhs.data); it != idMap_.end())
+        it->second = lhs.heapIdx;
 
-    if(auto* idxPtr = idMap_.Get(rhs.data))
-        *idxPtr = rhs.heapIdx;
+    if(auto it = idMap_.find(rhs.data); it != idMap_.end())
+        it->second = rhs.heapIdx;
 }
 
 std::uint64_t TimerHeap::RoundToBucket(std::uint64_t expire, std::uint64_t delta) noexcept

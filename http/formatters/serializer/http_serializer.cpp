@@ -11,6 +11,8 @@ namespace HttpSerializer {
 SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer)
 {
     auto& networkConfig = WFX::Core::Config::GetInstance().networkConfig;
+    auto incSize = networkConfig.sendBufferIncSize,
+        maxSize = networkConfig.maxSendBufferSize;
 
     // Ensure write buffer is initialized
     if(!buffer.IsWriteInitialized() && !buffer.InitWriteBuffer(networkConfig.maxSendBufferSize))
@@ -45,12 +47,12 @@ SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer)
     bool        includeBody = !res.IsFileOperation() && !res.IsStreamOperation();
     std::size_t totalSize   = headerSize + (includeBody ? bodyView.size() : 0);
 
-    if(totalSize > meta->bufferSize)
+    if(totalSize > maxSize)
         return {SerializeResult::SERIALIZE_BUFFER_TOO_SMALL, {}};
 
     // Serialize the response
-    buffer.AppendData("HTTP/1.", 7);
-    buffer.AppendData(res.version == HttpVersion::HTTP_1_1 ? "1 " : "0 ", 2);
+    buffer.AppendWriteData("HTTP/1.", 7, incSize, maxSize);
+    buffer.AppendWriteData(res.version == HttpVersion::HTTP_1_1 ? "1 " : "0 ", 2, incSize, maxSize);
     
     std::uint16_t code = static_cast<std::uint16_t>(res.status);
     char codeStr[4];
@@ -58,23 +60,23 @@ SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer)
     codeStr[1] = '0' + ((code / 10) % 10);
     codeStr[2] = '0' + (code % 10);
     codeStr[3] = ' ';
-    buffer.AppendData(codeStr, 4);
+    buffer.AppendWriteData(codeStr, 4, incSize, maxSize);
     
-    buffer.AppendData(reason.data(), static_cast<uint32_t>(reason.size()));
-    buffer.AppendData("\r\n", 2);
+    buffer.AppendWriteData(reason.data(), static_cast<uint32_t>(reason.size()), incSize, maxSize);
+    buffer.AppendWriteData("\r\n", 2, incSize, maxSize);
 
     // Headers
     for(const auto& [k, v] : res.headers.GetHeaderMap()) {
-        buffer.AppendData(k.data(), static_cast<uint32_t>(k.size()));
-        buffer.AppendData(": ", 2);
-        buffer.AppendData(v.data(), static_cast<uint32_t>(v.size()));
-        buffer.AppendData("\r\n", 2);
+        buffer.AppendWriteData(k.data(), static_cast<uint32_t>(k.size()), incSize, maxSize);
+        buffer.AppendWriteData(": ", 2, incSize, maxSize);
+        buffer.AppendWriteData(v.data(), static_cast<uint32_t>(v.size()), incSize, maxSize);
+        buffer.AppendWriteData("\r\n", 2, incSize, maxSize);
     }
 
-    buffer.AppendData("\r\n", 2);
+    buffer.AppendWriteData("\r\n", 2, incSize, maxSize);
 
     if(includeBody && !bodyView.empty()) {
-        buffer.AppendData(bodyView.data(), static_cast<uint32_t>(bodyView.size()));
+        buffer.AppendWriteData(bodyView.data(), static_cast<uint32_t>(bodyView.size()), incSize, maxSize);
         return {SerializeResult::SERIALIZE_SUCCESS, {}};
     }
 

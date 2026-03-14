@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # -----------------------------
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING
-        "Choose the type of build.")
+        "Choose the type of build." FORCE)
 endif()
 
 # -----------------------------
@@ -51,11 +51,9 @@ function(filter_sources_by_os out_var)
     set(${out_var} "${filtered_sources}" PARENT_SCOPE)
 endfunction()
 
-if(CMAKE_BUILD_TYPE MATCHES "Debug")
-    add_compile_definitions(
-        $<$<CONFIG:Debug>:WFX_DEBUG>
-    )
-endif()
+add_compile_definitions(
+    $<$<CONFIG:Debug>:WFX_DEBUG>
+)
 
 file(GLOB_RECURSE WFX_CLI_SOURCES         "${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cpp")
 file(GLOB_RECURSE WFX_CONFIG_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/config/*.cpp")

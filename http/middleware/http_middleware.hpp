@@ -1,15 +1,12 @@
 #ifndef WFX_HTTP_MIDDLEWARE_HPP
 #define WFX_HTTP_MIDDLEWARE_HPP
 
-#include "http/common/http_route_common.hpp"
+#include "shared/http/common.hpp"
 #include <unordered_map>
 
 namespace WFX::Http {
 
-// Forward declare TrieNode and ConnectionContext
-// Each defined inside of routing/route_segment.hpp and connection/http_connection.hpp
-struct TrieNode;
-struct ConnectionContext;
+using namespace WFX::Shared;
 
 using MiddlewareName        = std::string_view;
 using MiddlewareConfigOrder = const std::vector<std::string>&;

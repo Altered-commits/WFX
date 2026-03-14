@@ -15,7 +15,7 @@
     namespace {                                                        \
         struct WFX_MW_CLASS(uniq) {                                    \
             WFX_MW_CLASS(uniq)() {                                     \
-                WFX::Shared::__WFXDeferredMiddleware.emplace_back([] { \
+                WFX::Shared::__WFXDeferredSimple.emplace_back([] {     \
                     __WFXApi->GetHttpAPIV1()->RegisterMiddleware(      \
                         name, MakeMiddlewareEntry(callback)            \
                     );                                                 \

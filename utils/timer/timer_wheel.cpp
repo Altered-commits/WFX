@@ -88,7 +88,7 @@ std::uint64_t TimerWheel::GetTick() const noexcept
     return nowTick_;
 }
 
-void TimerWheel::Schedule(std::uint32_t pos, std::uint64_t timeout)
+void TimerWheel::Schedule(std::uint32_t pos, std::uint32_t extra, std::uint64_t timeout)
 {
     // Sanity checks
     if(pos >= cap_)
@@ -124,6 +124,7 @@ void TimerWheel::Schedule(std::uint32_t pos, std::uint64_t timeout)
     SlotMeta& m = meta_[pos];
     m.bucket    = bucket;
     m.rounds    = rounds;
+    m.extra     = extra;
 
     // Insert at head of wheelHeads_[bucket]
     m.next = wheelHeads_[bucket];
@@ -154,10 +155,11 @@ void TimerWheel::Tick(std::uint64_t nowTick)
         // Process bucket entries
         while(curr != NIL) {
             SlotMeta& m = meta_[curr];
-            std::uint32_t next = m.next;
+            std::uint8_t  extra = m.extra;
+            std::uint32_t next  = m.next;
 
             if(m.rounds == 0) {
-                onExpire_(curr);
+                onExpire_(curr, extra);
                 Unlink(curr);
             }
             else

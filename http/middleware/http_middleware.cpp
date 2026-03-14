@@ -194,7 +194,7 @@ MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(
         return {MiddlewareAction{}, std::move(task)};
 
     // We were able to finish async in sync, check for errors
-    // Right now we will crash the engine on errors, later we will actually handle them
+    // TODO: Right now we will crash the engine on errors, later we will actually handle them
     auto [action, err] = task.GetResult();
     if(err != Async::Status::NONE)
         logger.Fatal("[HttpMiddleware]: Coroutine completed with errors");

@@ -31,7 +31,7 @@ HttpParseState Parse(ConnectionContext* ctx)
         return HttpParseState::PARSE_ERROR;
 
     // Config variables
-    std::uint32_t maxBufferSize      = Config::GetInstance().networkConfig.maxRecvBufferSize;
+    std::uint32_t maxBufferSize      = Config::GetInstance().networkConfig.maxReadBufferSize;
     std::uint32_t maxBodyTotalSize   = Config::GetInstance().networkConfig.maxBodyTotalSize;
     std::uint32_t maxHeaderTotalSize = Config::GetInstance().networkConfig.maxHeaderTotalSize;
 
@@ -46,7 +46,7 @@ HttpParseState Parse(ConnectionContext* ctx)
     HttpRequest& request = *ctx->requestInfo;
 
     // Our very cool State Machine handling different states of parser
-    switch(static_cast<HttpParseState>(ctx->GetParseState())) {
+    switch(ctx->GetParseState()) {
         // In the case of it being idle, and some data arrives, we can safely fallthrough
         // As this only gets called if any data exists or arrives
         case HttpParseState::PARSE_IDLE:

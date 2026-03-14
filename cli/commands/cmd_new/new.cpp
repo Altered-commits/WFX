@@ -210,8 +210,9 @@ connection_threads = "auto"  # IOCP worker thread count
 request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
-worker_processes = 2      # Max simultaneous worker connections
-backlog          = 1024   # Max pending connections in OS listen queue
+worker_processes        = 2      # Max simultaneous worker connections
+worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
+backlog                 = 1024   # Max pending connections in OS listen queue
 
 [Linux.IoUring]
 accept_slots     = 64     # Max simultaneous connections being accepted
@@ -249,23 +250,7 @@ extern "C" {
         if(api) {
             __WFXApi = api;
 
-            auto& constructors = WFX::Shared::__WFXDeferredConstructors;
-            auto& middlewares  = WFX::Shared::__WFXDeferredMiddleware;
-            auto& routes       = WFX::Shared::__WFXDeferredRoutes;
-
-            for(auto& fn : constructors)
-                fn();
-
-            for(auto& fn : middlewares)
-                fn();
-
-            for(auto& fn : routes)
-                fn();
-
-            // Clean up memory
-            WFX::Shared::__EraseDeferredVector(constructors);
-            WFX::Shared::__EraseDeferredVector(middlewares);
-            WFX::Shared::__EraseDeferredVector(routes);
+            WFX::Shared::__ExecuteAndEraseDeferred();
 
             registered = true;
         }

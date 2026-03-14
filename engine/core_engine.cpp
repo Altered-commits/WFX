@@ -42,7 +42,7 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
     HandleMiddlewareLoading();
 }
 
-void CoreEngine::Listen(const std::string& host, int port)
+void CoreEngine::Listen(const std::string& host, std::uint16_t port)
 {
     connHandler_->Initialize(host, port);
 
@@ -212,14 +212,17 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
 
             return;
 
-        // TODO: For insufficient cases, we need to be able to stream the remaining response
+        // Log error and return internal error
         case SerializeResult::SERIALIZE_BUFFER_INSUFFICIENT:
-            connHandler_->Write(ctx, {});
+            logger_.Error(
+                "[CoreEngine]: Write buffer size insufficient for serializing data. 'Stream' is recommended"
+            );
+            connHandler_->Write(ctx, HttpError::internalError);
             return;
 
         default:
             logger_.Error("[CoreEngine]: Failed to serialize response");
-            connHandler_->Close(ctx);
+            connHandler_->Write(ctx, HttpError::internalError);
             return;
     }
 }
@@ -231,7 +234,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
     auto& res     = *ctx->responseInfo;
     auto* node    = static_cast<const TrieNode*>(req.routeNode_);
 
-    Response userRes{&res, httpApi};
+    Response userRes{&res};
 
     // Trackers
     ExecutionLevel eLevel = ctx->trackAsync.GetELevel();

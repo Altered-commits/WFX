@@ -15,6 +15,7 @@ public:
 
 public: // Main functions
     void*     Wrap(SSLSocket fd)                                                        override;
+    void*     WrapClient(SSLSocket fd, const char* host)                                override;
     SSLReturn Handshake(void* conn)                                                     override;
     
     SSLResult Read(void* conn, char* buf, int len)                                      override;

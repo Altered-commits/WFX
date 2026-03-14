@@ -90,7 +90,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         },
 
         // Endpoint API
-        [](std::string_view url) -> std::uint32_t {
+        [](std::string_view url, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig) -> std::uint16_t {
             /*
              * NOTE: 'url' allowed only till port number (route and optional parameters are not allowed)
              * Example:
@@ -103,6 +103,8 @@ const HTTP_API_TABLE* GetHttpAPIV1()
             auto& logger = Logger::GetInstance();
             if(url.empty())
                 logger.Fatal("[HttpAPI]: Endpoint got empty URL");
+
+            logger.Info("[HttpAPI]: Resolving endpoint: ", url);
 
             std::string_view protocol{}, host{}, port{}, urlCpy{url};
 
@@ -193,8 +195,49 @@ const HTTP_API_TABLE* GetHttpAPIV1()
             if(!__GlobalHttpDataV1.connHandler)
                 logger.Fatal("[HttpAPI]: Connection handler was nullptr for endpoint");
 
-            // return __GlobalHttpDataV1.connHandler->InitializeEndpoint(host.data(), port.data());
-            return 0;
+            bool useTLS = false;
+
+            switch(tlsConfig) {
+                // AUTO: TLS only on known secure ports
+                case EndpointTLSConfig::AUTO:
+                    switch(nport) {
+                        case 443:   // HTTPS
+                        case 465:   // SMTPS
+                        case 993:   // IMAPS
+                        case 995:   // POP3S
+                        case 636:   // LDAPS
+                        case 989:   // FTPS (data)
+                        case 990:   // FTPS (control)
+                        case 5671:  // AMQP over TLS
+                        case 8883:  // MQTT over TLS
+                            useTLS = true;
+                            break;
+                    }
+                    break;
+
+                // FORCE_REQUIRE: Always TLS, no matter what
+                case EndpointTLSConfig::FORCE_REQUIRE:
+                    useTLS = true;
+                    break;
+    
+                // FORCE_INSECURE: Never TLS, even on 443
+                case EndpointTLSConfig::FORCE_INSECURE:
+                    useTLS = false;
+                    break;
+            }
+
+            return __GlobalHttpDataV1.connHandler->AllocateEndpoint(host, port, cLimit, ifLimit, useTLS);
+        },
+        // WriteEndpointFn
+        [](void* ctx, std::uint16_t endpointIndex, const std::byte* ptr, std::uint32_t size) -> EndpointStatus {
+            if(!ctx) {
+                Logger::GetInstance().Error("[HttpAPI]: 'WriteEndpoint' received null context");
+                return EndpointStatus::INTERNAL_ERROR;
+            }
+
+            return __GlobalHttpDataV1.connHandler->WriteEndpoint(
+                reinterpret_cast<ConnectionContext*>(ctx), endpointIndex, ptr, size
+            );
         },
 
         // Data API

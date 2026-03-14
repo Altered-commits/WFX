@@ -16,6 +16,7 @@
     #include <wait.h>
     #include <signal.h>
 #endif
+#include <thread>
 
 namespace WFX::CLI {
 
@@ -59,7 +60,7 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
 
     // -------------------- INITIALIZING PHASE --------------------
     signal(SIGINT, HandleMasterSignal);
-    signal(SIGTERM, SIG_IGN);
+    signal(SIGTERM, HandleMasterSignal);
 
     // Handle initialization of SSL key before we do anything else
     if(!RandomPool::GetInstance().GetBytes(globalState.sslKey.data(), globalState.sslKey.size()))
@@ -74,19 +75,19 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     // Compile only user source
     if(!success || !hasDynamic)
         HandleUserCxxCompilation(CxxCompilationOption::SOURCE_ONLY);
-
     // Compile both source + templates
-    else {
+    else
         HandleUserCxxCompilation();
-        templateEngine.LoadDynamicTemplatesFromLib();
-    }
+
+    // Load template library if it exists
+    templateEngine.LoadDynamicTemplatesFromLib();
 
     bool pinToCpu = cfg.GetFlag(ServerFlags::PIN_TO_CPU);
     bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
     bool ohp      = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
     
     // Switch ports if we enable https and we don't want to override https default port
-    int port = useHttps && !ohp ? 443 : cfg.port;
+    std::uint16_t port = useHttps && !ohp ? 443U : cfg.port;
     logger.Info("[WFX-Master]: Dev server running at ",
                 useHttps ? "https://" : "http://", cfg.host, ':', port);
 
@@ -143,9 +144,33 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     while(!globalState.shouldStop)
         pause();
 
+    logger.Info("[WFX-Master]: Signal received (INT / TERM), waiting for workers to shutdown...");
+
     // -------------------- SHUTDOWN PHASE --------------------
-    for(int i = 0; i < osConfig.workerProcesses; i++)
-        waitpid(globalState.workerPids[i], nullptr, 0);
+    for(std::uint32_t i = 0; i < osConfig.workerProcesses; i++) {
+        pid_t pid    = globalState.workerPids[i];
+        bool  exited = false;
+
+        for(std::uint32_t t = 0; t < config.osSpecificConfig.workerShutdownTimeout * 10; t++) {
+            int status;
+            pid_t ret = waitpid(pid, &status, WNOHANG);
+
+            // Worker exited normally
+            if(ret == pid) {
+                exited = true;
+                break;
+            }
+
+            // Poll every 100ms
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        if(!exited) {
+            // Worker didn't exit in time, force kill
+            kill(pid, SIGKILL);
+            waitpid(pid, nullptr, 0); // Reap zombie
+        }
+    }
 #endif // _WIN32
 
     logger.Info("[WFX-Master]: Shutdown successfully");

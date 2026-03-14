@@ -7,7 +7,7 @@
 
 namespace WFX::Http {
 
-using namespace WFX::Utils; // For 'MoveOnlyFunction', 'Logger'
+using namespace ::WFX::Utils; // For 'MoveOnlyFunction', 'Logger'
 
 class RouteTrie {
 public:    

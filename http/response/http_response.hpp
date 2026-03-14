@@ -3,7 +3,7 @@
 
 #include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
-#include "http/common/http_route_common.hpp"
+#include "shared/http/common.hpp"
 
 #include "include/third_party/json/json_fwd.hpp"
 
@@ -15,8 +15,7 @@ using Json = nlohmann::json;
 
 namespace WFX::Http {
 
-// Forward declare connection handler here, we will include its impl in .cpp file
-class HttpConnectionHandler;
+using namespace WFX::Shared;
 
 using BodyType = std::variant<std::monostate, std::string_view, std::string, StreamGenerator>;
 

@@ -2,7 +2,20 @@
 #define WFX_INC_HTTP_HELPER_HPP
 
 #include "async/task.hpp"
-#include "http/common/http_route_common.hpp"
+#include "shared/http/common.hpp"
+
+using WFX::Shared::HttpCallbackType;
+using WFX::Shared::AsyncCallbackType;
+using WFX::Shared::SyncCallbackType;
+using WFX::Shared::MiddlewareAction;
+using WFX::Shared::AsyncMiddlewareAction;
+using WFX::Shared::HttpMiddlewareType;
+using WFX::Shared::HttpMiddlewareStack;
+using WFX::Shared::SyncMiddlewareType;
+using WFX::Shared::AsyncMiddlewareType;
+
+using WFX::Shared::AsyncVoid;
+using WFX::Shared::AsyncMiddlewareAction;
 
 // vvv Http Stuff vvv
 template<typename Lambda>

@@ -16,13 +16,16 @@ enum class TimeUnit : std::uint8_t {
 };
 
 struct SlotMeta {
-    std::uint32_t next   = NIL;
-    std::uint32_t prev   = NIL;
-    std::uint16_t bucket = 0;
-    std::uint8_t  rounds = 0;
-};
+    std::uint32_t next   = NIL; // |
+    std::uint32_t prev   = NIL; // |-> 8 bytes
 
-using OnExpireCallback = std::function<void(std::uint32_t id)>;
+    std::uint32_t extra  = 0; // |
+    std::uint16_t bucket = 0; // |
+    std::uint8_t  rounds = 0; // |-> 8 bytes
+};
+static_assert(sizeof(SlotMeta) == 16, "SlotMeta must STRICTLY be 16 bytes.");
+
+using OnExpireCallback = std::function<void(std::uint32_t id, std::uint32_t extra)>;
 
 class TimerWheel {
 public:
@@ -38,7 +41,7 @@ public:
     void          Reinit(std::uint32_t capacity);
     void          SetTick(std::uint32_t val, TimeUnit unit);
     std::uint64_t GetTick() const noexcept;
-    void          Schedule(std::uint32_t pos, std::uint64_t timeout);
+    void          Schedule(std::uint32_t pos, std::uint32_t extra, std::uint64_t timeout);
     void          Cancel(std::uint32_t pos);
     void          Tick(std::uint64_t nowTick);
 

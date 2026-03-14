@@ -2,7 +2,6 @@
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
 #include "http/request/http_request.hpp"
-#include "http/common/http_route_common.hpp"
 #include "utils/backport/move_only_function.hpp"
 #include "utils/crypt/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
@@ -24,6 +23,8 @@
 #endif
 
 namespace WFX::Http {
+
+using namespace WFX::Shared;
 
 // Cross-Platform compatible Ip Struct
 struct WFXIpAddress {
@@ -60,6 +61,7 @@ enum class HttpParseState : std::uint8_t {
 };
 
 enum class EventType : std::uint8_t {
+    EVENT_CONNECT,
     EVENT_ACCEPT,
     EVENT_HANDSHAKE, // For SSL
     EVENT_RECV,
@@ -71,6 +73,12 @@ enum class EventType : std::uint8_t {
 enum class ConnectionState : std::uint8_t {
     CONNECTION_ALIVE,
     CONNECTION_CLOSE
+};
+
+enum class EndpointState : std::uint8_t {
+    ENDPOINT_NONE,     // Not an endpoint type
+    ENDPOINT_INSECURE, // Basic connection (HTTP, etc)
+    ENDPOINT_SECURE,   // SSL connection (HTTPS, etc)
 };
 
 // Forward declare it so compilers won't cry
@@ -141,15 +149,16 @@ struct ConnectionContext : public ConnectionTag {
 
     union {
         struct {
-            std::uint16_t parseState            : 3;   // --
+            std::uint16_t endpointStatus        : 4;   // --
+            std::uint16_t parseState            : 3;   //  |
             std::uint16_t connectionState       : 2;   //  |
+            std::uint16_t endpointState         : 2;   //  |
             std::uint16_t isStreamOperation     : 1;   //  |
             std::uint16_t isFileOperation       : 1;   //  |
             std::uint16_t isAsyncTimerOperation : 1;   //  |
             std::uint16_t isShuttingDown        : 1;   //  |
-            std::uint16_t streamChunked         : 1;   //  |
-            std::uint16_t __FPad                : 6;   //  V
-        };                                             // 2 byte
+            std::uint16_t streamChunked         : 1;   //  V
+        };                                             // 2 bytes
         std::uint16_t __Flags = 0;
     };
 
@@ -158,19 +167,25 @@ struct ConnectionContext : public ConnectionTag {
         std::uint32_t trackBytes = 0;              // |-> 4 bytes (Used in HTTP parsing then async tracking if needed)
     };
 
-    void*                sslConn       = nullptr;  // 8 bytes
-    WFX::Utils::RWBuffer rwBuffer;                 // 16 bytes
+    std::uint32_t        expectedBodyLength = 0;        // 4 bytes
+    std::uint16_t        generationId       = 1;        // 2 bytes (0 is specially reserved)
+    std::uint16_t        endpointIdx        = 0;        // 2 bytes
 
-    WFXSocket          socket             = -1;       // 4 | 8 bytes
-    std::uint32_t      generationId       = 1;        // 4 bytes (0 is specially reserved)
-                                                      // 4 bytes padded
-    StreamGenerator    streamGenerator    = {};       // 8 bytes
-    HttpRequest*       requestInfo        = nullptr;  // 8 bytes
-    HttpResponse*      responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
-    FileInfo*          fileInfo           = nullptr;  // 8 bytes
-    WFXIpAddress       connInfo;                      // 20 bytes
-    std::uint32_t      expectedBodyLength = 0;        // 4 bytes
-    Async::GenericTask parentCoro{};                  // 8 bytes
+    void*                sslConn            = nullptr;  // 8 bytes
+    StreamGenerator      streamGenerator    = {};       // 8 bytes
+    HttpRequest*         requestInfo        = nullptr;  // 8 bytes
+    HttpResponse*        responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
+    FileInfo*            fileInfo           = nullptr;  // 8 bytes
+    Async::GenericTask   parentCoro;                    // 8 bytes
+    WFX::Utils::RWBuffer rwBuffer;                      // 16 bytes
+
+    WFXIpAddress         connInfo;                      // 20 bytes
+    int                  __Pad              = 0;        // 4 bytes
+    WFXSocket            socket             = -1;       // 4 | 8 bytes
+                                                        // Padded if sizeof(WFXSocket) == 4
+                                                        
+    ConnectionContext*   clientContext      = nullptr;  // 8 bytes (Set only on endpoint contexts)
+    ConnectionContext*   endpointContext    = nullptr;  // 8 bytes (Set only on client contexts)
 
 public: // Helper functions
     void ResetContext();
@@ -178,25 +193,41 @@ public: // Helper functions
 
     void SetParseState(HttpParseState newState);
     void SetConnectionState(ConnectionState newState);
+    void SetEndpointState(EndpointState newState);
+    void SetEndpointStatus(EndpointStatus newStatus);
 
     HttpParseState  GetParseState()      const;
     ConnectionState GetConnectionState() const;
-
-    bool          IsAsyncOperation() const;
+    EndpointState   GetEndpointState()   const;
+    EndpointStatus  GetEndpointStatus()  const;
+    
+    bool          IsEndpoint() const;
+    bool          IsAsyncOperation()    const;
     Async::Status TryFinishCoroutines();
 };
 static_assert(sizeof(ConnectionContext) <= 128, "ConnectionContext must STRICTLY be less than or equal to 128 bytes.");
 
-// Abstraction for Windows and Linux impl
-class HttpConnectionHandler {
-public:
+struct EndpointContext {
+    std::string      host;
+    sockaddr_storage addr    = {0};
+    socklen_t        addrLen = 0;
+};
+static_assert(sizeof(EndpointContext) <= 256, "EndpointContext must STRICTLY be less than or equal to 256 bytes.");
+
+// Abstraction for OS impl
+struct HttpConnectionHandler {
     virtual ~HttpConnectionHandler() = default;
 
     // Initialize sockets, bind and listen on given host:port
-    virtual void Initialize(const std::string& host, int port) = 0;
+    virtual void Initialize(const std::string& host, std::uint16_t port) = 0;
 
     // Set the receive callback ONCE per socket (can be overwritten if needed)
     virtual void SetEngineCallbacks(ReceiveCallback onData, CompletionCallback onComplete) = 0;
+
+    // Create new endpoint on backend
+    virtual std::uint16_t AllocateEndpoint(
+        std::string_view host, std::string_view port, std::uint32_t cLimit, std::uint32_t ifLimit, bool useTLS
+    ) = 0;
 
     // Read more data if required (Async)
     virtual void ResumeReceive(ConnectionContext* ctx) = 0;
@@ -207,20 +238,25 @@ public:
     // Write file directly to sockets (Async)
     virtual void WriteFile(ConnectionContext* ctx, std::string path) = 0;
 
+    // Write data directly to an endpoint (Async)
+    virtual EndpointStatus WriteEndpoint(
+        ConnectionContext* ctx, std::uint32_t endpointIndex, const std::byte* ptr, std::uint32_t size
+    ) = 0;
+
     // Stream data to socket via a generator function (Async)
     virtual void Stream(ConnectionContext* ctx, StreamGenerator generator, bool streamChunked = true) = 0;
 
     // Close a client socket
     virtual void Close(ConnectionContext* ctx, bool forceClose = false) = 0;
 
-    // Run the main connection loop (can be used by dev/serve mode)
-    virtual void Run() = 0;
-
     // Refresh the connection's expiry time
     virtual void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) = 0;
 
     // Refresh the connection's async timer
     virtual bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) = 0;
+
+    // Run the main connection loop
+    virtual void Run() = 0;
 
     // Shutdown the main connection loop, cleanup everything
     virtual void Stop() = 0;
@@ -230,8 +266,10 @@ public:
 
 // Write a std::hash specialization for WFXIpAddress
 namespace std {
-    using namespace WFX::Utils; // For 'Logger' and 'RandomPool'
-    using namespace WFX::Http;  // For 'WFXIpAddress'
+    using WFX::Utils::Logger;
+    using WFX::Utils::RandomPool;
+    using WFX::Utils::Hasher::SipHash24;
+    using WFX::Http::WFXIpAddress;
 
     template<>
     struct hash<WFXIpAddress> {
@@ -248,7 +286,7 @@ namespace std {
                 }
             } _initOnce;
 
-            return Hasher::SipHash24(
+            return SipHash24(
                 addr.ip.raw,
                 addr.ipType == AF_INET ? sizeof(in_addr) : sizeof(in6_addr),
                 sipKey

@@ -1,11 +1,13 @@
 #ifndef WFX_HTTP_ROUTE_SEGMENT_HPP
 #define WFX_HTTP_ROUTE_SEGMENT_HPP
 
-#include "http/common/http_route_common.hpp"
+#include "shared/http/common.hpp"
 #include <memory>
 #include <variant>
 
 namespace WFX::Http {
+
+using namespace WFX::Shared;
 
 enum class ParamType : std::uint8_t {
     UINT,

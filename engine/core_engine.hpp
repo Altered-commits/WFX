@@ -16,7 +16,7 @@ using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpR
 class CoreEngine {
 public: // Main Stuff
     CoreEngine(const char* dllPath, bool useHttps);
-    void Listen(const std::string& host, int port);
+    void Listen(const std::string& host, std::uint16_t port);
     void Stop();
 
 private: // Internal Functions

@@ -1,38 +1,88 @@
 #ifndef WFX_INC_HTTP_ENPOINT_HPP
 #define WFX_INC_HTTP_ENPOINT_HPP
 
+#include "async/promise.hpp"
 #include "core/core.hpp"
+#include "shared/utils/deferred_init_vector.hpp"
+#include <span>
 
-struct APIInterface {
+namespace Endpoint {
+
+using WFX::Shared::EndpointTLSConfig;
+
+// vvv Metadata vvv
+struct Metadata {
     const char*   __Url       = nullptr;
-    std::uint32_t __IntrnlIdx = 0;
+    std::uint16_t __IntrnlIdx = 0;
 };
 
-struct LazyAPIInterface {
+// vvv Awaitables vvv
+struct WritePayloadAwaitable {
+    using EndpointStatus = WFX::Shared::EndpointStatus;
+
+public: // Storage
+    std::span<const std::byte> payload{};
+    std::uint16_t              endpointIdx{0};
+    EndpointStatus             status{};
+
+public: // Main setup
+    // Always suspend
+    bool await_ready() const noexcept { return false; }
+
+    void await_suspend(std::coroutine_handle<> h) noexcept {
+        status = __WFXApi->GetHttpAPIV1()->WriteEndpoint(
+                            __WFXApi->GetHttpAPIV1()->GetGlobalPtrData(),
+                            endpointIdx,
+                            payload.data(),
+                            payload.size()
+                        );
+
+        // On failure, resume the coroutine so user can handle the error
+        if(status != EndpointStatus::PENDING)
+            h.resume();
+    }
+
+    // Return status
+    EndpointStatus await_resume() const noexcept { return status; }
+};
+
+struct Resolve {
 public: // Constructor
-    constexpr LazyAPIInterface(const char* url) noexcept
-    {
+    constexpr Resolve(
+        const char* url,
+        std::uint32_t     connLimit     = 64,
+        std::uint32_t     inFlightLimit = 64,
+        EndpointTLSConfig tlsConfig     = EndpointTLSConfig::AUTO
+    ) {
         value_.__Url = url;
+
+        WFX::Shared::__WFXDeferredContextual.emplace_back([=, this] {
+            value_.__IntrnlIdx = __WFXApi->GetHttpAPIV1()->AllocateEndpoint(
+                                    url,
+                                    connLimit,
+                                    inFlightLimit,
+                                    tlsConfig
+                                );
+        });
     }
 
-public: // Helper functions
-    inline const APIInterface& Get() const noexcept
+public: // vvv Main Functions vvv
+    WritePayloadAwaitable SendPayload(std::span<const std::byte> rawPayload) const
     {
-        if(!init_) {
-            value_.__IntrnlIdx = __WFXApi->GetHttpAPIV1()->AllocateEndpoint(value_.__Url);
-            init_  = true;
-        }
-        return value_;
+        return WritePayloadAwaitable{rawPayload, value_.__IntrnlIdx};
     }
 
-    inline operator const APIInterface&() const noexcept
+    WritePayloadAwaitable SendPayload(std::string_view str) const
     {
-        return Get();
+        return SendPayload(std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(str.data()), str.size()
+        ));
     }
 
 private:
-    mutable APIInterface value_ = {};
-    mutable bool         init_  = false;
+    Metadata value_ = {};
 };
+
+} // namespace Endpoint
 
 #endif // WFX_INC_HTTP_ENPOINT_HPP

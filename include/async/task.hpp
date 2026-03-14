@@ -32,7 +32,7 @@ public: // Main functions
 };
 
 // vvv Main shit vvv
-template<typename T = void>
+template<typename T>
 struct [[nodiscard]] Task {
     using promise_type = Promise<T>;
     using HandleType   = std::coroutine_handle<promise_type>;
