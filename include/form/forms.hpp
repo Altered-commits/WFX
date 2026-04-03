@@ -5,7 +5,7 @@
 #include "validators.hpp"
 #include "sanitizers.hpp"
 #include "renders.hpp"
-#include "http/aliases.hpp"
+#include "http/request.hpp"
 #include "third_party/json/json.hpp"
 #include <array>
 
@@ -16,7 +16,7 @@
 // For ease of use :)
 using Json = nlohmann::json;
 
-namespace Form {
+namespace WFX::Http {
 
 // vvv Field Builders vvv
 template<typename Rule>
@@ -132,23 +132,21 @@ public:
 
 public: // Main Functions
     // Auto select the parsing type looking at the header
-    FormError Parse(Request& req, CleanedType& out) const
+    FormError Parse(Request req, CleanedType& out) const
     {
-        auto [exists, hptr] = req.headers.CheckAndGetHeader("Content-Type");
-        if(!exists)
+        std::string_view contentType;
+        if(!req.GetHeader("Content-Type", contentType))
             return FormError::UNSUPPORTED_CONTENT_TYPE;
 
         // Content-Type can contain multiple fields seperated by ';'
         // What we need is the initial one
-        auto ct = WFX::Utils::TrimView(
-            (*hptr).substr(0, hptr->find(';'))
-        );
+        auto ct = WFX::Utils::TrimView(contentType.substr(0, contentType.find(';')));
 
         // In memory simple form
         if(WFX::Utils::StringCanonical::InsensitiveStringCompare(
             ct, "application/x-www-form-urlencoded"
         ))
-            return ParseStatic(req.body, out);
+            return ParseStatic(req.Body(), out);
 
         // Other types of forms are not supported for now
         return FormError::UNSUPPORTED_CONTENT_TYPE;
@@ -340,6 +338,6 @@ inline std::string_view JsonToFormRender(const Json* json)
     return fnPtr(formPtr);
 }
 
-} // namespace Form
+} // namespace WFX::Http
 
 #endif // WFX_INC_FORMS_HPP

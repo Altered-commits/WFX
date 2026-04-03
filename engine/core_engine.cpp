@@ -1,6 +1,9 @@
 #include "core_engine.hpp"
 
 #include "http/response.hpp"
+#include "http/request.hpp"
+#include "http/request/http_request.hpp"
+#include "http/connection/http_connection.hpp"
 #include "http/common/http_error_msgs.hpp"
 #include "http/formatters/parser/http_parser.hpp"
 #include "http/formatters/serializer/http_serializer.hpp"
@@ -162,7 +165,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
 
                 if(!node) {
                     res.Status(HttpStatus::NOT_FOUND)
-                        .SendText("404: Route not found :(");
+                        .SendText(std::string_view{"404: Route not found :("});
                     goto __HandleResponse;
                 }
 
@@ -235,6 +238,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
     auto* node    = static_cast<const TrieNode*>(req.routeNode_);
 
     Response userRes{&res};
+    Request userReq{&req};
 
     // Trackers
     ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
@@ -243,7 +247,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
         goto __HandleResponse;
 
     if(eLevel == ExecutionLevel::MIDDLEWARE) {
-        auto [success, task] = middleware_.ExecuteMiddleware(node, req, userRes, ctx);
+        auto [success, task] = middleware_.ExecuteMiddleware(ctx, node, userReq, userRes);
 
         if(!success) {
             // For failure, just handle response and be done with
@@ -251,7 +255,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
             if(!task) {
                 res.ClearInfo();
                 res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                    .SendText("Internal Server Error: CE - CF1");
+                    .SendText(std::string_view{"Internal Server Error: CE - CF1"});
                 goto __HandleResponse;
             }
 
@@ -267,7 +271,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
 
     // Sync, execute it right now
     if(auto* sync = std::get_if<SyncCallbackType>(&node->callback))
-        (*sync)(req, userRes);
+        (*sync)(userReq, userRes);
 
     // Async, check if we have executed it entirely right now, if not-
     // -schedule it for later
@@ -279,7 +283,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
         // -scheduler will set the ptr later on when needed, no need to keep a dangling pointer
         httpApi->SetGlobalPtrData(static_cast<void*>(ctx));
 
-        auto coro = async(req, userRes);
+        auto coro = async(userReq, userRes);
         coro.Resume();
 
         // Reset to remove any dangling references
@@ -298,7 +302,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
         if(err != Async::Status::NONE) {
             res.ClearInfo();
             res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                .SendText("Internal Server Error: CE - CF2");
+                .SendText(std::string_view{"Internal Server Error: CE - CF2"});
         }
         // No errors, finish the request
     }

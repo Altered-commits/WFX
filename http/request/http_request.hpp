@@ -4,9 +4,9 @@
 #include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
 #include "shared/http/common.hpp"
+#include "shared/abis/any.hpp"
 
 #include <string>
-#include <any>
 
 // Forward declare engine to access cool internal stuff
 namespace WFX::Core { class CoreEngine; }
@@ -17,7 +17,7 @@ namespace WFX::Http {
 using WFX::Shared::PathSegments;
 
 // Context storage for middleware / routes / user stuff
-using ContextMap = std::unordered_map<std::string, std::any>;
+using ContextMap = std::unordered_map<std::string, Shared::Any>;
 
 struct HttpRequest {
     HttpMethod       method;
@@ -37,59 +37,19 @@ public: // Copying is strictly not allowed
 public: // Helper functions
     void ClearInfo()
     {
+        for(auto& [k, v] : context)
+            v.Reset();
+
         routeNode_ = nullptr;
         headers.Clear();
         pathSegments.clear(); 
         context.clear();
     }
 
-    template<typename T>
-    void SetContext(const std::string& key, T&& value)
-    {
-        context[key] = std::forward<T>(value);
-    }
-
-    template<typename T>
-    const T* GetContext(const std::string& key) const
-    {
-        auto it = context.find(key);
-        if(it == context.end())
-            return nullptr;
-
-        auto p = std::any_cast<T>(&(it->second));
-
-        // Stored value is T (which is a pointer), so std::any_cast gives T*, collapse T* -> T
-        if constexpr(std::is_pointer_v<T>)
-            return p ? *p : nullptr;
-        else
-            return p;
-    }
-
-    template<typename T>
-    const T* InitOrGetContext(const std::string& key, T&& value)
-    {
-        auto& slot = context[key];
-        if(!slot.has_value())
-            slot = std::forward<T>(value);
-
-        auto p = std::any_cast<T>(&slot);
-
-        // Stored value is T (which is a pointer), so std::any_cast gives T*, collapse T* -> T
-        if constexpr(std::is_pointer_v<T>)
-            return p ? *p : nullptr;
-        else
-            return p;
-    }
-
-    void EraseContext(const std::string& key) noexcept
-    {
-        context.erase(key);
-    }
-
 private:
     const void* routeNode_ = nullptr;
 
-    friend class WFX::Core::CoreEngine;
+    friend class Core::CoreEngine;
 };
 
 } // namespace WFX::Http

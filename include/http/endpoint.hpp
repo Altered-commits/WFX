@@ -3,17 +3,17 @@
 
 #include "async/promise.hpp"
 #include "core/core.hpp"
-#include "shared/utils/deferred_init_vector.hpp"
+#include "core/deferred_init_vector.hpp"
 #include <span>
 
-namespace Endpoint {
+namespace WFX::Http {
 
 using WFX::Shared::EndpointTLSConfig;
 
 // vvv Metadata vvv
 struct Metadata {
-    const char*   __Url       = nullptr;
-    std::uint16_t __IntrnlIdx = 0;
+    std::string_view __Url       = {};
+    std::uint16_t    __IntrnlIdx = 0;
 };
 
 // vvv Awaitables vvv
@@ -49,7 +49,7 @@ public: // Main setup
 struct Resolve {
 public: // Constructor
     constexpr Resolve(
-        const char* url,
+        std::string_view url,
         std::uint32_t     connLimit     = 64,
         std::uint32_t     inFlightLimit = 64,
         EndpointTLSConfig tlsConfig     = EndpointTLSConfig::AUTO
@@ -58,7 +58,7 @@ public: // Constructor
 
         WFX::Shared::__WFXDeferredContextual.emplace_back([=, this] {
             value_.__IntrnlIdx = __WFXApi->GetHttpAPIV1()->AllocateEndpoint(
-                                    url,
+                                    Shared::StringView{url.data(), url.size()},
                                     connLimit,
                                     inFlightLimit,
                                     tlsConfig
@@ -83,6 +83,6 @@ private:
     Metadata value_ = {};
 };
 
-} // namespace Endpoint
+} // namespace WFX::Http
 
 #endif // WFX_INC_HTTP_ENPOINT_HPP

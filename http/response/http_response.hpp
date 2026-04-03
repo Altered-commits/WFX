@@ -35,12 +35,12 @@ public:
     bool          IsStreamOperation() const;
     OperationType GetOperation()      const;
 
-    void SendText(const char* cstr);
+    void SendText(std::string_view cstr);
     void SendText(std::string&& str);
 
     void SendJson(const Json& j);
 
-    void SendFile(const char* cstr, bool autoHandle404);
+    void SendFile(std::string_view cstr, bool autoHandle404);
     void SendFile(std::string&& path, bool autoHandle404);
 
     void SendTemplate(const char* cstr, Json&& ctx);

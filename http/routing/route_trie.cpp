@@ -77,8 +77,8 @@ const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& out
 
                     case ParamType::UUID:
                     {
-                        WFX::Utils::UUID uuid;
-                        if(!WFX::Utils::UUID::FromString(segment, uuid))
+                        Shared::UUID uuid;
+                        if(!Shared::UUID::FromString(Shared::StringView{segment.data(), segment.size()}, uuid))
                             continue;
                         
                         paramCandidate = uuid;

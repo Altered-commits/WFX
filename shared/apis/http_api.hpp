@@ -2,11 +2,18 @@
 #define WFX_SHARED_HTTP_API_HPP
 
 #include "http/constants/http_constants.hpp"
-#include "third_party/json/json_fwd.hpp"
 #include "shared/http/common.hpp"
+#include "shared/abis/any.hpp"
+#include "shared/abis/string_view.hpp"
 
-// To be consistent with naming
-using Json = nlohmann::json;
+// Fwd declare stuff
+namespace WFX::Http {
+
+class Router;
+class HttpMiddleware;
+class HttpConnectionHandler;
+
+} // namespace WFX::Http
 
 namespace WFX::Shared {
 
@@ -33,41 +40,34 @@ struct HttpAPIDataV1 {
 
 // vvv All aliases for clarity vvv
 // Routing
-using RegisterRouteFn         = void (*)(HttpMethod method, std::string_view path, HttpCallbackType callback);
-using RegisterRouteExFn       = void (*)(HttpMethod method, std::string_view path, HttpMiddlewareStack mwStack, HttpCallbackType callback);
-using PushRoutePrefixFn       = void (*)(std::string_view prefix);
-using PopRoutePrefixFn        = void (*)();
+using RegisterRouteFn   = void (*)(HttpMethod method, StringView path, HttpCallbackType callback);
+using RegisterRouteExFn = void (*)(HttpMethod method, StringView path, HttpMiddlewareStack mwStack, HttpCallbackType callback);
+using PushRoutePrefixFn = void (*)(StringView prefix);
+using PopRoutePrefixFn  = void (*)();
 
 // Middleware
-using RegisterMiddlewareFn    = void (*)(std::string_view name, HttpMiddlewareType callback);
+using RegisterMiddlewareFn = void (*)(StringView name, HttpMiddlewareType callback);
 
-// Response control
-using SetStatusFn             = void (*)(HttpResponse* backend, HttpStatus status);
-using SetHeaderFn             = void (*)(HttpResponse* backend, std::string key, std::string value);
+// Request Control
+using GetMethodFn    = HttpMethod  (*)(const void* request);
+using GetVersionFn   = HttpVersion (*)(const void* request);
+using GetPathFn      = StringView  (*)(const void* request);
+using GetBodyFn      = StringView  (*)(const void* request);
+using GetHeaderFn    = bool        (*)(const void* request, StringView key, StringView* outVal);
+using SetContextFn   = void        (*)(void* request, StringView key, Any value);
+using GetContextFn   = bool        (*)(const void* request, StringView key, Any* outVal);
+using EraseContextFn = void        (*)(void* request, StringView key);
 
-// SendText
-using SendTextCStrFn          = void (*)(HttpResponse* backend, const char* cstr);
-
-// SendJson
-using SendJsonConstRefFn      = void (*)(HttpResponse* backend, const Json* json);
-
-// SendFile
-using SendFileCStrFn          = void (*)(HttpResponse* backend, const char* cstr, bool autoHandle404);
-
-// SendTemplate
-using SendTemplateCStrFn      = void (*)(HttpResponse* backend, const char* cstr, Json&& ctx);
-
-// Special rvalue overload
-using SendTextRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&)>;
-using SendFileRvalueFn        = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&, bool)>;
-using SendTemplateRvalueFn    = WFX::Utils::MoveOnlyFunction<void(HttpResponse*, std::string&&, Json&&)>;
-
-// Stream API
-using StreamFn = void (*)(HttpResponse* backend, StreamGenerator generator, bool streamChunked);
+// Response Control
+using SetStatusFn = void (*)(void* response, HttpStatus status);
+using SetHeaderFn = void (*)(void* response, StringView key, StringView value);
+using SendTextFn  = void (*)(void* response, StringView view);
+using SendFileFn  = void (*)(void* response, StringView view, bool autoHandle404);
+using StreamFn    = void (*)(void* response, StreamGenerator generator, bool streamChunked);
 
 // Endpoint API
 using AllocateEndpointFn = std::uint16_t (*)(
-    std::string_view url, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig
+    StringView url, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig
 );
 using WriteEndpointFn = EndpointStatus (*)(
     void* ctx, std::uint16_t endpointIndex, const std::byte* ptr, std::uint32_t size
@@ -88,26 +88,21 @@ struct HTTP_API_TABLE {
     // Middleware
     RegisterMiddlewareFn    RegisterMiddleware;
 
-    // Response manipulation
+    // Request Control
+    GetMethodFn             GetMethod;
+    GetVersionFn            GetVersion;
+    GetPathFn               GetPath;
+    GetBodyFn               GetBody;
+    GetHeaderFn             GetHeader;
+    SetContextFn            SetContext;
+    GetContextFn            GetContext;
+    EraseContextFn          EraseContext;
+
+    // Response Control
     SetStatusFn             SetStatus;
     SetHeaderFn             SetHeader;
-
-    // SendText overloads
-    SendTextCStrFn          SendTextCStr;
-    SendTextRvalueFn        SendTextMove;
-
-    // SendJson overloads
-    SendJsonConstRefFn      SendJsonConstRef;
-
-    // SendFile overloads
-    SendFileCStrFn          SendFileCStr;
-    SendFileRvalueFn        SendFileMove;
-
-    // SendTemplate overloads
-    SendTemplateCStrFn      SendTemplateCStr;
-    SendTemplateRvalueFn    SendTemplateMove;
-
-    // Stream API
+    SendTextFn              SendText;
+    SendFileFn              SendFile;
     StreamFn                Stream;
 
     // Endpoint API

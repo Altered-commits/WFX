@@ -37,21 +37,19 @@ OperationType HttpResponse::GetOperation() const { return operationType_; }
 
 // vvv MAIN SHIT BELOW vvv
 // vvv TEXT vvv
-void HttpResponse::SendText(const char* cstr)
+void HttpResponse::SendText(std::string_view view)
 {
     auto& logger = Logger::GetInstance();
 
     // Shouldn't happen btw
-    if(!cstr)
-        logger.Fatal("[HttpResponse]: SendText(const char*) received nullptr");
+    if(view.empty())
+        logger.Fatal("[HttpResponse]: SendText(std::string_view) received empty view");
     
     if(!std::holds_alternative<std::monostate>(body))
         logger.Fatal("[HttpResponse]: SendText() called after response body already set");
     
     if(IsFileOperation())
         logger.Fatal("[HttpResponse]: Cannot call SendText() after SendFile()");
-
-    auto view = std::string_view{cstr};
 
     body = view;
     headers.SetHeader("Content-Length", UInt64ToStr(view.size()));
@@ -70,13 +68,11 @@ void HttpResponse::SendJson(const Json& j)
 }
 
 // vvv FILE vvv
-void HttpResponse::SendFile(const char* cstr, bool autoHandle404)
+void HttpResponse::SendFile(std::string_view view, bool autoHandle404)
 {
     // Shouldn't happen btw
-    if(!cstr)
-        Logger::GetInstance().Fatal("[HttpResponse]: SendFile(const char*) received nullptr");
-
-    auto view = std::string_view{cstr};
+    if(view.empty())
+        Logger::GetInstance().Fatal("[HttpResponse]: SendFile(std::string_view) received empty view");
 
     if(!ValidateFileSend(view, autoHandle404))
         return;
@@ -112,7 +108,7 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
     auto meta = TemplateEngine::GetInstance().GetTemplate(std::move(path));
     if(!meta) {
         Status(HttpStatus::NOT_FOUND)
-            .SendText("Template not found");
+            .SendText(std::string_view{"Template not found"});
         return;
     }
 
@@ -134,7 +130,7 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
         // A bit of sanity check, this shouldn't happen btw but still
         if(!meta->gen) {
             Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                .SendText("[ST]_1Internal Error");
+                .SendText(std::string_view{"[ST]_1Internal Error"});
             return;
         }
 
@@ -143,13 +139,13 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
         auto [fd, size] = FileCache::GetInstance().GetFileDesc(meta->filePath);
         if(fd == WFX_INVALID_FILE) {
             Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                .SendText("[ST]_2Internal Error");
+                .SendText(std::string_view{"[ST]_2Internal Error"});
             return;
         }
         auto inFile = FileSystem::OpenFileExisting(fd, static_cast<std::size_t>(size));
         if(!inFile) {
             Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                .SendText("[ST]_3Internal Error");
+                .SendText(std::string_view{"[ST]_3Internal Error"});
             return;
         }
 
@@ -296,7 +292,7 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
                     if(jsonValue->is_string())
                         carry = jsonValue->get<std::string>();
                     else {
-                        auto sv = Form::JsonToFormRender(jsonValue);
+                        auto sv = JsonToFormRender(jsonValue);
                         if(!sv.empty())
                             carry = sv;
                         else
@@ -370,7 +366,7 @@ bool HttpResponse::ValidateFileSend(std::string_view path, bool autoHandle404, c
 
     if(autoHandle404 && !FileSystem::FileExists(path.data())) {
         Status(HttpStatus::NOT_FOUND)
-            .SendText("File not found");
+            .SendText(std::string_view{"File not found"});
         return false;
     }
 

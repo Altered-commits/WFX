@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <string>
 
-namespace Form {
+namespace WFX::Http {
 
 static inline void RenderInputAttributes(std::string& preRenderedForm, const Text& r)
 {
@@ -54,6 +54,6 @@ static inline void RenderInputAttributes(std::string& preRenderedForm, const Flo
         preRenderedForm += "max=\"" + std::to_string(f.max) + "\" ";
 }
 
-} // namespace Form
+} // namespace WFX::Http
 
 #endif // WFX_INC_FORM_RENDERS_HPP

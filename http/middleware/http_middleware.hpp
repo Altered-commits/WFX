@@ -6,6 +6,10 @@
 
 namespace WFX::Http {
 
+// Fwd declare stuff
+struct TrieNode;
+struct ConnectionContext;
+
 using namespace WFX::Shared;
 
 using MiddlewareName        = std::string_view;
@@ -28,7 +32,7 @@ public:
     void RegisterPerRouteMiddleware(const TrieNode* node, HttpMiddlewareStack mwStack);
 
     MiddlewareResult ExecuteMiddleware(
-        const TrieNode* node, HttpRequest& req, Response res, ConnectionContext* ctx
+        ConnectionContext* ctx, const TrieNode* node, Request req, Response res
     );
 
     // Using std::string because TOML loader returns vector<string>
@@ -42,10 +46,10 @@ private:
 
 private: // Helper functions
     MiddlewareResult ExecuteHelper(
-        HttpRequest& req, Response res, HttpMiddlewareStack& stack, ConnectionContext* ctx
+        ConnectionContext* ctx, HttpMiddlewareStack& stack, Request req, Response res
     );
     MiddlewareFunctionResult ExecuteFunction(
-        ConnectionContext* ctx, HttpMiddlewareType& entry, HttpRequest& req, Response res
+        ConnectionContext* ctx, HttpMiddlewareType& entry, Request req, Response res
     );
 
 private:

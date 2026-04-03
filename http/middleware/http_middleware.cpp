@@ -1,6 +1,7 @@
 #include "http_middleware.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/response.hpp"
+#include "http/request.hpp"
 #include "shared/apis/http_api.hpp"
 #include "utils/logger/logger.hpp"
 #include <unordered_set>
@@ -33,11 +34,11 @@ void HttpMiddleware::RegisterPerRouteMiddleware(const TrieNode* node, HttpMiddle
 }
 
 MiddlewareResult HttpMiddleware::ExecuteMiddleware(
-    const TrieNode* node, HttpRequest& req, Response res, ConnectionContext* ctx
+    ConnectionContext* ctx, const TrieNode* node, Request req, Response res
 ) {
     if(ctx->trackAsync.GetMLevel() == MiddlewareLevel::GLOBAL) {
         // Initially execute the global middleware stack
-        auto [success, task] = ExecuteHelper(req, res, middlewareGlobalCallbacks_, ctx);
+        auto [success, task] = ExecuteHelper(ctx, middlewareGlobalCallbacks_, req, res);
         if(!success)
             return {false, std::move(task)};
 
@@ -57,7 +58,7 @@ MiddlewareResult HttpMiddleware::ExecuteMiddleware(
         return {true, AsyncMiddlewareAction{nullptr}};
 
     // Per route middleware exists, execute it
-    return ExecuteHelper(req, res, elem->second, ctx);
+    return ExecuteHelper(ctx, elem->second, req, res);
 }
 
 void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareConfigOrder order)
@@ -99,7 +100,7 @@ void HttpMiddleware::DiscardFactoryMap()
 
 // vvv Helper Functions vvv
 MiddlewareResult HttpMiddleware::ExecuteHelper(
-    HttpRequest& req, Response res, HttpMiddlewareStack& stack, ConnectionContext* ctx
+    ConnectionContext* ctx, HttpMiddlewareStack& stack, Request req, Response res
 ) {
     std::size_t stackSize = stack.size();
     if(stackSize == 0)
@@ -159,7 +160,7 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(
 }
 
 MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(
-    ConnectionContext* ctx, HttpMiddlewareType& entry, HttpRequest& req, Response res
+    ConnectionContext* ctx, HttpMiddlewareType& entry, Request req, Response res
 ) {
     auto& logger = WFX::Utils::Logger::GetInstance();
 

@@ -1,4 +1,5 @@
 #include "http_connection.hpp"
+#include "http/request/http_request.hpp"
 #include "http/response/http_response.hpp"
 #include "shared/apis/http_api.hpp"
 

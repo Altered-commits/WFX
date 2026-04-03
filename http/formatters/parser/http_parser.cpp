@@ -1,6 +1,8 @@
 #include "http_parser.hpp"
 
 #include "config/config.hpp"
+#include "http/headers/http_headers.hpp"
+#include "http/request/http_request.hpp"
 #include "utils/backport/string.hpp"
 #include "utils/crypt/string.hpp"
 

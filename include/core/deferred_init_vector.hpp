@@ -1,10 +1,10 @@
-#ifndef WFX_SHARED_DEFERRED_INIT_VECTOR_HPP
-#define WFX_SHARED_DEFERRED_INIT_VECTOR_HPP
+#ifndef WFX_INC_HTTP_DEFERRED_INIT_VECTOR_HPP
+#define WFX_INC_HTTP_DEFERRED_INIT_VECTOR_HPP
 
 #include <functional>
 #include <vector>
 
-namespace WFX::Shared {
+namespace WFX::Http {
 
 using DeferredSimpleCallback  = void(*)();
 using DeferredContextCallback = std::function<void()>;
@@ -34,6 +34,6 @@ inline void __ExecuteAndEraseDeferred()
     __WFXDeferredContextual.shrink_to_fit();
 }
 
-} // namespace WFX::Shared
+} // namespace WFX::Http
 
-#endif // WFX_SHARED_DEFERRED_INIT_VECTOR_HPP
+#endif // WFX_INC_HTTP_DEFERRED_INIT_VECTOR_HPP

@@ -2,41 +2,42 @@
 #define WFX_INC_HTTP_HELPER_HPP
 
 #include "async/task.hpp"
+#include "shared/abis/types.hpp"
 #include "shared/http/common.hpp"
 
-using WFX::Shared::HttpCallbackType;
-using WFX::Shared::AsyncCallbackType;
-using WFX::Shared::SyncCallbackType;
-using WFX::Shared::MiddlewareAction;
-using WFX::Shared::AsyncMiddlewareAction;
-using WFX::Shared::HttpMiddlewareType;
-using WFX::Shared::HttpMiddlewareStack;
-using WFX::Shared::SyncMiddlewareType;
-using WFX::Shared::AsyncMiddlewareType;
+namespace WFX::Http {
 
-using WFX::Shared::AsyncVoid;
-using WFX::Shared::AsyncMiddlewareAction;
+using Shared::HttpCallbackType;
+using Shared::AsyncCallbackType;
+using Shared::SyncCallbackType;
+using Shared::MiddlewareAction;
+using Shared::AsyncMiddlewareAction;
+using Shared::HttpMiddlewareType;
+using Shared::HttpMiddlewareStack;
+using Shared::SyncMiddlewareType;
+using Shared::AsyncMiddlewareType;
+
+using Shared::AsyncVoid;
+using Shared::AsyncMiddlewareAction;
 
 // vvv Http Stuff vvv
 template<typename Lambda>
 HttpCallbackType MakeHttpCallbackFromLambda(Lambda&& cb)
 {
-    using Request = WFX::Http::HttpRequest;
-
     // Async lambda, wrap automatically
-    if constexpr(std::is_invocable_r_v<AsyncVoid, Lambda, Request&, Response>)
+    if constexpr(std::is_invocable_r_v<AsyncVoid, Lambda, Request, Response>)
         return AsyncCallbackType{std::forward<Lambda>(cb)};
 
     // Sync lambda
-    else if constexpr(std::is_invocable_r_v<void, Lambda, Request&, Response>)
+    else if constexpr(std::is_invocable_r_v<void, Lambda, Request, Response>)
         return SyncCallbackType{std::forward<Lambda>(cb)};
 
     else
         static_assert(
             std::false_type::value,
             "[UserSide:Http-Callback]: Invalid route callback. Expected one of:\n"
-            "  - Sync callback:  void(Request&, Response)\n"
-            "  - Async callback: AsyncVoid(Request&, Response)\n"
+            "  - Sync callback:  void(WFX::Http::Request, WFX::Http::Response)\n"
+            "  - Async callback: AsyncVoid(WFX::Http::Request, WFX::Http::Response)\n"
         );
 }
 
@@ -44,14 +45,12 @@ HttpCallbackType MakeHttpCallbackFromLambda(Lambda&& cb)
 template<typename Lambda>
 inline HttpMiddlewareType MakeMiddlewareEntry(Lambda&& cb)
 {
-    using Request = WFX::Http::HttpRequest;
-
     // Sync middleware
-    if constexpr(std::is_invocable_r_v<MiddlewareAction, Lambda, Request&, Response>)
+    if constexpr(std::is_invocable_r_v<MiddlewareAction, Lambda, Request, Response>)
         return SyncMiddlewareType{std::forward<Lambda>(cb)};
 
     // Async middleware
-    else if constexpr(std::is_invocable_r_v<AsyncMiddlewareAction, Lambda, Request&, Response>)
+    else if constexpr(std::is_invocable_r_v<AsyncMiddlewareAction, Lambda, Request, Response>)
         return AsyncMiddlewareType{std::forward<Lambda>(cb)};
 
     else
@@ -59,8 +58,8 @@ inline HttpMiddlewareType MakeMiddlewareEntry(Lambda&& cb)
         static_assert(
             std::false_type::value,
             "[UserSide:Http-Middleware]: Invalid middleware type. Expected either:\n"
-            "  - A sync middleware: MiddlewareAction(Request&, Response)\n"
-            "  - An async middleware: AsyncMiddlewareAction(Request&, Response)\n"
+            "  - A sync middleware: MiddlewareAction(WFX::Http::Request, WFX::Http::Response)\n"
+            "  - An async middleware: AsyncMiddlewareAction(WFX::Http::Request, WFX::Http::Response)\n"
         );
 }
 
@@ -76,5 +75,7 @@ inline HttpMiddlewareStack MakeMiddlewareFromFunctions(Lambda&&... mws)
 
     return stack;
 }
+
+} // namespace WFX::Http
 
 #endif // WFX_INC_HTTP_HELPER_HPP

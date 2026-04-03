@@ -1,6 +1,7 @@
 #include "http_api.hpp"
 
 #include "http/connection/http_connection.hpp"
+#include "http/request/http_request.hpp"
 #include "http/response/http_response.hpp"
 #include "http/routing/router.hpp"
 #include "http/middleware/http_middleware.hpp"
@@ -17,30 +18,41 @@ using WFX::Utils::Logger;
 // with multiple connections is our entire flow of data is single threaded and will remain that way
 static HttpAPIDataV1 __GlobalHttpDataV1;
 
+// vvv Helper functions vvv
+static HttpRequest*       ToReq(void* backend) { return static_cast<HttpRequest*>(backend); }
+static const HttpRequest* ToReq(const void* backend) { return static_cast<const HttpRequest*>(backend); }
+static HttpResponse*      ToRes(void* backend) { return static_cast<HttpResponse*>(backend); }
+
+// vvv Main Stuff vvv
 const HTTP_API_TABLE* GetHttpAPIV1()
 {
     static HTTP_API_TABLE __GlobalHttpAPIV1 = {
         // Routing
-        [](HttpMethod method, std::string_view path, HttpCallbackType cb) {  // RegisterRoute
+        [](HttpMethod method, StringView path, HttpCallbackType cb) {  // RegisterRoute
             if(!__GlobalHttpDataV1.router)
                 Logger::GetInstance().Fatal("[HttpAPI]: Router was nullptr for 'RegisterRoute'");
 
-            (void)__GlobalHttpDataV1.router->RegisterRoute(method, path, std::move(cb));
+            (void)__GlobalHttpDataV1.router->RegisterRoute(
+                method, std::string_view{path.Data(), path.Size()}, std::move(cb)
+            );
         },
-        [](HttpMethod method, std::string_view path, HttpMiddlewareStack mwStack, HttpCallbackType cb) { // RegisterRouteEx
+        [](HttpMethod method, StringView path, HttpMiddlewareStack mwStack, HttpCallbackType cb) { // RegisterRouteEx
             if(!__GlobalHttpDataV1.router || !__GlobalHttpDataV1.middleware)
                 Logger::GetInstance().Fatal("[HttpAPI]: Router or Middleware was nullptr for 'RegisterRouteEx'");
 
-            auto* node = __GlobalHttpDataV1.router->RegisterRoute(method, path, std::move(cb));
+            auto* node = __GlobalHttpDataV1.router->RegisterRoute(
+                method, std::string_view{path.Data(), path.Size()}, std::move(cb)
+            );
+
             __GlobalHttpDataV1.middleware->RegisterPerRouteMiddleware(node, std::move(mwStack));
         },
-        [](std::string_view prefix) {  // PushRoutePrefix
+        [](StringView prefix) {  // PushRoutePrefix
             if(!__GlobalHttpDataV1.router)
                 Logger::GetInstance().Fatal("[HttpAPI]: Router was nullptr for 'PushRoutePrefix'");
 
-            __GlobalHttpDataV1.router->PushRouteGroup(prefix);
+            __GlobalHttpDataV1.router->PushRouteGroup(std::string_view{prefix.Data(), prefix.Size()});
         },
-        [](void) {  // PopRoutePrefix
+        [] {  // PopRoutePrefix
             if(!__GlobalHttpDataV1.router)
                 Logger::GetInstance().Fatal("[HttpAPI]: Router was nullptr for 'PopRoutePrefix'");
 
@@ -48,49 +60,99 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         },
 
         // Middleware
-        [](std::string_view name, HttpMiddlewareType cb) { // RegisterMiddleware
+        [](StringView name, HttpMiddlewareType cb) { // RegisterMiddleware
             if(!__GlobalHttpDataV1.middleware)
                 Logger::GetInstance().Fatal("[HttpAPI]: Middleware was nullptr for 'RegisterMiddleware'");
 
-            __GlobalHttpDataV1.middleware->RegisterMiddleware(name, std::move(cb));
+            __GlobalHttpDataV1.middleware->RegisterMiddleware(
+                std::string_view{name.Data(), name.Size()}, std::move(cb)
+            );
         },
-        
-        // Response handling
-        [](HttpResponse* backend, HttpStatus code) {  // SetStatusFn
-            backend->Status(code);
-        },
-        [](HttpResponse* backend, std::string key, std::string value) {  // SetHeaderFn
-            backend->Set(std::move(key), std::move(value));
-        },
-        [](HttpResponse* backend, const char* cstr) {  // SendTextCStrFn
-            backend->SendText(cstr);
-        },
-        SendTextRvalueFn{[](HttpResponse* backend, std::string&& text) {  // SendTextRvalueFn
-            backend->SendText(std::move(text));
-        }},
-        [](HttpResponse* backend, const Json* json) {  // SendJsonConstRefFn
-            backend->SendJson(*json);
-        },
-        [](HttpResponse* backend, const char* cstr, bool autoHandle404) {  // SendFileCStrFn
-            backend->SendFile(cstr, autoHandle404);
-        },
-        SendFileRvalueFn{[](HttpResponse* backend, std::string&& path, bool autoHandle404) {  // SendFileRvalueFn
-            backend->SendFile(std::move(path), autoHandle404);
-        }},
-        [](HttpResponse* backend, const char* cstr, Json&& ctx) {  // SendTemplateCStrFn
-            backend->SendTemplate(cstr, std::move(ctx));
-        },
-        SendTemplateRvalueFn{[](HttpResponse* backend, std::string&& path, Json&& ctx) {  // SendTemplateRvalueFn
-            backend->SendTemplate(std::move(path), std::move(ctx));
-        }},
 
+        // Request Handling
+        [](const void* request) { // GetMethodFn
+            return ToReq(request)->method;
+        },
+        [](const void* request) { // GetVersionFn
+            return ToReq(request)->version;
+        },
+        [](const void* request) { // GetPathFn
+            auto path = ToReq(request)->path;
+            return StringView{path.data(), static_cast<std::uint64_t>(path.size())};
+        },
+        [](const void* request) { // GetBodyFn
+            auto body = ToReq(request)->body;
+            return StringView{body.data(), static_cast<std::uint64_t>(body.size())};
+        },
+        [](const void* request, StringView key, StringView* outVal) { // GetHeaderFn
+            if(!outVal)
+                return false;
+
+            auto* req = ToReq(request);
+            auto val = req->headers.GetHeader(std::string_view{key.Data(), key.Size()});
+
+            if(val.empty())
+                return false;
+
+            *outVal = StringView{val.data(), static_cast<std::uint64_t>(val.size())};
+            return true;
+        },
+        [](void* request, StringView key, Any value) { // SetContextFn
+            auto* req = ToReq(request);
+            auto k = std::string(key.Data(), key.Size());
+
+            // If key exists, destroy old value
+            auto [it, inserted] = req->context.try_emplace(k);
+            if(!inserted)
+                it->second.Reset();
+
+            it->second = value;
+        },
+        [](const void* request, StringView key, Any* outVal) { // GetContextFn
+            if(!outVal)
+                return false;
+
+            auto* req = ToReq(request);
+
+            auto it = req->context.find(std::string(key.Data(), key.Size()));
+            if(it == req->context.end())
+                return false;
+
+            *outVal = it->second;
+            return true;
+        },
+        [](void* request, StringView key) { // EraseContextFn
+            auto* req = ToReq(request);
+
+            auto it = req->context.find(std::string(key.Data(), key.Size()));
+            if(it != req->context.end()) {
+                it->second.Reset();
+                req->context.erase(it);
+            }
+        },
+
+        // Response handling
+        [](void* backend, HttpStatus code) {  // SetStatusFn
+            ToRes(backend)->Status(code);
+        },
+        [](void* backend, StringView key, StringView value) {  // SetHeaderFn
+            ToRes(backend)->Set(
+                std::string(key.Data(), key.Size()), std::string(value.Data(), value.Size())
+            );
+        },
+        [](void* backend, StringView view) {  // SendTextFn
+            ToRes(backend)->SendText(std::string_view{view.Data(), view.Size()});
+        },
+        [](void* backend, StringView view, bool autoHandle404) {  // SendFileFn
+            ToRes(backend)->SendFile(std::string_view{view.Data(), view.Size()}, autoHandle404);
+        },
         // Stream API
-        [](HttpResponse* backend, StreamGenerator generator, bool streamChunked) { // StreamFn
-            backend->Stream(std::move(generator), streamChunked);
+        [](void* backend, StreamGenerator generator, bool streamChunked) { // StreamFn
+            ToRes(backend)->Stream(std::move(generator), streamChunked);
         },
 
         // Endpoint API
-        [](std::string_view url, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig) -> std::uint16_t {
+        [](StringView urlView, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig) -> std::uint16_t {
             /*
              * NOTE: 'url' allowed only till port number (route and optional parameters are not allowed)
              * Example:
@@ -101,12 +163,12 @@ const HTTP_API_TABLE* GetHttpAPIV1()
              *      example.com            is not allowed (no protocol defined)
              */
             auto& logger = Logger::GetInstance();
-            if(url.empty())
+            if(urlView.Empty())
                 logger.Fatal("[HttpAPI]: Endpoint got empty URL");
 
-            logger.Info("[HttpAPI]: Resolving endpoint: ", url);
+            std::string_view protocol{}, host{}, port{}, url{urlView.Data(), urlView.Size()}, urlCpy{url};
 
-            std::string_view protocol{}, host{}, port{}, urlCpy{url};
+            logger.Info("[HttpAPI]: Resolving endpoint: ", url);
 
             // Detect protocol
             auto pos = url.find("://");

@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace Form {
+namespace WFX::Http {
 
 // vvv Helper Aliases vvv
 using TextOutputType  = DecayedType<Text>::Type;
@@ -84,6 +84,6 @@ static constexpr SanitizerFn<IntOutputType>   DefaultSanitizerFor(const Int&)   
 static constexpr SanitizerFn<UIntOutputType>  DefaultSanitizerFor(const UInt&)  { return DefaultSanitizeUInt;  }
 static constexpr SanitizerFn<FloatOutputType> DefaultSanitizerFor(const Float&) { return DefaultSanitizeFloat; }
 
-} // namespace Form
+} // namespace WFX::Http
 
 #endif // WFX_INC_FORM_SANITIZERS_HPP

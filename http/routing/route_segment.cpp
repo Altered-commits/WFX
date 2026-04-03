@@ -1,6 +1,6 @@
 #include "route_segment.hpp"
 
-#include "utils/uuid/uuid.hpp"
+#include "shared/abis/uuid.hpp"
 
 namespace WFX::Http {
 
@@ -48,10 +48,10 @@ bool RouteSegment::MatchesStatic(std::string_view candidate) const
 ParamType RouteSegment::GetParamType() const
 {
     if(const DynamicSegment* p = GetParam()) {
-        if(std::holds_alternative<std::uint64_t>(*p))    return ParamType::UINT;
-        if(std::holds_alternative<std::int64_t>(*p))     return ParamType::INT;
-        if(std::holds_alternative<std::string_view>(*p)) return ParamType::STRING;
-        if(std::holds_alternative<WFX::Utils::UUID>(*p)) return ParamType::UUID;
+        if(std::holds_alternative<std::uint64_t>(*p))     return ParamType::UINT;
+        if(std::holds_alternative<std::int64_t>(*p))      return ParamType::INT;
+        if(std::holds_alternative<std::string_view>(*p))  return ParamType::STRING;
+        if(std::holds_alternative<WFX::Shared::UUID>(*p)) return ParamType::UUID;
     }
 
     return ParamType::UNKNOWN;

@@ -1,55 +1,60 @@
 #ifndef WFX_INC_HTTP_ROUTE_MACROS_HPP
 #define WFX_INC_HTTP_ROUTE_MACROS_HPP
 
-#include "aliases.hpp"
 #include "helper.hpp"
+#include "request.hpp"
 #include "response.hpp"
 #include "core/core.hpp"
-#include "shared/utils/deferred_init_vector.hpp"
+#include "core/deferred_init_vector.hpp"
 
 // Glue suffix to names
 #define WFX_ROUTE_CLASS(prefix, id) WFX_CONCAT(WFXRoute_, WFX_CONCAT(prefix, id))
 #define WFX_ROUTE_INSTANCE(id)      WFX_CONCAT(WFXRouteInst_, id)
 
 // Generate once
-#define WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, callback, uniq)  \
+#define WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, cb, uniq)        \
     namespace {                                                         \
         struct WFX_ROUTE_CLASS(method, uniq) {                          \
             WFX_ROUTE_CLASS(method, uniq)() {                           \
                 WFX::Shared::__WFXDeferredSimple.emplace_back([] {      \
                     __WFXApi->GetHttpAPIV1()->RegisterRoute(            \
-                        WFX::Http::HttpMethod::method, path, callback   \
+                        WFX::Http::HttpMethod::method,                  \
+                        WFX::Shared::StringView::FromCString(path),     \
+                        WFX::Http::MakeHttpCallbackFromLambda(cb)       \
                     );                                                  \
                 });                                                     \
             }                                                           \
         } WFX_ROUTE_INSTANCE(uniq);                                     \
     }
 
-#define WFX_INTERNAL_ROUTE_REGISTER_EX_IMPL(method, path, mw, callback, uniq) \
+#define WFX_INTERNAL_ROUTE_REGISTER_EX_IMPL(method, path, mw, cb, uniq)       \
     namespace {                                                               \
         struct WFX_ROUTE_CLASS(method, uniq) {                                \
             WFX_ROUTE_CLASS(method, uniq)() {                                 \
                 WFX::Shared::__WFXDeferredSimple.emplace_back([] {            \
                     __WFXApi->GetHttpAPIV1()->RegisterRouteEx(                \
-                        WFX::Http::HttpMethod::method, path, mw, callback     \
+                        WFX::Http::HttpMethod::method,                        \
+                        WFX::Shared::StringView::FromCString(path),           \
+                        mw,                                                   \
+                        WFX::Http::MakeHttpCallbackFromLambda(cb)             \
                     );                                                        \
                 });                                                           \
             }                                                                 \
         } WFX_ROUTE_INSTANCE(uniq);                                           \
     }
 
-#define WFX_INTERNAL_ROUTE_REGISTER(method, path, callback)             \
-    WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, callback, __COUNTER__)
+#define WFX_INTERNAL_ROUTE_REGISTER(method, path, cb)             \
+    WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, cb, __COUNTER__)
 
-#define WFX_INTERNAL_ROUTE_REGISTER_EX(method, path, mw, callback)      \
-    WFX_INTERNAL_ROUTE_REGISTER_EX_IMPL(method, path, mw, callback, __COUNTER__)
+#define WFX_INTERNAL_ROUTE_REGISTER_EX(method, path, mw, cb)      \
+    WFX_INTERNAL_ROUTE_REGISTER_EX_IMPL(method, path, mw, cb, __COUNTER__)
 
 // vvv HTTP MACROS vvv
-#define WFX_GET(path, cb)  WFX_INTERNAL_ROUTE_REGISTER(GET, path, MakeHttpCallbackFromLambda(cb))
-#define WFX_POST(path, cb) WFX_INTERNAL_ROUTE_REGISTER(POST, path, MakeHttpCallbackFromLambda(cb))
+#define WFX_GET(path, cb)  WFX_INTERNAL_ROUTE_REGISTER(GET, path, cb)
+#define WFX_POST(path, cb) WFX_INTERNAL_ROUTE_REGISTER(POST, path, cb)
 
-#define WFX_GET_EX(path, mw, cb)  WFX_INTERNAL_ROUTE_REGISTER_EX(GET, path, mw, MakeHttpCallbackFromLambda(cb))
-#define WFX_POST_EX(path, mw, cb) WFX_INTERNAL_ROUTE_REGISTER_EX(POST, path, mw, MakeHttpCallbackFromLambda(cb))
+#define WFX_GET_EX(path, mw, cb)  WFX_INTERNAL_ROUTE_REGISTER_EX(GET, path, mw, cb)
+#define WFX_POST_EX(path, mw, cb) WFX_INTERNAL_ROUTE_REGISTER_EX(POST, path, mw, cb)
 
 // vvv ROUTE GROUPING vvv
 #define WFX_GROUP_START_IMPL(path, id)                                \

@@ -1,7 +1,8 @@
 #ifndef WFX_HTTP_CONNECTION_HANDLER_HPP
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
-#include "http/request/http_request.hpp"
+#include "shared/http/common.hpp" // Temporary, will be removed in future
+#include "shared/abis/types.hpp"
 #include "utils/backport/move_only_function.hpp"
 #include "utils/crypt/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
@@ -25,6 +26,10 @@
 namespace WFX::Http {
 
 using namespace WFX::Shared;
+
+// Fwd declare stuff
+struct HttpRequest;
+struct HttpResponse;
 
 // Cross-Platform compatible Ip Struct
 struct WFXIpAddress {
