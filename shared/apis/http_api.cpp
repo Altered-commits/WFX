@@ -148,7 +148,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         },
         // Stream API
         [](void* backend, StreamGenerator generator, bool streamChunked) { // StreamFn
-            ToRes(backend)->Stream(std::move(generator), streamChunked);
+            ToRes(backend)->Stream(generator, streamChunked);
         },
 
         // Endpoint API

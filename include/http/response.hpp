@@ -6,8 +6,6 @@
 
 namespace WFX::Http {
 
-using WFX::Shared::StreamGenerator;
-
 /* User side implementation of 'Response' class. 'CoreEngine' passes the API */
 class Response {
 public:
@@ -39,6 +37,39 @@ public:
     {
         auto sv = ToSV(path);
         __WFXApi->GetHttpAPIV1()->SendFile(backend_, sv, autoHandle404);
+    }
+
+    template<typename Fn>
+    void Stream(Fn&& fn, bool chunked)
+    {
+        using FnType = std::decay_t<Fn>;
+
+        // Allocate using engine allocator
+        void* raw = __WFXApi->GetMemoryAPIV1()->Alloc(sizeof(FnType));
+        if(!raw)
+            return;
+
+        // Placement new
+        FnType* f = new(raw) FnType(std::forward<Fn>(fn));
+
+        Shared::StreamGenerator gen{
+            f,
+
+            // Next
+            [](void* ctx, Shared::StreamBuffer buffer) -> Shared::StreamResult {
+                return (*static_cast<FnType*>(ctx))(buffer);
+            },
+
+            // Destroy
+            [](void* ctx) {
+                auto* f = static_cast<FnType*>(ctx);
+
+                f->~FnType();
+                __WFXApi->GetMemoryAPIV1()->Free(f);
+            }
+        };
+
+        __WFXApi->GetHttpAPIV1()->Stream(backend_, gen, chunked);
     }
 
 private:

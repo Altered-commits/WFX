@@ -38,6 +38,14 @@ struct StreamBuffer {
 };
 static_assert(sizeof(StreamBuffer) == 16, "'StreamBuffer' must be exactly 16 bytes.");
 
+struct StreamGenerator {
+    void* ctx;
+
+    StreamResult (*Next)(void* ctx, StreamBuffer buffer);
+    void         (*Destroy)(void* ctx);
+};
+static_assert(sizeof(StreamGenerator) == 24, "'StreamGenerator' must be exactly 24 bytes.");
+
 // vvv Endpoint vvv
 enum class EndpointStatus : std::uint8_t {
     // Success

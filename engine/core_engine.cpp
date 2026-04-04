@@ -205,11 +205,20 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
         case SerializeResult::SERIALIZE_SUCCESS:
             if(res.IsFileOperation())
                 connHandler_->WriteFile(ctx, std::move(bodyView));
-            else if(res.IsStreamOperation())
+
+            else if(res.IsStreamOperation()) {
+                auto& gen = std::get<StreamGenerator>(res.body);
+
                 connHandler_->Stream(
-                    ctx, std::move(std::get<StreamGenerator>(res.body)),
+                    ctx,
+                    gen, // pass copy (trivial)
                     res.GetOperation() == OperationType::STREAM_CHUNKED
                 );
+
+                // CRITICAL: prevent double destroy by both HttpResponse and ConnectionHandler
+                gen.ctx = nullptr;
+                res.body = std::monostate{};
+            }
             else
                 connHandler_->Write(ctx, {});
 

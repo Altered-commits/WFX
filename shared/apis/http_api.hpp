@@ -17,7 +17,7 @@ class HttpConnectionHandler;
 
 namespace WFX::Shared {
 
-using namespace WFX::Http; // For 'HttpMethod', 'HttpResponse', 'HttpStatus'
+using namespace WFX::Http; // For 'HttpMethod', ...
 
 enum class HttpAPIVersion : std::uint8_t {
     V1 = 1,

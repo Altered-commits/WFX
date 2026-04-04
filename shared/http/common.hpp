@@ -15,10 +15,10 @@
 namespace WFX::Http {
 
 // Defined in user side of code (include/http/response.hpp)
-class Response;
+struct Response;
 
 // Defined in user side of code (include/http/response.hpp)
-class Request;
+struct Request;
 
 } // namespace WFX::Http
 
@@ -28,8 +28,6 @@ namespace WFX::Shared {
 using DynamicSegment         = std::variant<std::uint64_t, std::int64_t, std::string_view, UUID>;
 using StaticOrDynamicSegment = std::variant<std::string_view, DynamicSegment>;
 using PathSegments           = std::vector<DynamicSegment>;
-
-using StreamGenerator = WFX::Utils::MoveOnlyFunction<StreamResult(StreamBuffer)>;
 
 // vvv Middleware (Sync & Async) vvv
 using SyncMiddlewareType  = MiddlewareAction (*)(WFX::Http::Request, WFX::Http::Response);

@@ -272,7 +272,7 @@ void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
 
 __CleanupOrRearm:
     // Special case, stream operation, stream the content via streamGenerator
-    if(ctx->streamGenerator) {
+    if(ctx->isStreamOperation) {
         ResumeStream(ctx);
         return;
     }
@@ -378,14 +378,14 @@ EndpointStatus EpollConnectionHandler::WriteEndpoint(
 void EpollConnectionHandler::Stream(ConnectionContext* ctx, StreamGenerator generator, bool streamChunked)
 {
     // Sanity checks
-    if(!generator) {
-        logger_.Error("[Epoll]: Stream() called with null generator");
+    if(!generator.ctx || !generator.Next) {
+        logger_.Error("[Epoll]: 'Stream()' called but received empty generator");
         Close(ctx);
         return;
     }
 
     // Store the generator function in context for future use
-    ctx->streamGenerator = std::move(generator);
+    ctx->streamGenerator = generator;
 
     // For streaming operations, we first want to finish writing out headers-
     // -and mark it as stream operation, so when 'Write' completes, it should-
@@ -764,13 +764,9 @@ bool EpollConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string
     if(fd < 0)
         return false;
 
-    if(!ctx->fileInfo)
-        ctx->fileInfo = new FileInfo{};
-    
-    auto* fileInfo = ctx->fileInfo;
-    fileInfo->fd       = fd;
-    fileInfo->offset   = 0;
-    fileInfo->fileSize = size;
+    ctx->fileInfo.fd       = fd;
+    ctx->fileInfo.offset   = 0;
+    ctx->fileInfo.fileSize = size;
 
     return true;
 }
@@ -900,20 +896,20 @@ void EpollConnectionHandler::Receive(ConnectionContext* ctx)
 void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
 {
     // This is called in this order: WriteFile() -> Write() [Headers sent] -> SendFile()
-    // This expects fileInfo to be constructed and set beforehand
+    // This expects fileInfo to be set beforehand
     // If not, its UB. GG
-    if(!ctx->fileInfo) {
-        logger_.Warn("[Epoll]: SendFile expects ctx->fileInfo to be set, got nullptr");
+    if(ctx->fileInfo.fd < 0 || ctx->fileInfo.fileSize <= 0) {
+        logger_.Warn("[Epoll]: 'SendFile' expects 'ctx->fileInfo' to be set, got invalid data");
         Close(ctx);
         return;
     }
 
-    auto* fileInfo = ctx->fileInfo;
-    int   fd       = fileInfo->fd;
+    auto& fileInfo = ctx->fileInfo;
+    int   fd       = fileInfo.fd;
 
-    while(fileInfo->offset < fileInfo->fileSize) {
-        ssize_t n = WrapFile(ctx, fd, &fileInfo->offset,
-                               fileInfo->fileSize - fileInfo->offset);
+    while(fileInfo.offset < fileInfo.fileSize) {
+        ssize_t n = WrapFile(ctx, fd, &fileInfo.offset,
+                               fileInfo.fileSize - fileInfo.offset);
         // Try to send more of file
         if(n > 0)
             continue;
@@ -951,8 +947,8 @@ void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
 void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
 {
     // Paranoia check
-    if(!ctx->streamGenerator) {
-        logger_.Warn("[Epoll]: 'streamGenerator' function called but is nullptr");
+    if(!ctx->streamGenerator.ctx || !ctx->streamGenerator.Next) {
+        logger_.Warn("[Epoll]: 'ResumeStream' function called but received empty generator");
         Close(ctx);
         return;
     }
@@ -985,7 +981,7 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     char*       chunkPtr = !ctx->streamChunked ? writeRegion.ptr : writeRegion.ptr + chunkHeaderReserve;
     std::size_t chunkCap = !ctx->streamChunked ? writeRegion.len : writeRegion.len - chunkHeaderReserve - 2;
 
-    auto streamResult = ctx->streamGenerator({ chunkPtr, chunkCap });
+    auto streamResult = ctx->streamGenerator.Next(ctx->streamGenerator.ctx, { chunkPtr, chunkCap });
 
     // Refresh timeout everytime a chunk is sent
     RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
@@ -1053,7 +1049,6 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     bool wasChunked = static_cast<bool>(ctx->streamChunked);
 
     // Only STOP_AND_... states can reach here
-    // Now its not necessary to reset "ALL" the data here but uk, fun
     writeMeta->dataLength    = 0;
     writeMeta->writtenLength = 0;
     ctx->isStreamOperation   = 0;
@@ -1414,21 +1409,36 @@ ssize_t EpollConnectionHandler::WrapFile(ConnectionContext* ctx, int fd, off_t* 
             ctx->isFileOperation   = 0;
             ctx->isStreamOperation = 1;
             ctx->streamChunked     = 0;
-            ctx->streamGenerator   = [
-                fileInfo = ctx->fileInfo
-            ](StreamBuffer buffer) {
-                std::int64_t res = pread(fileInfo->fd, buffer.buffer, buffer.size, fileInfo->offset);
-                // Error or EOF
-                if(res <= 0)
-                    return StreamResult{ 
-                        0, res == 0
-                            ? StreamAction::STOP_AND_ALIVE_CONN
-                            : StreamAction::STOP_AND_CLOSE_CONN
-                    };
+            ctx->streamGenerator = {
+                // ctx
+                &ctx->fileInfo,
 
-                // No error
-                fileInfo->offset += res;
-                return StreamResult{ static_cast<std::size_t>(res), StreamAction::CONTINUE };
+                // Next
+                [](void* c, StreamBuffer buffer) -> StreamResult {
+                    auto* fileInfo = static_cast<FileInfo*>(c);
+
+                    ssize_t res = pread(fileInfo->fd, buffer.buffer, buffer.size, fileInfo->offset);
+
+                    // Error or EOF
+                    if(res <= 0) {
+                        return StreamResult{
+                            0, res == 0
+                                ? StreamAction::STOP_AND_ALIVE_CONN
+                                : StreamAction::STOP_AND_CLOSE_CONN
+                        };
+                    }
+
+                    // Success
+                    fileInfo->offset += res;
+
+                    return StreamResult{
+                        static_cast<std::size_t>(res),
+                        StreamAction::CONTINUE
+                    };
+                },
+
+                // Destroy (not needed)
+                nullptr
             };
 
             // Signal to caller that streaming mode is engaged

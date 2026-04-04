@@ -56,6 +56,7 @@ private:
 
 public: // Internal use
     void ClearInfo();
+    void DestroyStream(StreamGenerator& gen);
 
 public:
     HttpVersion     version = HttpVersion::HTTP_1_1;

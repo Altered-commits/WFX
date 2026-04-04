@@ -177,17 +177,16 @@ struct ConnectionContext : public ConnectionTag {
     std::uint16_t        endpointIdx        = 0;        // 2 bytes
 
     void*                sslConn            = nullptr;  // 8 bytes
-    StreamGenerator      streamGenerator    = {};       // 8 bytes
     HttpRequest*         requestInfo        = nullptr;  // 8 bytes
     HttpResponse*        responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
-    FileInfo*            fileInfo           = nullptr;  // 8 bytes
     Async::GenericTask   parentCoro;                    // 8 bytes
     WFX::Utils::RWBuffer rwBuffer;                      // 16 bytes
+    FileInfo             fileInfo           = {};       // 24 bytes
+    StreamGenerator      streamGenerator    = {};       // 24 bytes
 
     WFXIpAddress         connInfo;                      // 20 bytes
-    int                  __Pad              = 0;        // 4 bytes
     WFXSocket            socket             = -1;       // 4 | 8 bytes
-                                                        // Padded if sizeof(WFXSocket) == 4
+                                                        // Padded if sizeof(WFXSocket) == 8
                                                         
     ConnectionContext*   clientContext      = nullptr;  // 8 bytes (Set only on endpoint contexts)
     ConnectionContext*   endpointContext    = nullptr;  // 8 bytes (Set only on client contexts)
@@ -205,12 +204,13 @@ public: // Helper functions
     ConnectionState GetConnectionState() const;
     EndpointState   GetEndpointState()   const;
     EndpointStatus  GetEndpointStatus()  const;
-    
+
     bool          IsEndpoint() const;
     bool          IsAsyncOperation()    const;
+    void          CleanupStreamGenerator();
     Async::Status TryFinishCoroutines();
 };
-static_assert(sizeof(ConnectionContext) <= 128, "ConnectionContext must STRICTLY be less than or equal to 128 bytes.");
+static_assert(sizeof(ConnectionContext) <= 196, "ConnectionContext must STRICTLY be less than or equal to 196 bytes.");
 
 struct EndpointContext {
     std::string      host;

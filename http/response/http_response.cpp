@@ -149,10 +149,8 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
             return;
         }
 
-        // We will stream out the stuff pretty much, chunked encoded template
-        // For generator, we can confidently take the raw pointer as template metadata will exist-
-        // -till the end of life (..hopefully)
-        Stream([
+        // Main callback
+        auto streamCallback = [
             inFile        = std::move(inFile),
             ctx           = std::move(ctx),
             gen           = meta->gen.get(),
@@ -323,7 +321,37 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
                 // Yeah uhh shouldn't happen
                 return { 0, StreamAction::STOP_AND_CLOSE_CONN };
             }
-        }, true, true);
+        };
+
+        using FnType = decltype(streamCallback);
+
+        void* raw = BufferPool::GetInstance().Lease(sizeof(FnType));
+        if(!raw) {
+            Status(HttpStatus::INTERNAL_SERVER_ERROR)
+                .SendText(std::string_view{"[ST]_OOM"});
+            return;
+        }
+
+        FnType* f = new(raw) FnType(std::move(streamCallback));
+
+        StreamGenerator gen{
+            f,
+
+            [](void* ctx, StreamBuffer buffer) -> StreamResult {
+                return (*static_cast<FnType*>(ctx))(buffer);
+            },
+
+            [](void* ctx) {
+                auto* f = static_cast<FnType*>(ctx);
+                f->~FnType();
+                BufferPool::GetInstance().Release(f);
+            }
+        };
+
+        // We will stream out the stuff pretty much, chunked encoded template
+        // For generator, we can confidently take the raw pointer as template metadata will exist-
+        // -till the end of life (..hopefully)
+        Stream(gen, true, true);
     }
 }
 
@@ -332,12 +360,16 @@ void HttpResponse::Stream(StreamGenerator generator, bool streamChunked, bool sk
     if(!skipChecks && !std::holds_alternative<std::monostate>(body))
         Logger::GetInstance().Fatal("[HttpResponse]: Stream() called after body already set");
 
+    // Destroy existing stream, this could happen if we skip checks and did multiple calls
+    if(auto* old = std::get_if<StreamGenerator>(&body))
+        DestroyStream(*old);
+
     // Set the streaming-specific header
     if(streamChunked)
         headers.SetHeader("Transfer-Encoding", "chunked");
 
     operationType_ = streamChunked ? OperationType::STREAM_CHUNKED : OperationType::STREAM_FIXED;
-    body = std::move(generator);
+    body = generator;
 }
 
 // vvv HELPER FUNCTIONS vvv
@@ -388,10 +420,26 @@ void HttpResponse::PrepareFileHeaders(std::string_view path)
 void HttpResponse::ClearInfo()
 {
     headers.Clear();
+
+    // 'StreamGenerator' is POD type, it does not have destructor. So when we switch to monostate below,-
+    // -variant would not be able to destroy 'StreamGenerator'. Hence we specifically destroy it ourselves
+    if(auto* gen = std::get_if<StreamGenerator>(&body))
+        DestroyStream(*gen);
+
     body           = std::monostate{};
     version        = HttpVersion::HTTP_1_1;
     status         = HttpStatus::OK;
     operationType_ = OperationType::TEXT;
+}
+
+void HttpResponse::DestroyStream(StreamGenerator& gen)
+{
+    if(gen.ctx && gen.Destroy)
+        gen.Destroy(gen.ctx);
+
+    gen.ctx     = nullptr;
+    gen.Next    = nullptr;
+    gen.Destroy = nullptr;
 }
 
 } // namespace WFX::Http

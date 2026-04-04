@@ -11,17 +11,9 @@ WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
     ipType = other.ipType;
 
     switch(ipType) {
-        case AF_INET:
-            memcpy(&ip.v4, &other.ip.v4, sizeof(in_addr));
-            break;
-        
-        case AF_INET6:
-            memcpy(&ip.v6, &other.ip.v6, sizeof(in6_addr));
-            break;
-
-        default:
-            memset(&ip, 0, sizeof(ip));
-            break;
+        case AF_INET:  memcpy(&ip.v4, &other.ip.v4, sizeof(in_addr));  break;
+        case AF_INET6: memcpy(&ip.v6, &other.ip.v6, sizeof(in6_addr)); break;
+        default:       memset(&ip, 0, sizeof(ip));                     break;
     }
 
     return *this;
@@ -32,7 +24,11 @@ bool WFXIpAddress::operator==(const WFXIpAddress& other) const
     if(ipType != other.ipType)
         return false;
 
-    return memcmp(ip.raw, other.ip.raw, ipType == AF_INET ? 4 : 16) == 0;
+    switch(ipType) {
+        case AF_INET:  return memcmp(ip.raw, other.ip.raw, 4) == 0;
+        case AF_INET6: return memcmp(ip.raw, other.ip.raw, 16) == 0;
+        default:       return false;
+    }
 }
 
 // Helper functions
@@ -65,7 +61,8 @@ void ConnectionContext::ResetContext()
     
     if(requestInfo)  { delete requestInfo;  requestInfo  = nullptr; }
     if(responseInfo) { delete responseInfo; responseInfo = nullptr; }
-    if(fileInfo)     { delete fileInfo;     fileInfo     = nullptr; }
+
+    CleanupStreamGenerator();
 
     // Clear all flags except 'endpointState', tis special
     const bool keep = endpointState;
@@ -73,6 +70,7 @@ void ConnectionContext::ResetContext()
     endpointState = keep;
 
     // Rest of the stuff
+    fileInfo           = FileInfo{};
     connInfo           = WFXIpAddress{};
     expectedBodyLength = 0;
     eventType          = EventType::EVENT_ACCEPT;
@@ -90,8 +88,10 @@ void ConnectionContext::ClearContext()
 
     if(requestInfo)  requestInfo->ClearInfo();
     if(responseInfo) responseInfo->ClearInfo();
-    if(fileInfo)     *fileInfo = FileInfo{};
 
+    CleanupStreamGenerator();
+
+    fileInfo              = FileInfo{};
     isFileOperation       = 0;
     isStreamOperation     = 0;
     isAsyncTimerOperation = 0;
@@ -150,6 +150,16 @@ bool ConnectionContext::IsEndpoint() const
 bool ConnectionContext::IsAsyncOperation() const
 {
     return static_cast<bool>(parentCoro);
+}
+
+void ConnectionContext::CleanupStreamGenerator()
+{
+    if(streamGenerator.ctx && streamGenerator.Destroy)
+        streamGenerator.Destroy(streamGenerator.ctx);
+
+    streamGenerator.ctx     = nullptr;
+    streamGenerator.Next    = nullptr;
+    streamGenerator.Destroy = nullptr;
 }
 
 Async::Status ConnectionContext::TryFinishCoroutines()
