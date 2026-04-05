@@ -24,7 +24,7 @@ template <typename K, typename V>
 HashShard<K, V>::~HashShard()
 {
     if(entries_)
-        pool_.Release(entries_);
+        pool_.Free(entries_);
 }
 
 template <typename K, typename V>
@@ -32,7 +32,7 @@ void HashShard<K, V>::Init(std::size_t cap)
 {
     initialBucketCapacity_ = cap;
     capacity_              = cap;
-    entries_               = reinterpret_cast<Entry*>(pool_.Lease(cap * sizeof(Entry)));
+    entries_               = reinterpret_cast<Entry*>(pool_.Alloc(cap * sizeof(Entry)));
     
     if(!entries_)
         Logger::GetInstance().Fatal("[HashShard]: Failed to get memory for entries");
@@ -59,7 +59,7 @@ void HashShard<K, V>::Resize(std::size_t newCapacity)
     // Just to keep everything in check
     newCapacity = Math::RoundUpToPowerOfTwo(newCapacity);
 
-    Entry* newEntries = reinterpret_cast<Entry*>(pool_.Lease(newCapacity * sizeof(Entry)));
+    Entry* newEntries = reinterpret_cast<Entry*>(pool_.Alloc(newCapacity * sizeof(Entry)));
     if(!newEntries)
         Logger::GetInstance().Fatal("[HashShard]: Failed to resize entries");
     
@@ -95,7 +95,7 @@ void HashShard<K, V>::Resize(std::size_t newCapacity)
         }
     }
 
-    pool_.Release(entries_);
+    pool_.Free(entries_);
     entries_  = newEntries;
     capacity_ = newCapacity;
 }

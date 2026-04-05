@@ -27,7 +27,7 @@ bool RWBuffer::InitReadBuffer(std::uint32_t size)
     auto& pool = BufferPool::GetInstance();
 
     std::size_t allocSize = sizeof(ReadMetadata) + size;
-    readBuffer_ = static_cast<char*>(pool.Lease(allocSize));
+    readBuffer_ = static_cast<char*>(pool.Alloc(allocSize));
     if(!readBuffer_)
         return false;
 
@@ -47,7 +47,7 @@ bool RWBuffer::InitWriteBuffer(std::uint32_t size)
     auto& pool = BufferPool::GetInstance();
 
     std::size_t allocSize = sizeof(WriteMetadata) + size;
-    writeBuffer_ = static_cast<char*>(pool.Lease(allocSize));
+    writeBuffer_ = static_cast<char*>(pool.Alloc(allocSize));
     if(!writeBuffer_)
         return false;
 
@@ -63,15 +63,8 @@ void RWBuffer::ResetBuffer()
 {
     auto& pool = BufferPool::GetInstance();
 
-    if(readBuffer_) {
-        pool.Release(readBuffer_);
-        readBuffer_ = nullptr;
-    }
-
-    if(writeBuffer_) {
-        pool.Release(writeBuffer_);
-        writeBuffer_ = nullptr;
-    }
+    pool.Free(readBuffer_);  readBuffer_ = nullptr;
+    pool.Free(writeBuffer_); writeBuffer_ = nullptr;
 }
 
 void RWBuffer::ClearBuffer()
@@ -142,7 +135,7 @@ bool RWBuffer::GenericGrowBuffer(
 
     std::uint32_t allocSize = static_cast<std::uint32_t>(metaSize + newSize);
 
-    char* newBuf = static_cast<char*>(pool.Reacquire(buffer, allocSize));
+    char* newBuf = static_cast<char*>(pool.Realloc(buffer, allocSize));
     if(!newBuf)
         return false;
 

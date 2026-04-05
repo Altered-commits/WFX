@@ -325,7 +325,7 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
 
         using FnType = decltype(streamCallback);
 
-        void* raw = BufferPool::GetInstance().Lease(sizeof(FnType));
+        void* raw = BufferPool::GetInstance().Alloc(sizeof(FnType));
         if(!raw) {
             Status(HttpStatus::INTERNAL_SERVER_ERROR)
                 .SendText(std::string_view{"[ST]_OOM"});
@@ -344,7 +344,7 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
             [](void* ctx) {
                 auto* f = static_cast<FnType*>(ctx);
                 f->~FnType();
-                BufferPool::GetInstance().Release(f);
+                BufferPool::GetInstance().Free(f);
             }
         };
 

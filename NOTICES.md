@@ -5,7 +5,7 @@ This project uses the following third-party open-source libraries. We thank the 
 ---
 
 ## nlohmann/json
-**Copyright:** (c) 2013-2025 Niels Lohmann  
+**Copyright:** (c) 2013-2026 Niels Lohmann  
 **License:** MIT
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -43,7 +43,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 ---
 
 ## OpenSSL
-**Copyright:** (c) 1998-2025 The OpenSSL Project Authors  
+**Copyright:** (c) 1998-2026 The OpenSSL Project Authors  
 **License:** Apache License 2.0
 
 Licensed under the Apache License, Version 2.0 (the "License");

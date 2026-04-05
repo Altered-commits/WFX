@@ -199,19 +199,25 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
 {
     HttpResponse& res = *ctx->responseInfo;
 
-    auto&& [serializeResult, bodyView] = HttpSerializer::SerializeToBuffer(res, ctx->rwBuffer);
+    auto&& [serializeResult, body] = HttpSerializer::SerializeToBuffer(res, ctx->rwBuffer);
+
+    ctx->SetConnectionState(
+        serializeResult == SerializeResult::SERIALIZE_SUCCESS
+            ? ConnectionState::CONNECTION_ALIVE
+            : ConnectionState::CONNECTION_CLOSE
+    );
 
     switch(serializeResult) {
         case SerializeResult::SERIALIZE_SUCCESS:
             if(res.IsFileOperation())
-                connHandler_->WriteFile(ctx, std::move(bodyView));
+                connHandler_->WriteFile(ctx, std::move(body));
 
             else if(res.IsStreamOperation()) {
                 auto& gen = std::get<StreamGenerator>(res.body);
 
                 connHandler_->Stream(
                     ctx,
-                    gen, // pass copy (trivial)
+                    gen,
                     res.GetOperation() == OperationType::STREAM_CHUNKED
                 );
 

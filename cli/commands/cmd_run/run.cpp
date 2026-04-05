@@ -9,6 +9,7 @@
 #include "utils/logger/logger.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include "utils/backport/string.hpp"
+#include "utils/crash_tracer/crash_tracer.hpp"
 
 #ifdef _WIN32
     #include <windows.h>
@@ -35,17 +36,13 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     if(!FileSystem::DirectoryExists(project.c_str())) 
         logger.Fatal("[WFX]: '", project, "' directory does not exist");
 
+    // Create directory for logs if not exists
+    const std::string crashLogDir = project + "/" + config.miscConfig.crashLogDir;
+    if(!FileSystem::DirectoryExists(crashLogDir.c_str()) && !FileSystem::CreateDirectory(crashLogDir))
+        logger.Fatal("[WFX]: Failed to create '", crashLogDir, "' directory for crash dumps");
+
 #ifdef _WIN32
-    SetConsoleCtrlHandler(ConsoleHandler, TRUE);
-    SetUnhandledExceptionFilter(ExceptionFilter);
-
-    WFX::Core::CoreEngine engine{noCache};
-    engine.Listen(host, port);
-
-    while(!shouldStop)
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    engine.Stop();
+    logger.Fatal("[WFX]: Re-implement 'Run' for 'Windows' properly!");
 #else
     // -------------------- LOADING PHASE --------------------
     config.LoadCoreSettings(project + "/wfx.toml");
@@ -105,6 +102,12 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
                 setpgid(0, 0);          // First worker becomes group leader
             else
                 setpgid(0, globalState.workerPGID); // Join first worker's group
+
+            // Same as below, every process will have its own crash tracer
+            char workerName[32];
+            std::snprintf(workerName, sizeof(workerName), "worker-%d", i);
+            CrashTracer::SetWorkerName(workerName);
+            CrashTracer::Install(crashLogDir.c_str());
 
             // For every process initialize its own BufferPool and FileCache
             BufferPool::GetInstance().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });

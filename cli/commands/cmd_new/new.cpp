@@ -224,14 +224,15 @@ file_chunk_size  = 65536  # How big of a file chunk to send at once
 max_events       = 1024   # How many events should epoll handle at a time
 
 [Misc]
-file_cache_size     = 20     # Number of files cached for efficiency (LFU)
-template_chunk_size = 16384  # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size    = 2048   # Max chunk size to read / write from template cache file (in bytes)
+file_cache_size     = 20      # Number of files cached for efficiency (LFU)
+template_chunk_size = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
+cache_chunk_size    = 2048    # Max chunk size to read / write from template cache file (in bytes)
+crash_log_dir       = "logs"  # Relative to project directory e.g. <project>/logs
 )");
 
     // 3. Bridge between engine and user code
-    CreateFile(projBase / "src/api_entry.cpp", R"(#include <shared/apis/master_api.hpp>
-#include <shared/utils/deferred_init_vector.hpp>
+    CreateFile(projBase / "src/api_entry.cpp", R"(#include <core/deferred_init_vector.hpp>
+#include <shared/apis/master_api.hpp>
 #include <shared/utils/compiler_macro.hpp>
 
 // WARNING: DO NOT MODIFY THIS SYMBOL OR THIS FILE

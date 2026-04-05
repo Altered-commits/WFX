@@ -155,7 +155,7 @@ void TimerWheel::Tick(std::uint64_t nowTick)
         // Process bucket entries
         while(curr != NIL) {
             SlotMeta& m = meta_[curr];
-            std::uint8_t  extra = m.extra;
+            std::uint32_t extra = m.extra;
             std::uint32_t next  = m.next;
 
             if(m.rounds == 0) {

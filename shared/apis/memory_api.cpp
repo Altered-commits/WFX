@@ -10,13 +10,13 @@ const MEMORY_API_TABLE* GetMemoryAPIV1()
 {
     static MEMORY_API_TABLE __GlobalAsyncAPIV1 = {
         [](std::uint64_t size) { // AllocFn
-            return BufferPool::GetInstance().Lease(size);
+            return BufferPool::GetInstance().Alloc(size);
         },
         [](void* ptr, std::uint64_t newSize) { // ReallocFn
-            return BufferPool::GetInstance().Reacquire(ptr, newSize);
+            return BufferPool::GetInstance().Realloc(ptr, newSize);
         },
         [](void* ptr) { // FreeFn
-            BufferPool::GetInstance().Release(ptr);
+            BufferPool::GetInstance().Free(ptr);
         },
 
         // Version

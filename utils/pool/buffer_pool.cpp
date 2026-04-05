@@ -9,13 +9,16 @@
 
 #include <tlsf.h>
 
-namespace WFX::Utils {
-
 /* 
  * [02-11-2025]: i'm making buffer pool single sharded, no need for multiple shards, we won't be-
  *               -using threads and stuff
  */
+namespace WFX::Utils {
 
+// vvv Constants vvv
+static constexpr std::size_t MAX_EXPANSION_ATTEMPTS = 4;
+
+// vvv Main stuff vvv
 BufferPool& BufferPool::GetInstance()
 {
     static BufferPool pool;
@@ -30,115 +33,198 @@ BufferPool::~BufferPool()
     for(void* segment : shard_.memorySegments)
         AlignedFree(segment);
 
-    logger_.Info("[BufferPool]: Cleanup complete");
+    logger_.Info(
+        "[BufferPool]: Shutdown successfully. Metrics: ",
+        "allocs=",     stats_.totalAllocations,   ", ",
+        "frees=",      stats_.totalFrees,         ", ",
+        "reallocs=",   stats_.totalReallocs,      ", ",
+        "expansions=", stats_.poolExpansions,     ", ",
+        "failures=",   stats_.allocationFailures
+    );
 }
 
-void BufferPool::Init(std::size_t initialSize, ResizeCallback resizeCb)
+void BufferPool::Init(std::size_t initialSize, ResizeCallback resizeCb, OOMCallback oomCb)
 {
-    if(resizeCb)
-        resizeCallback_ = std::move(resizeCb);
+    if(IsInitialized())
+        logger_.Fatal("[BufferPool]: Init() called twice");
 
-    // Allocate memory for the pool
-    void* memory = AlignedMalloc(initialSize, tlsf_align_size());
+    if(resizeCb) resizeCallback_ = std::move(resizeCb);
+    if(oomCb)    oomCallback_    = std::move(oomCb);
+
+    const std::size_t tlsfOverhead = tlsf_size() + tlsf_pool_overhead();
+    const std::size_t rawSize      = initialSize + tlsfOverhead;
+
+    void* memory = AlignedMalloc(rawSize, tlsf_align_size());
     if(!memory)
-        logger_.Fatal("[BufferPool]: Initial malloc failed for constructing pool");
+        logger_.Fatal("[BufferPool]: Initial OS allocation failed for ", rawSize, " bytes");
 
-    shard_.tlsfAllocator = tlsf_create_with_pool(memory, initialSize);
-    if(!shard_.tlsfAllocator)
-        logger_.Fatal("[BufferPool]: Failed to initialize TLSF for pool");
+    shard_.tlsfAllocator = tlsf_create_with_pool(memory, rawSize);
+    if(!shard_.tlsfAllocator) {
+        AlignedFree(memory);
+        logger_.Fatal("[BufferPool]: 'tlsf_create_with_pool()' rejected the initial segment");
+    }
 
-    shard_.poolSize = initialSize;
+    shard_.poolSize   = rawSize;
+    shard_.usableSize = initialSize;
     shard_.memorySegments.push_back(memory);
-
-    logger_.Info("[BufferPool]: Created initial pool of size: ", initialSize, " bytes");
+ 
+    logger_.Info("[BufferPool]: Ready, usable=", initialSize, " raw=", rawSize, " (both in bytes)");
 }
 
-bool BufferPool::IsInitialized()
+bool BufferPool::IsInitialized() const
 {
-    return !shard_.memorySegments.empty();
+    return shard_.tlsfAllocator != nullptr;
 }
 
 // vvv Allocators vvv
-void* BufferPool::Lease(std::size_t size)
+void* BufferPool::Alloc(std::size_t size)
 {
-    // Guaranteed to be not nullptr, hopefully
-    return AllocateFromShard(size);
+    if(size == 0)
+        return nullptr;
+
+    void* ptr = AllocateFromShard(size);
+
+    if(ptr)
+        ++stats_.totalAllocations;
+    else
+        logger_.Error("[BufferPool]: 'Alloc(", size, ")' failed after all expansion attempts");
+
+    return ptr;
 }
 
-void* BufferPool::Reacquire(void* rawBlock, std::size_t newSize)
+void* BufferPool::Realloc(void* rawBlock, std::size_t newSize)
 {
+    // Mirror realloc(3) semantics exactly
     if(!rawBlock)
+        return Alloc(newSize);
+
+    if(newSize == 0) {
+        Free(rawBlock);
         return nullptr;
-    
-    // Pass the real TLSF pointer, not the shifted one
-    void* newRawBlock = tlsf_realloc(shard_.tlsfAllocator, rawBlock, newSize);
-
-    if(!newRawBlock) {
-        // Allocate manually
-        newRawBlock = AllocateFromShard(newSize);
-
-        // Copy only min(oldSize, newSize) bytes
-        std::size_t copySize = std::min(tlsf_block_size(rawBlock), newSize);
-        std::memcpy(newRawBlock, rawBlock, copySize);
-
-        tlsf_free(shard_.tlsfAllocator, rawBlock);
     }
 
-    return newRawBlock;
+    const std::size_t oldSize = tlsf_block_size(rawBlock);
+
+    // Fast path: TLSF extends inplace or coalesces an adjacent free block
+    void* newBlock = tlsf_realloc(shard_.tlsfAllocator, rawBlock, newSize);
+    if(newBlock) {
+        ++stats_.totalReallocs;
+        return newBlock;
+    }
+
+    // Slow path: 'rawBlock' is still fully valid here, TLSF does not touch it on failure
+    newBlock = AllocateFromShard(newSize);
+    if(!newBlock) {
+        ++stats_.allocationFailures;
+        logger_.Error("[BufferPool]: 'Realloc(", newSize, ")' failed, original block preserved at ", rawBlock);
+        return nullptr;
+    }
+
+    std::memcpy(newBlock, rawBlock, std::min(oldSize, newSize));
+    tlsf_free(shard_.tlsfAllocator, rawBlock);
+
+    ++stats_.totalReallocs;
+    ++stats_.totalFrees;
+    return newBlock;
 }
 
-void BufferPool::Release(void* rawBlock)
+void BufferPool::Free(void* rawBlock)
 {
     if(!rawBlock)
         return;
 
-    // Free the entire original block
     tlsf_free(shard_.tlsfAllocator, rawBlock);
+    ++stats_.totalFrees;
+}
+
+const BufferPoolStats& BufferPool::GetStats() const
+{
+    return stats_;
 }
 
 // vvv Helper functions vvv
-void* BufferPool::AllocateFromShard(std::size_t totalSize)
+void* BufferPool::AllocateFromShard(std::size_t size)
 {
-    void* rawBlock = tlsf_malloc(shard_.tlsfAllocator, totalSize);
-    if(rawBlock)
-        return rawBlock;
+    void* ptr = tlsf_malloc(shard_.tlsfAllocator, size);
+    if(ptr)
+        return ptr;
 
-    // Allocation failed: expand
-    std::size_t newSegmentSize = resizeCallback_
-        ? resizeCallback_(shard_.poolSize) // User callback
-        : shard_.poolSize * 2;             // Fallback
-
-    // Sanity check: ensure the new segment can fit the request
-    if(newSegmentSize < totalSize)
-        newSegmentSize = totalSize * 2;
-
-    shard_.poolSize += newSegmentSize;
-
-    void* newMemory = AlignedMalloc(newSegmentSize, tlsf_align_size());
-    if(!newMemory)
-        logger_.Fatal("[BufferPool]: Out of memory, failed to allocate new segment of size: ", newSegmentSize, " bytes");
-
-    if(!tlsf_add_pool(shard_.tlsfAllocator, newMemory, newSegmentSize))
-        logger_.Fatal("[BufferPool]: TLSF rejected new pool segment (possible corruption)");
-
-    shard_.memorySegments.push_back(newMemory);
-
-    rawBlock = tlsf_malloc(shard_.tlsfAllocator, totalSize);
-    if(!rawBlock)
-        logger_.Fatal("[BufferPool]: Allocation failed even after expanding pool. Possible TLSF corruption");
-
-    return rawBlock;
+    return ExpandAndAllocate(size);
 }
 
-// AlignedMalloc and AlignedFree remain the same.
+void* BufferPool::ExpandAndAllocate(std::size_t requestedSize)
+{
+    const std::size_t segmentOverhead = tlsf_pool_overhead() + tlsf_block_size_min();
+    const std::size_t minSegment      = requestedSize + segmentOverhead;
+
+    std::size_t idealSize = resizeCallback_
+                                ? resizeCallback_(shard_.poolSize)
+                                : shard_.poolSize * 2;
+
+    if(idealSize < minSegment)
+        idealSize = minSegment;
+
+    for(std::size_t attempt = 0; attempt < MAX_EXPANSION_ATTEMPTS; ++attempt) {
+        // Halve each retry, but never drop below what is needed to serve the request
+        const std::size_t trySize = std::max(idealSize >> attempt, minSegment);
+
+        void* newMemory = AlignedMalloc(trySize, tlsf_align_size());
+        if(!newMemory) {
+            logger_.Warn("[BufferPool]: OS refused ", trySize, " bytes on attempt ", attempt + 1);
+            if(trySize == minSegment)
+                break;
+
+            continue;
+        }
+
+        if(!tlsf_add_pool(shard_.tlsfAllocator, newMemory, trySize)) {
+            AlignedFree(newMemory);
+            logger_.Warn("[BufferPool]: 'tlsf_add_pool()' rejected segment of ", trySize, " bytes");
+            if(trySize == minSegment)
+                break;
+
+            continue;
+        }
+
+        shard_.poolSize   += trySize;
+        shard_.usableSize += (trySize - segmentOverhead);
+        shard_.memorySegments.push_back(newMemory);
+        ++stats_.poolExpansions;
+
+        void* ptr = tlsf_malloc(shard_.tlsfAllocator, requestedSize);
+        if(ptr)
+            return ptr;
+
+        logger_.Error("[BufferPool]: Allocation failed post-expansion, possible TLSF corruption");
+        break;
+    }
+
+    ++stats_.allocationFailures;
+
+    if(oomCallback_)
+        oomCallback_(requestedSize, shard_.poolSize, stats_);
+    else
+        logger_.Fatal(
+            "[BufferPool]: OOM killer, all ", MAX_EXPANSION_ATTEMPTS, " expansion attempts failed. ",
+            "The pool could not grow to serve ", requestedSize, " bytes. ",
+            "Current pool size is ", shard_.poolSize, " bytes across ", shard_.memorySegments.size(), " segment(s). ",
+            "Set an 'OOMCallback' to handle this gracefully instead of crashing"
+        );
+
+    return nullptr;
+}
+
+// vvv OS Allocators vvv
 void* BufferPool::AlignedMalloc(std::size_t size, std::size_t alignment)
 {
+    if(alignment < sizeof(void*))
+        alignment = sizeof(void*);
+
 #if defined(_WIN32)
     return _aligned_malloc(size, alignment);
 #else
     void* ptr = nullptr;
-    if(posix_memalign(&ptr, alignment, size) != 0) return nullptr;
-    return ptr;
+    return (posix_memalign(&ptr, alignment, size) == 0) ? ptr : nullptr;
 #endif
 }
 

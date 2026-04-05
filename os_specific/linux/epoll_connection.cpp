@@ -5,6 +5,7 @@
 #include "http/common/http_error_msgs.hpp"
 #include "http/common/http_global_state.hpp"
 #include "http/ssl/http_ssl_factory.hpp"
+#include "utils/crash_tracer/crash_tracer.hpp"
 #include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
@@ -38,6 +39,8 @@ EpollConnectionHandler::~EpollConnectionHandler()
 // vvv Initializing Functions vvv
 void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t port)
 {
+    WFX_TRACE();
+
     auto& osConfig      = config_.osSpecificConfig;
     auto& networkConfig = config_.networkConfig;
 
@@ -112,7 +115,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
             // -we do '>=' instead of '=='
             // NOTE: extra will be used as endpoint index, set inside of RefreshExpiry
             ConnectionContext* ctx = nullptr;
-            
+
             if(extra >= CLIENT_CONNECTION_TAG)
                 ctx = connections_.GetPtr(connId);
             else
@@ -234,6 +237,8 @@ void EpollConnectionHandler::ResumeReceive(ConnectionContext* ctx)
 
 void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
 {
+    WFX_TRACE();
+
     // Case 1: Direct send (used only for static error codes)
     // NOTE: CHANGE OF PLANS, msg is fire and forget, i don't care if they get delivered-
     // -or not, if u want good error messages u will go the hard route anyways (res.Status().SendText()...)
@@ -397,6 +402,8 @@ void EpollConnectionHandler::Stream(ConnectionContext* ctx, StreamGenerator gene
 
 void EpollConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
 {
+    WFX_TRACE();
+
     // Sanity check
     if(!ctx)
         return;
@@ -436,6 +443,8 @@ void EpollConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
 // vvv Main Functions vvv
 void EpollConnectionHandler::Run()
 {
+    WFX_TRACE();
+
     // Just a simple sanity check before we do anything
     if(!onReceive_ || !onAsyncCompletion_)
         logger_.Fatal(
@@ -660,6 +669,8 @@ void EpollConnectionHandler::Stop()
 //  --- Connection Handlers ---
 ConnectionContext* EpollConnectionHandler::GetConnection(std::uint16_t endpointIndex)
 {
+    WFX_TRACE();
+
     ConnectionContext* ctx = nullptr;
 
     // Client connection
@@ -683,6 +694,8 @@ ConnectionContext* EpollConnectionHandler::GetConnection(std::uint16_t endpointI
 
 void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx, bool freeOnly)
 {
+    WFX_TRACE();
+
     if(!ctx)
         return;
 
@@ -843,6 +856,8 @@ bool EpollConnectionHandler::ResolveIP(const sockaddr_storage& addr, WFXIpAddres
 
 void EpollConnectionHandler::Receive(ConnectionContext* ctx)
 {
+    WFX_TRACE();
+
     // Ensure buffer is ready
     if(!EnsureReadReady(ctx))
         return;
@@ -895,6 +910,8 @@ void EpollConnectionHandler::Receive(ConnectionContext* ctx)
 
 void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
 {
+    WFX_TRACE();
+
     // This is called in this order: WriteFile() -> Write() [Headers sent] -> SendFile()
     // This expects fileInfo to be set beforehand
     // If not, its UB. GG
@@ -946,6 +963,8 @@ void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
 
 void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
 {
+    WFX_TRACE();
+
     // Paranoia check
     if(!ctx->streamGenerator.ctx || !ctx->streamGenerator.Next) {
         logger_.Warn("[Epoll]: 'ResumeStream' function called but received empty generator");
@@ -1076,6 +1095,8 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
 
 void EpollConnectionHandler::HandleAsyncResume(ConnectionContext* ctx)
 {
+    WFX_TRACE();
+
     switch(ctx->TryFinishCoroutines()) {
         case Async::Status::COMPLETED:
             onAsyncCompletion_(ctx);
@@ -1091,6 +1112,8 @@ void EpollConnectionHandler::HandleAsyncResume(ConnectionContext* ctx)
 
 void EpollConnectionHandler::HandleHandshake(ConnectionContext* ctx, std::uint32_t ev)
 {
+    WFX_TRACE();
+
     // For now, 'Endpoint' types will always try to 'SEND' first. Will be changed later
     // However, client connection will need to 'RECV' first because... i mean, without it how will-
     // -server know what to respond with?
@@ -1116,6 +1139,8 @@ void EpollConnectionHandler::HandleHandshake(ConnectionContext* ctx, std::uint32
 
 void EpollConnectionHandler::HandleWriteReady(ConnectionContext* ctx, std::uint32_t ev)
 {
+    WFX_TRACE();
+
     switch(ctx->eventType) {
         case EventType::EVENT_SEND:
             Write(ctx, {});
@@ -1278,6 +1303,8 @@ bool EpollConnectionHandler::CreateAndConnect(ConnectionContext* ctx, EndpointCo
 //  --- Wrapper Functions ---
 void EpollConnectionHandler::WrapAccept(ConnectionContext* ctx)
 {
+    WFX_TRACE();
+
     int clientFd = ctx->socket;
 
     if(useHttps_) {
@@ -1308,6 +1335,8 @@ void EpollConnectionHandler::WrapAccept(ConnectionContext* ctx)
 
 EndpointStatus EpollConnectionHandler::WrapConnect(ConnectionContext* ctx, EndpointContainer& ecnt) 
 {
+    WFX_TRACE();
+
     // IMP: This won't release any pools or sockets (Never calls 'Close()'), it expects-
     // -caller function to do so. IT IS MANDATORY THAT ERROR HANDLING IS DONE BY CALLER OR EVENT LOOP
     auto& endpointCtx  = ecnt.first;
