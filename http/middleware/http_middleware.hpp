@@ -1,8 +1,10 @@
 #ifndef WFX_HTTP_MIDDLEWARE_HPP
 #define WFX_HTTP_MIDDLEWARE_HPP
 
-#include "shared/http/common.hpp"
+#include "shared/abis/types.hpp"
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace WFX::Http {
 
@@ -10,17 +12,22 @@ namespace WFX::Http {
 struct TrieNode;
 struct ConnectionContext;
 
-using namespace WFX::Shared;
+using namespace WFX::Shared; // For 'MwCallback', ...
 
-using MiddlewareName        = std::string_view;
+using MiddlewareStack       = std::vector<MwCallback>;
 using MiddlewareConfigOrder = const std::vector<std::string>&;
-using MiddlewareFactory     = std::unordered_map<MiddlewareName, HttpMiddlewareType>;
-using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, HttpMiddlewareStack>;
+using MiddlewareFactory     = std::unordered_map<std::string_view, MwCallback>;
+using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, MiddlewareStack>;
 
-// 1st parameter is whether we successfully executed all middleware or no
-// 2nd parameter is for async functionality
-using MiddlewareResult         = std::pair<bool, AsyncMiddlewareAction>;
-using MiddlewareFunctionResult = std::pair<MiddlewareAction, AsyncMiddlewareAction>;
+struct MiddlewareResult {
+    bool success;
+    bool isAsync;  // true = engine should wait for callback
+};
+
+struct MiddlewareFunctionResult {
+    MiddlewareAction action;
+    bool isAsync;
+};
 
 class HttpMiddleware {
 public:
@@ -28,8 +35,8 @@ public:
     ~HttpMiddleware() = default;
 
 public:
-    void RegisterMiddleware(MiddlewareName name, HttpMiddlewareType mw);
-    void RegisterPerRouteMiddleware(const TrieNode* node, HttpMiddlewareStack mwStack);
+    void RegisterMiddleware(std::string_view name, MwCallback mw);
+    void RegisterPerRouteMiddleware(const TrieNode* node, MiddlewareStack mwStack);
 
     MiddlewareResult ExecuteMiddleware(
         ConnectionContext* ctx, const TrieNode* node, Request req, Response res
@@ -37,7 +44,6 @@ public:
 
     // Using std::string because TOML loader returns vector<string>
     void LoadMiddlewareFromConfig(MiddlewareConfigOrder order);
-
     void DiscardFactoryMap();
 
 private:
@@ -46,10 +52,10 @@ private:
 
 private: // Helper functions
     MiddlewareResult ExecuteHelper(
-        ConnectionContext* ctx, HttpMiddlewareStack& stack, Request req, Response res
+        ConnectionContext* ctx, Request req, Response res, MiddlewareStack& stack
     );
     MiddlewareFunctionResult ExecuteFunction(
-        ConnectionContext* ctx, HttpMiddlewareType& entry, Request req, Response res
+        ConnectionContext* ctx, Request req, Response res, MwCallback mw
     );
 
 private:
@@ -57,7 +63,7 @@ private:
     MiddlewareFactory middlewareFactories_;
 
     // Main stuff
-    HttpMiddlewareStack middlewareGlobalCallbacks_;
+    MiddlewareStack     middlewareGlobalCallbacks_;
     MiddlewarePerRoute  middlewarePerRouteCallbacks_;
 };
 

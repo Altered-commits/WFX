@@ -3,7 +3,7 @@
 
 #include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
-#include "shared/http/common.hpp"
+#include "http/routing/route_segment.hpp"
 #include "shared/abis/any.hpp"
 
 #include <string>
@@ -14,7 +14,7 @@ namespace WFX::Core { class CoreEngine; }
 // Just defines the structure of request
 namespace WFX::Http {
 
-using WFX::Shared::PathSegments;
+using WFX::Http::PathSegments;
 
 // Context storage for middleware / routes / user stuff
 using ContextMap = std::unordered_map<std::string, Shared::Any>;

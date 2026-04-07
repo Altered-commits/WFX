@@ -1,9 +1,7 @@
 #ifndef WFX_HTTP_CONNECTION_HANDLER_HPP
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
-#include "shared/http/common.hpp" // Temporary, will be removed in future
 #include "shared/abis/types.hpp"
-#include "utils/backport/move_only_function.hpp"
 #include "utils/crypt/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
 
@@ -25,30 +23,33 @@
 
 namespace WFX::Http {
 
-using namespace WFX::Shared;
-
 // Fwd declare stuff
 struct HttpRequest;
 struct HttpResponse;
 
+using namespace WFX::Shared;
+
 // Cross-Platform compatible Ip Struct
 struct WFXIpAddress {
     union {
-        in_addr  v4;
-        in6_addr v6;
-        uint8_t  raw[16]; // For hashing
+        in_addr      v4;
+        in6_addr     v6;
+        std::uint8_t raw[16]; // For hashing
     } ip;
 
-    uint8_t ipType = 255; // AF_INET or AF_INET6
+    std::uint16_t port = 0;
+    std::uint8_t  type = 0; // AF_INET or AF_INET6
 
-    // Necessary operations
+    // Operator functions
     WFXIpAddress& operator=(const WFXIpAddress& other);
     bool          operator==(const WFXIpAddress& other) const;
 
     // Helper functions
     std::string_view GetIpStr()  const;
     const char*      GetIpType() const;
+    bool             ToSockAddr(sockaddr_storage& out, socklen_t& len) const;
 };
+static_assert(sizeof(WFXIpAddress) == 20, "'WFXIpAddress' must be exactly 20 bytes");
 
 // Might be weird to define it here but its important, these states are further used in-
 // -both connection backend and parser so yeah
@@ -89,8 +90,7 @@ enum class EndpointState : std::uint8_t {
 // Forward declare it so compilers won't cry
 struct ConnectionContext;
 
-using ReceiveCallback    = std::function<void(ConnectionContext*)>;
-using CompletionCallback = std::function<void(ConnectionContext*)>;
+using ReceiveCallback = std::function<void(ConnectionContext*)>;
 
 struct FileInfo {
 #if defined(_WIN32)
@@ -179,21 +179,23 @@ struct ConnectionContext : public ConnectionTag {
     void*                sslConn            = nullptr;  // 8 bytes
     HttpRequest*         requestInfo        = nullptr;  // 8 bytes
     HttpResponse*        responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
-    Async::GenericTask   parentCoro;                    // 8 bytes
+    AsyncCompleteFn      asyncOnDone        = nullptr;  // 8 bytes
+    void*                asyncUserData      = nullptr;  // 8 bytes
     WFX::Utils::RWBuffer rwBuffer;                      // 16 bytes
     FileInfo             fileInfo           = {};       // 24 bytes
     StreamGenerator      streamGenerator    = {};       // 24 bytes
 
     WFXIpAddress         connInfo;                      // 20 bytes
     WFXSocket            socket             = -1;       // 4 | 8 bytes
-                                                        // Padded if sizeof(WFXSocket) == 8
-                                                        
+                                                        // Padded if sizeof(WFXSocket) == 4
+
     ConnectionContext*   clientContext      = nullptr;  // 8 bytes (Set only on endpoint contexts)
     ConnectionContext*   endpointContext    = nullptr;  // 8 bytes (Set only on client contexts)
 
 public: // Helper functions
     void ResetContext();
     void ClearContext();
+    void CleanupStreamGenerator();
 
     void SetParseState(HttpParseState newState);
     void SetConnectionState(ConnectionState newState);
@@ -204,11 +206,9 @@ public: // Helper functions
     ConnectionState GetConnectionState() const;
     EndpointState   GetEndpointState()   const;
     EndpointStatus  GetEndpointStatus()  const;
-
-    bool          IsEndpoint() const;
-    bool          IsAsyncOperation()    const;
-    void          CleanupStreamGenerator();
-    Async::Status TryFinishCoroutines();
+    
+    bool          IsEndpoint()       const;
+    bool          IsAsyncOperation() const;
 };
 static_assert(sizeof(ConnectionContext) <= 196, "ConnectionContext must STRICTLY be less than or equal to 196 bytes.");
 
@@ -227,7 +227,7 @@ struct HttpConnectionHandler {
     virtual void Initialize(const std::string& host, std::uint16_t port) = 0;
 
     // Set the receive callback ONCE per socket (can be overwritten if needed)
-    virtual void SetEngineCallbacks(ReceiveCallback onData, CompletionCallback onComplete) = 0;
+    virtual void SetEngineCallback(ReceiveCallback onData) = 0;
 
     // Create new endpoint on backend
     virtual std::uint16_t AllocateEndpoint(
@@ -258,7 +258,9 @@ struct HttpConnectionHandler {
     virtual void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) = 0;
 
     // Refresh the connection's async timer
-    virtual bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) = 0;
+    virtual bool RefreshAsyncTimer(
+        ConnectionContext* ctx, std::uint32_t delayMilliseconds, AsyncCompleteFn onComplete, void* userData
+    ) = 0;
 
     // Run the main connection loop
     virtual void Run() = 0;
@@ -287,13 +289,13 @@ namespace std {
                 InitKeyOnce()
                 {
                     if(!RandomPool::GetInstance().GetBytes(sipKey, sizeof(sipKey)))
-                        Logger::GetInstance().Fatal("[WFXIpAddressHash]: Failed to initialize SipHash key");
+                        Logger::GetInstance().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
                 }
             } _initOnce;
 
             return SipHash24(
                 addr.ip.raw,
-                addr.ipType == AF_INET ? sizeof(in_addr) : sizeof(in6_addr),
+                addr.type == AF_INET ? sizeof(in_addr) : sizeof(in6_addr),
                 sipKey
             );
         }

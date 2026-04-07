@@ -13,7 +13,7 @@ public:
     ~Router() = default;
 
 public:
-    const TrieNode* RegisterRoute(HttpMethod method, std::string_view path, HttpCallbackType handler);
+    const TrieNode* RegisterRoute(HttpMethod method, std::string_view path, RouteCallback handler);
     const TrieNode* MatchRoute(HttpMethod method, std::string_view path, PathSegments& outParams) const;
 
     void PushRouteGroup(std::string_view prefix);

@@ -28,7 +28,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
 {
     static HTTP_API_TABLE __GlobalHttpAPIV1 = {
         // Routing
-        [](HttpMethod method, StringView path, HttpCallbackType cb) {  // RegisterRoute
+        [](HttpMethod method, StringView path, RouteCallback cb) {  // RegisterRoute
             if(!__GlobalHttpDataV1.router)
                 Logger::GetInstance().Fatal("[HttpAPI]: Router was nullptr for 'RegisterRoute'");
 
@@ -36,15 +36,25 @@ const HTTP_API_TABLE* GetHttpAPIV1()
                 method, std::string_view{path.Data(), path.Size()}, std::move(cb)
             );
         },
-        [](HttpMethod method, StringView path, HttpMiddlewareStack mwStack, HttpCallbackType cb) { // RegisterRouteEx
+        [](HttpMethod method, StringView path, const MwCallback* mwStack, std::size_t mwStackSize, RouteCallback cb) { // RegisterRouteEx
+            auto& logger = Logger::GetInstance();
+
             if(!__GlobalHttpDataV1.router || !__GlobalHttpDataV1.middleware)
-                Logger::GetInstance().Fatal("[HttpAPI]: Router or Middleware was nullptr for 'RegisterRouteEx'");
+                logger.Fatal("[HttpAPI]: Router or Middleware was nullptr for 'RegisterRouteEx'");
+
+            if(mwStackSize == 0)
+                logger.Fatal("[HttpAPI]: 'RegisterRouteEx' must have atleast 1 middleware, got 0");
+
+            // Create per-route middleware vector
+            std::vector<MwCallback> mwVector;
+            for(std::size_t i = 0; i < mwStackSize; i++)
+                mwVector.push_back(mwStack[i]);
 
             auto* node = __GlobalHttpDataV1.router->RegisterRoute(
-                method, std::string_view{path.Data(), path.Size()}, std::move(cb)
+                method, std::string_view{path.Data(), path.Size()}, cb
             );
 
-            __GlobalHttpDataV1.middleware->RegisterPerRouteMiddleware(node, std::move(mwStack));
+            __GlobalHttpDataV1.middleware->RegisterPerRouteMiddleware(node, std::move(mwVector));
         },
         [](StringView prefix) {  // PushRoutePrefix
             if(!__GlobalHttpDataV1.router)
@@ -60,12 +70,12 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         },
 
         // Middleware
-        [](StringView name, HttpMiddlewareType cb) { // RegisterMiddleware
+        [](StringView name, MwCallback cb) { // RegisterMiddleware
             if(!__GlobalHttpDataV1.middleware)
                 Logger::GetInstance().Fatal("[HttpAPI]: Middleware was nullptr for 'RegisterMiddleware'");
 
             __GlobalHttpDataV1.middleware->RegisterMiddleware(
-                std::string_view{name.Data(), name.Size()}, std::move(cb)
+                std::string_view{name.Data(), name.Size()}, cb
             );
         },
 

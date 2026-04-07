@@ -3,9 +3,8 @@
 
 #include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
-#include "shared/http/common.hpp"
-
-#include "include/third_party/json/json_fwd.hpp"
+#include "third_party/json/json_fwd.hpp"
+#include "shared/abis/types.hpp"
 
 #include <variant>
 #include <string>
@@ -15,7 +14,7 @@ using Json = nlohmann::json;
 
 namespace WFX::Http {
 
-using namespace WFX::Shared;
+using namespace WFX::Shared; // For 'StreamGenerator', ...
 
 using BodyType = std::variant<std::monostate, std::string_view, std::string, StreamGenerator>;
 

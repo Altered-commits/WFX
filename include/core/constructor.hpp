@@ -2,7 +2,7 @@
 #define WFX_INC_CORE_CONSTRUCTOR_MACROS_HPP
 
 #include "core.hpp"
-#include "deferred_init_vector.hpp"
+#include "core/deferred_init_vector.hpp"
 
 #define WFX_CNSTRCT_CLASS(id)    WFX_CONCAT(WFXConstructor_, id)
 #define WFX_CNSTRCT_INSTANCE(id) WFX_CONCAT(WFXConstructorInst_, id)

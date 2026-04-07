@@ -19,6 +19,9 @@ public: // Main Stuff
     void Listen(const std::string& host, std::uint16_t port);
     void Stop();
 
+public: // Static stuff
+    static void OnCoroutineComplete(void* ud, AsyncResult result);
+
 private: // Internal Functions
     void HandleRequest(ConnectionContext* ctx);
     void HandleResponse(ConnectionContext* ctx);

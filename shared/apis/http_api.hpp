@@ -2,7 +2,7 @@
 #define WFX_SHARED_HTTP_API_HPP
 
 #include "http/constants/http_constants.hpp"
-#include "shared/http/common.hpp"
+#include "shared/abis/types.hpp"
 #include "shared/abis/any.hpp"
 #include "shared/abis/string_view.hpp"
 
@@ -23,13 +23,6 @@ enum class HttpAPIVersion : std::uint8_t {
     V1 = 1,
 };
 
-// Endpoint enum
-enum class EndpointTLSConfig : std::uint8_t {
-    AUTO,           // TLS automatically on some preconfigured ports
-    FORCE_REQUIRE,  // Force TLS (Port doesn't matter)
-    FORCE_INSECURE  // Explicitly allow no TLS even on secure ports
-};
-
 // Data internally used by Http API
 struct HttpAPIDataV1 {
     Router*                router      = nullptr;
@@ -40,13 +33,13 @@ struct HttpAPIDataV1 {
 
 // vvv All aliases for clarity vvv
 // Routing
-using RegisterRouteFn   = void (*)(HttpMethod method, StringView path, HttpCallbackType callback);
-using RegisterRouteExFn = void (*)(HttpMethod method, StringView path, HttpMiddlewareStack mwStack, HttpCallbackType callback);
+using RegisterRouteFn   = void (*)(HttpMethod, StringView path, RouteCallback);
+using RegisterRouteExFn = void (*)(HttpMethod, StringView path, const MwCallback* mwStack, std::size_t mwStackSize, RouteCallback);
 using PushRoutePrefixFn = void (*)(StringView prefix);
 using PopRoutePrefixFn  = void (*)();
 
 // Middleware
-using RegisterMiddlewareFn = void (*)(StringView name, HttpMiddlewareType callback);
+using RegisterMiddlewareFn = void (*)(StringView name, MwCallback);
 
 // Request Control
 using GetMethodFn    = HttpMethod  (*)(const void* request);
@@ -59,11 +52,11 @@ using GetContextFn   = bool        (*)(const void* request, StringView key, Any*
 using EraseContextFn = void        (*)(void* request, StringView key);
 
 // Response Control
-using SetStatusFn = void (*)(void* response, HttpStatus status);
+using SetStatusFn = void (*)(void* response, HttpStatus);
 using SetHeaderFn = void (*)(void* response, StringView key, StringView value);
 using SendTextFn  = void (*)(void* response, StringView view);
 using SendFileFn  = void (*)(void* response, StringView view, bool autoHandle404);
-using StreamFn    = void (*)(void* response, StreamGenerator generator, bool streamChunked);
+using StreamFn    = void (*)(void* response, StreamGenerator, bool streamChunked);
 
 // Endpoint API
 using AllocateEndpointFn = std::uint16_t (*)(

@@ -1,72 +1,135 @@
 #ifndef WFX_INC_CXX_ASYNC_PROMISE_HPP
 #define WFX_INC_CXX_ASYNC_PROMISE_HPP
 
+#include "core/core.hpp"
+#include "shared/abis/types.hpp"
 #include <coroutine>
-#include <utility>
-#include <cstdint>
 
-namespace Async {
+namespace WFX::Async {
 
-enum class Status : std::uint8_t {
-    NONE = 0,
-    COMPLETED,     // Mostly for internal use
-    TIMER_FAILURE,
-    IO_FAILURE,
-    INTERNAL_FAILURE
-};
+using WFX::Shared::AsyncResult;
+using WFX::Shared::AsyncStatus;
+using WFX::Shared::AsyncCompleteFn;
+using WFX::Shared::MiddlewareAction;
 
-// Base Promise (Contains shared error storage)
-struct BasePromise {
-    Status error_ = Status::NONE;
-
-    // We must manually call .resume()
-    std::suspend_always initial_suspend() noexcept { return {}; }
-
-    // Keep frame alive for result check
-    std::suspend_always final_suspend() noexcept { return {}; }
-
-    // We won't directly use exceptions, just set error code
-    void unhandled_exception() noexcept { error_ = Status::INTERNAL_FAILURE; }
-};
-
-// Forward declaration
 template<typename T> struct Task;
 
-// Promise specialization (T)
-template<typename T>
-struct Promise : BasePromise {
-    T value_{};
+// Shared base, allocator + initial_suspend
+struct BasePromise {
+    AsyncCompleteFn onDone_   = nullptr;
+    void*           onDoneUd_ = nullptr;
 
-    // Success path: co_return T;
-    void return_value(T&& v) noexcept
-    {
-        value_ = std::move(v);
-        error_ = Status::NONE;
-    }
-    void return_value(const T& v) noexcept
-    {
-        value_ = v;
-        error_ = Status::NONE;
-    }
+public:
+    void* operator new(std::size_t size) { return __WFXApi->GetMemoryAPIV1()->Alloc(size); }
+    void  operator delete(void* ptr)     { __WFXApi->GetMemoryAPIV1()->Free(ptr); }
 
-    // Failure path: co_return Status::...;
-    void return_value(Status e) noexcept
-    {
-        error_ = e;
-        // value_ remains default
-    }
-
-    Task<T> get_return_object();
+public:
+    std::suspend_always initial_suspend() noexcept { return {}; }
 };
 
-// Promise specialization (Void)
+// Exists so 'Task<T>' can name 'Promise<T>' as 'promise_type'
+// Left incomplete for specializations to work properly
+template<typename T>
+struct Promise;
+
+// Promise<void> specialization (Async Routes)
 template<>
 struct Promise<void> : BasePromise {
-    void return_void() noexcept {}
+    AsyncStatus status_ = AsyncStatus::NONE;
+
+public:
+    void return_void() noexcept
+    {
+        status_ = AsyncStatus::COMPLETED;
+    }
+
+    void unhandled_exception() noexcept
+    {
+        status_ = AsyncStatus::INTERNAL_FAILURE;
+    }
+
+    auto final_suspend() noexcept
+    {
+        struct Completion {
+            Promise* p;
+
+            bool await_ready() noexcept { return false; }
+
+            void await_suspend(std::coroutine_handle<> h) noexcept
+            {
+                AsyncResult result {
+                    nullptr, 0,
+                    MiddlewareAction::CONTINUE,
+                    p->status_
+                };
+
+                auto cb = p->onDone_;
+                auto ud = p->onDoneUd_;
+
+                h.destroy();
+
+                if(cb) cb(ud, result);
+            }
+
+            void await_resume() noexcept {}
+        };
+
+        return Completion{this};
+    }
 
     Task<void> get_return_object();
 };
 
-} // namespace Async
+// Promise<MiddlewareAction> specialization (Async Middleware)
+template<>
+struct Promise<MiddlewareAction> : BasePromise {
+    AsyncStatus      status_ = AsyncStatus::NONE;
+    MiddlewareAction value_  = MiddlewareAction::CONTINUE;
+
+public:
+    void return_value(MiddlewareAction v) noexcept
+    {
+        value_  = v;
+        status_ = AsyncStatus::COMPLETED;
+    }
+
+    void unhandled_exception() noexcept
+    {
+        status_ = AsyncStatus::INTERNAL_FAILURE;
+    }
+
+    auto final_suspend() noexcept
+    {
+        struct Completion {
+            Promise* p;
+
+            bool await_ready() noexcept { return false; }
+
+            void await_suspend(std::coroutine_handle<> h) noexcept
+            {
+                AsyncResult result {
+                    nullptr, 0,
+                    p->value_,
+                    p->status_
+                };
+
+                auto cb = p->onDone_;
+                auto ud = p->onDoneUd_;
+
+                h.destroy();
+
+                if(cb) cb(ud, result);
+            }
+
+            void await_resume() noexcept {}
+        };
+
+        return Completion{this};
+    }
+
+    Task<MiddlewareAction> get_return_object();
+};
+
+} // namespace WFX::Async
 
 #endif // WFX_INC_CXX_ASYNC_PROMISE_HPP

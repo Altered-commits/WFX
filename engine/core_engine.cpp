@@ -5,6 +5,7 @@
 #include "http/request/http_request.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/common/http_error_msgs.hpp"
+#include "http/common/http_global_state.hpp"
 #include "http/formatters/parser/http_parser.hpp"
 #include "http/formatters/serializer/http_serializer.hpp"
 #include "shared/apis/master_api.hpp"
@@ -49,12 +50,9 @@ void CoreEngine::Listen(const std::string& host, std::uint16_t port)
 {
     connHandler_->Initialize(host, port);
 
-    connHandler_->SetEngineCallbacks(
+    connHandler_->SetEngineCallback(
         [this](ConnectionContext* ctx) {
             this->HandleRequest(ctx);
-        },
-        [this](ConnectionContext* ctx) {
-            this->HandleSuccess(ctx);
         }
     );
     connHandler_->Run();
@@ -262,64 +260,50 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
         goto __HandleResponse;
 
     if(eLevel == ExecutionLevel::MIDDLEWARE) {
-        auto [success, task] = middleware_.ExecuteMiddleware(ctx, node, userReq, userRes);
+        auto [success, isAsync] = middleware_.ExecuteMiddleware(ctx, node, userReq, userRes);
 
         if(!success) {
             // For failure, just handle response and be done with
             // Later this will be properly handled
-            if(!task) {
+            if(!isAsync) {
                 res.ClearInfo();
                 res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
                     .SendText(std::string_view{"Internal Server Error: CE - CF1"});
                 goto __HandleResponse;
             }
 
-            // Its async, let scheduler do its job at the backend
-            ctx->parentCoro = std::move(task);
+            // Async middleware, coroutine will fire 'OnCoroutineComplete' when done
             FinishRequest(ctx);
             return;
         }
+
         // Update 'eLevel' to be 'RESPONSE' level so the next time this shits called, we-
         // -directly jump to '__HandleResponse'
         ctx->trackAsync.SetELevel(ExecutionLevel::RESPONSE);
     }
 
     // Sync, execute it right now
-    if(auto* sync = std::get_if<SyncCallbackType>(&node->callback))
-        (*sync)(userReq, userRes);
+    if(node->callback.kind == CallbackKind::SYNC)
+        node->callback.sync(userReq, userRes);
 
     // Async, check if we have executed it entirely right now, if not-
     // -schedule it for later
     else {
-        auto& async = std::get<AsyncCallbackType>(node->callback);
-
         // Set context (type erased) at http api side before calling async callback
         // And also erase it after callback is done, if the callback hasn't finished, the-
         // -scheduler will set the ptr later on when needed, no need to keep a dangling pointer
         httpApi->SetGlobalPtrData(static_cast<void*>(ctx));
 
-        auto coro = async(userReq, userRes);
-        coro.Resume();
+        node->callback.async(userReq, userRes, CoreEngine::OnCoroutineComplete, ctx);
 
         // Reset to remove any dangling references
         httpApi->SetGlobalPtrData(nullptr);
 
-        // (Async path)
-        if(!coro.IsFinished()) {
-            ctx->parentCoro = std::move(coro);
-            FinishRequest(ctx);
-            return;
-        }
-
-        // (Sync path)
-        // Check for errors which may have propagated
-        auto err = coro.GetResult();
-        if(err != Async::Status::NONE) {
-            res.ClearInfo();
-            res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                .SendText(std::string_view{"Internal Server Error: CE - CF2"});
-        }
-        // No errors, finish the request
+        // If the coroutine already completed synchronously ('final_suspend' already fired the callback),-
+        // -the response is already handled
+        // If still suspended, it will fire later. Either way, we are done here
+        FinishRequest(ctx);
+        return;
     }
 
 __HandleResponse:
@@ -328,6 +312,34 @@ __HandleResponse:
 }
 
 // vvv Helper Functions vvv
+void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
+{
+    auto* ctx = static_cast<ConnectionContext*>(ud);
+    auto* engine = GetGlobalState().enginePtr;
+
+    if(result.status != AsyncStatus::COMPLETED) {
+        ctx->responseInfo->ClearInfo();
+        ctx->responseInfo->Status(HttpStatus::INTERNAL_SERVER_ERROR)
+            .SendText(std::string_view{"Internal Server Error: Async Failure"});
+
+        ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+    }
+
+    // If this was middleware, inject the action into the pipeline
+    if(ctx->trackAsync.GetELevel() == ExecutionLevel::MIDDLEWARE) {
+        *ctx->trackAsync.GetMAction() = result.action;
+        ctx->trackAsync.SetELevel(ExecutionLevel::RESPONSE);
+
+        // Continue the pipeline, re-enter 'HandleSuccess' to run the route
+        // This is safe because the coroutine frame is already destroyed
+        engine->HandleSuccess(ctx);
+        return;
+    }
+
+    // Route completed, serialize and send
+    engine->HandleResponse(ctx);
+}
+
 void CoreEngine::FinishRequest(ConnectionContext* ctx)
 {
     ctx->SetParseState(HttpParseState::PARSE_IDLE);

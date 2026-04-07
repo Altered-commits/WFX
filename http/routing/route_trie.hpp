@@ -7,11 +7,9 @@
 
 namespace WFX::Http {
 
-using namespace ::WFX::Utils; // For 'MoveOnlyFunction', 'Logger'
-
 class RouteTrie {
 public:    
-    const TrieNode* Insert(std::string_view fullRoute, HttpCallbackType handler);
+    const TrieNode* Insert(std::string_view fullRoute, RouteCallback handler);
     const TrieNode* Match(std::string_view requestPath, PathSegments& outParams) const;
 
     void PushGroup(std::string_view prefix);

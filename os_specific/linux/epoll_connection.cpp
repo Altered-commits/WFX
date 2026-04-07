@@ -106,14 +106,14 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
     // vvv Initialize timeout handler vvv
     timerWheel_.Init(
         connections_.GetSlots(),
-        1024, 1, TimeUnit::SECONDS,
+        4096, 1, TimeUnit::SECONDS,
         [this](std::uint32_t connId, std::uint32_t extra) {
             // 'extra' for now just contains a 16 bit value. If value
             //     >= CLIENT_CONNECTION_TAG, then its a client connection
             //     <  CLIENT_CONNECTION_TAG, then its an endpoint connection
             // It is going to be a 16 bit value, but for correctness sake-
             // -we do '>=' instead of '=='
-            // NOTE: extra will be used as endpoint index, set inside of RefreshExpiry
+            // NOTE: extra will be used as endpoint index, set inside of 'RefreshExpiry'
             ConnectionContext* ctx = nullptr;
 
             if(extra >= CLIENT_CONNECTION_TAG)
@@ -165,10 +165,9 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
         logger_.Fatal("[Epoll]: Failed to add async timer to epoll: ", strerror(errno));
 }
 
-void EpollConnectionHandler::SetEngineCallbacks(ReceiveCallback onData, CompletionCallback onComplete)
+void EpollConnectionHandler::SetEngineCallback(ReceiveCallback onData)
 {
-    onReceive_         = std::move(onData);
-    onAsyncCompletion_ = std::move(onComplete);
+    onReceive_ = std::move(onData);
 }
 
 std::uint16_t EpollConnectionHandler::AllocateEndpoint(
@@ -446,10 +445,9 @@ void EpollConnectionHandler::Run()
     WFX_TRACE();
 
     // Just a simple sanity check before we do anything
-    if(!onReceive_ || !onAsyncCompletion_)
+    if(!onReceive_)
         logger_.Fatal(
-            "[Epoll]: Member 'onReceive_' or 'onAsyncCompletion_' was not initialized."
-            " Call 'SetEngineCallbacks' before calling 'Run'"
+            "[Epoll]: Member 'onReceive_' was not initialized. Call 'SetEngineCallback' before calling 'Run'"
         );
 
     // Used for special fds like timers, accepts, etc
@@ -478,41 +476,13 @@ void EpollConnectionHandler::Run()
 
             // Handle timeouts timers
             if(sfd == timeoutTimerFd_) {
-                // We just need to drain the sfd, we dont care about the 'expirations' value
-                std::uint64_t expirations = 0;
-                (void)read(sfd, &expirations, sizeof(expirations));
-
-                // Calculate elapsed time since the server started in seconds
-                std::uint64_t nowSec = NowMs() / 1000;
-
-                timerWheel_.Tick(nowSec);
-
-                logger_.Info("<TimeoutTimer>: ", numConnectionsAlive_, ' ', nowSec);
+                HandleTimeoutTimer(sfd);
                 continue;
             }
 
             // Handle async timers
             if(sfd == asyncTimerFd_) {
-                std::uint64_t expirations = 0;
-                (void)read(sfd, &expirations, sizeof(expirations));
-
-                std::uint64_t newTick = NowMs();
-                std::uint64_t connId  = 0;
-
-                while(timerHeap_.PopExpired(newTick, connId)) {
-                    ConnectionContext* ctx = connections_.GetPtr(connId);
-
-                    // Well, we are done with our timer operation so yeah
-                    ctx->isAsyncTimerOperation = 0;
-
-                    HandleAsyncResume(ctx);
-                }
-
-                // Because the async timer is one shot, update it just in case there exists more async-
-                // -registered timers
-                UpdateAsyncTimer();
-
-                logger_.Info("<AsyncTimer>: ", numConnectionsAlive_, ' ', newTick);
+                HandleAsyncTimer(sfd);
                 continue;
             }
 
@@ -643,10 +613,11 @@ void EpollConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t
     timerWheel_.Schedule(idx, extra, timeoutSeconds);
 }
 
-bool EpollConnectionHandler::RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds)
-{
+bool EpollConnectionHandler::RefreshAsyncTimer(
+    ConnectionContext* ctx, std::uint32_t delayMs, AsyncCompleteFn onComplete, void* userData
+) {
     std::uint32_t idx    = connections_.GetIndex(ctx);
-    std::uint64_t expire = NowMs() + delayMilliseconds;
+    std::uint64_t expire = NowMs() + delayMs;
 
     // Timers are coalesced if they fall within +-10ms of each other
     if(!timerHeap_.Insert(idx, expire, 10)) {
@@ -655,6 +626,9 @@ bool EpollConnectionHandler::RefreshAsyncTimer(ConnectionContext* ctx, std::uint
     }
 
     ctx->isAsyncTimerOperation = 1;
+    ctx->asyncOnDone           = onComplete;
+    ctx->asyncUserData         = userData;
+
     UpdateAsyncTimer();
 
     return true;
@@ -742,9 +716,12 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx, bool free
     // If client context exists, it means that the endpoint operation hasn't finished-
     // -but it somehow closed, in this case, just notify the client (as client is suspended-
     // -due to co_await)
-    // TODO: Return 'EndpointStatus' properly on resuming
     else if(ctx->clientContext)
-        HandleAsyncResume(ctx->clientContext);
+        HandleAsyncCallback(ctx->clientContext, {
+            nullptr, 0,
+            MiddlewareAction::CONTINUE,
+            AsyncStatus::IO_FAILURE
+        });
 
     if(ctx->socket > 0)
         close(ctx->socket);
@@ -838,15 +815,15 @@ bool EpollConnectionHandler::ResolveIP(const sockaddr_storage& addr, WFXIpAddres
         case AF_INET:
         {
             const auto* v4 = reinterpret_cast<const sockaddr_in*>(sa);
-            out.ip.v4  = v4->sin_addr;
-            out.ipType = AF_INET;
+            out.ip.v4 = v4->sin_addr;
+            out.type  = AF_INET;
             return true;
         }
         case AF_INET6:
         {
             const auto* v6 = reinterpret_cast<const sockaddr_in6*>(sa);
-            out.ip.v6  = v6->sin6_addr;
-            out.ipType = AF_INET6;
+            out.ip.v6 = v6->sin6_addr;
+            out.type  = AF_INET6;
             return true;
         }
         default:
@@ -925,8 +902,7 @@ void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
     int   fd       = fileInfo.fd;
 
     while(fileInfo.offset < fileInfo.fileSize) {
-        ssize_t n = WrapFile(ctx, fd, &fileInfo.offset,
-                               fileInfo.fileSize - fileInfo.offset);
+        ssize_t n = WrapFile(ctx, fd, &fileInfo.offset, fileInfo.fileSize - fileInfo.offset);
         // Try to send more of file
         if(n > 0)
             continue;
@@ -1000,7 +976,7 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     char*       chunkPtr = !ctx->streamChunked ? writeRegion.ptr : writeRegion.ptr + chunkHeaderReserve;
     std::size_t chunkCap = !ctx->streamChunked ? writeRegion.len : writeRegion.len - chunkHeaderReserve - 2;
 
-    auto streamResult = ctx->streamGenerator.Next(ctx->streamGenerator.ctx, { chunkPtr, chunkCap });
+    auto streamResult = ctx->streamGenerator.Next(ctx->streamGenerator.ctx, {chunkPtr, chunkCap});
 
     // Refresh timeout everytime a chunk is sent
     RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
@@ -1093,21 +1069,55 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     else Close(ctx);
 }
 
-void EpollConnectionHandler::HandleAsyncResume(ConnectionContext* ctx)
+void EpollConnectionHandler::HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res)
 {
     WFX_TRACE();
 
-    switch(ctx->TryFinishCoroutines()) {
-        case Async::Status::COMPLETED:
-            onAsyncCompletion_(ctx);
-            break;
+    if(ctx->asyncOnDone) {
+        auto cb = ctx->asyncOnDone;
+        auto ud = ctx->asyncUserData;
 
-        // Errors and other cases
-        default:
-            ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-            Write(ctx, HttpError::internalError);
-            break;
+        ctx->asyncOnDone   = nullptr;
+        ctx->asyncUserData = nullptr;
+
+        cb(ud, res);
     }
+}
+
+void EpollConnectionHandler::HandleTimeoutTimer(int sfd)
+{
+    // TODO: Both 'HandleTimeoutTimer' and 'HandleAsyncTimer' must properly handle read return value
+    std::uint64_t expirations = 0;
+    (void)read(sfd, &expirations, sizeof(expirations));
+
+    // Calculate elapsed time since the server started in seconds
+    std::uint64_t nowSec = NowMs() / 1000;
+
+    timerWheel_.Tick(nowSec);
+
+    logger_.Info("<TimeoutTimer>: ", numConnectionsAlive_, ' ', nowSec);
+}
+
+void EpollConnectionHandler::HandleAsyncTimer(int sfd)
+{
+    std::uint64_t expirations = 0;
+    (void)read(sfd, &expirations, sizeof(expirations));
+
+    std::uint64_t newTick = NowMs();
+    std::uint64_t connId  = 0;
+
+    while(timerHeap_.PopExpired(newTick, connId)) {
+        ConnectionContext* ctx = connections_.GetPtr(connId);
+        ctx->isAsyncTimerOperation = 0;
+
+        HandleAsyncCallback(ctx, {nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::COMPLETED});
+    }
+
+    // Because the async timer is one shot, update it just in case there exists more async-
+    // -registered timers
+    UpdateAsyncTimer();
+
+    logger_.Info("<AsyncTimer>: ", numConnectionsAlive_, ' ', newTick);
 }
 
 void EpollConnectionHandler::HandleHandshake(ConnectionContext* ctx, std::uint32_t ev)
@@ -1229,7 +1239,7 @@ std::uint64_t EpollConnectionHandler::PackEpollData(ConnectionContext* ctx)
 
 bool EpollConnectionHandler::RegisterEpoll(ConnectionContext* ctx, int op)
 {
-    // Poll once, then we just won't touch epoll_ctl again till we close connection
+    // Poll once, then we just won't touch 'epoll_ctl' again till we close connection
     // We will use 'ctx->eventType' to control the flow of data pretty much, preventing-
     // -any sort of race condition and such
     // NOTE: For deletion cases, event must be 'nullptr'

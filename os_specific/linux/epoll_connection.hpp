@@ -37,8 +37,8 @@ public:
     ~EpollConnectionHandler();
 
 public: // Initializing
-    void          Initialize(const std::string& host, std::uint16_t port)                   override;
-    void          SetEngineCallbacks(ReceiveCallback onData, CompletionCallback onComplete) override;
+    void          Initialize(const std::string& host, std::uint16_t port) override;
+    void          SetEngineCallback(ReceiveCallback onData)               override;
     std::uint16_t AllocateEndpoint(
         std::string_view host, std::string_view port, std::uint32_t cLimit, std::uint32_t ifLimit, bool useTLS
     ) override;
@@ -55,9 +55,11 @@ public: // I/O Operations
     
 public: // Main Functions
     void Run()                                                                      override;
-    void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)        override;
-    bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds) override;
     void Stop()                                                                     override;
+    void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)        override;
+    bool RefreshAsyncTimer(
+        ConnectionContext* ctx, std::uint32_t delayMs, AsyncCompleteFn onComplete, void* userData
+    ) override;
 
 private: // Helper Functions
     ConnectionContext* GetConnection(std::uint16_t endpointIndex = 0xFFFF);
@@ -73,7 +75,9 @@ private: // Helper Functions
     void               Receive(ConnectionContext* ctx);
     void               SendFile(ConnectionContext* ctx);
     void               ResumeStream(ConnectionContext* ctx);
-    void               HandleAsyncResume(ConnectionContext* ctx);
+    void               HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res);
+    void               HandleTimeoutTimer(int sfd);
+    void               HandleAsyncTimer(int sfd);
     void               HandleHandshake(ConnectionContext* ctx, std::uint32_t ev);
     void               HandleWriteReady(ConnectionContext* ctx, std::uint32_t ev);
     void               UpdateAsyncTimer();
@@ -97,7 +101,6 @@ private: // Misc
 
     IpLimiter          ipLimiter_         = {pool_};
     ReceiveCallback    onReceive_         = {};
-    CompletionCallback onAsyncCompletion_ = {};
     std::atomic<bool>  running_           = true;
     bool               useHttps_          = false;
 
