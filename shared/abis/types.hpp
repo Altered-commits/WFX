@@ -43,6 +43,14 @@ struct AsyncResult {
 static_assert(sizeof(AsyncResult) == 16, "'AsyncResult' must be exactly 16 bytes.");
 
 using AsyncCompleteFn = void(*)(void* userData, AsyncResult result);
+using AsyncDestroyFn  = void(*)(void* userData);
+
+struct AsyncData {
+    void*           userData;       // |
+    AsyncCompleteFn AsyncComplete;  // | -> For cleaner storage on engine side i suppose
+    AsyncDestroyFn  AsyncDestroy;   // |
+};
+static_assert(sizeof(AsyncData) == 24, "'AsyncData' must be exactly 24 bytes.");
 
 // vvv Route Callbacks vvv
 using SyncRouteFn  = void (*)(WFX::Http::Request, WFX::Http::Response);

@@ -30,5 +30,3 @@ To Fix:
 2. Batch syscalls (for receving and sending data) instead of spamming them every request
 3. Timer wheel shouldn't expire connections inline, or for larger count it will stall backend pipeline
 4. ADD PROPER ERROR CHECKING FOR ASYNC TIMER OPERATIONS (low failure rate rn at high concurrency but still)  [Partially fixed]
-5. After many seconds of 'wrk', like on HTTPS, 12k connections, 300 seconds sending big file like json.hpp using streaming,-
-   -after 'wrk' close, some connections linger, fine no issue, but it crashes during timeout, so yeah gotta check it

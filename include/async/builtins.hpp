@@ -22,7 +22,9 @@ public:
 
         // Passed by engine, guaranteed
         void* connCtx   = __WFXApi->GetHttpAPIV1()->GetGlobalPtrData();
-        bool  scheduled = __WFXApi->GetAsyncAPIV1()->RegisterAsyncTimer(connCtx, delayMs, OnComplete, this);
+        bool  scheduled = __WFXApi->GetAsyncAPIV1()->RegisterAsyncTimer(
+            connCtx, delayMs, {this, OnComplete, OnDestroy}
+        );
 
         // On failure, resume the coroutine so user can handle the error
         if(!scheduled) {

@@ -22,6 +22,12 @@ public: // 'AsyncAPI' Callback
         self->handle_.resume();
     }
 
+    static void OnDestroy(void* ud) noexcept
+    {
+        auto* self = static_cast<Derived*>(ud);
+        self->handle_.destroy();
+    }
+
 public: // Always suspend
     bool await_ready() const noexcept { return false; }
 };

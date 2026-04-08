@@ -614,7 +614,7 @@ void EpollConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t
 }
 
 bool EpollConnectionHandler::RefreshAsyncTimer(
-    ConnectionContext* ctx, std::uint32_t delayMs, AsyncCompleteFn onComplete, void* userData
+    ConnectionContext* ctx, std::uint32_t delayMs, AsyncData asyncData
 ) {
     std::uint32_t idx    = connections_.GetIndex(ctx);
     std::uint64_t expire = NowMs() + delayMs;
@@ -626,8 +626,7 @@ bool EpollConnectionHandler::RefreshAsyncTimer(
     }
 
     ctx->isAsyncTimerOperation = 1;
-    ctx->asyncOnDone           = onComplete;
-    ctx->asyncUserData         = userData;
+    ctx->asyncData             = asyncData;
 
     UpdateAsyncTimer();
 
@@ -697,11 +696,12 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx, bool free
     // Only applicable for client operations
     if(!ctx->IsEndpoint()) {
         if(ctx->isAsyncTimerOperation) {
-            if(timerHeap_.Remove(idx))
-                UpdateAsyncTimer();
-            else
-                logger_.Warn("[Epoll]: Failed to cancel async timer");
+            if(timerHeap_.Remove(idx)) UpdateAsyncTimer();
         }
+
+        // Destroy orphaned coroutine frame if connection is dying-
+        // -while an async operation is in-flight
+        HandleAsyncCallback(ctx, {}, true);
 
         // From clients POV, if the endpoint hasn't been set to nullptr after-
         // -endpoint operations complete, it means client closed before endpoint even-
@@ -721,7 +721,7 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx, bool free
             nullptr, 0,
             MiddlewareAction::CONTINUE,
             AsyncStatus::IO_FAILURE
-        });
+        }, false);
 
     if(ctx->socket > 0)
         close(ctx->socket);
@@ -1069,18 +1069,29 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     else Close(ctx);
 }
 
-void EpollConnectionHandler::HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res)
+void EpollConnectionHandler::HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res, bool destroy)
 {
     WFX_TRACE();
 
-    if(ctx->asyncOnDone) {
-        auto cb = ctx->asyncOnDone;
-        auto ud = ctx->asyncUserData;
+    auto& async = ctx->asyncData;
 
-        ctx->asyncOnDone   = nullptr;
-        ctx->asyncUserData = nullptr;
+    // Sanity checks, 'userData' in some edge cases maybe null, these shouldn't be
+    if(!async.AsyncComplete && !async.AsyncDestroy)
+        return;
 
-        cb(ud, res);
+    auto complete = async.AsyncComplete;
+    auto kill     = async.AsyncDestroy;
+    auto ud       = async.userData;
+
+    async.AsyncComplete = nullptr;
+    async.AsyncDestroy  = nullptr;
+    async.userData      = nullptr;
+
+    if(destroy) {
+        if(kill) kill(ud);
+    }
+    else {
+        if(complete) complete(ud, res);
     }
 }
 
@@ -1110,7 +1121,11 @@ void EpollConnectionHandler::HandleAsyncTimer(int sfd)
         ConnectionContext* ctx = connections_.GetPtr(connId);
         ctx->isAsyncTimerOperation = 0;
 
-        HandleAsyncCallback(ctx, {nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::COMPLETED});
+        HandleAsyncCallback(ctx, {
+            nullptr, 0,
+            MiddlewareAction::CONTINUE,
+            AsyncStatus::COMPLETED
+        }, false);
     }
 
     // Because the async timer is one shot, update it just in case there exists more async-

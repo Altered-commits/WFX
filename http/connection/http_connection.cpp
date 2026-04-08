@@ -106,15 +106,14 @@ void ConnectionContext::ResetContext()
     endpointState = keep;
 
     // Rest of the stuff
-    fileInfo           = FileInfo{};
-    connInfo           = WFXIpAddress{};
     expectedBodyLength = 0;
     eventType          = EventType::EVENT_ACCEPT;
     parseState         = 0;
     trackBytes         = 0;
     socket             = WFX_INVALID_SOCKET;
-    asyncOnDone        = nullptr;
-    asyncUserData      = nullptr;
+    fileInfo           = FileInfo{};
+    connInfo           = WFXIpAddress{};
+    asyncData          = AsyncData{};
     clientContext      = nullptr;
     endpointContext    = nullptr;
 }
@@ -128,15 +127,14 @@ void ConnectionContext::ClearContext()
 
     CleanupStreamGenerator();
 
-    fileInfo              = FileInfo{};
     isFileOperation       = 0;
     isStreamOperation     = 0;
     isAsyncTimerOperation = 0;
     streamChunked         = 0;
     expectedBodyLength    = 0;
     trackBytes            = 0;
-    asyncOnDone           = nullptr;
-    asyncUserData         = nullptr;
+    fileInfo              = FileInfo{};
+    asyncData             = AsyncData{};
     clientContext         = nullptr;
     endpointContext       = nullptr;
 }
@@ -198,7 +196,7 @@ bool ConnectionContext::IsEndpoint() const
 
 bool ConnectionContext::IsAsyncOperation() const
 {
-    return static_cast<bool>(asyncOnDone);
+    return asyncData.AsyncComplete != nullptr;
 }
 
 } // namespace WFX::Http

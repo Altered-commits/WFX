@@ -18,7 +18,7 @@ struct AsyncAPIDataV1 {
 };
 
 // vvv All aliases for clarity vvv
-using RegisterAsyncTimerFn = bool(*)(void* ctx, std::uint32_t delayMs, AsyncCompleteFn onComplete, void* userData);
+using RegisterAsyncTimerFn = bool(*)(void* ctx, std::uint32_t delayMs, AsyncData asyncData);
 
 // vvv API declarations vvv
 struct ASYNC_API_TABLE {

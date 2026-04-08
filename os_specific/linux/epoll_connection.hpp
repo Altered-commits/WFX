@@ -54,12 +54,10 @@ public: // I/O Operations
     void           Close(ConnectionContext* ctx, bool forceClose = false)                        override;
     
 public: // Main Functions
-    void Run()                                                                      override;
-    void Stop()                                                                     override;
-    void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)        override;
-    bool RefreshAsyncTimer(
-        ConnectionContext* ctx, std::uint32_t delayMs, AsyncCompleteFn onComplete, void* userData
-    ) override;
+    void Run()                                                                                 override;
+    void Stop()                                                                                override;
+    void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)                   override;
+    bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMs, AsyncData asyncData) override;
 
 private: // Helper Functions
     ConnectionContext* GetConnection(std::uint16_t endpointIndex = 0xFFFF);
@@ -75,7 +73,7 @@ private: // Helper Functions
     void               Receive(ConnectionContext* ctx);
     void               SendFile(ConnectionContext* ctx);
     void               ResumeStream(ConnectionContext* ctx);
-    void               HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res);
+    void               HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res, bool destroy);
     void               HandleTimeoutTimer(int sfd);
     void               HandleAsyncTimer(int sfd);
     void               HandleHandshake(ConnectionContext* ctx, std::uint32_t ev);

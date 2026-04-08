@@ -15,7 +15,7 @@ const ASYNC_API_TABLE* GetAsyncAPIV1()
     // 'ctx' is ConnectionContext just type erased so user doesn't DO anything
     static ASYNC_API_TABLE __GlobalAsyncAPIV1 = {
         // vvv Async Functions vvv
-        [](void* ctx, std::uint32_t delayMs, AsyncCompleteFn onComplete, void* userData) { // RegisterAsyncTimer
+        [](void* ctx, std::uint32_t delayMs, AsyncData asyncData) { // RegisterAsyncTimer
             auto& logger = Logger::GetInstance();
 
             if(!ctx) {
@@ -32,7 +32,7 @@ const ASYNC_API_TABLE* GetAsyncAPIV1()
                 return false;
             }
 
-            return connHandler->RefreshAsyncTimer(cctx, delayMs, onComplete, userData);
+            return connHandler->RefreshAsyncTimer(cctx, delayMs, asyncData);
         },
 
         // Version

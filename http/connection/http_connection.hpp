@@ -179,9 +179,8 @@ struct ConnectionContext : public ConnectionTag {
     void*                sslConn            = nullptr;  // 8 bytes
     HttpRequest*         requestInfo        = nullptr;  // 8 bytes
     HttpResponse*        responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
-    AsyncCompleteFn      asyncOnDone        = nullptr;  // 8 bytes
-    void*                asyncUserData      = nullptr;  // 8 bytes
     WFX::Utils::RWBuffer rwBuffer;                      // 16 bytes
+    AsyncData            asyncData          = {};       // 24 bytes
     FileInfo             fileInfo           = {};       // 24 bytes
     StreamGenerator      streamGenerator    = {};       // 24 bytes
 
@@ -258,9 +257,7 @@ struct HttpConnectionHandler {
     virtual void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) = 0;
 
     // Refresh the connection's async timer
-    virtual bool RefreshAsyncTimer(
-        ConnectionContext* ctx, std::uint32_t delayMilliseconds, AsyncCompleteFn onComplete, void* userData
-    ) = 0;
+    virtual bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds, AsyncData asyncData) = 0;
 
     // Run the main connection loop
     virtual void Run() = 0;
