@@ -10,7 +10,7 @@ namespace WFX::Http {
 using namespace WFX::Core;  // For 'Config'
 using namespace std::chrono;
 
-IpLimiter::IpLimiter(BufferPool& poolRef)
+IpLimiter::IpLimiter(Utils::BufferPool& poolRef)
     : ipLimits_(poolRef)
 {
     ipLimits_.Init(512);

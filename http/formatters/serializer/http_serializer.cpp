@@ -8,7 +8,7 @@ namespace WFX::Http {
 
 namespace HttpSerializer {
 
-SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer)
+SerializedHttpResponse SerializeToBuffer(HttpResponse& res, Utils::RWBuffer& buffer)
 {
     auto& networkConfig = Core::Config::GetInstance().networkConfig;
     auto incSize = networkConfig.sendBufferIncSize,
@@ -52,7 +52,7 @@ SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer)
 
     // Serialize the response
     buffer.AppendWriteData("HTTP/1.", 7, incSize, maxSize);
-    buffer.AppendWriteData(res.version == HttpVersion::HTTP_1_1 ? "1 " : "0 ", 2, incSize, maxSize);
+    buffer.AppendWriteData(res.version == Shared::HttpVersion::HTTP_1_1 ? "1 " : "0 ", 2, incSize, maxSize);
     
     std::uint16_t code = static_cast<std::uint16_t>(res.status);
     char codeStr[4];

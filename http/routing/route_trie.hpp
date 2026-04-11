@@ -2,14 +2,13 @@
 #define WFX_HTTP_ROUTE_TRIE_HPP
 
 #include "route_segment.hpp"
-
 #include <string_view>
 
 namespace WFX::Http {
 
 class RouteTrie {
 public:    
-    const TrieNode* Insert(std::string_view fullRoute, RouteCallback handler);
+    const TrieNode* Insert(std::string_view fullRoute, Shared::RouteCallback handler);
     const TrieNode* Match(std::string_view requestPath, PathSegments& outParams) const;
 
     void PushGroup(std::string_view prefix);

@@ -220,8 +220,8 @@ bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequ
         return false;
 
     std::string_view methodStr = line.substr(0, mEnd);
-    outRequest.method = HttpMethodToEnum(methodStr);
-    if(outRequest.method == HttpMethod::UNKNOWN)
+    outRequest.method = HttpMethodToEnum(Shared::StringView{methodStr.data(), methodStr.size()});
+    if(outRequest.method == Shared::HttpMethod::UNKNOWN)
         return false;
 
     std::size_t pathStart = mEnd + 1;
@@ -236,8 +236,8 @@ bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequ
         return false;
 
     std::string_view versionStr = line.substr(pathEnd + 1);
-    outRequest.version = HttpVersionToEnum(versionStr);
-    if(outRequest.version == HttpVersion::UNKNOWN)
+    outRequest.version = HttpVersionToEnum(Shared::StringView{versionStr.data(), versionStr.size()});
+    if(outRequest.version == Shared::HttpVersion::UNKNOWN)
         return false;
 
     return true;

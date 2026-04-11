@@ -5,7 +5,7 @@
 #include "utils/backport/string.hpp"
 #include <cstdlib>
 
-namespace WFX::Http {
+namespace WFX::Form {
 
 static inline bool DefaultValidateText(std::string_view sv, const void* fieldPtr)
 {
@@ -106,6 +106,6 @@ static constexpr ValidatorFn DefaultValidatorFor(const Int&)   { return DefaultV
 static constexpr ValidatorFn DefaultValidatorFor(const UInt&)  { return DefaultValidateUInt;  }
 static constexpr ValidatorFn DefaultValidatorFor(const Float&) { return DefaultValidateFloat; }
 
-} // namespace WFX::Http
+} // namespace WFX::Form
 
 #endif // WFX_INC_FORM_VALIDATORS_HPP

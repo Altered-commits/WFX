@@ -3,6 +3,8 @@
 
 namespace WFX::Http {
 
+using namespace WFX::Shared; // For every single abi types
+
 RouteSegment::RouteSegment(std::string_view key, std::unique_ptr<TrieNode> c)
     : routeValue(SegmentVariant::FromString(StringView{key.data(), key.size()}, true)),
     child(std::move(c))

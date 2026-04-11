@@ -11,8 +11,9 @@
 
 namespace WFX::Http {
 
-using namespace WFX::Utils; // For 'Logger', 'FileSystem', ...
-using namespace WFX::Core;  // For 'TemplateEngine'
+using namespace WFX::Utils;  // For 'Logger', 'FileSystem', ...
+using namespace WFX::Core;   // For 'TemplateEngine'
+using namespace WFX::Shared; // For every single abi type
 
 constexpr const char* CONTENT_TYPE_PLAIN = "text/plain";
 constexpr const char* CONTENT_TYPE_JSON  = "application/json";
@@ -290,7 +291,7 @@ void HttpResponse::SendTemplate(std::string&& path, Json&& ctx)
                     if(jsonValue->is_string())
                         carry = jsonValue->get<std::string>();
                     else {
-                        auto sv = JsonToFormRender(jsonValue);
+                        auto sv = Form::JsonToFormRender(jsonValue);
                         if(!sv.empty())
                             carry = sv;
                         else

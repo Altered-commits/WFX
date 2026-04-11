@@ -1,4 +1,3 @@
-
 namespace WFX::Http {
 
 template<typename T>

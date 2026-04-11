@@ -6,8 +6,6 @@
 
 namespace WFX::Http {
 
-using namespace WFX::Utils; // For 'RWBuffer'
-
 enum class SerializeResult : std::uint8_t {
     SERIALIZE_SUCCESS,
     SERIALIZE_BUFFER_FAILED,      // Allocation failed, buffer is nullptr
@@ -18,7 +16,9 @@ enum class SerializeResult : std::uint8_t {
 using SerializedHttpResponse = std::pair<SerializeResult, std::string>;
 
 namespace HttpSerializer {
-    SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer);
+
+SerializedHttpResponse SerializeToBuffer(HttpResponse& res, Utils::RWBuffer& buffer);
+
 } // namespace HttpSerializer
 
 } // namespace WFX::Http

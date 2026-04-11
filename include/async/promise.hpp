@@ -10,7 +10,6 @@ namespace WFX::Async {
 using WFX::Shared::AsyncResult;
 using WFX::Shared::AsyncStatus;
 using WFX::Shared::AsyncCompleteFn;
-using WFX::Shared::MiddlewareAction;
 
 template<typename T> struct Task;
 
@@ -20,8 +19,8 @@ struct BasePromise {
     void*           onDoneUd_ = nullptr;
 
 public:
-    void* operator new(std::size_t size) { return __WFXApi->GetMemoryAPIV1()->Alloc(size); }
-    void  operator delete(void* ptr)     { __WFXApi->GetMemoryAPIV1()->Free(ptr); }
+    void* operator new(std::size_t size) { return Core::MemoryApi()->Alloc(size); }
+    void  operator delete(void* ptr)     { Core::MemoryApi()->Free(ptr); }
 
 public:
     std::suspend_always initial_suspend() noexcept { return {}; }
@@ -59,7 +58,7 @@ public:
             {
                 AsyncResult result {
                     nullptr, 0,
-                    MiddlewareAction::CONTINUE,
+                    Shared::MiddlewareAction::CONTINUE,
                     p->status_
                 };
 
@@ -82,12 +81,12 @@ public:
 
 // Promise<MiddlewareAction> specialization (Async Middleware)
 template<>
-struct Promise<MiddlewareAction> : BasePromise {
-    AsyncStatus      status_ = AsyncStatus::NONE;
-    MiddlewareAction value_  = MiddlewareAction::CONTINUE;
+struct Promise<Shared::MiddlewareAction> : BasePromise {
+    AsyncStatus              status_ = AsyncStatus::NONE;
+    Shared::MiddlewareAction value_  = Shared::MiddlewareAction::CONTINUE;
 
 public:
-    void return_value(MiddlewareAction v) noexcept
+    void return_value(Shared::MiddlewareAction v) noexcept
     {
         value_  = v;
         status_ = AsyncStatus::COMPLETED;
@@ -127,8 +126,12 @@ public:
         return Completion{this};
     }
 
-    Task<MiddlewareAction> get_return_object();
+    Task<Shared::MiddlewareAction> get_return_object();
 };
+
+// Useful aliases
+using Void             = Async::Task<void>;
+using MiddlewareAction = Async::Task<Shared::MiddlewareAction>;
 
 } // namespace WFX::Async
 

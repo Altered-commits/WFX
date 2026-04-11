@@ -1,9 +1,9 @@
 #ifndef WFX_HTTP_RESPONSE_HPP
 #define WFX_HTTP_RESPONSE_HPP
 
-#include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
 #include "third_party/json/json_fwd.hpp"
+#include "shared/abis/constants.hpp"
 #include "shared/abis/types.hpp"
 
 #include <variant>
@@ -14,9 +14,7 @@ using Json = nlohmann::json;
 
 namespace WFX::Http {
 
-using namespace WFX::Shared; // For 'StreamGenerator', ...
-
-using BodyType = std::variant<std::monostate, std::string_view, std::string, StreamGenerator>;
+using BodyType = std::variant<std::monostate, std::string_view, std::string, Shared::StreamGenerator>;
 
 enum class OperationType : std::uint8_t {
     TEXT,
@@ -27,7 +25,7 @@ enum class OperationType : std::uint8_t {
 
 struct HttpResponse {
 public:
-    HttpResponse& Status(HttpStatus code);
+    HttpResponse& Status(Shared::HttpStatus code);
     HttpResponse& Set(std::string&& key, std::string&& value);
 
     bool          IsFileOperation()   const;
@@ -46,7 +44,7 @@ public:
     void SendTemplate(std::string&& path, Json&& ctx);
 
     // Stream API
-    void Stream(StreamGenerator generator, bool streamChunked = true, bool skipChecks = false);
+    void Stream(Shared::StreamGenerator generator, bool streamChunked = true, bool skipChecks = false);
 
 private:
     void SetTextBody(std::string&& text, const char* contentType);
@@ -55,13 +53,13 @@ private:
 
 public: // Internal use
     void ClearInfo();
-    void DestroyStream(StreamGenerator& gen);
+    void DestroyStream(Shared::StreamGenerator& gen);
 
 public:
-    HttpVersion     version = HttpVersion::HTTP_1_1;
-    HttpStatus      status  = HttpStatus::OK;
-    ResponseHeaders headers;
-    BodyType        body;
+    Shared::HttpVersion version = Shared::HttpVersion::HTTP_1_1;
+    Shared::HttpStatus  status  = Shared::HttpStatus::OK;
+    ResponseHeaders     headers;
+    BodyType            body;
 
 private:
     OperationType operationType_ = OperationType::TEXT;

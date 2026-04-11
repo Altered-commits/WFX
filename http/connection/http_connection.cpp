@@ -6,6 +6,8 @@
 
 namespace WFX::Http {
 
+using namespace WFX::Shared; // For every single abi type
+
 // vvv Ip Address Methods vvv
 WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
 {

@@ -46,10 +46,10 @@ inline Task<void> Promise<void>::get_return_object()
     };
 }
 
-inline Task<MiddlewareAction> Promise<MiddlewareAction>::get_return_object()
+inline Task<Shared::MiddlewareAction> Promise<Shared::MiddlewareAction>::get_return_object()
 {
-    return Task<MiddlewareAction>{
-        std::coroutine_handle<Promise<MiddlewareAction>>::from_promise(*this)
+    return Task<Shared::MiddlewareAction>{
+        std::coroutine_handle<Promise<Shared::MiddlewareAction>>::from_promise(*this)
     };
 }
 

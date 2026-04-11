@@ -28,6 +28,7 @@ struct ASYNC_API_TABLE {
     // Metadata
     AsyncAPIVersion apiVersion;
 };
+static_assert(std::is_standard_layout<ASYNC_API_TABLE>::value, "'ASYNC_API_TABLE' must be standard layout");
 
 // vvv Getter & Initializers vvv
 const ASYNC_API_TABLE* GetAsyncAPIV1();

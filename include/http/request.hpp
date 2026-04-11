@@ -3,6 +3,7 @@
 
 #include "core/core.hpp"
 #include "shared/apis/http_api.hpp"
+#include <string_view>
 
 namespace WFX::Http {
 
@@ -12,25 +13,25 @@ public:
     Request(void* backend) : backend_(backend) {}
 
 public:
-    HttpMethod Method() const
+    Shared::HttpMethod Method() const
     {
-        return __WFXApi->GetHttpAPIV1()->GetMethod(backend_);
+        return Core::HttpApi()->GetMethod(backend_);
     }
 
-    HttpVersion Version() const
+    Shared::HttpVersion Version() const
     {
-        return __WFXApi->GetHttpAPIV1()->GetVersion(backend_);
+        return Core::HttpApi()->GetVersion(backend_);
     }
 
     std::string_view Path() const
     {
-        auto sv = __WFXApi->GetHttpAPIV1()->GetPath(backend_);
+        auto sv = Core::HttpApi()->GetPath(backend_);
         return { sv.data, static_cast<std::size_t>(sv.length) };
     }
 
     std::string_view Body() const
     {
-        auto sv = __WFXApi->GetHttpAPIV1()->GetBody(backend_);
+        auto sv = Core::HttpApi()->GetBody(backend_);
         return { sv.data, static_cast<std::size_t>(sv.length) };
     }
 
@@ -40,7 +41,7 @@ public:
         Shared::StringView k = ToSV(key);
         Shared::StringView val{};
 
-        bool ok = __WFXApi->GetHttpAPIV1()->GetHeader(backend_, k, &val);
+        bool ok = Core::HttpApi()->GetHeader(backend_, k, &val);
         if(!ok)
             return false;
 
@@ -52,19 +53,19 @@ public:
     void SetContext(std::string_view key, Shared::Any value)
     {
         auto k = ToSV(key);
-        __WFXApi->GetHttpAPIV1()->SetContext(backend_, k, value);
+        Core::HttpApi()->SetContext(backend_, k, value);
     }
 
     bool GetContext(std::string_view key, Shared::Any& out) const
     {
         auto k = ToSV(key);
-        return __WFXApi->GetHttpAPIV1()->GetContext(backend_, k, &out);
+        return Core::HttpApi()->GetContext(backend_, k, &out);
     }
 
     void EraseContext(std::string_view key)
     {
         auto k = ToSV(key);
-        __WFXApi->GetHttpAPIV1()->EraseContext(backend_, k);
+        Core::HttpApi()->EraseContext(backend_, k);
     }
 
 private:

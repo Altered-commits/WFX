@@ -12,9 +12,9 @@ public:
     Response(void* backend) : backend_(backend) {}
 
 public:
-    Response& Status(HttpStatus code)
+    Response& Status(Shared::HttpStatus code)
     {
-        __WFXApi->GetHttpAPIV1()->SetStatus(backend_, code);
+        Core::HttpApi()->SetStatus(backend_, code);
         return *this;
     }
 
@@ -23,20 +23,20 @@ public:
         auto k = ToSV(key);
         auto v = ToSV(value);
 
-        __WFXApi->GetHttpAPIV1()->SetHeader(backend_, k, v);
+        Core::HttpApi()->SetHeader(backend_, k, v);
         return *this;
     }
 
     void SendText(std::string_view text)
     {
         auto sv = ToSV(text);
-        __WFXApi->GetHttpAPIV1()->SendText(backend_, sv);
+        Core::HttpApi()->SendText(backend_, sv);
     }
 
     void SendFile(std::string_view path, bool autoHandle404 = true)
     {
         auto sv = ToSV(path);
-        __WFXApi->GetHttpAPIV1()->SendFile(backend_, sv, autoHandle404);
+        Core::HttpApi()->SendFile(backend_, sv, autoHandle404);
     }
 
     template<typename Fn>
@@ -45,7 +45,7 @@ public:
         using FnType = std::decay_t<Fn>;
 
         // Allocate using engine allocator
-        void* raw = __WFXApi->GetMemoryAPIV1()->Alloc(sizeof(FnType));
+        void* raw = Core::MemoryApi()->Alloc(sizeof(FnType));
         if(!raw)
             return;
 
@@ -65,11 +65,11 @@ public:
                 auto* f = static_cast<FnType*>(ctx);
 
                 f->~FnType();
-                __WFXApi->GetMemoryAPIV1()->Free(f);
+                Core::MemoryApi()->Free(f);
             }
         };
 
-        __WFXApi->GetHttpAPIV1()->Stream(backend_, gen, chunked);
+        Core::HttpApi()->Stream(backend_, gen, chunked);
     }
 
 private:

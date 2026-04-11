@@ -1,9 +1,9 @@
 #ifndef WFX_HTTP_REQUEST_HPP
 #define WFX_HTTP_REQUEST_HPP
 
-#include "http/constants/http_constants.hpp"
 #include "http/headers/http_headers.hpp"
 #include "http/routing/route_segment.hpp"
+#include "shared/abis/constants.hpp"
 #include "shared/abis/any.hpp"
 
 #include <string>
@@ -18,13 +18,13 @@ namespace WFX::Http {
 using ContextMap = std::unordered_map<std::string, Shared::Any>;
 
 struct HttpRequest {
-    HttpMethod       method;
-    HttpVersion      version;
-    std::string_view path;
-    std::string_view body;
-    RequestHeaders   headers;
-    ContextMap       context;
-    PathSegments     pathSegments;
+    Shared::HttpMethod  method;
+    Shared::HttpVersion version;
+    std::string_view    path;
+    std::string_view    body;
+    RequestHeaders      headers;
+    ContextMap          context;
+    PathSegments        pathSegments;
 
 public: // Copying is strictly not allowed
     HttpRequest(const HttpRequest&)            = delete;

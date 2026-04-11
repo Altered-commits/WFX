@@ -123,7 +123,7 @@ LONG WINAPI ExceptionFilter(EXCEPTION_POINTERS* ep) {
 #else
 void HandleMasterSignal(int)
 {
-    auto& globalState = GetGlobalState();
+    auto& globalState = Http::GetGlobalState();
     globalState.shouldStop = true;
 
     if(globalState.workerPGID > 0)
@@ -132,7 +132,7 @@ void HandleMasterSignal(int)
 
 void HandleWorkerSignal(int)
 {
-    auto& globalState = GetGlobalState();
+    auto& globalState = Http::GetGlobalState();
     globalState.shouldStop = true;
     
     // Stop is atomic, its safe to call it in signal handler

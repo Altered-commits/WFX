@@ -23,6 +23,7 @@ namespace WFX::CLI {
 
 using namespace WFX::Http;  // For 'WFXGlobalState', ...
 using namespace WFX::Utils; // For 'Logger', 'BufferPool', 'FileCache', ...
+using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 
 int RunServer(const std::string& project, const ServerConfig& cfg)
 {

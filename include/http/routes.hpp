@@ -15,9 +15,9 @@
     namespace {                                                               \
         struct WFX_ROUTE_CLASS(method, uniq) {                                \
             WFX_ROUTE_CLASS(method, uniq)() {                                 \
-                WFX::Shared::__WFXDeferred.emplace_back([] {                  \
-                    __WFXApi->GetHttpAPIV1()->RegisterRoute(                  \
-                        WFX::Http::HttpMethod::method,                        \
+                WFX::Core::__WFXDeferred.emplace_back([] {                    \
+                    WFX::Core::HttpApi()->RegisterRoute(                      \
+                        WFX::Shared::HttpMethod::method,                      \
                         WFX::Shared::StringView::FromCString(path),           \
                         WFX::Http::MakeRouteCallback(callback)                \
                     );                                                        \
@@ -31,12 +31,12 @@
         struct WFX_ROUTE_CLASS(method, uniq) {                                \
             WFX_ROUTE_CLASS(method, uniq)() {                                 \
                 auto mwArr = mw;                                              \
-                WFX::Shared::__WFXDeferred.emplace_back(                      \
+                WFX::Core::__WFXDeferred.emplace_back(                        \
                     [mwArr]() mutable {                                       \
-                        __WFXApi->GetHttpAPIV1()->RegisterRouteEx(            \
-                            WFX::Http::HttpMethod::method,                    \
+                        WFX::Core::HttpApi()->RegisterRouteEx(                \
+                            WFX::Shared::HttpMethod::method,                  \
                             WFX::Shared::StringView::FromCString(path),       \
-                            mwArr.data(), mwArr.count(),                      \
+                            mwArr.Data(), mwArr.Count(),                      \
                             WFX::Http::MakeRouteCallback(callback)            \
                         );                                                    \
                     }                                                         \
@@ -67,7 +67,7 @@
         struct WFX_CONCAT(WFXGroupStart_, id) {                       \
             WFX_CONCAT(WFXGroupStart_, id)() {                        \
                 WFX::Shared::__WFXDeferredSimple.emplace_back([] {    \
-                    __WFXApi->GetHttpAPIV1()->PushRoutePrefix(path);  \
+                    WFX::Core::HttpApi()->PushRoutePrefix(path);      \
                 });                                                   \
             }                                                         \
         } WFX_CONCAT(WFXGroupStartInst_, id);                         \
@@ -78,7 +78,7 @@
         struct WFX_CONCAT(WFXGroupEnd_, id) {                         \
             WFX_CONCAT(WFXGroupEnd_, id)() {                          \
                 WFX::Shared::__WFXDeferredSimple.emplace_back([] {    \
-                    __WFXApi->GetHttpAPIV1()->PopRoutePrefix();       \
+                    WFX::Core::HttpApi()->PopRoutePrefix();           \
                 });                                                   \
             }                                                         \
         } WFX_CONCAT(WFXGroupEndInst_, id);                           \

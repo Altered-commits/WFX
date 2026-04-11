@@ -2,8 +2,7 @@
 #define WFX_HTTP_ROUTER_HPP
 
 #include "route_trie.hpp"
-
-#include "http/constants/http_constants.hpp"
+#include "shared/abis/constants.hpp"
 
 namespace WFX::Http {
 
@@ -13,8 +12,8 @@ public:
     ~Router() = default;
 
 public:
-    const TrieNode* RegisterRoute(HttpMethod method, std::string_view path, RouteCallback handler);
-    const TrieNode* MatchRoute(HttpMethod method, std::string_view path, PathSegments& outParams) const;
+    const TrieNode* RegisterRoute(Shared::HttpMethod method, std::string_view path, Shared::RouteCallback handler);
+    const TrieNode* MatchRoute(Shared::HttpMethod method, std::string_view path, PathSegments& outParams) const;
 
     void PushRouteGroup(std::string_view prefix);
     void PopRouteGroup();

@@ -2,6 +2,7 @@
 #define WFX_SHARED_MEMORY_API_HPP
 
 #include <cstdint>
+#include <type_traits>
 
 namespace WFX::Shared {
 
@@ -23,6 +24,7 @@ struct MEMORY_API_TABLE {
     // Metadata
     MemoryAPIVersion apiVersion;
 };
+static_assert(std::is_standard_layout<MEMORY_API_TABLE>::value, "'MEMORY_API_TABLE' must be standard layout");
 
 // vvv Getter vvv
 const MEMORY_API_TABLE* GetMemoryAPIV1();

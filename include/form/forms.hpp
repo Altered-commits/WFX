@@ -16,7 +16,7 @@
 // For ease of use :)
 using Json = nlohmann::json;
 
-namespace WFX::Http {
+namespace WFX::Form {
 
 // vvv Field Builders vvv
 template<typename Rule>
@@ -132,7 +132,7 @@ public:
 
 public: // Main Functions
     // Auto select the parsing type looking at the header
-    FormError Parse(Request req, CleanedType& out) const
+    FormError Parse(Http::Request req, CleanedType& out) const
     {
         std::string_view contentType;
         if(!req.GetHeader("Content-Type", contentType))
@@ -338,6 +338,6 @@ inline std::string_view JsonToFormRender(const Json* json)
     return fnPtr(formPtr);
 }
 
-} // namespace WFX::Http
+} // namespace WFX::Form
 
 #endif // WFX_INC_FORMS_HPP

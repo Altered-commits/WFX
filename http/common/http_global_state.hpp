@@ -13,13 +13,11 @@ namespace WFX::Core {
 
 namespace WFX::Http {
 
-using namespace WFX::Core; // For 'CoreEngine', 'TemplateEngine'
-
 using SSLKey = std::array<std::uint8_t, 80>;
 
 struct WFXGlobalState {
     std::atomic<bool> shouldStop = false;
-    CoreEngine*       enginePtr  = nullptr;
+    Core::CoreEngine* enginePtr  = nullptr;
     SSLKey            sslKey     = { 0 };
 
 #ifdef _WIN32

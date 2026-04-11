@@ -27,8 +27,6 @@ namespace WFX::Http {
 struct HttpRequest;
 struct HttpResponse;
 
-using namespace WFX::Shared;
-
 // Cross-Platform compatible Ip Struct
 struct WFXIpAddress {
     union {
@@ -118,8 +116,8 @@ struct AsyncTrack {
     std::uint16_t mIndex;
 
     // Get the address of the 8-bit action field directly
-    MiddlewareAction* GetMAction() { 
-        return reinterpret_cast<MiddlewareAction*>(&mAction); 
+    Shared::MiddlewareAction* GetMAction() { 
+        return reinterpret_cast<Shared::MiddlewareAction*>(&mAction); 
     }
 
     // Execution Level: Upper 4 bits
@@ -131,10 +129,10 @@ struct AsyncTrack {
     }
 
     // Middleware Level: Lower 4 bits
-    MiddlewareLevel GetMLevel() const { 
-        return static_cast<MiddlewareLevel>(levels & 0x0F); 
+    Shared::MiddlewareLevel GetMLevel() const { 
+        return static_cast<Shared::MiddlewareLevel>(levels & 0x0F); 
     }
-    void SetMLevel(MiddlewareLevel v) {
+    void SetMLevel(Shared::MiddlewareLevel v) {
         levels = (levels & 0xF0) | (static_cast<std::uint8_t>(v) & 0x0F);
     }
     
@@ -154,42 +152,42 @@ struct ConnectionContext : public ConnectionTag {
 
     union {
         struct {
-            std::uint16_t endpointStatus        : 4;   // --
-            std::uint16_t parseState            : 3;   //  |
-            std::uint16_t connectionState       : 2;   //  |
-            std::uint16_t endpointState         : 2;   //  |
-            std::uint16_t isStreamOperation     : 1;   //  |
-            std::uint16_t isFileOperation       : 1;   //  |
-            std::uint16_t isAsyncTimerOperation : 1;   //  |
-            std::uint16_t isShuttingDown        : 1;   //  |
-            std::uint16_t streamChunked         : 1;   //  V
-        };                                             // 2 bytes
+            std::uint16_t endpointStatus        : 4;  // --
+            std::uint16_t parseState            : 3;  //  |
+            std::uint16_t connectionState       : 2;  //  |
+            std::uint16_t endpointState         : 2;  //  |
+            std::uint16_t isStreamOperation     : 1;  //  |
+            std::uint16_t isFileOperation       : 1;  //  |
+            std::uint16_t isAsyncTimerOperation : 1;  //  |
+            std::uint16_t isShuttingDown        : 1;  //  |
+            std::uint16_t streamChunked         : 1;  //  V
+        };                                            // 2 bytes
         std::uint16_t __Flags = 0;
     };
 
     union {
-        AsyncTrack    trackAsync;                  // |
-        std::uint32_t trackBytes = 0;              // |-> 4 bytes (Used in HTTP parsing then async tracking if needed)
+        AsyncTrack    trackAsync;      // |
+        std::uint32_t trackBytes = 0;  // |-> 4 bytes (Used in HTTP parsing then async tracking if needed)
     };
 
-    std::uint32_t        expectedBodyLength = 0;        // 4 bytes
-    std::uint16_t        generationId       = 1;        // 2 bytes (0 is specially reserved)
-    std::uint16_t        endpointIdx        = 0;        // 2 bytes
+    std::uint32_t expectedBodyLength = 0;  // 4 bytes
+    std::uint16_t generationId       = 1;  // 2 bytes (0 is specially reserved)
+    std::uint16_t endpointIdx        = 0;  // 2 bytes
 
-    void*                sslConn            = nullptr;  // 8 bytes
-    HttpRequest*         requestInfo        = nullptr;  // 8 bytes
-    HttpResponse*        responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
-    Utils::RWBuffer      rwBuffer;                      // 16 bytes
-    AsyncData            asyncData          = {};       // 24 bytes
-    FileInfo             fileInfo           = {};       // 24 bytes
-    StreamGenerator      streamGenerator    = {};       // 24 bytes
+    void*                   sslConn            = nullptr;  // 8 bytes
+    HttpRequest*            requestInfo        = nullptr;  // 8 bytes
+    HttpResponse*           responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
+    Utils::RWBuffer         rwBuffer;                      // 16 bytes
+    Shared::AsyncData       asyncData          = {};       // 24 bytes
+    FileInfo                fileInfo           = {};       // 24 bytes
+    Shared::StreamGenerator streamGenerator    = {};       // 24 bytes
 
-    WFXIpAddress         connInfo;                      // 20 bytes
-    WFXSocket            socket             = -1;       // 4 | 8 bytes
-                                                        // Padded if sizeof(WFXSocket) == 4
+    WFXIpAddress connInfo = {};                  // 20 bytes
+    WFXSocket    socket   = WFX_INVALID_SOCKET;  // 4 | 8 bytes
+                                                 // Padded if sizeof(WFXSocket) == 4
 
-    ConnectionContext*   clientContext      = nullptr;  // 8 bytes (Set only on endpoint contexts)
-    ConnectionContext*   endpointContext    = nullptr;  // 8 bytes (Set only on client contexts)
+    ConnectionContext* clientContext   = nullptr;  // 8 bytes (Set only on endpoint contexts)
+    ConnectionContext* endpointContext = nullptr;  // 8 bytes (Set only on client contexts)
 
 public: // Helper functions
     void ResetContext();
@@ -199,12 +197,12 @@ public: // Helper functions
     void SetParseState(HttpParseState newState);
     void SetConnectionState(ConnectionState newState);
     void SetEndpointState(EndpointState newState);
-    void SetEndpointStatus(EndpointStatus newStatus);
+    void SetEndpointStatus(Shared::EndpointStatus newStatus);
 
-    HttpParseState  GetParseState()      const;
-    ConnectionState GetConnectionState() const;
-    EndpointState   GetEndpointState()   const;
-    EndpointStatus  GetEndpointStatus()  const;
+    HttpParseState          GetParseState()      const;
+    ConnectionState         GetConnectionState() const;
+    EndpointState           GetEndpointState()   const;
+    Shared::EndpointStatus  GetEndpointStatus()  const;
     
     bool          IsEndpoint()       const;
     bool          IsAsyncOperation() const;
@@ -243,12 +241,14 @@ struct HttpConnectionHandler {
     virtual void WriteFile(ConnectionContext* ctx, std::string path) = 0;
 
     // Write data directly to an endpoint (Async)
-    virtual EndpointStatus WriteEndpoint(
+    virtual Shared::EndpointStatus WriteEndpoint(
         ConnectionContext* ctx, std::uint32_t endpointIndex, const std::byte* ptr, std::uint32_t size
     ) = 0;
 
     // Stream data to socket via a generator function (Async)
-    virtual void Stream(ConnectionContext* ctx, StreamGenerator generator, bool streamChunked = true) = 0;
+    virtual void Stream(
+        ConnectionContext* ctx, Shared::StreamGenerator generator, bool streamChunked = true
+    ) = 0;
 
     // Close a client socket
     virtual void Close(ConnectionContext* ctx, bool forceClose = false) = 0;
@@ -257,7 +257,9 @@ struct HttpConnectionHandler {
     virtual void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) = 0;
 
     // Refresh the connection's async timer
-    virtual bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds, AsyncData asyncData) = 0;
+    virtual bool RefreshAsyncTimer(
+        ConnectionContext* ctx, std::uint32_t delayMilliseconds, Shared::AsyncData asyncData
+    ) = 0;
 
     // Run the main connection loop
     virtual void Run() = 0;

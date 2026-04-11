@@ -10,9 +10,6 @@
 
 namespace WFX::Core {
 
-using namespace WFX::Utils; // For 'Logger', 'FileSystem', 'ProcessUtils'
-using namespace WFX::Http;  // For 'HttpConnectionHandler', 'HttpParser', 'HttpRequest', 'HttpMiddleware'
-
 class CoreEngine {
 public: // Main Stuff
     CoreEngine(const char* dllPath, bool useHttps);
@@ -20,27 +17,27 @@ public: // Main Stuff
     void Stop();
 
 public: // Static stuff
-    static void OnCoroutineComplete(void* ud, AsyncResult result);
+    static void OnCoroutineComplete(void* ud, Shared::AsyncResult result);
 
 private: // Internal Functions
-    void HandleRequest(ConnectionContext* ctx);
-    void HandleResponse(ConnectionContext* ctx);
-    void HandleSuccess(ConnectionContext* ctx);
+    void HandleRequest(Http::ConnectionContext* ctx);
+    void HandleResponse(Http::ConnectionContext* ctx);
+    void HandleSuccess(Http::ConnectionContext* ctx);
 
 private: // Helper Functions
-    void         FinishRequest(ConnectionContext* ctx);
+    void         FinishRequest(Http::ConnectionContext* ctx);
     std::uint8_t HandleConnectionHeader(std::string_view header);
     void         HandleUserDLLInjection(const char* dllDir);
     void         HandleMiddlewareLoading();
 
 private:
-    Logger& logger_ = Logger::GetInstance();
-    Config& config_ = Config::GetInstance();
+    Config&        config_ = Config::GetInstance();
+    Utils::Logger& logger_ = Utils::Logger::GetInstance();
     
-    HttpMiddleware middleware_;
-    Router         router_;
+    Http::HttpMiddleware middleware_;
+    Http::Router         router_;
 
-    std::unique_ptr<HttpConnectionHandler> connHandler_;
+    std::unique_ptr<Http::HttpConnectionHandler> connHandler_;
 };
 
 } // namespace WFX

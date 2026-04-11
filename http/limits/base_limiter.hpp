@@ -4,7 +4,6 @@
 /* This pure header file impl is there for one reason, house commonly used functions in limiters */
 
 #include "http/connection/http_connection.hpp"
-
 #include <chrono>
 
 namespace WFX::Http {

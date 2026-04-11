@@ -11,7 +11,7 @@ using WFX::Shared::AsyncStatus;
 
 template<typename Derived>
 struct AwaitableBase {
-    AsyncResult result_ = { nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::NONE };
+    AsyncResult result_ = { nullptr, 0, Shared::MiddlewareAction::CONTINUE, AsyncStatus::NONE };
     std::coroutine_handle<> handle_;
 
 public: // 'AsyncAPI' Callback

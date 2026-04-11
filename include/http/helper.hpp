@@ -9,25 +9,15 @@
 
 namespace WFX::Http {
 
-using WFX::Shared::RouteCallback;
-using WFX::Shared::MwCallback;
-using WFX::Shared::CallbackKind;
-using WFX::Shared::SyncRouteFn;
-using WFX::Shared::AsyncRouteFn;
-using WFX::Shared::SyncMwFn;
-using WFX::Shared::AsyncMwFn;
-using WFX::Shared::AsyncCompleteFn;
-using WFX::Shared::AsyncResult;
-using WFX::Shared::MiddlewareAction;
-
-using AsyncVoid             = Async::Task<void>;
-using AsyncMiddlewareAction = Async::Task<MiddlewareAction>;
+// Helper for static_assert
+template<typename T>
+struct AlwaysFalse : std::false_type {};
 
 template<typename Lambda>
-RouteCallback MakeRouteCallback(Lambda&& cb)
+Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
 {
-    // Async route: Lambda returns 'AsyncVoid'
-    if constexpr(std::is_invocable_r_v<AsyncVoid, Lambda, Request, Response>) {
+    // Async route: Lambda returns 'Async::Void'
+    if constexpr(std::is_invocable_r_v<Async::Void, Lambda, Request, Response>) {
         // The lambda is non-capturing, so we can store it as a constexpr/static
         // We generate a thunk that bridges the ABI signature to the user signature
         //
@@ -41,9 +31,9 @@ RouteCallback MakeRouteCallback(Lambda&& cb)
         // We use a static local to hold the lambda (zero-size for non-capturing)
         static auto fn = cb;
 
-        RouteCallback rc;
-        rc.kind  = CallbackKind::ASYNC;
-        rc.async = [](Request req, Response res, AsyncCompleteFn onDone, void* onDoneUd)
+        Shared::RouteCallback rc;
+        rc.kind  = Shared::CallbackKind::ASYNC;
+        rc.async = [](Request req, Response res, Shared::AsyncCompleteFn onDone, void* onDoneUd)
         {
             auto task = fn(req, res);
             task.SetCompletion(onDone, onDoneUd);
@@ -62,8 +52,8 @@ RouteCallback MakeRouteCallback(Lambda&& cb)
     else if constexpr(std::is_invocable_r_v<void, Lambda, Request, Response>) {
         static auto fn = cb;
 
-        RouteCallback rc;
-        rc.kind = CallbackKind::SYNC;
+        Shared::RouteCallback rc;
+        rc.kind = Shared::CallbackKind::SYNC;
         rc.sync = [](Request req, Response res) {
             fn(req, res);
         };
@@ -73,24 +63,24 @@ RouteCallback MakeRouteCallback(Lambda&& cb)
 
     else {
         static_assert(
-            std::is_invocable_r_v<void, Lambda, Request, Response>,
+            AlwaysFalse<Lambda>::value,
             "[WFX]: Invalid route callback. Expected one of:\n"
-            "  - Sync:  void(WFX::Http::Request, WFX::Http::Response)\n"
-            "  - Async: AsyncVoid(WFX::Http::Request, WFX::Http::Response)\n"
+            "  - void(WFX::Http::Request, WFX::Http::Response)\n"
+            "  - Async::Void(WFX::Http::Request, WFX::Http::Response)\n"
         );
     }
 }
 
 template<typename Lambda>
-MwCallback MakeMwCallback(Lambda&& cb)
+Shared::MwCallback MakeMwCallback(Lambda&& cb)
 {
-    // Async middleware: returns 'AsyncMiddlewareAction'
-    if constexpr(std::is_invocable_r_v<AsyncMiddlewareAction, Lambda, Request, Response>) {
+    // Async middleware: returns 'Async::MiddlewareAction'
+    if constexpr(std::is_invocable_r_v<Async::MiddlewareAction, Lambda, Request, Response>) {
         static auto fn = cb;
 
-        MwCallback mc;
-        mc.kind  = CallbackKind::ASYNC;
-        mc.async = [](Request req, Response res, AsyncCompleteFn onDone, void* onDoneUd)
+        Shared::MwCallback mc;
+        mc.kind  = Shared::CallbackKind::ASYNC;
+        mc.async = [](Request req, Response res, Shared::AsyncCompleteFn onDone, void* onDoneUd)
         {
             auto task = fn(req, res);
             task.SetCompletion(onDone, onDoneUd);
@@ -101,12 +91,12 @@ MwCallback MakeMwCallback(Lambda&& cb)
     }
 
     // Sync middleware: returns 'MiddlewareAction'
-    else if constexpr(std::is_invocable_r_v<MiddlewareAction, Lambda, Request, Response>) {
+    else if constexpr(std::is_invocable_r_v<Shared::MiddlewareAction, Lambda, Request, Response>) {
         static auto fn = cb;
 
-        MwCallback mc;
-        mc.kind = CallbackKind::SYNC;
-        mc.sync = [](Request req, Response res) -> MiddlewareAction {
+        Shared::MwCallback mc;
+        mc.kind = Shared::CallbackKind::SYNC;
+        mc.sync = [](Request req, Response res) -> Shared::MiddlewareAction {
             return fn(req, res);
         };
 
@@ -115,10 +105,10 @@ MwCallback MakeMwCallback(Lambda&& cb)
 
     else {
         static_assert(
-            std::is_invocable_r_v<MiddlewareAction, Lambda, Request, Response>,
+            AlwaysFalse<Lambda>::value,
             "[WFX]: Invalid middleware callback. Expected one of:\n"
-            "  - Sync:  MiddlewareAction(WFX::Http::Request, WFX::Http::Response)\n"
-            "  - Async: AsyncMiddlewareAction(WFX::Http::Request, WFX::Http::Response)\n"
+            "  - Shared::MiddlewareAction(WFX::Http::Request, WFX::Http::Response)\n"
+            "  - Async::MiddlewareAction(WFX::Http::Request, WFX::Http::Response)\n"
         );
     }
 }
@@ -126,7 +116,7 @@ MwCallback MakeMwCallback(Lambda&& cb)
 // Variadic helper to build a 'MwCallback' array for per-route middleware
 template<typename... Lambdas>
 struct MwCallbackArray {
-    MwCallback entries[sizeof...(Lambdas)];
+    Shared::MwCallback entries[sizeof...(Lambdas)];
 
 public:
     MwCallbackArray(Lambdas&&... mws)
@@ -134,8 +124,8 @@ public:
     {}
 
 public:
-    const MwCallback* data()  const { return entries; }
-    std::size_t       count() const { return sizeof...(Lambdas); }
+    const Shared::MwCallback* Data()  const { return entries; }
+    std::size_t               Count() const { return sizeof...(Lambdas); }
 };
 
 template<typename... Lambdas>

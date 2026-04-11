@@ -12,11 +12,9 @@ namespace WFX::Http {
 struct TrieNode;
 struct ConnectionContext;
 
-using namespace WFX::Shared; // For 'MwCallback', ...
-
-using MiddlewareStack       = std::vector<MwCallback>;
+using MiddlewareStack       = std::vector<Shared::MwCallback>;
 using MiddlewareConfigOrder = const std::vector<std::string>&;
-using MiddlewareFactory     = std::unordered_map<std::string_view, MwCallback>;
+using MiddlewareFactory     = std::unordered_map<std::string_view, Shared::MwCallback>;
 using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, MiddlewareStack>;
 
 struct MiddlewareResult {
@@ -25,7 +23,7 @@ struct MiddlewareResult {
 };
 
 struct MiddlewareFunctionResult {
-    MiddlewareAction action;
+    Shared::MiddlewareAction action;
     bool isAsync;
 };
 
@@ -35,7 +33,7 @@ public:
     ~HttpMiddleware() = default;
 
 public:
-    void RegisterMiddleware(std::string_view name, MwCallback mw);
+    void RegisterMiddleware(std::string_view name, Shared::MwCallback mw);
     void RegisterPerRouteMiddleware(const TrieNode* node, MiddlewareStack mwStack);
 
     MiddlewareResult ExecuteMiddleware(
@@ -55,7 +53,7 @@ private: // Helper functions
         ConnectionContext* ctx, Request req, Response res, MiddlewareStack& stack
     );
     MiddlewareFunctionResult ExecuteFunction(
-        ConnectionContext* ctx, Request req, Response res, MwCallback mw
+        ConnectionContext* ctx, Request req, Response res, Shared::MwCallback mw
     );
 
 private:

@@ -15,7 +15,7 @@ using namespace WFX::Http; // For 'Router', 'Middleware'
 using WFX::Utils::Logger;
 
 // '__GlobalHttpDataV1.data' Can be set via the http api, the reason why this is safe to set even-
-// with multiple connections is our entire flow of data is single threaded and will remain that way
+// -with multiple connections is our entire flow of data is single threaded and will remain that way
 static HttpAPIDataV1 __GlobalHttpDataV1;
 
 // vvv Helper functions vvv

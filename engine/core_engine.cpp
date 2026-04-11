@@ -20,6 +20,10 @@
 
 namespace WFX::Core {
 
+using namespace WFX::Http;   // |
+using namespace WFX::Shared; // | -> For essentially everything
+using namespace WFX::Utils;  // |
+
 // Some internal enum stuff for connection header
 enum ConnectionHeader : std::uint8_t {
     NONE       = 0,

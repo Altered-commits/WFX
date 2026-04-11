@@ -5,6 +5,7 @@
 namespace WFX::Http {
 
 using namespace WFX::Utils; // For 'Logger'
+using namespace WFX::Shared; // For every single abi type
 
 const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, RouteCallback handler)
 {

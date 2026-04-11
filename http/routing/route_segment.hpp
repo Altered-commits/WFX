@@ -8,9 +8,7 @@
 
 namespace WFX::Http {
 
-using namespace WFX::Shared;
-
-using PathSegments = std::vector<SegmentVariant>;
+using PathSegments = std::vector<Shared::SegmentVariant>;
 
 enum class ParamType : std::uint8_t {
     UINT,
@@ -24,28 +22,30 @@ struct RouteSegment;
 
 struct TrieNode {
     std::vector<RouteSegment> children;
-    RouteCallback             callback;
+    Shared::RouteCallback     callback;
 };
 
 struct RouteSegment {
-    SegmentVariant            routeValue;
+    Shared::SegmentVariant    routeValue{};
     std::unique_ptr<TrieNode> child = nullptr;
 
+public:
     RouteSegment(std::string_view key, std::unique_ptr<TrieNode> c);
-    RouteSegment(SegmentVariant p, std::unique_ptr<TrieNode> c);
+    RouteSegment(Shared::SegmentVariant p, std::unique_ptr<TrieNode> c);
 
     RouteSegment(const RouteSegment&)            = delete;
     RouteSegment& operator=(const RouteSegment&) = delete;
     RouteSegment(RouteSegment&&)                 noexcept = default;
     RouteSegment& operator=(RouteSegment&&)      noexcept = default;
 
+public:
     // vvv Type Checks vvv
     bool IsStatic() const;
     bool IsParam()  const;
 
     // vvv Accessors vvv
-    const SegmentVariant* GetParam()     const;
-          TrieNode*       GetChild()     const;
+    const Shared::SegmentVariant* GetParam()     const;
+          TrieNode*               GetChild()     const;
 
     // vvv Utilities vvv
     bool             MatchesStatic(std::string_view candidate) const;

@@ -1,7 +1,7 @@
 #ifndef WFX_SHARED_HTTP_API_HPP
 #define WFX_SHARED_HTTP_API_HPP
 
-#include "http/constants/http_constants.hpp"
+#include "shared/abis/constants.hpp"
 #include "shared/abis/types.hpp"
 #include "shared/abis/any.hpp"
 #include "shared/abis/string_view.hpp"
@@ -17,18 +17,16 @@ class HttpConnectionHandler;
 
 namespace WFX::Shared {
 
-using namespace WFX::Http; // For 'HttpMethod', ...
-
 enum class HttpAPIVersion : std::uint8_t {
     V1 = 1,
 };
 
 // Data internally used by Http API
 struct HttpAPIDataV1 {
-    Router*                router      = nullptr;
-    HttpMiddleware*        middleware  = nullptr;
-    HttpConnectionHandler* connHandler = nullptr;
-    void*                  data        = nullptr;  // Any data type erased
+    Http::Router*                router      = nullptr;
+    Http::HttpMiddleware*        middleware  = nullptr;
+    Http::HttpConnectionHandler* connHandler = nullptr;
+    void*                        data        = nullptr;  // Any data type-erased
 };
 
 // vvv All aliases for clarity vvv
@@ -109,10 +107,11 @@ struct HTTP_API_TABLE {
     // Metadata
     HttpAPIVersion          apiVersion;
 };
+static_assert(std::is_standard_layout<HTTP_API_TABLE>::value, "'HTTP_API_TABLE' must be standard layout");
 
 // vvv Getter & Initializers vvv
 const HTTP_API_TABLE* GetHttpAPIV1();
-void                  InitHttpAPIV1(HttpConnectionHandler*, Router*, HttpMiddleware*);
+void                  InitHttpAPIV1(Http::HttpConnectionHandler*, Http::Router*, Http::HttpMiddleware*);
 
 } // namespace WFX::Shared
 

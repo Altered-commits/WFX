@@ -6,7 +6,9 @@
 namespace WFX::Http {
 
 namespace HttpParser {
-    HttpParseState Parse(ConnectionContext* ctx);
+
+HttpParseState Parse(ConnectionContext* ctx);
+
 } // namespace HttpParser
 
 } // namespace WFX::Http

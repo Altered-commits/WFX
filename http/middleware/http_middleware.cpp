@@ -8,6 +8,8 @@
 
 namespace WFX::Http {
 
+using namespace WFX::Shared; // For every single abi type
+
 // vvv Main Functions vvv
 void HttpMiddleware::RegisterMiddleware(std::string_view name, MwCallback mw)
 {

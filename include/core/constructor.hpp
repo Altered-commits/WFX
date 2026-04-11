@@ -12,7 +12,7 @@
     namespace {                                                         \
         struct WFX_CNSTRCT_CLASS(uniq) {                                \
             WFX_CNSTRCT_CLASS(uniq)() {                                 \
-                WFX::Shared::__WFXDeferred.emplace_back([] callback);   \
+                WFX::Core::__WFXDeferred.emplace_back(callback);        \
             }                                                           \
         } WFX_CNSTRCT_INSTANCE(uniq);                                   \
     }

@@ -1,10 +1,10 @@
-#ifndef WFX_INC_HTTP_DEFERRED_INIT_VECTOR_HPP
-#define WFX_INC_HTTP_DEFERRED_INIT_VECTOR_HPP
+#ifndef WFX_INC_CORE_DEFERRED_INIT_VECTOR_HPP
+#define WFX_INC_CORE_DEFERRED_INIT_VECTOR_HPP
 
 #include <functional>
 #include <vector>
 
-namespace WFX::Http {
+namespace WFX::Core {
 
 using DeferredCallback = std::function<void()>;
 using DeferredVector   = std::vector<DeferredCallback>;
@@ -23,6 +23,6 @@ inline void __ExecuteAndEraseDeferred()
     __WFXDeferred.shrink_to_fit();
 }
 
-} // namespace WFX::Http
+} // namespace WFX::Core
 
-#endif // WFX_INC_HTTP_DEFERRED_INIT_VECTOR_HPP
+#endif // WFX_INC_CORE_DEFERRED_INIT_VECTOR_HPP

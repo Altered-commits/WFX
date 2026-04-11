@@ -13,6 +13,7 @@ struct MASTER_API_TABLE {
     const ASYNC_API_TABLE*  (*GetAsyncAPIV1)();
     const MEMORY_API_TABLE* (*GetMemoryAPIV1)();
 };
+static_assert(std::is_standard_layout<MASTER_API_TABLE>::value, "'MASTER_API_TABLE' must be standard layout");
 
 // vvv Hardcoded signature to inject API table to user side vvv
 using RegisterMasterAPIFn = void (*)(const MASTER_API_TABLE*);
