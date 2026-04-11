@@ -129,10 +129,6 @@ public:
     Task<Shared::MiddlewareAction> get_return_object();
 };
 
-// Useful aliases
-using Void             = Async::Task<void>;
-using MiddlewareAction = Async::Task<Shared::MiddlewareAction>;
-
 } // namespace WFX::Async
 
 #endif // WFX_INC_CXX_ASYNC_PROMISE_HPP

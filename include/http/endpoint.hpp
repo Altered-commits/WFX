@@ -30,8 +30,8 @@ public: // Main setup
     bool await_ready() const noexcept { return false; }
 
     void await_suspend(std::coroutine_handle<> h) noexcept {
-        status = __WFXApi->GetHttpAPIV1()->WriteEndpoint(
-                            __WFXApi->GetHttpAPIV1()->GetGlobalPtrData(),
+        status = Core::HttpApi()->WriteEndpoint(
+                            Core::HttpApi()->GetGlobalPtrData(),
                             endpointIdx,
                             payload.data(),
                             payload.size()
@@ -56,8 +56,8 @@ public: // Constructor
     ) {
         value_.__Url = url;
 
-        WFX::Shared::__WFXDeferredContextual.emplace_back([=, this] {
-            value_.__IntrnlIdx = __WFXApi->GetHttpAPIV1()->AllocateEndpoint(
+        Core::__WFXDeferred.emplace_back([=, this] {
+            value_.__IntrnlIdx = Core::HttpApi()->AllocateEndpoint(
                                     Shared::StringView{url.data(), url.size()},
                                     connLimit,
                                     inFlightLimit,

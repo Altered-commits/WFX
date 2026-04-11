@@ -107,6 +107,20 @@ const HTTP_API_TABLE* GetHttpAPIV1()
             *outVal = StringView{val.data(), static_cast<std::uint64_t>(val.size())};
             return true;
         },
+        [](const void* request) { // GetSegmentCountFn
+            return ToReq(request)->pathSegments.size();
+        },
+        [](const void* request, std::uint64_t index) { // GetSegmentFn
+            auto& segments = ToReq(request)->pathSegments;
+
+            if(index >= segments.size())
+                Logger::GetInstance().Fatal(
+                    "[HttpAPI]: Index out of bounds for 'GetSegment'. Expected less than ",
+                    segments.size(), ", got", index
+                );
+
+            return segments[index];
+        },
         [](void* request, StringView key, Any value) { // SetContextFn
             auto* req = ToReq(request);
             auto k = std::string(key.Data(), key.Size());
@@ -150,11 +164,21 @@ const HTTP_API_TABLE* GetHttpAPIV1()
                 std::string(key.Data(), key.Size()), std::string(value.Data(), value.Size())
             );
         },
-        [](void* backend, StringView view) {  // SendTextFn
-            ToRes(backend)->SendText(std::string_view{view.Data(), view.Size()});
+        [](void* backend, StringView view, bool copyBuffer) {  // SendTextFn
+            auto* response = ToRes(backend);
+
+            if(copyBuffer)
+                response->SendText(std::string{view.Data(), view.Size()});
+            else
+                response->SendText(std::string_view{view.Data(), view.Size()});
         },
-        [](void* backend, StringView view, bool autoHandle404) {  // SendFileFn
-            ToRes(backend)->SendFile(std::string_view{view.Data(), view.Size()}, autoHandle404);
+        [](void* backend, StringView view, bool autoHandle404, bool copyBuffer) {  // SendFileFn
+            auto* response = ToRes(backend);
+
+            if(copyBuffer)
+                response->SendFile(std::string{view.Data(), view.Size()}, autoHandle404);
+            else
+                response->SendFile(std::string_view{view.Data(), view.Size()}, autoHandle404);
         },
         // Stream API
         [](void* backend, StreamGenerator generator, bool streamChunked) { // StreamFn

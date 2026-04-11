@@ -8,10 +8,11 @@ namespace WFX::Shared {
 
 struct alignas(8) Any {
 public:
-    void* data;
-    void (*destructor)(void*);
+    void*         data;
+    void          (*destructor)(void*);
+    std::uint64_t typeID;
 
-public: // vvv Basic methods vvv
+public:
     void Reset() noexcept
     {
         if(data && destructor)
@@ -19,33 +20,42 @@ public: // vvv Basic methods vvv
 
         data       = nullptr;
         destructor = nullptr;
+        typeID     = 0;
     }
 
-    bool        HasValue() const noexcept { return data != nullptr; }
-    void*       Get()            noexcept { return data; }
-    const void* Get()      const noexcept { return data; }
+    bool          HasValue() const noexcept { return data != nullptr; }
+    void*         Get()            noexcept { return data; }
+    const void*   Get()      const noexcept { return data; }
+    std::uint64_t TypeID()   const noexcept { return typeID; }
+
+    template<typename T>
+    T* As() noexcept
+    {
+        if(typeID != TypeIDOf<T>())
+            return nullptr;
+
+        return static_cast<T*>(data);
+    }
+
+    template<typename T>
+    const T* As() const noexcept
+    {
+        if(typeID != TypeIDOf<T>())
+            return nullptr;
+
+        return static_cast<const T*>(data);
+    }
 
 public: // vvv Factory vvv
     template<typename T>
-    static Any Create(T* ptr) noexcept
+    static std::uint64_t TypeIDOf() noexcept
     {
-        Any a{};
-        a.data       = static_cast<void*>(ptr);
-        a.destructor = [](void* p) { delete static_cast<T*>(p); };
-
-        return a;
-    }
-
-    static Any FromRaw(void* ptr) noexcept
-    {
-        Any a{};
-        a.data = ptr;
-        a.destructor = nullptr;
-        return a;
+        static const std::uint8_t tag = 0;
+        return reinterpret_cast<std::uint64_t>(&tag);
     }
 };
 
-static_assert(sizeof(Any) == 16,                      "WFX_Any ABI size mismatch");
+static_assert(sizeof(Any) == 24,                      "WFX_Any ABI size mismatch");
 static_assert(alignof(Any) == alignof(void*),         "WFX_Any alignment mismatch");
 static_assert(std::is_standard_layout<Any>::value,    "WFX_Any must be standard layout");
 static_assert(std::is_trivially_copyable<Any>::value, "WFX_Any must be trivially copyable");

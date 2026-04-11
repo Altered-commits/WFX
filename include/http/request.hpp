@@ -4,6 +4,7 @@
 #include "core/core.hpp"
 #include "shared/apis/http_api.hpp"
 #include <string_view>
+#include <cstring>
 
 namespace WFX::Http {
 
@@ -50,16 +51,98 @@ public:
     }
 
 public:
-    void SetContext(std::string_view key, Shared::Any value)
+    std::uint64_t SegmentCount() const
     {
-        auto k = ToSV(key);
-        Core::HttpApi()->SetContext(backend_, k, value);
+        return Core::HttpApi()->GetSegmentCount(backend_);
     }
 
-    bool GetContext(std::string_view key, Shared::Any& out) const
+    Shared::SegmentVariant GetSegment(std::uint64_t index) const
+    {
+        return Core::HttpApi()->GetSegment(backend_, index);
+    }
+
+public:
+    template<typename T>
+    bool SetContext(std::string_view key, T&& value)
+    {
+        using U = std::decay_t<T>;
+
+        auto k = ToSV(key);
+
+        Shared::Any any{};
+        any.typeID = Shared::Any::TypeIDOf<U>();
+
+        if constexpr (
+            sizeof(U) <= sizeof(void*) &&
+            alignof(U) <= alignof(void*) &&
+            std::is_trivially_copyable_v<U> &&
+            std::is_trivially_destructible_v<U>
+        ) {
+            U tmp = std::forward<T>(value);
+            std::memcpy(&any.data, &tmp, sizeof(U));
+            any.destructor = nullptr;
+        }
+        else {
+            void* mem = Core::MemoryApi()->Alloc(sizeof(U));
+            if(!mem)
+                return false;
+
+            U* obj = new(mem) U(std::forward<T>(value));
+            any.data = obj;
+
+            any.destructor = [](void* p) {
+                static_cast<U*>(p)->~U();
+                Core::MemoryApi()->Free(p);
+            };
+        }
+
+        Core::HttpApi()->SetContext(backend_, k, any);
+        return true;
+    }
+
+    template<typename T>
+    bool GetContext(std::string_view key, T& out) const
+    {
+        using U = std::decay_t<T>;
+
+        auto k = ToSV(key);
+        Shared::Any any{};
+
+        if(!Core::HttpApi()->GetContext(backend_, k, &any))
+            return false;
+
+        if constexpr (
+            sizeof(U) <= sizeof(void*) &&
+            alignof(U) <= alignof(void*) &&
+            std::is_trivially_copyable_v<U> &&
+            std::is_trivially_destructible_v<U>
+        ) {
+            if(any.typeID != Shared::Any::TypeIDOf<U>())
+                return false;
+
+            std::memcpy(&out, &any.data, sizeof(U));
+            return true;
+        }
+        else {
+            const U* ptr = any.As<U>();
+            if(!ptr)
+                return false;
+
+            out = *ptr;
+            return true;
+        }
+    }
+
+    template<typename T>
+    const T* GetContextPtr(std::string_view key) const
     {
         auto k = ToSV(key);
-        return Core::HttpApi()->GetContext(backend_, k, &out);
+        Shared::Any any{};
+
+        if(!Core::HttpApi()->GetContext(backend_, k, &any))
+            return nullptr;
+
+        return any.As<T>();
     }
 
     void EraseContext(std::string_view key)

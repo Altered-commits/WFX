@@ -3,6 +3,7 @@
 
 #include "core/core.hpp"
 #include "shared/apis/http_api.hpp"
+#include <string>
 
 namespace WFX::Http {
 
@@ -27,18 +28,28 @@ public:
         return *this;
     }
 
-    void SendText(std::string_view text)
+public:
+    // vvv const char*, static storage, no copy vvv
+    void SendText(const char* text)
     {
-        auto sv = ToSV(text);
-        Core::HttpApi()->SendText(backend_, sv);
+        Core::HttpApi()->SendText(backend_, ToSV(text), false);
+    }
+    void SendFile(const char* path, bool autoHandle404 = true)
+    {
+        Core::HttpApi()->SendFile(backend_, ToSV(path), autoHandle404, false);
     }
 
-    void SendFile(std::string_view path, bool autoHandle404 = true)
+    // vvv owned string, engine copies vvv
+    void SendText(std::string text)
     {
-        auto sv = ToSV(path);
-        Core::HttpApi()->SendFile(backend_, sv, autoHandle404);
+        Core::HttpApi()->SendText(backend_, ToSV(text), true);
+    }
+    void SendFile(std::string path, bool autoHandle404 = true)
+    {
+        Core::HttpApi()->SendFile(backend_, ToSV(path), autoHandle404, false);
     }
 
+public:
     template<typename Fn>
     void Stream(Fn&& fn, bool chunked)
     {

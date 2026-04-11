@@ -9,26 +9,14 @@
 
 namespace WFX::Http {
 
-// Helper for static_assert
 template<typename T>
 struct AlwaysFalse : std::false_type {};
 
 template<typename Lambda>
 Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
 {
-    // Async route: Lambda returns 'Async::Void'
-    if constexpr(std::is_invocable_r_v<Async::Void, Lambda, Request, Response>) {
-        // The lambda is non-capturing, so we can store it as a constexpr/static
-        // We generate a thunk that bridges the ABI signature to the user signature
-        //
-        // The thunk:
-        //  - Wraps raw handles into Request/Response
-        //  - Creates the coroutine (Task<void>)
-        //  - Sets the engine's completion callback on the promise
-        //  - Resumes the coroutine
-        //
-        // Since Lambda is non-capturing, we can call it inside the thunk directly
-        // We use a static local to hold the lambda (zero-size for non-capturing)
+    // Async route: Lambda returns WFX::Coro (Task<void>)
+    if constexpr(std::is_invocable_r_v<Async::Task<void>, Lambda, Request, Response>) {
         static auto fn = cb;
 
         Shared::RouteCallback rc;
@@ -48,7 +36,7 @@ Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
         return rc;
     }
 
-    // Sync route: Lambda returns 'void'
+    // Sync route: Lambda returns void
     else if constexpr(std::is_invocable_r_v<void, Lambda, Request, Response>) {
         static auto fn = cb;
 
@@ -65,8 +53,8 @@ Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
         static_assert(
             AlwaysFalse<Lambda>::value,
             "[WFX]: Invalid route callback. Expected one of:\n"
-            "  - void(WFX::Http::Request, WFX::Http::Response)\n"
-            "  - Async::Void(WFX::Http::Request, WFX::Http::Response)\n"
+            "  - void(WFX::Request, WFX::Response)\n"
+            "  - WFX::Coro(WFX::Request, WFX::Response)\n"
         );
     }
 }
@@ -74,8 +62,8 @@ Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
 template<typename Lambda>
 Shared::MwCallback MakeMwCallback(Lambda&& cb)
 {
-    // Async middleware: returns 'Async::MiddlewareAction'
-    if constexpr(std::is_invocable_r_v<Async::MiddlewareAction, Lambda, Request, Response>) {
+    // Async middleware: returns WFX::MwCoro (Task<MiddlewareAction>)
+    if constexpr(std::is_invocable_r_v<Async::Task<Shared::MiddlewareAction>, Lambda, Request, Response>) {
         static auto fn = cb;
 
         Shared::MwCallback mc;
@@ -90,7 +78,7 @@ Shared::MwCallback MakeMwCallback(Lambda&& cb)
         return mc;
     }
 
-    // Sync middleware: returns 'MiddlewareAction'
+    // Sync middleware: returns WFX::MiddlewareAction
     else if constexpr(std::is_invocable_r_v<Shared::MiddlewareAction, Lambda, Request, Response>) {
         static auto fn = cb;
 
@@ -107,8 +95,8 @@ Shared::MwCallback MakeMwCallback(Lambda&& cb)
         static_assert(
             AlwaysFalse<Lambda>::value,
             "[WFX]: Invalid middleware callback. Expected one of:\n"
-            "  - Shared::MiddlewareAction(WFX::Http::Request, WFX::Http::Response)\n"
-            "  - Async::MiddlewareAction(WFX::Http::Request, WFX::Http::Response)\n"
+            "  - WFX::MiddlewareAction(WFX::Request, WFX::Response)\n"
+            "  - WFX::MwCoro(WFX::Request, WFX::Response)\n"
         );
     }
 }

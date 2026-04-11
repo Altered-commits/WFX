@@ -4,6 +4,7 @@
 #include "shared/abis/constants.hpp"
 #include "shared/abis/types.hpp"
 #include "shared/abis/any.hpp"
+#include "shared/abis/segment_variant.hpp"
 #include "shared/abis/string_view.hpp"
 
 // Fwd declare stuff
@@ -40,20 +41,22 @@ using PopRoutePrefixFn  = void (*)();
 using RegisterMiddlewareFn = void (*)(StringView name, MwCallback);
 
 // Request Control
-using GetMethodFn    = HttpMethod  (*)(const void* request);
-using GetVersionFn   = HttpVersion (*)(const void* request);
-using GetPathFn      = StringView  (*)(const void* request);
-using GetBodyFn      = StringView  (*)(const void* request);
-using GetHeaderFn    = bool        (*)(const void* request, StringView key, StringView* outVal);
-using SetContextFn   = void        (*)(void* request, StringView key, Any value);
-using GetContextFn   = bool        (*)(const void* request, StringView key, Any* outVal);
-using EraseContextFn = void        (*)(void* request, StringView key);
+using GetMethodFn       = HttpMethod             (*)(const void* request);
+using GetVersionFn      = HttpVersion            (*)(const void* request);
+using GetPathFn         = StringView             (*)(const void* request);
+using GetBodyFn         = StringView             (*)(const void* request);
+using GetHeaderFn       = bool                   (*)(const void* request, StringView key, StringView* outVal);
+using GetSegmentCountFn = std::uint64_t          (*)(const void* request);
+using GetSegmentFn      = Shared::SegmentVariant (*)(const void* request, std::uint64_t index);
+using SetContextFn      = void                   (*)(void* request, StringView key, Any value);
+using GetContextFn      = bool                   (*)(const void* request, StringView key, Any* outVal);
+using EraseContextFn    = void                   (*)(void* request, StringView key);
 
 // Response Control
 using SetStatusFn = void (*)(void* response, HttpStatus);
 using SetHeaderFn = void (*)(void* response, StringView key, StringView value);
-using SendTextFn  = void (*)(void* response, StringView view);
-using SendFileFn  = void (*)(void* response, StringView view, bool autoHandle404);
+using SendTextFn  = void (*)(void* response, StringView view, bool copyBuffer);
+using SendFileFn  = void (*)(void* response, StringView view, bool autoHandle404, bool copyBuffer);
 using StreamFn    = void (*)(void* response, StreamGenerator, bool streamChunked);
 
 // Endpoint API
@@ -85,6 +88,8 @@ struct HTTP_API_TABLE {
     GetPathFn               GetPath;
     GetBodyFn               GetBody;
     GetHeaderFn             GetHeader;
+    GetSegmentCountFn       GetSegmentCount;
+    GetSegmentFn            GetSegment;
     SetContextFn            SetContext;
     GetContextFn            GetContext;
     EraseContextFn          EraseContext;
