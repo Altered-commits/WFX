@@ -235,7 +235,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
                 if(protocol.empty())
                     logger.Fatal("[HttpAPI]: Missing port and protocol in endpoint");
 
-                port = WFX::Http::PortDetector::DetectFromProtocol(protocol);
+                port = Http::PortDetector::DetectFromProtocol(protocol);
                 if(port.empty())
                     logger.Fatal(
                         "[HttpAPI]: Endpoint cannot infer port for protocol '", protocol,

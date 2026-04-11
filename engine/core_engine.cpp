@@ -12,6 +12,7 @@
 #include "utils/backport/string.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
+#include "utils/crash_tracer/crash_tracer.hpp"
 
 #if defined(__linux__)
     #include <dlfcn.h>
@@ -36,8 +37,8 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 
     // Initialize API backend before anything else
-    WFX::Shared::InitHttpAPIV1(connHandler_.get(), &router_, &middleware_);
-    WFX::Shared::InitAsyncAPIV1(connHandler_.get());
+    Shared::InitHttpAPIV1(connHandler_.get(), &router_, &middleware_);
+    Shared::InitAsyncAPIV1(connHandler_.get());
 
     // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath);
@@ -68,6 +69,8 @@ void CoreEngine::Stop()
 // vvv Internal Functions vvv
 void CoreEngine::HandleRequest(ConnectionContext* ctx)
 {
+    WFX_TRACE();
+
     // This will be transmitted through all the layers (from here to middleware to user)
     if(!ctx->responseInfo)
         ctx->responseInfo = new HttpResponse{};
@@ -195,6 +198,8 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
 
 void CoreEngine::HandleResponse(ConnectionContext* ctx)
 {
+    WFX_TRACE();
+
     HttpResponse& res = *ctx->responseInfo;
 
     auto&& [serializeResult, body] = HttpSerializer::SerializeToBuffer(res, ctx->rwBuffer);
@@ -245,7 +250,9 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
 
 void CoreEngine::HandleSuccess(ConnectionContext* ctx)
 {
-    auto* httpApi = WFX::Shared::GetHttpAPIV1();
+    WFX_TRACE();
+
+    auto* httpApi = Shared::GetHttpAPIV1();
     auto& req     = *ctx->requestInfo;
     auto& res     = *ctx->responseInfo;
     auto* node    = static_cast<const TrieNode*>(req.routeNode_);
@@ -268,7 +275,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
             if(!isAsync) {
                 res.ClearInfo();
                 res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                    .SendText(std::string_view{"Internal Server Error: CE - CF1"});
+                    .SendText(std::string_view{"Internal Server Error: Middleware Execution"});
                 goto __HandleResponse;
             }
 
@@ -318,20 +325,19 @@ void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
     auto* engine = GetGlobalState().enginePtr;
 
     if(result.status != AsyncStatus::COMPLETED) {
+        ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+
         ctx->responseInfo->ClearInfo();
         ctx->responseInfo->Status(HttpStatus::INTERNAL_SERVER_ERROR)
             .SendText(std::string_view{"Internal Server Error: Async Failure"});
-
-        ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
     }
 
     // If this was middleware, inject the action into the pipeline
-    if(ctx->trackAsync.GetELevel() == ExecutionLevel::MIDDLEWARE) {
+    else if(ctx->trackAsync.GetELevel() == ExecutionLevel::MIDDLEWARE) {
         *ctx->trackAsync.GetMAction() = result.action;
-        ctx->trackAsync.SetELevel(ExecutionLevel::RESPONSE);
 
-        // Continue the pipeline, re-enter 'HandleSuccess' to run the route
-        // This is safe because the coroutine frame is already destroyed
+        // Re-enter 'HandleSuccess' to run the route or more middlewares
+        // This is safe because the current coroutine frame is already destroyed
         engine->HandleSuccess(ctx);
         return;
     }
@@ -411,7 +417,7 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
     }
 
     // Cast to your function type
-    auto registerFn = reinterpret_cast<WFX::Shared::RegisterMasterAPIFn>(rawProc);
+    auto registerFn = reinterpret_cast<Shared::RegisterMasterAPIFn>(rawProc);
 #else
     // POSIX (Linux / macOS / *nix)
     // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed
@@ -429,10 +435,10 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
         logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user SO. Error: ",
                       (dlsymErr ? dlsymErr : "symbol not found"));
 
-    auto registerFn = reinterpret_cast<WFX::Shared::RegisterMasterAPIFn>(rawSym);
+    auto registerFn = reinterpret_cast<Shared::RegisterMasterAPIFn>(rawSym);
 #endif
     // Call into the user module to inject the API
-    registerFn(WFX::Shared::GetMasterAPI());
+    registerFn(Shared::GetMasterAPI());
     logger_.Info("[CoreEngine]: Successfully injected API and initialized user module: ", dllPath);
 }
 
@@ -447,4 +453,4 @@ void CoreEngine::HandleMiddlewareLoading()
     middleware_.DiscardFactoryMap();
 }
 
-} // namespace WFX
+} // namespace WFX::Core

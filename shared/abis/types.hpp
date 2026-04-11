@@ -53,10 +53,10 @@ struct AsyncData {
 static_assert(sizeof(AsyncData) == 24, "'AsyncData' must be exactly 24 bytes.");
 
 // vvv Route Callbacks vvv
-using SyncRouteFn  = void (*)(WFX::Http::Request, WFX::Http::Response);
-using AsyncRouteFn = void (*)(WFX::Http::Request, WFX::Http::Response, AsyncCompleteFn onDone, void* onDoneUd);
-using SyncMwFn     = MiddlewareAction (*)(WFX::Http::Request, WFX::Http::Response);
-using AsyncMwFn    = void             (*)(WFX::Http::Request, WFX::Http::Response, AsyncCompleteFn onDone, void* onDoneUd);
+using SyncRouteFn  = void (*)(Http::Request, Http::Response);
+using AsyncRouteFn = void (*)(Http::Request, Http::Response, AsyncCompleteFn onDone, void* onDoneUd);
+using SyncMwFn     = MiddlewareAction (*)(Http::Request, Http::Response);
+using AsyncMwFn    = void             (*)(Http::Request, Http::Response, AsyncCompleteFn onDone, void* onDoneUd);
 
 enum class CallbackKind : std::uint8_t {
     SYNC = 0,

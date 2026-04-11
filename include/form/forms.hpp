@@ -140,10 +140,10 @@ public: // Main Functions
 
         // Content-Type can contain multiple fields seperated by ';'
         // What we need is the initial one
-        auto ct = WFX::Utils::TrimView(contentType.substr(0, contentType.find(';')));
+        auto ct = Utils::TrimView(contentType.substr(0, contentType.find(';')));
 
         // In memory simple form
-        if(WFX::Utils::StringCanonical::InsensitiveStringCompare(
+        if(Utils::StringCanonical::InsensitiveStringCompare(
             ct, "application/x-www-form-urlencoded"
         ))
             return ParseStatic(req.Body(), out);
@@ -202,7 +202,7 @@ private: // Helper Functions
                 return false;
 
             // Decode value in place
-            if(!WFX::Utils::StringCanonical::DecodePercentInplace(value))
+            if(!Utils::StringCanonical::DecodePercentInplace(value))
                 return false;
 
             out[fieldIdx++] = value;

@@ -12,7 +12,7 @@
     namespace {                                                        \
         struct WFX_MW_CLASS(uniq) {                                    \
             WFX_MW_CLASS(uniq)() {                                     \
-                WFX::Shared::__WFXDeferredSimple.emplace_back([] {     \
+                WFX::Shared::__WFXDeferred.emplace_back([] {           \
                     __WFXApi->GetHttpAPIV1()->RegisterMiddleware(      \
                         WFX::Shared::StringView::FromCString(name),    \
                         WFX::Http::MakeMwCallback(callback)            \

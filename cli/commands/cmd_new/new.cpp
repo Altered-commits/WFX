@@ -261,18 +261,8 @@ extern "C" {
     // 4. Code example
     CreateFile(projBase / "src/main.cpp", R"cxx(#include <http/routes.hpp>
 
-WFX_GET("/", [](Request& req, Response res) {
-    res.SendTemplate("index.html");
-});
-
-WFX_GET("/text", [](Request& req, Response res) {
+WFX_GET("/text", [](WFX::Http::Request req, WFX::Http::Response res) {
     res.SendText("Hello from WFX :)");
-});
-
-WFX_GET("/json", [](Request& req, Response res) {
-    res.SendJson(Json::object({
-        {"WFX says", "Hello :)"}
-    }));
 });
 )cxx");
 

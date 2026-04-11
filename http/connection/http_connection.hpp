@@ -179,7 +179,7 @@ struct ConnectionContext : public ConnectionTag {
     void*                sslConn            = nullptr;  // 8 bytes
     HttpRequest*         requestInfo        = nullptr;  // 8 bytes
     HttpResponse*        responseInfo       = nullptr;  // 8 bytes (Async functions require larger scope)
-    WFX::Utils::RWBuffer rwBuffer;                      // 16 bytes
+    Utils::RWBuffer      rwBuffer;                      // 16 bytes
     AsyncData            asyncData          = {};       // 24 bytes
     FileInfo             fileInfo           = {};       // 24 bytes
     StreamGenerator      streamGenerator    = {};       // 24 bytes

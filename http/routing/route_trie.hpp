@@ -20,7 +20,7 @@ private: // Helper functions
     static std::string_view StripRoute(std::string_view route);
 
 private:
-    TrieNode root_;
+    TrieNode root_{};
     TrieNode* insertCursor_ = &root_;    // Current node where routes get inserted to
     std::vector<TrieNode*> cursorStack_; // For nesting
 };

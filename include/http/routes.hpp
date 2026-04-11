@@ -15,7 +15,7 @@
     namespace {                                                               \
         struct WFX_ROUTE_CLASS(method, uniq) {                                \
             WFX_ROUTE_CLASS(method, uniq)() {                                 \
-                WFX::Shared::__WFXDeferredSimple.emplace_back([] {            \
+                WFX::Shared::__WFXDeferred.emplace_back([] {                  \
                     __WFXApi->GetHttpAPIV1()->RegisterRoute(                  \
                         WFX::Http::HttpMethod::method,                        \
                         WFX::Shared::StringView::FromCString(path),           \
@@ -30,15 +30,17 @@
     namespace {                                                               \
         struct WFX_ROUTE_CLASS(method, uniq) {                                \
             WFX_ROUTE_CLASS(method, uniq)() {                                 \
-                WFX::Shared::__WFXDeferredSimple.emplace_back([&] {           \
-                    auto mwArr = mw;                                          \
-                    __WFXApi->GetHttpAPIV1()->RegisterRouteEx(                \
-                        WFX::Http::HttpMethod::method,                        \
-                        WFX::Shared::StringView::FromCString(path),           \
-                        mwArr.data(), mwArr.count(),                          \
-                        WFX::Http::MakeRouteCallback(callback)                \
-                    );                                                        \
-                });                                                           \
+                auto mwArr = mw;                                              \
+                WFX::Shared::__WFXDeferred.emplace_back(                      \
+                    [mwArr]() mutable {                                       \
+                        __WFXApi->GetHttpAPIV1()->RegisterRouteEx(            \
+                            WFX::Http::HttpMethod::method,                    \
+                            WFX::Shared::StringView::FromCString(path),       \
+                            mwArr.data(), mwArr.count(),                      \
+                            WFX::Http::MakeRouteCallback(callback)            \
+                        );                                                    \
+                    }                                                         \
+                );                                                            \
             }                                                                 \
         } WFX_ROUTE_INSTANCE(uniq);                                           \
     }

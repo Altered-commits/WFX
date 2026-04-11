@@ -74,7 +74,7 @@ class Lexer
         static std::size_t line;
     
     private:
-        WFX::Utils::Logger& logger_ = WFX::Utils::Logger::GetInstance();
+        Utils::Logger& logger_ = Utils::Logger::GetInstance();
 
         //For Differentiation of keyword and identifier
         const std::unordered_map<std::string_view, TokenType> identifier_map = {

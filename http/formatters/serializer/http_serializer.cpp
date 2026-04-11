@@ -10,7 +10,7 @@ namespace HttpSerializer {
 
 SerializedHttpResponse SerializeToBuffer(HttpResponse& res, RWBuffer& buffer)
 {
-    auto& networkConfig = WFX::Core::Config::GetInstance().networkConfig;
+    auto& networkConfig = Core::Config::GetInstance().networkConfig;
     auto incSize = networkConfig.sendBufferIncSize,
         maxSize = networkConfig.maxSendBufferSize;
 

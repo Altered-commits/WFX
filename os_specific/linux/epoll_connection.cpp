@@ -5,6 +5,7 @@
 #include "http/common/http_error_msgs.hpp"
 #include "http/common/http_global_state.hpp"
 #include "http/ssl/http_ssl_factory.hpp"
+#include "shared/apis/http_api.hpp"
 #include "utils/crash_tracer/crash_tracer.hpp"
 #include <sys/sendfile.h>
 #include <sys/socket.h>
@@ -1087,12 +1088,19 @@ void EpollConnectionHandler::HandleAsyncCallback(ConnectionContext* ctx, AsyncRe
     async.AsyncDestroy  = nullptr;
     async.userData      = nullptr;
 
+    // Like all coroutines, this one would also require us to set type-erased 'ctx' at-
+    // -http API
+    Shared::GetHttpAPIV1()->SetGlobalPtrData(ctx);
+
     if(destroy) {
         if(kill) kill(ud);
     }
     else {
         if(complete) complete(ud, res);
     }
+
+    // And at the end, erase it
+    Shared::GetHttpAPIV1()->SetGlobalPtrData(nullptr);
 }
 
 void EpollConnectionHandler::HandleTimeoutTimer(int sfd)

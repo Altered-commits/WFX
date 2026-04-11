@@ -35,7 +35,7 @@ static inline bool DefaultSanitizeInt(std::string_view sv, const void* fieldPtr,
     const Int& r = *static_cast<const Int*>(fieldPtr);
 
     // All necessary checks are done in 'StrToInt64'
-    if(!WFX::Utils::StrToInt64(sv, out))
+    if(!Utils::StrToInt64(sv, out))
         return false;
 
     return (out >= r.min && out <= r.max);
@@ -47,7 +47,7 @@ static inline bool DefaultSanitizeUInt(std::string_view sv, const void* fieldPtr
     const UInt& r = *static_cast<const UInt*>(fieldPtr);
 
     // All necessary checks are done in 'StrToUInt64'
-    if(!WFX::Utils::StrToUInt64(sv, out))
+    if(!Utils::StrToUInt64(sv, out))
         return false;
 
     return (out >= r.min && out <= r.max);

@@ -8,14 +8,13 @@
 #define WFX_CNSTRCT_INSTANCE(id) WFX_CONCAT(WFXConstructorInst_, id)
 
 // Generate once
-#define WFX_INTERNAL_CNSTRCT_REGISTER_IMPL(callback, uniq)       \
-    namespace {                                                  \
-        struct WFX_CNSTRCT_CLASS(uniq) {                         \
-            WFX_CNSTRCT_CLASS(uniq)() {                          \
-                WFX::Shared::__WFXDeferredSimple                 \
-                    .emplace_back([] callback);                  \
-            }                                                    \
-        } WFX_CNSTRCT_INSTANCE(uniq);                            \
+#define WFX_INTERNAL_CNSTRCT_REGISTER_IMPL(callback, uniq)              \
+    namespace {                                                         \
+        struct WFX_CNSTRCT_CLASS(uniq) {                                \
+            WFX_CNSTRCT_CLASS(uniq)() {                                 \
+                WFX::Shared::__WFXDeferred.emplace_back([] callback);   \
+            }                                                           \
+        } WFX_CNSTRCT_INSTANCE(uniq);                                   \
     }
 
 #define WFX_INTERNAL_CNSTRCT_REGISTER(callback)                  \

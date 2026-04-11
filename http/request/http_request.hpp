@@ -14,8 +14,6 @@ namespace WFX::Core { class CoreEngine; }
 // Just defines the structure of request
 namespace WFX::Http {
 
-using WFX::Http::PathSegments;
-
 // Context storage for middleware / routes / user stuff
 using ContextMap = std::unordered_map<std::string, Shared::Any>;
 

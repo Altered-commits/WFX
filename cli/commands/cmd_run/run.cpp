@@ -113,7 +113,7 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
             BufferPool::GetInstance().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
             FileCache::GetInstance().Init(config.miscConfig.fileCacheSize);
 
-            WFX::Core::CoreEngine engine{dllDir.c_str(), useHttps};
+            Core::CoreEngine engine{dllDir.c_str(), useHttps};
             globalState.enginePtr = &engine;
 
             signal(SIGTERM, HandleWorkerSignal);
