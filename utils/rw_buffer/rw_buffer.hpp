@@ -43,6 +43,9 @@ public: // Init / Reset
     void ResetBuffer();
     void ClearBuffer();
 
+    void ClearWriteBuffer();
+    void ClearReadBuffer();
+
 public: // Getter functions
     char*          GetWriteData()        const noexcept;
     char*          GetReadData()         const noexcept;

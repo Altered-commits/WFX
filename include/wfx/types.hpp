@@ -34,6 +34,7 @@ using MiddlewareAction = Shared::MiddlewareAction;
 // -----------------------------------------------------------------------
 using StringView     = Shared::StringView;
 using UUID           = Shared::UUID;
+using UUIDString     = Shared::UUIDString;
 using SegmentVariant = Shared::SegmentVariant;
 using Any            = Shared::Any;
 
@@ -58,7 +59,6 @@ inline constexpr auto SegStcStr = Shared::SEG_VARIANT_STC_STR;
 //   return WFX::MwContinue;   // run next middleware, then the handler
 //   return WFX::MwSkipNext;   // skip the next middleware, keep going
 //   return WFX::MwBreak;      // stop everything, handler never runs
-//
 // -----------------------------------------------------------------------
 inline constexpr auto MwContinue = Shared::MiddlewareAction::CONTINUE;
 inline constexpr auto MwSkipNext = Shared::MiddlewareAction::SKIP_NEXT;

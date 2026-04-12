@@ -6,7 +6,7 @@
 
 namespace WFX::Shared {
 
-struct alignas(8) Any {
+struct Any {
 public:
     void*         data;
     void          (*destructor)(void*);
@@ -55,8 +55,8 @@ public: // vvv Factory vvv
     }
 };
 
-static_assert(sizeof(Any) == 24,                      "WFX_Any ABI size mismatch");
-static_assert(alignof(Any) == alignof(void*),         "WFX_Any alignment mismatch");
+static_assert(sizeof(Any) == 24,                      "WFX_Any ABI must be 24 bytes");
+static_assert(alignof(Any) == alignof(std::uint64_t), "WFX_Any alignment mismatch");
 static_assert(std::is_standard_layout<Any>::value,    "WFX_Any must be standard layout");
 static_assert(std::is_trivially_copyable<Any>::value, "WFX_Any must be trivially copyable");
 

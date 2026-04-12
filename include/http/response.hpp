@@ -3,7 +3,9 @@
 
 #include "core/core.hpp"
 #include "shared/apis/http_api.hpp"
-#include <string>
+
+#include <string_view>
+#include <charconv>
 
 namespace WFX::Http {
 
@@ -12,55 +14,109 @@ class Response {
 public:
     Response(void* backend) : backend_(backend) {}
 
-public:
+public: // Status and Headers
     Response& Status(Shared::HttpStatus code)
     {
         Core::HttpApi()->SetStatus(backend_, code);
         return *this;
     }
 
-    Response& Set(std::string_view key, std::string_view value)
+    Response& Header(std::string_view key, std::string_view value)
     {
-        auto k = ToSV(key);
-        auto v = ToSV(value);
-
-        Core::HttpApi()->SetHeader(backend_, k, v);
+        Core::HttpApi()->SetHeader(backend_, ToSV(key), ToSV(value));
         return *this;
     }
 
-public:
-    // vvv const char*, static storage, no copy vvv
-    void SendText(const char* text)
+public: // Main flow
+    // Char / View types
+    Response& Write(std::string_view data)
     {
-        Core::HttpApi()->SendText(backend_, ToSV(text), false);
-    }
-    void SendFile(const char* path, bool autoHandle404 = true)
-    {
-        Core::HttpApi()->SendFile(backend_, ToSV(path), autoHandle404, false);
+        Core::HttpApi()->WriteBody(backend_, ToSV(data));
+        return *this;
     }
 
-    // vvv owned string, engine copies vvv
-    void SendText(std::string text)
+    Response& Write(const char* data)
     {
-        Core::HttpApi()->SendText(backend_, ToSV(text), true);
-    }
-    void SendFile(std::string path, bool autoHandle404 = true)
-    {
-        Core::HttpApi()->SendFile(backend_, ToSV(path), autoHandle404, false);
+        return Write(std::string_view{data});
     }
 
-public:
+    // UUID types
+    Response& Write(const Shared::UUIDString& uuid)
+    {
+        return Write(std::string_view{uuid.data, 36});
+    }
+
+    // Integral types, stack formatted
+    Response& Write(std::int64_t value)
+    {
+        char buf[20];
+        auto [end, _] = std::to_chars(buf, buf + sizeof(buf), value);
+        return Write(std::string_view{buf, static_cast<std::size_t>(end - buf)});
+    }
+
+    Response& Write(std::uint64_t value)
+    {
+        char buf[20];
+        auto [end, _] = std::to_chars(buf, buf + sizeof(buf), value);
+        return Write(std::string_view{buf, static_cast<std::size_t>(end - buf)});
+    }
+
+    // Common integral promotions so user can pass int, unsigned, etc naturally
+    Response& Write(std::int32_t  value) { return Write(static_cast<int64_t>(value));  }
+    Response& Write(std::uint32_t value) { return Write(static_cast<uint64_t>(value)); }
+    Response& Write(std::int16_t  value) { return Write(static_cast<int64_t>(value));  }
+    Response& Write(std::uint16_t value) { return Write(static_cast<uint64_t>(value)); }
+    Response& Write(std::int8_t   value) { return Write(static_cast<int64_t>(value));  }
+    Response& Write(std::uint8_t  value) { return Write(static_cast<uint64_t>(value)); }
+
+    // Floating point, stack formatted
+    Response& Write(double value)
+    {
+        char buf[32];
+        auto [end, _] = std::to_chars(buf, buf + sizeof(buf), value);
+        return Write(std::string_view{buf, static_cast<std::size_t>(end - buf)});
+    }
+
+    Response& Write(float value) { return Write(static_cast<double>(value)); }
+
+    // Bool
+    Response& Write(bool value)
+    {
+        return Write(value ? std::string_view{"true", 4} : std::string_view{"false", 5});
+    }
+
+    // Locks response, patches Content-Length
+    // Optional: engine auto-commits if user forgets
+    void Commit()
+    {
+        Core::HttpApi()->Commit(backend_);
+    }
+
+public: // Sugar syntax
+    // Plain text, sets Content-Type, writes, commits
+    void SendText(std::string_view data)
+    {
+        Header("Content-Type", "text/plain");
+        Write(data);
+        Commit();
+    }
+
+    // Zero-copy sendfile path
+    void SendFile(std::string_view path, bool autoHandle404 = true)
+    {
+        Core::HttpApi()->WriteFile(backend_, ToSV(path), autoHandle404);
+    }
+
+    // Typed lambda, allocated via engine allocator
     template<typename Fn>
-    void Stream(Fn&& fn, bool chunked)
+    void Stream(Fn&& fn, bool chunked = true)
     {
         using FnType = std::decay_t<Fn>;
 
-        // Allocate using engine allocator
         void* raw = Core::MemoryApi()->Alloc(sizeof(FnType));
         if(!raw)
             return;
 
-        // Placement new
         FnType* f = new(raw) FnType(std::forward<Fn>(fn));
 
         Shared::StreamGenerator gen{
@@ -74,13 +130,12 @@ public:
             // Destroy
             [](void* ctx) {
                 auto* f = static_cast<FnType*>(ctx);
-
                 f->~FnType();
                 Core::MemoryApi()->Free(f);
             }
         };
 
-        Core::HttpApi()->Stream(backend_, gen, chunked);
+        Core::HttpApi()->WriteStream(backend_, gen, chunked);
     }
 
 private:

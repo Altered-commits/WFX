@@ -156,33 +156,27 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         },
 
         // Response handling
-        [](void* backend, HttpStatus code) {  // SetStatusFn
-            ToRes(backend)->Status(code);
+        // Response Control
+        [](void* backend, HttpStatus code) { // SetStatusFn
+            ToRes(backend)->WriteStatus(code);
         },
-        [](void* backend, StringView key, StringView value) {  // SetHeaderFn
-            ToRes(backend)->Set(
-                std::string(key.Data(), key.Size()), std::string(value.Data(), value.Size())
+        [](void* backend, StringView key, StringView value) { // SetHeaderFn
+            ToRes(backend)->WriteHeader(
+                std::string_view{key.Data(), key.Size()},
+                std::string_view{value.Data(), value.Size()}
             );
         },
-        [](void* backend, StringView view, bool copyBuffer) {  // SendTextFn
-            auto* response = ToRes(backend);
-
-            if(copyBuffer)
-                response->SendText(std::string{view.Data(), view.Size()});
-            else
-                response->SendText(std::string_view{view.Data(), view.Size()});
+        [](void* backend, StringView data) { // WriteBodyFn
+            ToRes(backend)->WriteBodyData(std::string_view{data.Data(), data.Size()});
         },
-        [](void* backend, StringView view, bool autoHandle404, bool copyBuffer) {  // SendFileFn
-            auto* response = ToRes(backend);
-
-            if(copyBuffer)
-                response->SendFile(std::string{view.Data(), view.Size()}, autoHandle404);
-            else
-                response->SendFile(std::string_view{view.Data(), view.Size()}, autoHandle404);
+        [](void* backend, StringView path, bool autoHandle404) { // WriteFileFn
+            ToRes(backend)->WriteFile(std::string_view{path.Data(), path.Size()}, autoHandle404);
         },
-        // Stream API
-        [](void* backend, StreamGenerator generator, bool streamChunked) { // StreamFn
-            ToRes(backend)->Stream(generator, streamChunked);
+        [](void* backend, StreamGenerator gen, bool chunked) { // WriteStreamFn
+            ToRes(backend)->WriteStream(gen, chunked);
+        },
+        [](void* backend) { // CommitFn
+            ToRes(backend)->Commit();
         },
 
         // Endpoint API

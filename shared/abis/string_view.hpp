@@ -7,7 +7,7 @@
 
 namespace WFX::Shared {
 
-struct alignas(8) StringView {
+struct StringView {
 public:
     const char*   data;
     std::uint64_t length;

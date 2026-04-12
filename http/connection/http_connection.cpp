@@ -125,7 +125,7 @@ void ConnectionContext::ClearContext()
     rwBuffer.ClearBuffer();
 
     if(requestInfo)  requestInfo->ClearInfo();
-    if(responseInfo) responseInfo->ClearInfo();
+    if(responseInfo) responseInfo->Reset();
 
     CleanupStreamGenerator();
 

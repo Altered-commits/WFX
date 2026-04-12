@@ -1,13 +1,12 @@
 #include "core_engine.hpp"
-
 #include "http/response.hpp"
 #include "http/request.hpp"
+#include "http/response/http_response.hpp"
 #include "http/request/http_request.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/common/http_error_msgs.hpp"
 #include "http/common/http_global_state.hpp"
-#include "http/formatters/http_parser.hpp"
-#include "http/formatters/http_serializer.hpp"
+#include "http/parser/http_parser.hpp"
 #include "shared/apis/master_api.hpp"
 #include "utils/backport/string.hpp"
 #include "utils/fileops/filesystem.hpp"
@@ -20,11 +19,10 @@
 
 namespace WFX::Core {
 
-using namespace WFX::Http;   // |
-using namespace WFX::Shared; // | -> For essentially everything
-using namespace WFX::Utils;  // |
+using namespace WFX::Http;
+using namespace WFX::Shared;
+using namespace WFX::Utils;
 
-// Some internal enum stuff for connection header
 enum ConnectionHeader : std::uint8_t {
     NONE       = 0,
     CLOSE      = 1 << 0,
@@ -66,7 +64,6 @@ void CoreEngine::Listen(const std::string& host, std::uint16_t port)
 void CoreEngine::Stop()
 {
     connHandler_->Stop();
-
     logger_.Info("[CoreEngine]: Stopped Successfully!");
 }
 
@@ -75,12 +72,13 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
 {
     WFX_TRACE();
 
-    // This will be transmitted through all the layers (from here to middleware to user)
+    auto& networkConfig = config_.networkConfig;
+
+    // Allocate response once per connection, reused across requests via Reset()
     if(!ctx->responseInfo)
         ctx->responseInfo = new HttpResponse{};
 
-    auto& res           = *ctx->responseInfo;
-    auto& networkConfig = config_.networkConfig;
+    auto& res = *ctx->responseInfo;
 
     // Main shit
     HttpParseState state = HttpParser::Parse(ctx);
@@ -89,17 +87,18 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
         case HttpParseState::PARSE_INCOMPLETE_BODY:
             ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
-            connHandler_->RefreshExpiry(ctx, state == HttpParseState::PARSE_INCOMPLETE_HEADERS ?
-                                            networkConfig.headerTimeout : networkConfig.bodyTimeout);
+            connHandler_->RefreshExpiry(ctx, state == HttpParseState::PARSE_INCOMPLETE_HEADERS
+                                            ? networkConfig.headerTimeout
+                                            : networkConfig.bodyTimeout);
             connHandler_->ResumeReceive(ctx);
             return;
-        
+
         case HttpParseState::PARSE_EXPECT_100:
             ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
             connHandler_->RefreshExpiry(ctx, networkConfig.bodyTimeout);
             connHandler_->Write(ctx, "HTTP/1.1 100 Continue\r\n\r\n");
             return;
-        
+
         case HttpParseState::PARSE_EXPECT_417:
             ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
             connHandler_->Write(ctx, "HTTP/1.1 417 Expectation Failed\r\n\r\n");
@@ -112,10 +111,6 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             // For now reset ctx->trackBytes so ctx->trackAsync becomes zeroed out 'HandleSuccess'
             ctx->trackBytes = 0;
 
-            // Version is important for Serializer to properly create a response
-            // HTTP/1.1 and HTTP/2 have different formats duh
-            res.version = ctx->requestInfo->version;
-
             auto& reqInfo    = *ctx->requestInfo;
             auto  connHeader = reqInfo.headers.GetHeader("Connection");
             auto  connMask   = HandleConnectionHeader(connHeader);
@@ -127,57 +122,52 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
                 return;
             }
 
-            bool shouldClose = false;
-
             // In this case:
             // HTTP/1.0: Defaults to close
             // HTTP/1.1: Defaults to keep-alive
-            if(connMask == ConnectionHeader::NONE)
-                shouldClose = (reqInfo.version == HttpVersion::HTTP_1_0);
+            bool shouldClose = (connMask == ConnectionHeader::NONE)
+                                ? (reqInfo.version == HttpVersion::HTTP_1_0)
+                                : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
 
-            // Propagate value from request header
-            else
-                shouldClose = connMask & ConnectionHeader::CLOSE;
-
-            // Set the 'connection' header ourselves in final response
-            res.Set("Connection", shouldClose ? "close" : "keep-alive");
-
-            // Set the connection state according to this right now, later if we have any issue, it-
-            // -will be overridden
             ctx->SetConnectionState(
                 shouldClose
                 ? ConnectionState::CONNECTION_CLOSE
                 : ConnectionState::CONNECTION_ALIVE
             );
 
-            // A bit of shortcut if its public route (starts with '/public/')
+            // Wire rwBuffer + version into response before any writes
+            // Write buffer allocated once, reused across requests on same connection
+            if(!ctx->rwBuffer.IsWriteInitialized() &&
+               !ctx->rwBuffer.InitWriteBuffer(networkConfig.maxSendBufferSize))
+            {
+                ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+                connHandler_->Write(ctx, HttpError::internalError);
+                return;
+            }
+
+            res.Reset();
+            res.rwBuffer_    = &ctx->rwBuffer;
+            res.version_     = reqInfo.version;
+            res.shouldClose_ = shouldClose;
+
+            // Public file shortcut
             if(StartsWith(reqInfo.path, "/public/")) {
-                // Skip the '/public' part (7 chars)
-                std::string_view relativePath = reqInfo.path.substr(7); 
+                std::string_view relativePath = reqInfo.path.substr(7);
                 std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
-                // Send the file
-                res.Status(HttpStatus::OK)
-                    .SendFile(std::move(fullRoute), true);
+                res.SendFile(fullRoute, true);
+                goto __HandleResponse;
             }
-            else {
-                // Get the callback for the route we got, if it doesn't exist, we display error
-                auto node = router_.MatchRoute(
-                                    reqInfo.method,
-                                    reqInfo.path,
-                                    reqInfo.pathSegments
-                                );
 
+            {
+                auto node = router_.MatchRoute(reqInfo.method, reqInfo.path, reqInfo.pathSegments);
                 if(!node) {
-                    res.Status(HttpStatus::NOT_FOUND)
-                        .SendText(std::string_view{"404: Route not found :("});
+                    HandleError(ctx, HttpStatus::NOT_FOUND, "404: Route not found :(");
                     goto __HandleResponse;
                 }
 
-                // Hand over control to HandleSuccess
                 reqInfo.routeNode_ = node;
                 HandleSuccess(ctx);
-
                 return;
             }
 
@@ -206,50 +196,22 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
 
     HttpResponse& res = *ctx->responseInfo;
 
-    auto&& [serializeResult, body] = HttpSerializer::SerializeToBuffer(res, ctx->rwBuffer);
+    // Sanity checks
+    if(!res.IsCommitted())
+        res.Commit();
 
-    ctx->SetConnectionState(
-        serializeResult == SerializeResult::SERIALIZE_SUCCESS
-            ? ConnectionState::CONNECTION_ALIVE
-            : ConnectionState::CONNECTION_CLOSE
-    );
-
-    switch(serializeResult) {
-        case SerializeResult::SERIALIZE_SUCCESS:
-            if(res.IsFileOperation())
-                connHandler_->WriteFile(ctx, std::move(body));
-
-            else if(res.IsStreamOperation()) {
-                auto& gen = std::get<StreamGenerator>(res.body);
-
-                connHandler_->Stream(
-                    ctx,
-                    gen,
-                    res.GetOperation() == OperationType::STREAM_CHUNKED
-                );
-
-                // CRITICAL: prevent double destroy by both HttpResponse and ConnectionHandler
-                gen.ctx = nullptr;
-                res.body = std::monostate{};
-            }
-            else
-                connHandler_->Write(ctx, {});
-
-            return;
-
-        // Log error and return internal error
-        case SerializeResult::SERIALIZE_BUFFER_INSUFFICIENT:
-            logger_.Error(
-                "[CoreEngine]: Write buffer size insufficient for serializing data. 'Stream' is recommended"
-            );
-            connHandler_->Write(ctx, HttpError::internalError);
-            return;
-
-        default:
-            logger_.Error("[CoreEngine]: Failed to serialize response");
-            connHandler_->Write(ctx, HttpError::internalError);
-            return;
+    if(res.IsFile()) {
+        connHandler_->WriteFile(ctx, res.TakeFilePath());
+        return;
     }
+
+    if(res.IsStream()) {
+        connHandler_->Stream(ctx, res.TakeGenerator());
+        return;
+    }
+
+    // 'rwBuffer' already has the full serialized wire response, just write that
+    connHandler_->Write(ctx, {});
 }
 
 void CoreEngine::HandleSuccess(ConnectionContext* ctx)
@@ -262,9 +224,8 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
     auto* node    = static_cast<const TrieNode*>(req.routeNode_);
 
     Response userRes{&res};
-    Request userReq{&req};
+    Request  userReq{&req};
 
-    // Trackers
     ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
 
     if(eLevel == ExecutionLevel::RESPONSE)
@@ -274,12 +235,9 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
         auto [success, isAsync] = middleware_.ExecuteMiddleware(ctx, node, userReq, userRes);
 
         if(!success) {
-            // For failure, just handle response and be done with
-            // Later this will be properly handled
             if(!isAsync) {
-                res.ClearInfo();
-                res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
-                    .SendText(std::string_view{"Internal Server Error: Middleware Execution"});
+                ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+                HandleError(ctx, HttpStatus::INTERNAL_SERVER_ERROR, "Middleware Execution");
                 goto __HandleResponse;
             }
 
@@ -307,7 +265,6 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
 
         node->callback.async(userReq, userRes, CoreEngine::OnCoroutineComplete, ctx);
 
-        // Reset to remove any dangling references
         httpApi->SetGlobalPtrData(nullptr);
 
         // If the coroutine already completed synchronously ('final_suspend' already fired the callback),-
@@ -325,15 +282,12 @@ __HandleResponse:
 // vvv Helper Functions vvv
 void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
 {
-    auto* ctx = static_cast<ConnectionContext*>(ud);
+    auto* ctx    = static_cast<ConnectionContext*>(ud);
     auto* engine = GetGlobalState().enginePtr;
 
     if(result.status != AsyncStatus::COMPLETED) {
         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-
-        ctx->responseInfo->ClearInfo();
-        ctx->responseInfo->Status(HttpStatus::INTERNAL_SERVER_ERROR)
-            .SendText(std::string_view{"Internal Server Error: Async Failure"});
+        engine->HandleError(ctx, HttpStatus::INTERNAL_SERVER_ERROR, "Async Failure");
     }
 
     // If this was middleware, inject the action into the pipeline
@@ -354,6 +308,18 @@ void CoreEngine::FinishRequest(ConnectionContext* ctx)
 {
     ctx->SetParseState(HttpParseState::PARSE_IDLE);
     connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
+}
+
+void CoreEngine::HandleError(ConnectionContext* ctx, Shared::HttpStatus code, std::string_view message)
+{
+    auto& res = *ctx->responseInfo;
+
+    // Reset the should close because it may have changed since
+    res.shouldClose_ = ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE;
+
+    res.Reset();
+    res.WriteStatus(code);
+    res.SendText(message);
 }
 
 std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)

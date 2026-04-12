@@ -69,16 +69,24 @@ void RWBuffer::ResetBuffer()
 
 void RWBuffer::ClearBuffer()
 {
-    auto* readMeta  = GetReadMeta();
+    ClearReadBuffer();
+    ClearWriteBuffer();
+}
+
+void RWBuffer::ClearWriteBuffer()
+{
     auto* writeMeta = GetWriteMeta();
-
-    if(readMeta)
-        readMeta->dataLength = 0;
-
     if(writeMeta) {
         writeMeta->dataLength    = 0;
         writeMeta->writtenLength = 0;
     }
+}
+
+void RWBuffer::ClearReadBuffer()
+{
+    auto* readMeta = GetReadMeta();
+    if(readMeta)
+        readMeta->dataLength = 0;
 }
 
 // vvv Getter Functions vvv

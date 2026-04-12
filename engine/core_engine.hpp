@@ -26,6 +26,7 @@ private: // Internal Functions
 
 private: // Helper Functions
     void         FinishRequest(Http::ConnectionContext* ctx);
+    void         HandleError(Http::ConnectionContext* ctx, Shared::HttpStatus code, std::string_view message);
     std::uint8_t HandleConnectionHeader(std::string_view header);
     void         HandleUserDLLInjection(const char* dllDir);
     void         HandleMiddlewareLoading();

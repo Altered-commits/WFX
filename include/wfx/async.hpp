@@ -36,7 +36,7 @@
 namespace WFX {
 
 // -----------------------------------------------------------------------
-// Coroutine return types — put these in your handler's return type:
+// Coroutine return types, put these in your handler's return type:
 //   -> WFX::Coro     for route handlers
 //   -> WFX::MwCoro   for middleware
 // -----------------------------------------------------------------------

@@ -53,11 +53,12 @@ using GetContextFn      = bool                   (*)(const void* request, String
 using EraseContextFn    = void                   (*)(void* request, StringView key);
 
 // Response Control
-using SetStatusFn = void (*)(void* response, HttpStatus);
-using SetHeaderFn = void (*)(void* response, StringView key, StringView value);
-using SendTextFn  = void (*)(void* response, StringView view, bool copyBuffer);
-using SendFileFn  = void (*)(void* response, StringView view, bool autoHandle404, bool copyBuffer);
-using StreamFn    = void (*)(void* response, StreamGenerator, bool streamChunked);
+using SetStatusFn    = void (*)(void* response, HttpStatus);
+using SetHeaderFn    = void (*)(void* response, StringView key, StringView value);
+using WriteBodyFn    = void (*)(void* response, StringView data);
+using WriteFileFn    = void (*)(void* response, StringView path, bool autoHandle404);
+using WriteStreamFn  = void (*)(void* response, StreamGenerator, bool chunked);
+using CommitFn       = void (*)(void* response);
 
 // Endpoint API
 using AllocateEndpointFn = std::uint16_t (*)(
@@ -97,9 +98,10 @@ struct HTTP_API_TABLE {
     // Response Control
     SetStatusFn             SetStatus;
     SetHeaderFn             SetHeader;
-    SendTextFn              SendText;
-    SendFileFn              SendFile;
-    StreamFn                Stream;
+    WriteBodyFn             WriteBody;
+    WriteFileFn             WriteFile;
+    WriteStreamFn           WriteStream;
+    CommitFn                Commit;
 
     // Endpoint API
     AllocateEndpointFn      AllocateEndpoint;
