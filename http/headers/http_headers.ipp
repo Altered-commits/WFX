@@ -8,7 +8,8 @@ std::size_t CaseInsensitiveHash::operator()(const T& key) const
         std::is_same_v<std::decay_t<T>, std::string_view>,
         "CaseInsensitiveHash: key must be std::string or std::string_view"
     );
-    return Utils::Hasher::Fnv1aCaseInsensitive(key);
+
+    return Shared::Hasher::Fnv1aCaseInsensitive(Shared::StringView{key.data(), key.size()});
 }
 
 template<typename T1, typename T2>

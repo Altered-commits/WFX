@@ -1,9 +1,10 @@
 #include "template_engine.hpp"
 #include "config/config.hpp"
-#include "utils/process/process.hpp"
-#include "utils/crypt/hash.hpp"
-#include "utils/backport/string.hpp"
+#include "shared/utils/hash.hpp"
 #include "shared/utils/compiler_macro.hpp"
+#include "utils/process/process.hpp"
+#include "utils/backport/string.hpp"
+#include <bit>
 
 namespace WFX::Core {
 
@@ -1100,11 +1101,11 @@ std::uint64_t TemplateEngine::HashBytecode(const RPNBytecode& rpn)
     std::uint64_t seed = rpn.size();
 
     for(const auto& op : rpn) {
-        seed = HashUtils::Rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
-                ^ HashUtils::Distribute(static_cast<std::uint64_t>(op.code));
+        seed = std::rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
+                ^ Shared::Hasher::Murmur3Mix64(static_cast<std::uint64_t>(op.code));
 
-        seed = HashUtils::Rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
-                ^ HashUtils::Distribute(static_cast<std::uint64_t>(op.arg));
+        seed = std::rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
+                ^ Shared::Hasher::Murmur3Mix64(static_cast<std::uint64_t>(op.arg));
     }
 
     return seed;

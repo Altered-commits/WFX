@@ -25,7 +25,7 @@ inline constexpr bool EndsWith(std::string_view str, std::string_view suffix) no
 }
 
 // vvv Conversions vvv
-inline std::string UInt64ToStr(uint64_t value, const std::string& fallback = "0") noexcept
+inline std::string UInt64ToStr(std::uint64_t value, const std::string& fallback = "0") noexcept
 {
     // Max decimal digits for uint64_t = 20, plus one for null terminator
     char buf[21];

@@ -105,6 +105,11 @@ public: // vvv Factory vvv
         return true;
     }
 
+    static bool FromString(const char* str, UUID& out) noexcept
+    {
+        return FromString(StringView{str, 36}, out);
+    }
+
     UUIDString ToString() const noexcept
     {
         UUIDString out;

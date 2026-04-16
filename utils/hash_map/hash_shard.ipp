@@ -57,7 +57,7 @@ void HashShard<K, V>::Resize(std::size_t newCapacity)
     if(newCapacity < initialBucketCapacity_) return;
 
     // Just to keep everything in check
-    newCapacity = Math::RoundUpToPowerOfTwo(newCapacity);
+    newCapacity = std::bit_ceil(newCapacity);
 
     Entry* newEntries = reinterpret_cast<Entry*>(pool_.Alloc(newCapacity * sizeof(Entry)));
     if(!newEntries)

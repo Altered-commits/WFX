@@ -21,6 +21,12 @@ public: // Status and Headers
         return *this;
     }
 
+    Response& Status(std::uint16_t code)
+    {
+        Core::HttpApi()->SetStatus(backend_, static_cast<Shared::HttpStatus>(code));
+        return *this;
+    }
+
     Response& Header(std::string_view key, std::string_view value)
     {
         Core::HttpApi()->SetHeader(backend_, ToSV(key), ToSV(value));
@@ -41,9 +47,9 @@ public: // Main flow
     }
 
     // UUID types
-    Response& Write(const Shared::UUIDString& uuid)
+    Response& Write(const Shared::UUID& uuid)
     {
-        return Write(std::string_view{uuid.data, 36});
+        return Write(std::string_view{uuid.ToString().data, 36});
     }
 
     // Integral types, stack formatted
@@ -61,13 +67,13 @@ public: // Main flow
         return Write(std::string_view{buf, static_cast<std::size_t>(end - buf)});
     }
 
-    // Common integral promotions so user can pass int, unsigned, etc naturally
-    Response& Write(std::int32_t  value) { return Write(static_cast<int64_t>(value));  }
-    Response& Write(std::uint32_t value) { return Write(static_cast<uint64_t>(value)); }
-    Response& Write(std::int16_t  value) { return Write(static_cast<int64_t>(value));  }
-    Response& Write(std::uint16_t value) { return Write(static_cast<uint64_t>(value)); }
-    Response& Write(std::int8_t   value) { return Write(static_cast<int64_t>(value));  }
-    Response& Write(std::uint8_t  value) { return Write(static_cast<uint64_t>(value)); }
+    // Common integral promotions so user can pass int, unsigned, etc. naturally
+    Response& Write(std::int32_t  value) { return Write(static_cast<std::int64_t>(value));  }
+    Response& Write(std::uint32_t value) { return Write(static_cast<std::uint64_t>(value)); }
+    Response& Write(std::int16_t  value) { return Write(static_cast<std::int64_t>(value));  }
+    Response& Write(std::uint16_t value) { return Write(static_cast<std::uint64_t>(value)); }
+    Response& Write(std::int8_t   value) { return Write(static_cast<std::int64_t>(value));  }
+    Response& Write(std::uint8_t  value) { return Write(static_cast<std::uint64_t>(value)); }
 
     // Floating point, stack formatted
     Response& Write(double value)

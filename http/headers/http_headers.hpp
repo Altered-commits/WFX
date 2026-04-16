@@ -1,7 +1,7 @@
 #ifndef WFX_HTTP_HEADERS_HPP
 #define WFX_HTTP_HEADERS_HPP
 
-#include "utils/crypt/hash.hpp"
+#include "shared/utils/hash.hpp"
 #include "utils/crypt/string.hpp"
 
 #include <string>

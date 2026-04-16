@@ -13,6 +13,7 @@
 #include "shared/abis/string_view.hpp"
 #include "shared/abis/segment_variant.hpp"
 #include "shared/abis/any.hpp"
+#include "json/json_writter.hpp"
 
 namespace WFX {
 
@@ -126,6 +127,24 @@ inline constexpr auto EpInternalError     = Shared::EndpointStatus::INTERNAL_ERR
 inline constexpr auto StreamContinue = Shared::StreamAction::CONTINUE;
 inline constexpr auto StreamDone     = Shared::StreamAction::STOP_AND_ALIVE_CONN;
 inline constexpr auto StreamClose    = Shared::StreamAction::STOP_AND_CLOSE_CONN;
+
+// -----------------------------------------------------------------------
+// JSON writer
+//
+// Zero-allocation streaming JSON sugar over res.Write.
+// Caller owns the phases (set headers before, commit after):
+//
+//   res.Header("Content-Type", "application/json");
+//   {
+//       auto j = WFX::Json(res);
+//       j = { {"name", "John"}, {"age", 25} };   // static
+//       j["active"] = true;                       // dynamic, mix freely
+//       j["tags"]  << "admin" << "verified";      // dynamic array
+//   }   // '}' written here by destructor
+//   res.Commit();
+//
+// Included via 'http/json_writer.hpp'
+// -----------------------------------------------------------------------
 
 } // namespace WFX
 

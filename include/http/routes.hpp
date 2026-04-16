@@ -11,55 +11,55 @@
 #define WFX_ROUTE_CLASS(prefix, id) WFX_CONCAT(WFXRoute_, WFX_CONCAT(prefix, id))
 #define WFX_ROUTE_INSTANCE(id)      WFX_CONCAT(WFXRouteInst_, id)
 
-#define WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, callback, uniq)        \
-    namespace {                                                               \
-        struct WFX_ROUTE_CLASS(method, uniq) {                                \
-            WFX_ROUTE_CLASS(method, uniq)() {                                 \
-                WFX::Core::__WFXDeferred.emplace_back([] {                    \
-                    WFX::Core::HttpApi()->RegisterRoute(                      \
-                        WFX::Shared::HttpMethod::method,                      \
-                        WFX::Shared::StringView::FromCString(path),           \
-                        WFX::Http::MakeRouteCallback(callback)                \
-                    );                                                        \
-                });                                                           \
-            }                                                                 \
-        } WFX_ROUTE_INSTANCE(uniq);                                           \
+#define WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, uniq, ...)         \
+    namespace {                                                           \
+        struct WFX_ROUTE_CLASS(method, uniq) {                            \
+            WFX_ROUTE_CLASS(method, uniq)() {                             \
+                WFX::Core::__WFXDeferred.emplace_back([] {                \
+                    WFX::Core::HttpApi()->RegisterRoute(                  \
+                        WFX::Shared::HttpMethod::method,                  \
+                        WFX::Shared::StringView::FromCString(path),       \
+                        WFX::Http::MakeRouteCallback(__VA_ARGS__)         \
+                    );                                                    \
+                });                                                       \
+            }                                                             \
+        } WFX_ROUTE_INSTANCE(uniq);                                       \
     }
 
-#define WFX_INTERNAL_ROUTE_REGISTER_EX_IMPL(method, path, mw, callback, uniq) \
-    namespace {                                                               \
-        struct WFX_ROUTE_CLASS(method, uniq) {                                \
-            WFX_ROUTE_CLASS(method, uniq)() {                                 \
-                auto mwArr = mw;                                              \
-                WFX::Core::__WFXDeferred.emplace_back(                        \
-                    [mwArr]() mutable {                                       \
-                        WFX::Core::HttpApi()->RegisterRouteEx(                \
-                            WFX::Shared::HttpMethod::method,                  \
-                            WFX::Shared::StringView::FromCString(path),       \
-                            mwArr.Data(), mwArr.Count(),                      \
-                            WFX::Http::MakeRouteCallback(callback)            \
-                        );                                                    \
-                    }                                                         \
-                );                                                            \
-            }                                                                 \
-        } WFX_ROUTE_INSTANCE(uniq);                                           \
+#define WFX_INTERNAL_ROUTE_REGISTER_EX_IMPL(method, path, mw, uniq, ...)   \
+    namespace {                                                            \
+        struct WFX_ROUTE_CLASS(method, uniq) {                             \
+            WFX_ROUTE_CLASS(method, uniq)() {                              \
+                auto mwArr = mw;                                           \
+                WFX::Core::__WFXDeferred.emplace_back(                     \
+                    [mwArr]() mutable {                                    \
+                        WFX::Core::HttpApi()->RegisterRouteEx(             \
+                            WFX::Shared::HttpMethod::method,               \
+                            WFX::Shared::StringView::FromCString(path),    \
+                            mwArr.Data(), mwArr.Count(),                   \
+                            WFX::Http::MakeRouteCallback(__VA_ARGS__)      \
+                        );                                                 \
+                    }                                                      \
+                );                                                         \
+            }                                                              \
+        } WFX_ROUTE_INSTANCE(uniq);                                        \
     }
 
-#define WFX_INTERNAL_ROUTE_REGISTER(method, path, callback)             \
-    WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, callback, __COUNTER__)
+#define WFX_INTERNAL_ROUTE_REGISTER(method, path, ...)  \
+    WFX_INTERNAL_ROUTE_REGISTER_IMPL(method, path, __COUNTER__, __VA_ARGS__)
 
-#define WFX_INTERNAL_ROUTE_REGISTER_EX(method, path, mw, callback)      \
-    WFX_INTERNAL_ROUTE_REGISTER_EX_IMPL(method, path, mw, callback, __COUNTER__)
+#define WFX_INTERNAL_ROUTE_REGISTER_EX(method, path, mw, ...)  \
+    WFX_INTERNAL_ROUTE_REGISTER_EX_IMPL(method, path, mw, __COUNTER__, __VA_ARGS__)
 
 // vvv HTTP MACROS vvv
 // Simple routes
-#define WFX_GET(path, cb)     WFX_INTERNAL_ROUTE_REGISTER(GET, path, cb)
-#define WFX_POST(path, cb)    WFX_INTERNAL_ROUTE_REGISTER(POST, path, cb)
+#define WFX_GET(path, ...)     WFX_INTERNAL_ROUTE_REGISTER(GET, path, __VA_ARGS__)
+#define WFX_POST(path, ...)    WFX_INTERNAL_ROUTE_REGISTER(POST, path, __VA_ARGS__)
 
 // Routes with per-route middleware
 // Usage: WFX_GET_EX("/path", WFX::Http::MakeMiddleware(mw1, mw2), handler)
-#define WFX_GET_EX(path, mw, cb)     WFX_INTERNAL_ROUTE_REGISTER_EX(GET, path, mw, cb)
-#define WFX_POST_EX(path, mw, cb)    WFX_INTERNAL_ROUTE_REGISTER_EX(POST, path, mw, cb)
+#define WFX_GET_EX(path, mw, ...)     WFX_INTERNAL_ROUTE_REGISTER_EX(GET, path, mw, __VA_ARGS__)
+#define WFX_POST_EX(path, mw, ...)    WFX_INTERNAL_ROUTE_REGISTER_EX(POST, path, mw, __VA_ARGS__)
 
 // vvv ROUTE GROUPING vvv
 #define WFX_GROUP_START_IMPL(path, id)                                \
