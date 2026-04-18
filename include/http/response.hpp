@@ -3,7 +3,6 @@
 
 #include "core/core.hpp"
 #include "shared/apis/http_api.hpp"
-
 #include <string_view>
 #include <charconv>
 

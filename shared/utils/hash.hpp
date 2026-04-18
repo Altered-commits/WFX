@@ -11,13 +11,13 @@ namespace WFX::Shared {
 
 namespace Hasher {
 
-inline constexpr std::uint64_t Fnv1a(const std::uint8_t* data, std::uint64_t len) noexcept
+inline constexpr std::uint64_t Fnv1a(const char* data, std::uint64_t len) noexcept
 {
     constexpr std::uint64_t prime  = 1099511628211ULL;
     constexpr std::uint64_t offset = 14695981039346656037ULL;
 
     std::uint64_t hash = offset;
-    const std::uint8_t* end = data + len;
+    const char* end = data + len;
     while(data < end) {
         hash ^= *data++;
         hash *= prime;
@@ -27,19 +27,16 @@ inline constexpr std::uint64_t Fnv1a(const std::uint8_t* data, std::uint64_t len
 
 inline std::uint64_t Fnv1a(StringView str) noexcept
 {
-    return Fnv1a(
-        reinterpret_cast<const std::uint8_t*>(str.Data()),
-        static_cast<std::uint64_t>(str.Size())
-    );
+    return Fnv1a(str.Data(), static_cast<std::uint64_t>(str.Size()));
 }
 
-inline constexpr std::uint64_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::uint64_t len) noexcept
+inline constexpr std::uint64_t Fnv1aCaseInsensitive(const char* data, std::uint64_t len) noexcept
 {
     constexpr std::uint64_t prime  = 1099511628211ULL;
     constexpr std::uint64_t offset = 14695981039346656037ULL;
 
     std::uint64_t hash = offset;
-    const std::uint8_t* end = data + len;
+    const char* end = data + len;
 
     while(data < end) {
         std::uint8_t c = *data++;
@@ -52,10 +49,7 @@ inline constexpr std::uint64_t Fnv1aCaseInsensitive(const std::uint8_t* data, st
 
 inline std::uint64_t Fnv1aCaseInsensitive(StringView str) noexcept
 {
-    return Fnv1aCaseInsensitive(
-        reinterpret_cast<const std::uint8_t*>(str.Data()),
-        static_cast<std::uint64_t>(str.Size())
-    );
+    return Fnv1aCaseInsensitive(str.Data(), static_cast<std::uint64_t>(str.Size()));
 }
 
 inline constexpr std::uint32_t Murmur3Mix32(std::uint32_t h) noexcept
@@ -92,7 +86,7 @@ inline std::uint64_t HashValue(const T& val) noexcept
     static_assert(std::is_trivially_copyable_v<T>, "HashValue requires trivially copyable type");
 
     return Fnv1a(
-        reinterpret_cast<const std::uint8_t*>(&val),
+        reinterpret_cast<const char*>(&val),
         sizeof(T)
     );
 }

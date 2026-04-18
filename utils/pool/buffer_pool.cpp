@@ -120,11 +120,13 @@ void* BufferPool::Realloc(void* rawBlock, std::size_t newSize)
         return nullptr;
     }
 
+    ++stats_.totalAllocations; // The new block is a real allocation that will be freed later
+
     std::memcpy(newBlock, rawBlock, std::min(oldSize, newSize));
     tlsf_free(shard_.tlsfAllocator, rawBlock);
 
     ++stats_.totalReallocs;
-    ++stats_.totalFrees;
+    ++stats_.totalFrees; // For the old block being freed
     return newBlock;
 }
 

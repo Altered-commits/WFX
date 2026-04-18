@@ -14,6 +14,7 @@
 #include "shared/abis/segment_variant.hpp"
 #include "shared/abis/any.hpp"
 #include "json/json_writter.hpp"
+#include "json/json_object.hpp"
 
 namespace WFX {
 
@@ -38,6 +39,42 @@ using UUID           = Shared::UUID;
 using UUIDString     = Shared::UUIDString;
 using SegmentVariant = Shared::SegmentVariant;
 using Any            = Shared::Any;
+
+// -----------------------------------------------------------------------
+// JSON serializers
+//
+// Two complementary serializers, pick based on your use case:
+//
+// WFX::ImJson  : Immediate-mode Json (16 bytes, zero heap)
+//                Streams JSON directly into the response buffer as each-
+//                -Write/Obj/Arr call is made. No allocation, no DOM.
+//                Best for large or repetitive payloads where structure-
+//                -is known upfront and throughput is the priority.
+//
+//   WFX_GET("/json", [](WFX::Request req, WFX::Response res) {
+//       auto j = WFX::ImJson(res);
+//       j.Write("key", "value");
+//       j.Arr("items");
+//           j.Obj(); j.Write("id", 1); j.End();
+//       j.End();
+//   })
+//
+// WFX::RmJson  : Retained-mode Json, DOM object (8 bytes, heap-backed)
+//                Builds a full JSON object in memory first, then-
+//                -serializes it in one shot via Write(). Supports nested-
+//                -access, array push, and merge.
+//                Best for dynamic payloads where structure is built-
+//                -conditionally or incrementally.
+//
+//   WFX_GET("/json", [](WFX::Request req, WFX::Response res) {
+//       auto o = WFX::RmJson();
+//       o["key"] = "value";
+//       o["meta"]["version"] = 2u;
+//       o.Write(res);
+//   })
+// -----------------------------------------------------------------------
+inline Json::JsonWriter ImJson(Http::Response& res) noexcept { return Json::JsonWriter{res}; }
+inline Json::JsonObject RmJson()                    noexcept { return Json::JsonObject::Init(); }
 
 // -----------------------------------------------------------------------
 // Segment variant tags, use with Request::GetSegment().Tag()
@@ -127,24 +164,6 @@ inline constexpr auto EpInternalError     = Shared::EndpointStatus::INTERNAL_ERR
 inline constexpr auto StreamContinue = Shared::StreamAction::CONTINUE;
 inline constexpr auto StreamDone     = Shared::StreamAction::STOP_AND_ALIVE_CONN;
 inline constexpr auto StreamClose    = Shared::StreamAction::STOP_AND_CLOSE_CONN;
-
-// -----------------------------------------------------------------------
-// JSON writer
-//
-// Zero-allocation streaming JSON sugar over res.Write.
-// Caller owns the phases (set headers before, commit after):
-//
-//   res.Header("Content-Type", "application/json");
-//   {
-//       auto j = WFX::Json(res);
-//       j = { {"name", "John"}, {"age", 25} };   // static
-//       j["active"] = true;                       // dynamic, mix freely
-//       j["tags"]  << "admin" << "verified";      // dynamic array
-//   }   // '}' written here by destructor
-//   res.Commit();
-//
-// Included via 'http/json_writer.hpp'
-// -----------------------------------------------------------------------
 
 } // namespace WFX
 

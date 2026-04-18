@@ -8,25 +8,25 @@
 #define WFX_MW_CLASS(id)    WFX_CONCAT(WFXMiddleware_, id)
 #define WFX_MW_INSTANCE(id) WFX_CONCAT(WFXMiddlewareInst_, id)
 
-#define WFX_INTERNAL_MW_REGISTER_IMPL(name, callback, uniq)            \
+#define WFX_INTERNAL_MW_REGISTER_IMPL(name, uniq, ...)                 \
     namespace {                                                        \
         struct WFX_MW_CLASS(uniq) {                                    \
             WFX_MW_CLASS(uniq)() {                                     \
                 WFX::Core::__WFXDeferred.emplace_back([] {             \
                     WFX::Core::HttpApi()->RegisterMiddleware(          \
                         WFX::Shared::StringView::FromCString(name),    \
-                        WFX::Http::MakeMwCallback(callback)            \
+                        WFX::Http::MakeMwCallback(__VA_ARGS__)         \
                     );                                                 \
                 });                                                    \
             }                                                          \
         } WFX_MW_INSTANCE(uniq);                                       \
     }
 
-#define WFX_INTERNAL_MW_REGISTER(name, callback)                       \
-    WFX_INTERNAL_MW_REGISTER_IMPL(name, callback, __COUNTER__)
+#define WFX_INTERNAL_MW_REGISTER(name, ...)                            \
+    WFX_INTERNAL_MW_REGISTER_IMPL(name, __COUNTER__, __VA_ARGS__)
 
-// vvv User friendly Macros vvv
-#define WFX_MIDDLEWARE(name, cb) WFX_INTERNAL_MW_REGISTER(name, cb)
+// vvv User friendly macro vvv
+#define WFX_MIDDLEWARE(name, ...) WFX_INTERNAL_MW_REGISTER(name, __VA_ARGS__)
 
 // vvv Per-route middleware list vvv
 // Usage: WFX_GET_EX("/path", WFX_MW_LIST(mw1, mw2), handler)

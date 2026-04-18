@@ -163,8 +163,6 @@ private: // Storage
     bool            done_   = false;
 };
 
-inline JsonWriter Writer(Http::Response& res) { return JsonWriter{res}; }
-
 } // namespace WFX::Json
 
-#endif
+#endif // WFX_INC_JSON_WRITER_HPP
