@@ -125,7 +125,7 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(
                 break;
 
             case MiddlewareAction::BREAK:
-                return {false, false};
+                return {false, false, true}; // Stop middleware chain
         }
     }
 
@@ -154,7 +154,7 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(
                 break;
 
             case MiddlewareAction::BREAK:
-                return {false, false};
+                return {false, false, true};
         }
     }
 

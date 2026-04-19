@@ -73,10 +73,10 @@ public:
         any.typeID = Shared::Any::TypeIDOf<U>();
 
         if constexpr (
-            sizeof(U) <= sizeof(void*) &&
-            alignof(U) <= alignof(void*) &&
-            std::is_trivially_copyable_v<U> &&
-            std::is_trivially_destructible_v<U>
+            sizeof(U) <= sizeof(void*)
+            && alignof(U) <= alignof(void*)
+            && std::is_trivially_copyable_v<U>
+            && std::is_trivially_destructible_v<U>
         ) {
             U tmp = std::forward<T>(value);
             std::memcpy(&any.data, &tmp, sizeof(U));
@@ -101,48 +101,38 @@ public:
     }
 
     template<typename T>
-    bool GetContext(std::string_view key, T& out) const
+    auto GetContext(std::string_view key) const
     {
         using U = std::decay_t<T>;
 
         auto k = ToSV(key);
         Shared::Any any{};
 
-        if(!Core::HttpApi()->GetContext(backend_, k, &any))
-            return false;
-
+        // For trivial types, return val + bool
         if constexpr (
-            sizeof(U) <= sizeof(void*) &&
-            alignof(U) <= alignof(void*) &&
-            std::is_trivially_copyable_v<U> &&
-            std::is_trivially_destructible_v<U>
+            sizeof(U) <= sizeof(void*)
+            && alignof(U) <= alignof(void*)
+            && std::is_trivially_copyable_v<U>
+            && std::is_trivially_destructible_v<U>
         ) {
-            if(any.typeID != Shared::Any::TypeIDOf<U>())
-                return false;
+            if(
+                !Core::HttpApi()->GetContext(backend_, k, &any)
+                || any.typeID != Shared::Any::TypeIDOf<U>()
+            )
+                return std::pair<U, bool>{{}, false};
 
+            U out{};
             std::memcpy(&out, &any.data, sizeof(U));
-            return true;
+
+            return std::pair<U, bool>{out, true};
         }
+        // For non-trivial types, we return ptr + bool
         else {
-            const U* ptr = any.As<U>();
-            if(!ptr)
-                return false;
+            if(!Core::HttpApi()->GetContext(backend_, k, &any))
+                return std::pair<U*, bool>{nullptr, false};
 
-            out = *ptr;
-            return true;
+            return std::pair<U*, bool>{any.As<U>(), true};
         }
-    }
-
-    template<typename T>
-    const T* GetContextPtr(std::string_view key) const
-    {
-        auto k = ToSV(key);
-        Shared::Any any{};
-
-        if(!Core::HttpApi()->GetContext(backend_, k, &any))
-            return nullptr;
-
-        return any.As<T>();
     }
 
     void EraseContext(std::string_view key)

@@ -539,9 +539,11 @@ public: // vvv Set with dynamic key, key copied into store, safe for temporaries
 public: // vvv Array push, returns Ref to new element vvv
     Ref PushBack() noexcept
     {
-        if(!Valid()) return Dead();
+        if(!Valid())
+            return Dead();
 
         auto& n = NMut();
+
         if(n.tag == JsonTag::EMPTY) { n.tag = JsonTag::ARRAY; n.u64a = 0; n.u64b = 0; }
         if(n.tag != JsonTag::ARRAY) return Dead();
 
@@ -571,32 +573,46 @@ public: // vvv Array push, returns Ref to new element vvv
     void PushBack(float v)               noexcept { PushBack(static_cast<double>(v)); }
 
 public: // vvv Assign vvv
-    Ref& operator=(std::nullptr_t) noexcept { if(Valid()) NMut().tag = JsonTag::EMPTY; return *this; }
+    Ref& operator=(std::nullptr_t) noexcept
+    {
+        if(Valid())
+            NMut().tag = JsonTag::EMPTY;
+
+        return *this;
+    }
 
     Ref& operator=(bool v) noexcept
     {
-        if(!Valid()) return *this;
+        if(!Valid())
+            return *this;
+
         auto& n = NMut(); n.tag = JsonTag::BOOL; n.u64a = v ? 1u : 0u;
         return *this;
     }
 
     Ref& operator=(std::int64_t v) noexcept
     {
-        if(!Valid()) return *this;
+        if(!Valid())
+            return *this;
+
         auto& n = NMut(); n.tag = JsonTag::INT64; std::memcpy(&n.u64a, &v, 8);
         return *this;
     }
 
     Ref& operator=(std::uint64_t v) noexcept
     {
-        if(!Valid()) return *this;
+        if(!Valid())
+            return *this;
+
         auto& n = NMut(); n.tag = JsonTag::UINT64; std::memcpy(&n.u64a, &v, 8);
         return *this;
     }
 
     Ref& operator=(double v) noexcept
     {
-        if(!Valid()) return *this;
+        if(!Valid())
+            return *this;
+
         auto& n = NMut(); n.tag = JsonTag::DOUBLE; std::memcpy(&n.u64a, &v, 8);
         return *this;
     }
@@ -604,7 +620,9 @@ public: // vvv Assign vvv
     // const char*, zero copy view, pointer packed into u64a
     Ref& operator=(const char* v) noexcept
     {
-        if(!Valid() || !v) return *this;
+        if(!Valid() || !v)
+            return *this;
+
         auto& n  = NMut();
         n.tag    = JsonTag::STR_VIEW;
         n.u64a   = KVKeyPackView(v);
@@ -615,9 +633,13 @@ public: // vvv Assign vvv
     // string_view, copied into str region
     Ref& operator=(std::string_view v) noexcept
     {
-        if(!Valid()) return *this;
+        if(!Valid())
+            return *this;
+
         std::uint32_t off = s_->AllocStr(v.data(), static_cast<std::uint32_t>(v.size()));
-        if(off == NIL) return *this;
+        if(off == NIL)
+            return *this;
+
         auto& n  = NMut();
         n.tag    = JsonTag::STR_OWN;
         n.u32a() = off;
@@ -627,7 +649,8 @@ public: // vvv Assign vvv
 
     Ref& operator=(const Shared::UUID& v) noexcept
     {
-        auto s = v.ToString(); return *this = std::string_view{s.data, 36};
+        auto s = v.ToString();
+        return *this = std::string_view{s.data, 36};
     }
 
     Ref& operator=(std::int32_t v)  noexcept { return *this = static_cast<std::int64_t>(v); }
@@ -726,6 +749,7 @@ private: // vvv Internals vvv
             for(std::uint32_t i = 0; i < n.u32b(); ++i) {
                 const KV&   kv    = kvs[list[i]];
                 const char* kvKey = KVKeyResolve(kv.key, strs);
+
                 if(kv.keyLen == klen && std::memcmp(kvKey, key, klen) == 0)
                     return Ref{s_, kv.val};
             }
@@ -746,6 +770,7 @@ private: // vvv Internals vvv
             while(htSlots[h] != NIL) {
                 const KV&   kv    = kvs[htSlots[h]];
                 const char* kvKey = KVKeyResolve(kv.key, strs);
+
                 if(kv.keyLen == klen && std::memcmp(kvKey, key, klen) == 0)
                     return Ref{s_, kv.val};
 
@@ -815,6 +840,7 @@ private: // vvv Internals vvv
     }
 
 private: // Storage
+    friend class JsonParser;
     friend class JsonObject;
 
     Store*        s_;
@@ -880,33 +906,42 @@ public: // vvv Main Functions vvv
 
     Ref operator[](std::string_view key) noexcept
     {
-        if(!s_) return Ref{nullptr, NIL};
+        if(!s_)
+            return Ref{nullptr, NIL};
+
         return Ref{s_, 0}[key];
     }
 
     Ref Get(std::string_view key) const noexcept
     {
-        if(!s_) return Ref{nullptr, NIL};
+        if(!s_)
+            return Ref{nullptr, NIL};
+
         return Ref{const_cast<Store*>(s_), 0}.Get(key);
     }
 
     template<typename T>
     Ref Set(std::string_view key, T&& val) noexcept
     {
-        if(!s_) return Ref{nullptr, NIL};
+        if(!s_)
+            return Ref{nullptr, NIL};
+
         return Ref{s_, 0}.Set(key, std::forward<T>(val));
     }
 
     // vvv Deep copy top-level keys from other into this vvv
     void Merge(const JsonObject& other) noexcept
     {
-        if(!s_ || !other.s_) return;
+        if(!s_ || !other.s_)
+            return;
 
         const Node& root = other.s_->Nodes()[0];
-        if(root.tag != JsonTag::OBJ_LNR && root.tag != JsonTag::OBJ_HASH) return;
+        if(root.tag != JsonTag::OBJ_LNR && root.tag != JsonTag::OBJ_HASH)
+            return;
 
         const NodeBlock* b = root.Block();
-        if(!b) return;
+        if(!b)
+            return;
 
         const KV*            kvs  = other.s_->KVs();
         const char*          strs = other.s_->Strs();
@@ -938,7 +973,8 @@ private: // vvv Internals vvv
 
     void Destroy() noexcept
     {
-        if(!s_) return;
+        if(!s_)
+            return;
 
         auto* api = WFX::Core::MemoryApi();
         if(api) {
@@ -1046,6 +1082,8 @@ private: // vvv Internals vvv
     }
 
 private: // Storage
+    friend class JsonParser;
+
     Store* s_ = nullptr;
 };
 

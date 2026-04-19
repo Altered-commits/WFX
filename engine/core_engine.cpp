@@ -232,12 +232,16 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
         goto __HandleResponse;
 
     if(eLevel == ExecutionLevel::MIDDLEWARE) {
-        auto [success, isAsync] = middleware_.ExecuteMiddleware(ctx, node, userReq, userRes);
+        auto [success, isAsync, isBroken] = middleware_.ExecuteMiddleware(ctx, node, userReq, userRes);
 
         if(!success) {
+            // Middleware returned MwBreak. Assuming it sent response (it should), finish the request
+            if(isBroken)
+                goto __HandleResponse;
+
             if(!isAsync) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-                HandleError(ctx, HttpStatus::INTERNAL_SERVER_ERROR, "Middleware Execution");
+                HandleError(ctx, HttpStatus::INTERNAL_SERVER_ERROR, "Middleware Execution Failure");
                 goto __HandleResponse;
             }
 

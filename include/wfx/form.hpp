@@ -18,7 +18,7 @@
 //       decltype(LoginForm)::CleanedType data;
 //       auto err = LoginForm.Parse(req, data);
 //
-//       if (err != WFX::Form::Ok) {
+//       if(err != WFX::Form::Ok) {
 //           res.Status(WFX::HttpStatus::BAD_REQUEST).SendText("bad form");
 //           return;
 //       }
@@ -26,7 +26,7 @@
 //       // std::get<N>(data).present  -> was the field submitted?
 //       // std::get<N>(data).value    -> the sanitized value
 //       auto& username = std::get<0>(data);
-//       if (username.present) { /* use username.value */ }
+//       if(username.present) { /* use username.value */ }
 //   });
 // -----------------------------------------------------------------------
 

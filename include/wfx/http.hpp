@@ -16,6 +16,7 @@
 //   WFX::AsyncOk / AsyncTimerFailure / ...          (via wfx/types.hpp)
 //   WFX::EpOk / EpConnectFailure / ...              (via wfx/types.hpp)
 //   WFX::StreamContinue / StreamDone / StreamClose  (via wfx/types.hpp)
+//   WFX::RmJson / ImJson / JsonObject / ParseJson   (via wfx/types.hpp)
 //
 // For form parsing include wfx/form.hpp separately.
 //
@@ -27,7 +28,7 @@
 // Async handler:
 //   WFX_GET("/wait", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 //       auto s = co_await WFX::SleepFor(100);
-//       if (s != WFX::AsyncOk) co_return;
+//       if(s != WFX::AsyncOk) co_return;
 //       res.SendText("waited");
 //       co_return;
 //   });

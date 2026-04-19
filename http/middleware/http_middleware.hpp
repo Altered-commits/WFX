@@ -19,7 +19,8 @@ using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, MiddlewareStac
 
 struct MiddlewareResult {
     bool success;
-    bool isAsync;  // true = engine should wait for callback
+    bool isAsync;           // true = engine should wait for callback
+    bool isBroken = false;  // true = middleware returned MwBreak, stop the chain entirely
 };
 
 struct MiddlewareFunctionResult {

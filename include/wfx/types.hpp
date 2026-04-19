@@ -15,6 +15,7 @@
 #include "shared/abis/any.hpp"
 #include "json/json_writter.hpp"
 #include "json/json_object.hpp"
+#include "json/json_parser.hpp"
 
 namespace WFX {
 
@@ -26,12 +27,6 @@ using HttpMethod  = Shared::HttpMethod;
 using HttpVersion = Shared::HttpVersion;
 
 // -----------------------------------------------------------------------
-// Async / middleware underlying types (rarely used directly)
-// -----------------------------------------------------------------------
-using AsyncStatus      = Shared::AsyncStatus;
-using MiddlewareAction = Shared::MiddlewareAction;
-
-// -----------------------------------------------------------------------
 // Data types
 // -----------------------------------------------------------------------
 using StringView     = Shared::StringView;
@@ -39,6 +34,7 @@ using UUID           = Shared::UUID;
 using UUIDString     = Shared::UUIDString;
 using SegmentVariant = Shared::SegmentVariant;
 using Any            = Shared::Any;
+using JsonObject     = Json::JsonObject;
 
 // -----------------------------------------------------------------------
 // JSON serializers
@@ -75,6 +71,22 @@ using Any            = Shared::Any;
 // -----------------------------------------------------------------------
 inline Json::JsonWriter ImJson(Http::Response& res) noexcept { return Json::JsonWriter{res}; }
 inline Json::JsonObject RmJson()                    noexcept { return Json::JsonObject::Init(); }
+
+// -----------------------------------------------------------------------
+// Parses a JSON body into a JsonObject.
+//
+// view : Controls string storage strategy.
+//        When false, all strings are copied into internal storage and-
+//        -remain valid after the input body is destroyed. When true,-
+//        -strings reference the input body directly, so the body must-
+//        -remain alive.
+//
+// maxDepth : Maximum allowed nesting depth
+// -----------------------------------------------------------------------
+inline Json::JsonParseResult ParseJson(std::string_view body, bool view = false, std::uint32_t maxDepth = 64) noexcept
+{
+    return Json::JsonParser::ParseImpl(body, view, maxDepth);
+}
 
 // -----------------------------------------------------------------------
 // Segment variant tags, use with Request::GetSegment().Tag()

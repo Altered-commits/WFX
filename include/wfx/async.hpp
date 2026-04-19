@@ -8,7 +8,7 @@
 // Async route:
 //   WFX_GET("/path", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 //       auto s = co_await WFX::SleepFor(500);
-//       if (s != WFX::AsyncOk) {
+//       if(s != WFX::AsyncOk) {
 //           res.Status(WFX::HttpStatus::INTERNAL_SERVER_ERROR)
 //              .SendText("timer failed");
 //           co_return;
