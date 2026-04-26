@@ -1,12 +1,12 @@
-#ifndef WFX_INC_JSON_WRITER_HPP
-#define WFX_INC_JSON_WRITER_HPP
+#ifndef WFX_SHARED_JSON_WRITER_HPP
+#define WFX_SHARED_JSON_WRITER_HPP
 
 #include "http/response.hpp"
 #include <string_view>
 #include <cstdint>
 #include <charconv>
 
-namespace WFX::Json {
+namespace WFX::Shared {
 
 class JsonWriter {
 public: // Ctors and Dtors
@@ -163,6 +163,6 @@ private: // Storage
     bool            done_   = false;
 };
 
-} // namespace WFX::Json
+} // namespace WFX::Shared
 
-#endif // WFX_INC_JSON_WRITER_HPP
+#endif // WFX_SHARED_JSON_WRITER_HPP

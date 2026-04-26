@@ -62,6 +62,7 @@ function(configure_compile target)
     else()
         target_compile_options(${target} PRIVATE
             -fPIC
+            -Wno-return-type-c-linkage
             $<$<CONFIG:Release>:
                 -O3
                 -march=native
@@ -95,12 +96,6 @@ function(configure_shared target)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
         )
     else()
-        target_link_options(${target} PRIVATE
-            -shared
-            -fPIC
-            -Wl,-rpath,../WFX/lib
-        )
-
         if(APPLE)
             target_link_options(${target} PRIVATE
                 $<$<CONFIG:Release>:-Wl,-dead_strip>
@@ -152,8 +147,11 @@ message(STATUS "================ Build Configuration ================")
 message(STATUS "Targets available:")
 message(STATUS "  - user_entry")
 message(STATUS "  - user_templates")
-message(STATUS "Output directory: ${OUTPUT_DIR}")
-message(STATUS "=====================================================")
+message(STATUS "Generator            : ${CMAKE_GENERATOR}")
+message(STATUS "Compiler             : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "C++ standard         : Cxx${CMAKE_CXX_STANDARD}")
+message(STATUS "Output directory     : ${OUTPUT_DIR}")
+message(STATUS "===========================================================")
 )");
 
     // 1.2. Git ignore file

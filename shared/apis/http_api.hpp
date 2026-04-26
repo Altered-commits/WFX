@@ -1,6 +1,7 @@
 #ifndef WFX_SHARED_HTTP_API_HPP
 #define WFX_SHARED_HTTP_API_HPP
 
+#include "shared/json/json_object_fwd.hpp"
 #include "shared/abis/constants.hpp"
 #include "shared/abis/types.hpp"
 #include "shared/abis/any.hpp"
@@ -53,12 +54,13 @@ using GetContextFn      = bool                   (*)(const void* request, String
 using EraseContextFn    = void                   (*)(void* request, StringView key);
 
 // Response Control
-using SetStatusFn    = void (*)(void* response, HttpStatus);
-using SetHeaderFn    = void (*)(void* response, StringView key, StringView value);
-using WriteBodyFn    = void (*)(void* response, StringView data);
-using WriteFileFn    = void (*)(void* response, StringView path, bool autoHandle404);
-using WriteStreamFn  = void (*)(void* response, StreamGenerator, bool chunked);
-using CommitFn       = void (*)(void* response);
+using SetStatusFn     = void (*)(void* response, HttpStatus);
+using SetHeaderFn     = void (*)(void* response, StringView key, StringView value);
+using WriteBodyFn     = void (*)(void* response, StringView data);
+using WriteFileFn     = void (*)(void* response, StringView path, bool autoHandle404);
+using WriteStreamFn   = void (*)(void* response, StreamGenerator, bool chunked);
+using WriteTemplateFn = void (*)(void* response, StringView path, JsonObject* ctx);
+using CommitFn        = void (*)(void* response);
 
 // Endpoint API
 using AllocateEndpointFn = std::uint16_t (*)(
@@ -101,6 +103,7 @@ struct HTTP_API_TABLE {
     WriteBodyFn             WriteBody;
     WriteFileFn             WriteFile;
     WriteStreamFn           WriteStream;
+    WriteTemplateFn         WriteTemplate;
     CommitFn                Commit;
 
     // Endpoint API

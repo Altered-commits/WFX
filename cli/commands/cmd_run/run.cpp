@@ -83,12 +83,11 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     bool pinToCpu = cfg.GetFlag(ServerFlags::PIN_TO_CPU);
     bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
     bool ohp      = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
-    
+
     // Switch ports if we enable https and we don't want to override https default port
     std::uint16_t port = useHttps && !ohp ? 443U : cfg.port;
-    logger.Info("[WFX-Master]: Dev server running at ",
-                useHttps ? "https://" : "http://", cfg.host, ':', port);
 
+    logger.Info("[WFX-Master]: Dev server running at ", useHttps ? "https://" : "http://", cfg.host, ':', port);
     logger.Info("[WFX-Master]: Press Ctrl+C to stop");
     logger.SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
 

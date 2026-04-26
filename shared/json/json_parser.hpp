@@ -1,7 +1,7 @@
-#ifndef WFX_INC_JSON_PARSER_HPP
-#define WFX_INC_JSON_PARSER_HPP
+#ifndef WFX_SHARED_JSON_PARSER_HPP
+#define WFX_SHARED_JSON_PARSER_HPP
 
-#include "json/json_object.hpp"
+#include "json_object.hpp"
 #include "shared/abis/string_view.hpp"
 #include <string_view>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include <charconv>
 #include <bit>
 
-namespace WFX::Json {
+namespace WFX::Shared {
 
 // vvv Parse result vvv
 //
@@ -24,6 +24,11 @@ struct JsonParseResult {
 };
 
 // vvv Internal parser, not for direct use vvv
+//
+// isView controls string value storage only:
+//   true  : parsed string values are stored as STR_VIEW (zero-copy, src must outlive object)
+//   false : parsed string values are copied into the store as STR_OWN (safe for temporary buffers)
+//
 struct JsonParser {
 public: // vvv Primitives vvv
     bool Ok()   const noexcept { return err == nullptr; }
@@ -132,8 +137,8 @@ public: // vvv Unicode vvv
     }
 
 public: // vvv String scanning vvv
-    // Scan src[pos...] for the end of a JSON string, stops at closing quote or first backslash,-
-    // -sets end to that position, hasEscape to true if backslash found
+    // Scan src[pos...] for the end of a JSON string, stops at closing quote or first backslash
+    // Sets end to that position, hasEscape to true if backslash found
     // Returns false on control character or unterminated string
     bool ScanString(std::size_t& end, bool& hasEscape) noexcept
     {
@@ -218,19 +223,19 @@ public: // vvv String scanning vvv
 
 public: // vvv String parsing vvv
     // Slow path: escape sequences present, always allocates into store
-    // Even in view mode, escaped bytes change so a zero-copy view is not possible
+    // Even in view mode, escaped bytes differ from src so zero-copy is impossible
     // Returns false on error
-    bool ParseStringEscaped(Store* s, Node& n) noexcept
+    bool ParseStringEscaped(JsonStore* s, JsonNode& n) noexcept
     {
         std::uint32_t capacity = static_cast<std::uint32_t>(len - pos) + 4;
         std::uint32_t strOff   = s->AllocStr(nullptr, capacity);
 
-        if(strOff == NIL) {
+        if(strOff == JSON_NIL) {
             Fail("out of memory");
             return false;
         }
 
-        char*         out    = s->Strs() + strOff;
+        char*         out    = s->strs + strOff;
         std::uint32_t outLen = 0;
 
         while(pos < len) {
@@ -258,8 +263,8 @@ public: // vvv String parsing vvv
                 return false;
         }
 
-        out[outLen] = '\0';
-        s->strLen   = strOff + outLen + 1; // patch strLen, capacity may be larger
+        out[outLen]  = '\0';
+        s->strLen    = strOff + outLen + 1; // patch strLen, capacity may be larger
 
         n.tag    = JsonTag::STR_OWN;
         n.u32a() = strOff;
@@ -268,9 +273,11 @@ public: // vvv String parsing vvv
     }
 
     // Parse a JSON string into node, opening quote not yet consumed
-    // Fast path: no escapes, set STR_VIEW (view mode) or copy to STR_OWN (copy mode)
-    // Slow path: escapes present, delegates to ParseStringEscaped
-    bool ParseString(Store* s, Node& n) noexcept
+    // Fast path (no escapes):
+    //   isView = true  : STR_VIEW, zero-copy pointer into src (src must outlive the object)
+    //   isView = false : STR_OWN, copied into store
+    // Slow path (escapes present): always STR_OWN regardless of isView
+    bool ParseString(JsonStore* s, JsonNode& n) noexcept
     {
         if(!Expect('"'))
             return false;
@@ -281,18 +288,21 @@ public: // vvv String parsing vvv
         if(!ScanString(end, hasEscape)) return false;
         if(hasEscape)                   return ParseStringEscaped(s, n);
 
-        // Fast path
+        // Fast path: no escape sequences in this string
         std::uint32_t slen = static_cast<std::uint32_t>(end - pos);
 
         if(isView) {
-            n.tag    = JsonTag::STR_VIEW;
-            n.u64a   = KVKeyPackView(src + pos);
+            // Zero-copy: pack pointer into u64a, store length in u32c
+            // Must memcpy from a const char* local, &src[pos] is the char's address
+            n.tag = JsonTag::STR_VIEW;
+            const char* ptr = src + pos;
+            std::memcpy(&n.u64a, &ptr, 8);
             n.u32c() = slen;
         }
         else {
             std::uint32_t off = s->AllocStr(src + pos, slen);
 
-            if(off == NIL) {
+            if(off == JSON_NIL) {
                 Fail("out of memory");
                 return false;
             }
@@ -343,7 +353,7 @@ public: // vvv Number parsing vvv
         return true;
     }
 
-    bool ParseNumber(Node& n) noexcept
+    bool ParseNumber(JsonNode& n) noexcept
     {
         std::size_t start   = pos;
         bool        isNeg   = Peek() == '-';
@@ -390,10 +400,10 @@ public: // vvv Number parsing vvv
     }
 
 public: // vvv Value vvv
-    // Parse any JSON value, writing result into an existing Ref
-    // The Ref is provided by the caller (from PushBack or GetOrCreate on the parent)
+    // Parse any JSON value, writing result into an existing JsonRef
+    // The JsonRef is provided by the caller (from PushBack or GetOrCreate on the parent)
     // This function only decides what type the value is and fills the node
-    bool ParseValue(Ref& r) noexcept
+    bool ParseValue(JsonRef& r) noexcept
     {
         SkipWS();
 
@@ -403,7 +413,7 @@ public: // vvv Value vvv
         }
 
         char  c = Peek();
-        Node& n = r.NMut();
+        JsonNode& n = r.NMut();
 
         if(c == '"') return ParseString(r.s_, n);
         if(c == '{') return ParseObject(r);
@@ -452,9 +462,9 @@ public: // vvv Value vvv
     }
 
 public: // vvv Object and Array vvv
-    // For each key, call r.GetOrCreate(key, klen, isView) to get back a value Ref. Then-
-    // -recursively parse the value into that Ref
-    bool ParseObject(Ref r) noexcept
+    // For each key, GetOrCreate copies the key into the store regardless of isView
+    // Keys must always be owned, src may not outlive the JsonObject
+    bool ParseObject(JsonRef r) noexcept
     {
         ++pos; // skip '{'
         if(++depth > maxDepth) {
@@ -462,7 +472,7 @@ public: // vvv Object and Array vvv
             return false;
         }
 
-        r.NMut().tag  = JsonTag::OBJ_LNR;
+        r.NMut().tag  = JsonTag::OBJECT;
         r.NMut().u64a = 0;
         r.NMut().u64b = 0;
 
@@ -488,30 +498,37 @@ public: // vvv Object and Array vvv
             if(!ScanString(end, hasEscape))
                 return false;
 
-            Ref valRef{nullptr, NIL};
+            JsonRef valRef{nullptr, JSON_NIL};
 
             if(!hasEscape) {
-                // Fast path: key points directly into src
+                // Fast path: key has no escape sequences, copy directly from src
                 std::uint32_t klen = static_cast<std::uint32_t>(end - keyStart);
                 pos    = end + 1; // skip closing "
-                valRef = r.GetOrCreate(src + keyStart, klen, isView);
+                valRef = r.GetOrCreate(src + keyStart, klen);
             }
             else {
-                // Escaped key: parse into a temp node to get the decoded bytes,
-                // then insert as an owned key regardless of view mode
+                // Escaped key: rewind and parse the full string to get decoded bytes,-
+                // -then insert. Always owned, escaped content differs from src bytes
                 pos = keyStart - 1; // rewind to opening quote
 
-                Node tmp;
+                JsonNode tmp;
                 tmp.tag  = JsonTag::EMPTY;
                 tmp.u64a = 0;
                 tmp.u64b = 0;
 
-                if(!ParseString(r.s_, tmp))
+                // Force copy for the key parse regardless of isView
+                bool savedView = isView;
+                isView = false;
+
+                bool ok = ParseString(r.s_, tmp);
+                isView = savedView;
+
+                if(!ok)
                     return false;
 
-                const char*   kptr = r.s_->Strs() + tmp.u32a();
+                const char*   kptr = r.s_->strs + tmp.u32a();
                 std::uint32_t klen = tmp.u32c();
-                valRef = r.GetOrCreate(kptr, klen, false);
+                valRef = r.GetOrCreate(kptr, klen);
             }
 
             if(!valRef.Valid()) {
@@ -546,9 +563,8 @@ public: // vvv Object and Array vvv
         return Ok();
     }
 
-    // For each element, call r.PushBack() to get a value Ref. Then recursively-
-    // -parse the element into that Ref
-    bool ParseArray(Ref r) noexcept
+    // For each element, PushBack() gives a value JsonRef, then parse recursively into it
+    bool ParseArray(JsonRef r) noexcept
     {
         ++pos; // skip '['
         if(++depth > maxDepth) {
@@ -568,7 +584,7 @@ public: // vvv Object and Array vvv
         }
 
         while(Ok()) {
-            Ref elem = r.PushBack();
+            JsonRef elem = r.PushBack();
 
             if(!elem.Valid()) {
                 Fail("out of memory");
@@ -599,7 +615,10 @@ public: // vvv Object and Array vvv
         return Ok();
     }
 
-public: // vvv Entrypoint for parsing JSON vvv
+public: // vvv Entry point vvv
+    // isView : controls string value storage only (not keys, which are always owned)
+    //   true  : zero-copy STR_VIEW for string values, src must outlive the returned object
+    //   false : STR_OWN copies for string values, safe for temporary buffers
     static JsonParseResult ParseImpl(std::string_view body, bool isView, std::uint32_t maxDepth) noexcept
     {
         JsonParseResult result;
@@ -623,6 +642,8 @@ public: // vvv Entrypoint for parsing JSON vvv
         p.depth    = 0;
         p.maxDepth = maxDepth;
         p.isView   = isView;
+        p.err      = nullptr;
+        p.errOff   = 0;
 
         p.SkipWS();
 
@@ -632,8 +653,8 @@ public: // vvv Entrypoint for parsing JSON vvv
             return result;
         }
 
-        // Root node is node 0, already allocated by Init()
-        Ref root{result.object.s_, 0};
+        // Root node is node 0, always allocated by JsonObject::Init()
+        JsonRef root{result.object.s_, 0};
 
         bool ok = p.Peek() == '{'
             ? p.ParseObject(root)
@@ -662,11 +683,11 @@ private: // vvv State vvv
     std::size_t   pos;
     std::uint32_t depth;
     std::uint32_t maxDepth;
-    bool          isView;
     const char*   err    = nullptr;
     std::size_t   errOff = 0;
+    bool          isView;
 };
 
-} // namespace WFX::Json
+} // namespace WFX::Shared
 
-#endif // WFX_INC_JSON_PARSER_HPP
+#endif // WFX_SHARED_JSON_PARSER_HPP

@@ -42,6 +42,10 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
     Shared::InitHttpAPIV1(connHandler_.get(), &router_, &middleware_);
     Shared::InitAsyncAPIV1(connHandler_.get());
 
+    // We set it on our end because each compiled binary has its own copy of '__WFXApi'
+    // If we want it to work on our end, we gotta set it here as well
+    SetMasterApi(Shared::GetMasterAPI());
+
     // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath);
 
@@ -146,9 +150,9 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             }
 
             res.Reset();
-            res.rwBuffer_    = &ctx->rwBuffer;
-            res.version_     = reqInfo.version;
-            res.shouldClose_ = shouldClose;
+            res.SetRWBuffer(&ctx->rwBuffer);
+            res.SetVersion(reqInfo.version);
+            res.SetShouldClose(shouldClose);
 
             // Public file shortcut
             if(StartsWith(reqInfo.path, "/public/")) {
@@ -319,11 +323,8 @@ void CoreEngine::HandleError(ConnectionContext* ctx, Shared::HttpStatus code, st
     auto& res = *ctx->responseInfo;
 
     // Reset the should close because it may have changed since
-    res.shouldClose_ = ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE;
-
-    res.Reset();
-    res.WriteStatus(code);
-    res.SendText(message);
+    res.SetShouldClose(ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE);
+    res.AbortWithError(code, message);
 }
 
 std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)

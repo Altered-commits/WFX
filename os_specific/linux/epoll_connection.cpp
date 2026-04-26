@@ -1041,15 +1041,18 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
             break;
     }
 
+    // Call destructor if one is present
+    if(ctx->streamGenerator.Destroy)
+        ctx->streamGenerator.Destroy(ctx->streamGenerator.ctx);
+
     // Storing value before resetting it below
     bool wasChunked = static_cast<bool>(ctx->streamChunked);
 
     // Only STOP_AND_... states can reach here
-    writeMeta->dataLength    = 0;
-    writeMeta->writtenLength = 0;
-    ctx->isStreamOperation   = 0;
-    ctx->streamChunked       = 0;
-    ctx->streamGenerator     = {};
+    rwBuffer.ClearWriteBuffer();
+    ctx->isStreamOperation = 0;
+    ctx->streamChunked     = 0;
+    ctx->streamGenerator   = {0};
 
     // Write final chunk or finalize stream
     if(wasChunked)

@@ -2,6 +2,7 @@
 #define WFX_INC_HTTP_USER_RESPONSE_HPP
 
 #include "core/core.hpp"
+#include "shared/json/json_object_fwd.hpp"
 #include "shared/apis/http_api.hpp"
 #include <string_view>
 #include <charconv>
@@ -107,10 +108,12 @@ public: // Sugar syntax
     }
 
     // Zero-copy sendfile path
-    void SendFile(std::string_view path, bool autoHandle404 = true)
-    {
-        Core::HttpApi()->WriteFile(backend_, ToSV(path), autoHandle404);
-    }
+    void SendFile(std::string_view path, bool autoHandle404 = true) { Core::HttpApi()->WriteFile(backend_, ToSV(path), autoHandle404); }
+    void SendFile(Shared::StringView path, bool autoHandle404 = true) { Core::HttpApi()->WriteFile(backend_, path, autoHandle404); }
+
+    // HTML Template, sets Content-Type, writes, commits
+    void SendTemplate(std::string_view path, Shared::JsonObject&& ctx)   { Core::HttpApi()->WriteTemplate(backend_, ToSV(path), &ctx); }
+    void SendTemplate(Shared::StringView path, Shared::JsonObject&& ctx) { Core::HttpApi()->WriteTemplate(backend_, path, &ctx); }
 
     // Typed lambda, allocated via engine allocator
     template<typename Fn>

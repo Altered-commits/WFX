@@ -1,18 +1,11 @@
-#ifndef WFX_ENGINE_TEMPLATE_INTERFACE_HPP
-#define WFX_ENGINE_TEMPLATE_INTERFACE_HPP
+#ifndef WFX_SHARED_NON_ABI_TEMPLATE_INTERFACE_HPP
+#define WFX_SHARED_NON_ABI_TEMPLATE_INTERFACE_HPP
 
-/*
- * Contains interfaces and structs necessary for template communication between-
- * -engine and user compiled .dll / .so
- */
-
-#include "include/third_party/json/json.hpp"
+#include "shared/json/json_object.hpp"
 #include <cstdint>
 #include <string_view>
 #include <variant>
-
-// For consistency :)
-using Json = nlohmann::json;
+#include <memory>
 
 namespace WFX::Core {
 
@@ -25,7 +18,7 @@ struct FileChunk {
 };
 
 struct VariableChunk {
-    const Json* value; // Pointer to the value in the context
+    Shared::JsonRef value; // Resolved at GetState call time
 };
 
 // Common return type of the chunk, a monostate return value signifies end of generation
@@ -49,25 +42,22 @@ struct StateResult {
     TemplateChunk chunk;
 };
 
-// vvv Helper Functions vvv
-/*
- * NOTE: THESE FUNCTIONS ASSUMES THAT KEYS ARE ALWAYS KNOWN AT RUNTIME, WHICH THEY ARE BTW
- */
-inline Json* SafeGetJson(Json& j, std::initializer_list<std::string_view> keys) noexcept
-{
-    Json* cur = &j;
-    for(auto& k : keys) {
-        if(!cur->is_object())
-            return nullptr;
+// Helper function. Returns invalid JsonRef if any key missing
+inline Shared::JsonRef SafeGetJson(Shared::JsonObject& ctx, std::initializer_list<std::string_view> keys) noexcept {
+    if(keys.size() == 0)
+        return Shared::JsonRef{nullptr, Shared::JSON_NIL};
 
-        auto it = cur->find(k);
+    auto it  = keys.begin();
+    auto ref = ctx.Get(*it++);
 
-        if(it == cur->end())
-            return nullptr;
+    for(; it != keys.end(); ++it) {
+        if(!ref.Valid() || !ref.IsObject())
+            return Shared::JsonRef{nullptr, Shared::JSON_NIL};
 
-        cur = &(*it);
+        ref = ref.Get(*it);
     }
-    return cur;
+
+    return ref;
 }
 
 // Interface
@@ -79,18 +69,17 @@ public:
     // Number of states in the compiled template
     virtual std::size_t GetStateCount() const noexcept = 0;
 
-    // Returns the TemplateResult for a given state index (0..count-1)
-    virtual StateResult GetState(std::size_t index, Json& ctx) const noexcept = 0;
+    // 'ctx' is the JsonObject passed by user in 'SendTemplate'
+    virtual StateResult GetState(std::size_t index, Shared::JsonObject& ctx) const noexcept = 0;
 };
-
-using TemplateGeneratorPtr = std::unique_ptr<BaseTemplateGenerator>;
 
 /*
  * Function pointer type exported by compiled template
  * Engine loads it via dlsym/GetProcAddress
  */
-using TemplateCreatorFn = TemplateGeneratorPtr(*)();
+using TemplateGeneratorPtr = std::unique_ptr<BaseTemplateGenerator>;
+using TemplateCreatorFn    = TemplateGeneratorPtr(*)();
 
 } // namespace WFX::Core
 
-#endif // WFX_ENGINE_TEMPLATE_INTERFACE_HPP
+#endif // WFX_SHARED_NON_ABI_TEMPLATE_INTERFACE_HPP

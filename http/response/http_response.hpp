@@ -2,6 +2,7 @@
 #define WFX_HTTP_RESPONSE_HPP
 
 #include "config/config.hpp"
+#include "shared/json/json_object.hpp"
 #include "shared/abis/types.hpp"
 #include "shared/abis/constants.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
@@ -25,28 +26,27 @@ enum class BodyKind : std::uint8_t {
 
 class HttpResponse {
 public:
-    Utils::RWBuffer*     rwBuffer_    = nullptr;                       // |
-    Shared::HttpVersion  version_     = Shared::HttpVersion::HTTP_1_1; // | -> All set by 'CoreEngine', guaranteed
-    bool                 shouldClose_ = false;                         // |
-
-public:
     // Called by engine before each request, resets internal state but keeps 'rwBuffer' allocation
     void Reset();
 
-    // Phase-enforced write API
+    // Phase-broken error API
+    void AbortWithError(Shared::HttpStatus status, std::string_view message);
+
+public: // Phase-enforced write API
     void WriteStatus(Shared::HttpStatus code);
     void WriteHeader(std::string_view key, std::string_view value);
     void WriteBodyData(std::string_view data);
     void WriteFile(std::string_view path, bool autoHandle404);
     void WriteStream(Shared::StreamGenerator gen, bool chunked);
+    void WriteTemplate(std::string&& path, Shared::JsonObject&& ctx); // Impl at end of file
     void Commit();
 
-    // Sugar syntax essentially
+public: // Sugar syntax essentially
     void SendText(std::string_view data);
     void SendFile(std::string_view path, bool autoHandle404);
     void SendStream(Shared::StreamGenerator gen, bool chunked);
 
-    // Queries used by CoreEngine / Serializer
+public: // Queries used by CoreEngine / Serializer
     bool                    IsCommitted()   const    { return phase_ == ResponsePhase::COMMITTED; }
     bool                    IsStream()      const    { return bodyKind_ == BodyKind::STREAM; }
     bool                    IsFile()        const    { return bodyKind_ == BodyKind::FILE; }
@@ -55,6 +55,10 @@ public:
     Shared::HttpStatus      GetStatus()     const    { return status_; }
     std::string             TakeFilePath()  noexcept { return std::move(filePath_); }
     Shared::StreamGenerator TakeGenerator() noexcept { Shared::StreamGenerator gen = stream_; stream_ = {}; return gen; }
+
+    void SetRWBuffer(Utils::RWBuffer* ptr) noexcept { rwBuffer_ = ptr; }
+    void SetVersion(Shared::HttpVersion v) noexcept { version_ = v; }
+    void SetShouldClose(bool sc)           noexcept { shouldClose_ = sc; }
 
 private:
     void EnsureStatusWritten();   // Auto-default 200 if FRESH
@@ -70,6 +74,11 @@ private:
             data, len, networkConfig_.sendBufferIncSize, networkConfig_.maxSendBufferSize
         );
     }
+
+private:
+    Utils::RWBuffer*     rwBuffer_    = nullptr;                       // |
+    Shared::HttpVersion  version_     = Shared::HttpVersion::HTTP_1_1; // | -> All set by 'CoreEngine', guaranteed
+    bool                 shouldClose_ = false;                         // |
 
 private:
     ResponsePhase      phase_           = ResponsePhase::FRESH;

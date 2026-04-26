@@ -13,9 +13,9 @@
 #include "shared/abis/string_view.hpp"
 #include "shared/abis/segment_variant.hpp"
 #include "shared/abis/any.hpp"
-#include "json/json_writter.hpp"
-#include "json/json_object.hpp"
-#include "json/json_parser.hpp"
+#include "shared/json/json_writter.hpp"
+#include "shared/json/json_object.hpp"
+#include "shared/json/json_parser.hpp"
 
 namespace WFX {
 
@@ -34,7 +34,7 @@ using UUID           = Shared::UUID;
 using UUIDString     = Shared::UUIDString;
 using SegmentVariant = Shared::SegmentVariant;
 using Any            = Shared::Any;
-using JsonObject     = Json::JsonObject;
+using JsonObject     = Shared::JsonObject;
 
 // -----------------------------------------------------------------------
 // JSON serializers
@@ -48,11 +48,11 @@ using JsonObject     = Json::JsonObject;
 //                -is known upfront and throughput is the priority.
 //
 //   WFX_GET("/json", [](WFX::Request req, WFX::Response res) {
-//       auto j = WFX::ImJson(res);
-//       j.Write("key", "value");
-//       j.Arr("items");
-//           j.Obj(); j.Write("id", 1); j.End();
-//       j.End();
+//       auto w = WFX::ImJson(res);
+//       w.Write("key", "value");
+//       w.Arr("items");
+//           w.Obj(); w.Write("id", 1); w.End();
+//       w.End();
 //   })
 //
 // WFX::RmJson  : Retained-mode Json, DOM object (8 bytes, heap-backed)
@@ -69,8 +69,13 @@ using JsonObject     = Json::JsonObject;
 //       o.Write(res);
 //   })
 // -----------------------------------------------------------------------
-inline Json::JsonWriter ImJson(Http::Response& res) noexcept { return Json::JsonWriter{res}; }
-inline Json::JsonObject RmJson()                    noexcept { return Json::JsonObject::Init(); }
+inline Shared::JsonWriter ImJson(Http::Response& res) noexcept { return Shared::JsonWriter{res}; }
+inline Shared::JsonObject RmJson()                    noexcept { return Shared::JsonObject::Init(); }
+
+// Hint overload
+inline Shared::JsonObject RmJson(std::uint32_t nodeHint, std::uint32_t kvHint, std::uint32_t strHint) noexcept {
+    return Shared::JsonObject::Init(nodeHint, kvHint, strHint);
+}
 
 // -----------------------------------------------------------------------
 // Parses a JSON body into a JsonObject.
@@ -83,9 +88,9 @@ inline Json::JsonObject RmJson()                    noexcept { return Json::Json
 //
 // maxDepth : Maximum allowed nesting depth
 // -----------------------------------------------------------------------
-inline Json::JsonParseResult ParseJson(std::string_view body, bool view = false, std::uint32_t maxDepth = 64) noexcept
+inline Shared::JsonParseResult ParseJson(std::string_view body, bool view = false, std::uint32_t maxDepth = 64) noexcept
 {
-    return Json::JsonParser::ParseImpl(body, view, maxDepth);
+    return Shared::JsonParser::ParseImpl(body, view, maxDepth);
 }
 
 // -----------------------------------------------------------------------

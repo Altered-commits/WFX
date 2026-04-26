@@ -175,6 +175,9 @@ const HTTP_API_TABLE* GetHttpAPIV1()
         [](void* backend, StreamGenerator gen, bool chunked) { // WriteStreamFn
             ToRes(backend)->WriteStream(gen, chunked);
         },
+        [](void* backend, StringView path, Shared::JsonObject* ctx) { // WriteTemplateFn
+            ToRes(backend)->WriteTemplate(std::string{path.Data(), path.Size()}, std::move(*ctx));
+        },
         [](void* backend) { // CommitFn
             ToRes(backend)->Commit();
         },
