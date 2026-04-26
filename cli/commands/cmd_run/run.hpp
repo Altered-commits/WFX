@@ -16,7 +16,7 @@ enum class ServerFlags : std::uint64_t {
 
 struct ServerConfig {
     std::string   host  = "127.0.0.1";
-    int           port  = 8080;
+    std::uint16_t port  = 8080;
     std::uint64_t flags = 0;
 
     inline bool GetFlag(ServerFlags f) const noexcept

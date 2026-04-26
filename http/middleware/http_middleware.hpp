@@ -1,25 +1,32 @@
 #ifndef WFX_HTTP_MIDDLEWARE_HPP
 #define WFX_HTTP_MIDDLEWARE_HPP
 
-#include "http/common/http_route_common.hpp"
+#include "shared/abis/types.hpp"
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace WFX::Http {
 
-// Forward declare TrieNode and ConnectionContext
-// Each defined inside of routing/route_segment.hpp and connection/http_connection.hpp
+// Fwd declare stuff
 struct TrieNode;
 struct ConnectionContext;
 
-using MiddlewareName        = std::string_view;
+using MiddlewareStack       = std::vector<Shared::MwCallback>;
 using MiddlewareConfigOrder = const std::vector<std::string>&;
-using MiddlewareFactory     = std::unordered_map<MiddlewareName, HttpMiddlewareType>;
-using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, HttpMiddlewareStack>;
+using MiddlewareFactory     = std::unordered_map<std::string_view, Shared::MwCallback>;
+using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, MiddlewareStack>;
 
-// 1st parameter is whether we successfully executed all middleware or no
-// 2nd parameter is for async functionality
-using MiddlewareResult         = std::pair<bool, AsyncMiddlewareAction>;
-using MiddlewareFunctionResult = std::pair<MiddlewareAction, AsyncMiddlewareAction>;
+struct MiddlewareResult {
+    bool success;
+    bool isAsync;           // true = engine should wait for callback
+    bool isBroken = false;  // true = middleware returned MwBreak, stop the chain entirely
+};
+
+struct MiddlewareFunctionResult {
+    Shared::MiddlewareAction action;
+    bool isAsync;
+};
 
 class HttpMiddleware {
 public:
@@ -27,16 +34,15 @@ public:
     ~HttpMiddleware() = default;
 
 public:
-    void RegisterMiddleware(MiddlewareName name, HttpMiddlewareType mw);
-    void RegisterPerRouteMiddleware(const TrieNode* node, HttpMiddlewareStack mwStack);
+    void RegisterMiddleware(std::string_view name, Shared::MwCallback mw);
+    void RegisterPerRouteMiddleware(const TrieNode* node, MiddlewareStack mwStack);
 
     MiddlewareResult ExecuteMiddleware(
-        const TrieNode* node, HttpRequest& req, Response res, ConnectionContext* ctx
+        ConnectionContext* ctx, const TrieNode* node, Request req, Response res
     );
 
     // Using std::string because TOML loader returns vector<string>
     void LoadMiddlewareFromConfig(MiddlewareConfigOrder order);
-
     void DiscardFactoryMap();
 
 private:
@@ -45,10 +51,10 @@ private:
 
 private: // Helper functions
     MiddlewareResult ExecuteHelper(
-        HttpRequest& req, Response res, HttpMiddlewareStack& stack, ConnectionContext* ctx
+        ConnectionContext* ctx, Request req, Response res, MiddlewareStack& stack
     );
     MiddlewareFunctionResult ExecuteFunction(
-        ConnectionContext* ctx, HttpMiddlewareType& entry, HttpRequest& req, Response res
+        ConnectionContext* ctx, Request req, Response res, Shared::MwCallback mw
     );
 
 private:
@@ -56,7 +62,7 @@ private:
     MiddlewareFactory middlewareFactories_;
 
     // Main stuff
-    HttpMiddlewareStack middlewareGlobalCallbacks_;
+    MiddlewareStack     middlewareGlobalCallbacks_;
     MiddlewarePerRoute  middlewarePerRouteCallbacks_;
 };
 

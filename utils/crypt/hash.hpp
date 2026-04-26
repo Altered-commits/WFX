@@ -1,30 +1,15 @@
 #ifndef WFX_UTILS_HASHERS_HPP
 #define WFX_UTILS_HASHERS_HPP
 
-#include "./string.hpp"
-
 #include <cstdint>
 #include <string_view>
 
-// Helper macros
-#define ROTL64(x, b) ((x << b) | (x >> (64 - b)))
-
 namespace WFX::Utils {
-
-// vvv HASH UTILS vvv
-namespace HashUtils { 
-    std::uint64_t Rotl(std::uint64_t n, unsigned int i) noexcept;
-    std::uint64_t Rotr(std::uint64_t n, unsigned int i) noexcept;
-    std::uint64_t Distribute(std::uint64_t n)           noexcept;
-} // namespace HashUtils
 
 // vvv HASHERS vvv
 namespace Hasher {
     std::uint64_t SipHash24(const std::uint8_t* data, std::uint64_t len, const std::uint8_t key[16]) noexcept;
     std::uint64_t SipHash24(std::string_view data, const std::uint8_t key[16])                       noexcept;
-
-    std::uint64_t Fnv1aCaseInsensitive(const std::uint8_t* data, std::uint64_t len) noexcept;
-    std::uint64_t Fnv1aCaseInsensitive(std::string_view data)                       noexcept;
 } // namespace Hasher
 
 // vvv TRUE RANDOMIZER vvv

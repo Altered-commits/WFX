@@ -1,55 +1,161 @@
 #ifndef WFX_INC_HTTP_USER_RESPONSE_HPP
 #define WFX_INC_HTTP_USER_RESPONSE_HPP
 
+#include "core/core.hpp"
+#include "shared/json/json_object_fwd.hpp"
 #include "shared/apis/http_api.hpp"
-#include "third_party/json/json.hpp"
-#include <cassert>
+#include <string_view>
+#include <charconv>
 
-/* User side implementation of 'Response' class. CoreEngine passes the API */
+namespace WFX::Http {
+
+/* User side implementation of 'Response' class. 'CoreEngine' passes the API */
 class Response {
-    using ResponsePtr = WFX::Http::HttpResponse*;
-    using ApiPtr      = const WFX::Shared::HTTP_API_TABLE*;
-
 public:
-    Response(ResponsePtr backend, ApiPtr httpApi)
-        : backend_(backend), httpApi_(httpApi)
-    {
-        assert(backend_ && httpApi_);
-    }
+    Response(void* backend) : backend_(backend) {}
 
-    Response& Status(WFX::Http::HttpStatus code)
+public: // Status and Headers
+    Response& Status(Shared::HttpStatus code)
     {
-        httpApi_->SetStatus(backend_, code);
+        Core::HttpApi()->SetStatus(backend_, code);
         return *this;
     }
 
-    Response& Set(std::string key, std::string value)
+    Response& Status(std::uint16_t code)
     {
-        httpApi_->SetHeader(backend_, std::move(key), std::move(value));
+        Core::HttpApi()->SetStatus(backend_, static_cast<Shared::HttpStatus>(code));
         return *this;
     }
 
-    // SendText overloads
-    void SendText(const char* cstr)  { httpApi_->SendTextCStr(backend_, cstr); }
-    void SendText(std::string&& str) { httpApi_->SendTextMove(backend_, std::move(str)); }
+    Response& Header(std::string_view key, std::string_view value)
+    {
+        Core::HttpApi()->SetHeader(backend_, ToSV(key), ToSV(value));
+        return *this;
+    }
 
-    // SendJson overloads
-    void SendJson(const Json& j) { httpApi_->SendJsonConstRef(backend_, &j); }
+public: // Main flow
+    // Char / View types
+    Response& Write(std::string_view data)
+    {
+        Core::HttpApi()->WriteBody(backend_, ToSV(data));
+        return *this;
+    }
 
-    // SendFile overloads
-    void SendFile(const char* path, bool autoHandle404 = true)   { httpApi_->SendFileCStr(backend_, path, autoHandle404); }
-    void SendFile(std::string&& path, bool autoHandle404 = true) { httpApi_->SendFileMove(backend_, std::move(path), autoHandle404); }
+    Response& Write(const char* data)
+    {
+        return Write(std::string_view{data});
+    }
 
-    // SendTemplate overloads
-    void SendTemplate(const char* path, Json&& ctx = {})   { httpApi_->SendTemplateCStr(backend_, path, std::move(ctx)); }
-    void SendTemplate(std::string&& path, Json&& ctx = {}) { httpApi_->SendTemplateMove(backend_, std::move(path), std::move(ctx)); }
+    // UUID types
+    Response& Write(const Shared::UUID& uuid)
+    {
+        return Write(std::string_view{uuid.ToString().data, 36});
+    }
 
-    // Stream API
-    void Stream(StreamGenerator generator, bool streamChunked = true) { httpApi_->Stream(backend_, std::move(generator), streamChunked); }
+    // Integral types, stack formatted
+    Response& Write(std::int64_t value)
+    {
+        char buf[20];
+        auto [end, _] = std::to_chars(buf, buf + sizeof(buf), value);
+        return Write(std::string_view{buf, static_cast<std::size_t>(end - buf)});
+    }
+
+    Response& Write(std::uint64_t value)
+    {
+        char buf[20];
+        auto [end, _] = std::to_chars(buf, buf + sizeof(buf), value);
+        return Write(std::string_view{buf, static_cast<std::size_t>(end - buf)});
+    }
+
+    // Common integral promotions so user can pass int, unsigned, etc. naturally
+    Response& Write(std::int32_t  value) { return Write(static_cast<std::int64_t>(value));  }
+    Response& Write(std::uint32_t value) { return Write(static_cast<std::uint64_t>(value)); }
+    Response& Write(std::int16_t  value) { return Write(static_cast<std::int64_t>(value));  }
+    Response& Write(std::uint16_t value) { return Write(static_cast<std::uint64_t>(value)); }
+    Response& Write(std::int8_t   value) { return Write(static_cast<std::int64_t>(value));  }
+    Response& Write(std::uint8_t  value) { return Write(static_cast<std::uint64_t>(value)); }
+
+    // Floating point, stack formatted
+    Response& Write(double value)
+    {
+        char buf[32];
+        auto [end, _] = std::to_chars(buf, buf + sizeof(buf), value);
+        return Write(std::string_view{buf, static_cast<std::size_t>(end - buf)});
+    }
+
+    Response& Write(float value) { return Write(static_cast<double>(value)); }
+
+    // Bool
+    Response& Write(bool value)
+    {
+        return Write(value ? std::string_view{"true", 4} : std::string_view{"false", 5});
+    }
+
+    // Locks response, patches Content-Length
+    // Optional: engine auto-commits if user forgets
+    void Commit()
+    {
+        Core::HttpApi()->Commit(backend_);
+    }
+
+public: // Sugar syntax
+    // Plain text, sets Content-Type, writes, commits
+    void SendText(std::string_view data)
+    {
+        Header("Content-Type", "text/plain");
+        Write(data);
+        Commit();
+    }
+
+    // Zero-copy sendfile path
+    void SendFile(std::string_view path, bool autoHandle404 = true) { Core::HttpApi()->WriteFile(backend_, ToSV(path), autoHandle404); }
+    void SendFile(Shared::StringView path, bool autoHandle404 = true) { Core::HttpApi()->WriteFile(backend_, path, autoHandle404); }
+
+    // HTML Template, sets Content-Type, writes, commits
+    void SendTemplate(std::string_view path, Shared::JsonObject&& ctx)   { Core::HttpApi()->WriteTemplate(backend_, ToSV(path), &ctx); }
+    void SendTemplate(Shared::StringView path, Shared::JsonObject&& ctx) { Core::HttpApi()->WriteTemplate(backend_, path, &ctx); }
+
+    // Typed lambda, allocated via engine allocator
+    template<typename Fn>
+    void Stream(Fn&& fn, bool chunked = true)
+    {
+        using FnType = std::decay_t<Fn>;
+
+        void* raw = Core::MemoryApi()->Alloc(sizeof(FnType));
+        if(!raw)
+            return;
+
+        FnType* f = new(raw) FnType(std::forward<Fn>(fn));
+
+        Shared::StreamGenerator gen{
+            f,
+
+            // Next
+            [](void* ctx, Shared::StreamBuffer buffer) -> Shared::StreamResult {
+                return (*static_cast<FnType*>(ctx))(buffer);
+            },
+
+            // Destroy
+            [](void* ctx) {
+                auto* f = static_cast<FnType*>(ctx);
+                f->~FnType();
+                Core::MemoryApi()->Free(f);
+            }
+        };
+
+        Core::HttpApi()->WriteStream(backend_, gen, chunked);
+    }
 
 private:
-    ResponsePtr backend_;
-    ApiPtr      httpApi_;
+    static Shared::StringView ToSV(std::string_view s)
+    {
+        return { s.data(), static_cast<std::uint64_t>(s.size()) };
+    }
+
+private:
+    void* backend_;
 };
+
+} // namespace WFX::Http
 
 #endif // WFX_INC_HTTP_USER_RESPONSE_HPP

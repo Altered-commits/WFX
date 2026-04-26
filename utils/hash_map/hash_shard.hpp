@@ -2,11 +2,10 @@
 #define WFX_UTILS_HASH_SHARD_HPP
 
 #include "utils/pool/buffer_pool.hpp"
-#include "utils/math/math.hpp"
-
 #include <mutex>
 #include <shared_mutex>
 #include <cstdint>
+#include <bit>
 
 namespace WFX::Utils {
 

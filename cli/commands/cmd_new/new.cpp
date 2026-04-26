@@ -62,6 +62,7 @@ function(configure_compile target)
     else()
         target_compile_options(${target} PRIVATE
             -fPIC
+            -Wno-return-type-c-linkage
             $<$<CONFIG:Release>:
                 -O3
                 -march=native
@@ -95,12 +96,6 @@ function(configure_shared target)
             INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
         )
     else()
-        target_link_options(${target} PRIVATE
-            -shared
-            -fPIC
-            -Wl,-rpath,../WFX/lib
-        )
-
         if(APPLE)
             target_link_options(${target} PRIVATE
                 $<$<CONFIG:Release>:-Wl,-dead_strip>
@@ -152,8 +147,11 @@ message(STATUS "================ Build Configuration ================")
 message(STATUS "Targets available:")
 message(STATUS "  - user_entry")
 message(STATUS "  - user_templates")
-message(STATUS "Output directory: ${OUTPUT_DIR}")
-message(STATUS "=====================================================")
+message(STATUS "Generator            : ${CMAKE_GENERATOR}")
+message(STATUS "Compiler             : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "C++ standard         : Cxx${CMAKE_CXX_STANDARD}")
+message(STATUS "Output directory     : ${OUTPUT_DIR}")
+message(STATUS "===========================================================")
 )");
 
     // 1.2. Git ignore file
@@ -210,8 +208,9 @@ connection_threads = "auto"  # IOCP worker thread count
 request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
-worker_processes = 2      # Max simultaneous worker connections
-backlog          = 1024   # Max pending connections in OS listen queue
+worker_processes        = 2      # Max simultaneous worker connections
+worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
+backlog                 = 1024   # Max pending connections in OS listen queue
 
 [Linux.IoUring]
 accept_slots     = 64     # Max simultaneous connections being accepted
@@ -223,14 +222,15 @@ file_chunk_size  = 65536  # How big of a file chunk to send at once
 max_events       = 1024   # How many events should epoll handle at a time
 
 [Misc]
-file_cache_size     = 20     # Number of files cached for efficiency (LFU)
-template_chunk_size = 16384  # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size    = 2048   # Max chunk size to read / write from template cache file (in bytes)
+file_cache_size     = 20      # Number of files cached for efficiency (LFU)
+template_chunk_size = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
+cache_chunk_size    = 2048    # Max chunk size to read / write from template cache file (in bytes)
+crash_log_dir       = "logs"  # Relative to project directory e.g. <project>/logs
 )");
 
     // 3. Bridge between engine and user code
-    CreateFile(projBase / "src/api_entry.cpp", R"(#include <shared/apis/master_api.hpp>
-#include <shared/utils/deferred_init_vector.hpp>
+    CreateFile(projBase / "src/api_entry.cpp", R"(#include <core/deferred_init_vector.hpp>
+#include <shared/apis/master_api.hpp>
 #include <shared/utils/compiler_macro.hpp>
 
 // WARNING: DO NOT MODIFY THIS SYMBOL OR THIS FILE
@@ -249,23 +249,7 @@ extern "C" {
         if(api) {
             __WFXApi = api;
 
-            auto& constructors = WFX::Shared::__WFXDeferredConstructors;
-            auto& middlewares  = WFX::Shared::__WFXDeferredMiddleware;
-            auto& routes       = WFX::Shared::__WFXDeferredRoutes;
-
-            for(auto& fn : constructors)
-                fn();
-
-            for(auto& fn : middlewares)
-                fn();
-
-            for(auto& fn : routes)
-                fn();
-
-            // Clean up memory
-            WFX::Shared::__EraseDeferredVector(constructors);
-            WFX::Shared::__EraseDeferredVector(middlewares);
-            WFX::Shared::__EraseDeferredVector(routes);
+            WFX::Shared::__ExecuteAndEraseDeferred();
 
             registered = true;
         }
@@ -275,18 +259,8 @@ extern "C" {
     // 4. Code example
     CreateFile(projBase / "src/main.cpp", R"cxx(#include <http/routes.hpp>
 
-WFX_GET("/", [](Request& req, Response res) {
-    res.SendTemplate("index.html");
-});
-
-WFX_GET("/text", [](Request& req, Response res) {
+WFX_GET("/text", [](WFX::Http::Request req, WFX::Http::Response res) {
     res.SendText("Hello from WFX :)");
-});
-
-WFX_GET("/json", [](Request& req, Response res) {
-    res.SendJson(Json::object({
-        {"WFX says", "Hello :)"}
-    }));
 });
 )cxx");
 

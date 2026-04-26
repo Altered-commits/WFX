@@ -1,9 +1,9 @@
 #ifndef WFX_TEMPLATE_ENGINE_HPP
 #define WFX_TEMPLATE_ENGINE_HPP
 
-#include "template_interface.hpp"
 #include "config/config.hpp"
 #include "legacy/lexer.hpp"
+#include "shared/non_abis/template_interface.hpp"
 #include "utils/logger/logger.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include <string>
@@ -212,6 +212,9 @@ private: // Nested helper types for the parser
         std::vector<std::string>                       staticVarNames;
         std::vector<Value>                             staticConstants;
 
+        // Used during cxx codegen
+        std::unordered_map<std::string, std::uint32_t> loopVarToJump;
+
         std::uint64_t currentLiteralStartOffset = 0;
         std::uint64_t currentLiteralLength      = 0;
         std::uint32_t chunkSize                 = 0;
@@ -240,7 +243,7 @@ private: // Transpiler Functions (Impl in template_transpiler.cpp)
 
     // Emitter Functions
     std::string GenerateCxxFromRPN(
-        TranspilationContext& ctx, std::uint32_t rpnIndex
+        TranspilationContext& ctx, std::uint32_t rpnIndex, bool asBool
     );
     bool GenerateIRFromTemplate(
         TranspilationContext& ctx, const std::string& staticHtmlPath

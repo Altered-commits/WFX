@@ -4,7 +4,6 @@
 /* This pure header file impl is there for one reason, house commonly used functions in limiters */
 
 #include "http/connection/http_connection.hpp"
-
 #include <chrono>
 
 namespace WFX::Http {
@@ -14,7 +13,7 @@ struct BaseLimiter {
     {
         WFXIpAddress out = ip;
 
-        if(ip.ipType == AF_INET)
+        if(ip.type == AF_INET)
             out.ip.v4.s_addr &= htonl(0xFFFFFF00); // Mask out subnet /24
         else
             memset(&out.ip.v6.s6_addr[8], 0, 8); // Mask out subnet /64

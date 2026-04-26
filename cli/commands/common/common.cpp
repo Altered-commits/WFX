@@ -123,10 +123,8 @@ LONG WINAPI ExceptionFilter(EXCEPTION_POINTERS* ep) {
 #else
 void HandleMasterSignal(int)
 {
-    auto& globalState = GetGlobalState();
+    auto& globalState = Http::GetGlobalState();
     globalState.shouldStop = true;
-    
-    Logger::GetInstance().Info("[WFX-Master]: Ctrl+C pressed, shutting down workers...");
 
     if(globalState.workerPGID > 0)
         kill(-globalState.workerPGID, SIGTERM); // Broadcast SIGTERM to all workers
@@ -134,7 +132,7 @@ void HandleMasterSignal(int)
 
 void HandleWorkerSignal(int)
 {
-    auto& globalState = GetGlobalState();
+    auto& globalState = Http::GetGlobalState();
     globalState.shouldStop = true;
     
     // Stop is atomic, its safe to call it in signal handler
@@ -147,9 +145,9 @@ void HandleWorkerSignal(int)
 void PinWorkerToCPU(int workerIndex) {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    
+
     int cpu = workerIndex % sysconf(_SC_NPROCESSORS_ONLN); // Round-Robin
-    
+
     CPU_SET(cpu, &cpuset);
 
     if(sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0)

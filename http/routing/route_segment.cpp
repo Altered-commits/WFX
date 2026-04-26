@@ -1,35 +1,40 @@
 #include "route_segment.hpp"
-
-#include "utils/uuid/uuid.hpp"
+#include "shared/abis/uuid.hpp"
 
 namespace WFX::Http {
 
-RouteSegment::RouteSegment(std::string_view key, std::unique_ptr<TrieNode> c)
-    : routeValue(key), child(std::move(c)) {}
+using namespace WFX::Shared; // For every single abi types
 
-RouteSegment::RouteSegment(DynamicSegment p, std::unique_ptr<TrieNode> c)
-    : routeValue(std::move(p)), child(std::move(c)) {}
+RouteSegment::RouteSegment(std::string_view key, std::unique_ptr<TrieNode> c)
+    : routeValue(SegmentVariant::FromString(StringView{key.data(), key.size()}, true)),
+    child(std::move(c))
+{}
+
+RouteSegment::RouteSegment(SegmentVariant p, std::unique_ptr<TrieNode> c)
+    : routeValue(p), child(std::move(c)) {}
 
 // vvv Type checks vvv
 bool RouteSegment::IsStatic() const
 {
-    return std::holds_alternative<std::string_view>(routeValue);
+    return routeValue.Tag() == SEG_VARIANT_STC_STR;
 }
 
 bool RouteSegment::IsParam() const
 {
-    return std::holds_alternative<DynamicSegment>(routeValue);
+    std::uint8_t t = routeValue.Tag();
+    return t == SEG_VARIANT_U64
+        || t == SEG_VARIANT_I64
+        || t == SEG_VARIANT_STR
+        || t == SEG_VARIANT_UUID;
 }
 
-// vvv Accessors vvv 
-const std::string_view* RouteSegment::GetStaticKey() const
+// vvv Accessors vvv
+const SegmentVariant* RouteSegment::GetParam() const
 {
-    return std::get_if<std::string_view>(&routeValue);
-}
+    if(!IsParam())
+        return nullptr;
 
-const DynamicSegment* RouteSegment::GetParam() const
-{
-    return std::get_if<DynamicSegment>(&routeValue);
+    return &routeValue;
 }
 
 TrieNode* RouteSegment::GetChild() const
@@ -40,35 +45,37 @@ TrieNode* RouteSegment::GetChild() const
 // vvv Utilities vvv
 bool RouteSegment::MatchesStatic(std::string_view candidate) const
 {
-    if(auto key = GetStaticKey())
-        return *key == candidate;
-    return false;
+    if(!IsStatic())
+        return false;
+
+    auto sv = routeValue.AsString();
+
+    return sv.Size() == candidate.size()
+        && std::memcmp(sv.data, candidate.data(), sv.Size()) == 0;
 }
 
 ParamType RouteSegment::GetParamType() const
 {
-    if(const DynamicSegment* p = GetParam()) {
-        if(std::holds_alternative<std::uint64_t>(*p))    return ParamType::UINT;
-        if(std::holds_alternative<std::int64_t>(*p))     return ParamType::INT;
-        if(std::holds_alternative<std::string_view>(*p)) return ParamType::STRING;
-        if(std::holds_alternative<WFX::Utils::UUID>(*p)) return ParamType::UUID;
+    switch(routeValue.Tag()) {
+        case SEG_VARIANT_U64:  return ParamType::UINT;
+        case SEG_VARIANT_I64:  return ParamType::INT;
+        case SEG_VARIANT_STR:  return ParamType::STRING;
+        case SEG_VARIANT_UUID: return ParamType::UUID;
+        default:               return ParamType::UNKNOWN;
     }
-
-    return ParamType::UNKNOWN;
 }
 
 std::string_view RouteSegment::ToString() const
 {
-    if(auto key = GetStaticKey())
+    if(IsStatic())
         return "<static>";
-    else {
-        switch(GetParamType()) {
-            case ParamType::UINT:   return "<uint>";
-            case ParamType::INT:    return "<int>";
-            case ParamType::STRING: return "<str>";
-            case ParamType::UUID:   return "<uuid>";
-            default:                return "<unknown>";
-        }
+
+    switch(GetParamType()) {
+        case ParamType::UINT:   return "<uint>";
+        case ParamType::INT:    return "<int>";
+        case ParamType::STRING: return "<str>";
+        case ParamType::UUID:   return "<uuid>";
+        default:                return "<unknown>";
     }
 }
 

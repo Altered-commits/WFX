@@ -27,7 +27,7 @@ bool RWBuffer::InitReadBuffer(std::uint32_t size)
     auto& pool = BufferPool::GetInstance();
 
     std::size_t allocSize = sizeof(ReadMetadata) + size;
-    readBuffer_ = static_cast<char*>(pool.Lease(allocSize));
+    readBuffer_ = static_cast<char*>(pool.Alloc(allocSize));
     if(!readBuffer_)
         return false;
 
@@ -47,7 +47,7 @@ bool RWBuffer::InitWriteBuffer(std::uint32_t size)
     auto& pool = BufferPool::GetInstance();
 
     std::size_t allocSize = sizeof(WriteMetadata) + size;
-    writeBuffer_ = static_cast<char*>(pool.Lease(allocSize));
+    writeBuffer_ = static_cast<char*>(pool.Alloc(allocSize));
     if(!writeBuffer_)
         return false;
 
@@ -63,29 +63,30 @@ void RWBuffer::ResetBuffer()
 {
     auto& pool = BufferPool::GetInstance();
 
-    if(readBuffer_) {
-        pool.Release(readBuffer_);
-        readBuffer_ = nullptr;
-    }
-
-    if(writeBuffer_) {
-        pool.Release(writeBuffer_);
-        writeBuffer_ = nullptr;
-    }
+    pool.Free(readBuffer_);  readBuffer_ = nullptr;
+    pool.Free(writeBuffer_); writeBuffer_ = nullptr;
 }
 
 void RWBuffer::ClearBuffer()
 {
-    auto* readMeta  = GetReadMeta();
+    ClearReadBuffer();
+    ClearWriteBuffer();
+}
+
+void RWBuffer::ClearWriteBuffer()
+{
     auto* writeMeta = GetWriteMeta();
-
-    if(readMeta)
-        readMeta->dataLength = 0;
-
     if(writeMeta) {
         writeMeta->dataLength    = 0;
         writeMeta->writtenLength = 0;
     }
+}
+
+void RWBuffer::ClearReadBuffer()
+{
+    auto* readMeta = GetReadMeta();
+    if(readMeta)
+        readMeta->dataLength = 0;
 }
 
 // vvv Getter Functions vvv
@@ -119,35 +120,97 @@ bool RWBuffer::IsWriteInitialized() const noexcept
     return (!!writeBuffer_);
 }
 
-// vvv Read Buffer Management vvv
-bool RWBuffer::GrowReadBuffer(std::uint32_t defaultSize, std::uint32_t maxSize)
-{
-    if(!readBuffer_) return false;
+// vvv Generic Buffer Management vvv
+bool RWBuffer::GenericGrowBuffer(
+    char*& buffer, std::uint32_t metaSize, std::uint32_t growSize, std::uint32_t maxSize
+) {
+    if(!buffer)
+        return false;
+
+    auto* meta = reinterpret_cast<RWBaseMetadata*>(buffer);
+
+    if(meta->dataLength < meta->bufferSize)
+        return true;
+
+    if(meta->bufferSize >= maxSize)
+        return false;
+
+    std::uint32_t newSize = meta->bufferSize + growSize;
+    if(newSize > maxSize)
+        newSize = maxSize;
 
     auto& pool = BufferPool::GetInstance();
 
-    auto* readMeta = reinterpret_cast<ReadMetadata*>(readBuffer_);
-    if(readMeta->dataLength >= readMeta->bufferSize) {
-        if(readMeta->bufferSize >= maxSize)
-            return false;
+    std::uint32_t allocSize = static_cast<std::uint32_t>(metaSize + newSize);
 
-        std::uint32_t newSize = readMeta->bufferSize + defaultSize;
-        if(newSize > maxSize)
-            newSize = maxSize;
+    char* newBuf = static_cast<char*>(pool.Realloc(buffer, allocSize));
+    if(!newBuf)
+        return false;
 
-        std::uint32_t allocSize = sizeof(ReadMetadata) + newSize;
+    buffer = newBuf;
 
-        // Reacquire = realloc
-        char* newBuf = static_cast<char*>(pool.Reacquire(readBuffer_, allocSize));
-        if(!newBuf)
-            return false;
-
-        readBuffer_ = newBuf;
-        readMeta = reinterpret_cast<ReadMetadata*>(readBuffer_);
-        readMeta->bufferSize = newSize;
-    }
+    meta = reinterpret_cast<RWBaseMetadata*>(buffer);
+    meta->bufferSize = newSize;
 
     return true;
+}
+
+bool RWBuffer::GenericAppendData(
+    char*& buffer, std::uint32_t metaSize, const char* data,
+    std::uint32_t size, std::uint32_t growSize, std::uint32_t maxSize
+) {
+    if(!buffer || !data || size == 0)
+        return false;
+
+    auto* meta = reinterpret_cast<RWBaseMetadata*>(buffer);
+
+    while(size > meta->bufferSize - meta->dataLength) {
+        if(!GenericGrowBuffer(buffer, metaSize, growSize, maxSize))
+            return false;
+
+        meta = reinterpret_cast<RWBaseMetadata*>(buffer);
+    }
+
+    char* dest = buffer + metaSize + meta->dataLength;
+    std::memcpy(dest, data, size);
+
+    meta->dataLength += size;
+    return true;
+}
+
+// vvv Read Buffer Management vvv
+bool RWBuffer::GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize)
+{
+    if(!readBuffer_)
+        return false;
+
+    return GenericGrowBuffer(
+        readBuffer_,
+        sizeof(ReadMetadata),
+        growSize,
+        maxSize
+    );
+}
+
+bool RWBuffer::AppendReadData(
+    const char* data, std::uint32_t size, std::uint32_t incSize, std::uint32_t maxSize
+) {
+    return GenericAppendData(
+        readBuffer_,
+        sizeof(ReadMetadata),
+        data,
+        size,
+        incSize,
+        maxSize
+    );
+}
+
+void RWBuffer::AdvanceReadLength(std::uint32_t n) noexcept
+{
+    if(!readBuffer_) return;
+
+    auto* meta = reinterpret_cast<ReadMetadata*>(readBuffer_);
+    meta->dataLength = std::min(meta->dataLength + n, meta->bufferSize);
 }
 
 ValidRegion RWBuffer::GetWritableReadRegion() const noexcept
@@ -161,23 +224,31 @@ ValidRegion RWBuffer::GetWritableReadRegion() const noexcept
     };
 }
 
-ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept
+// vvv Write Buffer Management vvv
+bool RWBuffer::GrowWriteBuffer(std::uint32_t growSize, std::uint32_t maxSize)
 {
-    if(!writeBuffer_) return {nullptr, 0};
+    if(!writeBuffer_)
+        return false;
 
-    auto* writeMeta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
-    return {
-        writeBuffer_ + sizeof(WriteMetadata) + writeMeta->dataLength,
-        writeMeta->bufferSize - writeMeta->dataLength
-    };
+    return GenericGrowBuffer(
+        writeBuffer_,
+        sizeof(WriteMetadata),
+        growSize,
+        maxSize
+    );
 }
 
-void RWBuffer::AdvanceReadLength(std::uint32_t n) noexcept
-{
-    if(!readBuffer_) return;
-
-    auto* meta = reinterpret_cast<ReadMetadata*>(readBuffer_);
-    meta->dataLength = std::min(meta->dataLength + n, meta->bufferSize);
+bool RWBuffer::AppendWriteData(
+    const char* data, std::uint32_t size, std::uint32_t incSize, std::uint32_t maxSize
+) {
+    return GenericAppendData(
+        writeBuffer_,
+        sizeof(WriteMetadata),
+        data,
+        size,
+        incSize,
+        maxSize
+    );
 }
 
 void RWBuffer::AdvanceWriteLength(std::uint32_t n) noexcept
@@ -188,25 +259,15 @@ void RWBuffer::AdvanceWriteLength(std::uint32_t n) noexcept
     meta->writtenLength = std::min(meta->writtenLength + n, meta->dataLength);
 }
 
-// vvv Write Buffer Management vvv
-bool RWBuffer::AppendData(const char* data, std::uint32_t size)
+ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept
 {
-    if(!writeBuffer_ || !data || size == 0)
-        return false;
+    if(!writeBuffer_) return {nullptr, 0};
 
-    auto* meta = GetWriteMeta();
-    std::uint32_t capacity = meta->bufferSize;
-    std::uint32_t used     = meta->dataLength;
-
-    // Write buffer is fixed, any attempts to overflow will fail
-    if(size > capacity - used)
-        return false;
-
-    char* dest = writeBuffer_ + sizeof(WriteMetadata) + used;
-    std::memcpy(dest, data, size);
-
-    meta->dataLength += size;
-    return true;
+    auto* writeMeta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
+    return {
+        writeBuffer_ + sizeof(WriteMetadata) + writeMeta->dataLength,
+        writeMeta->bufferSize - writeMeta->dataLength
+    };
 }
 
 } // namespace WFX::Utils

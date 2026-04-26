@@ -49,8 +49,9 @@ void Config::LoadCoreSettings(std::string_view path)
 
         // vvv Network vvv
         ExtractValue(tbl, "Network", "send_buffer_max",             networkConfig.maxSendBufferSize);
-        ExtractValue(tbl, "Network", "recv_buffer_max",             networkConfig.maxRecvBufferSize);
-        ExtractValue(tbl, "Network", "recv_buffer_incr",            networkConfig.bufferIncrSize);
+        ExtractValue(tbl, "Network", "recv_buffer_max",             networkConfig.maxReadBufferSize);
+        ExtractValue(tbl, "Network", "send_buffer_incr",            networkConfig.sendBufferIncSize);
+        ExtractValue(tbl, "Network", "recv_buffer_incr",            networkConfig.readBufferIncSize);
         ExtractValue(tbl, "Network", "header_reserve_hint",         networkConfig.headerReserveHintSize);
         ExtractValue(tbl, "Network", "max_header_size",             networkConfig.maxHeaderTotalSize);
         ExtractValue(tbl, "Network", "max_body_size",               networkConfig.maxBodyTotalSize);
@@ -86,8 +87,9 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractAutoOrAll(tbl, "Windows", "request_threads",
                          osSpecificConfig.callbackThreadCount, defaultUser, threadCount);
     #else
-        ExtractValue(tbl, "Linux", "worker_processes", osSpecificConfig.workerProcesses);
-        ExtractValue(tbl, "Linux", "backlog",          osSpecificConfig.backlog);
+        ExtractValue(tbl, "Linux", "worker_processes",        osSpecificConfig.workerProcesses);
+        ExtractValue(tbl, "Linux", "worker_shutdown_timeout", osSpecificConfig.workerShutdownTimeout);
+        ExtractValue(tbl, "Linux", "backlog",                 osSpecificConfig.backlog);
         
         #ifdef WFX_LINUX_USE_IO_URING
             ExtractValue(tbl, "Linux.IoUring", "accept_slots",    osSpecificConfig.acceptSlots);
@@ -103,6 +105,7 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Misc", "file_cache_size",      miscConfig.fileCacheSize);
         ExtractValue(tbl, "Misc", "cache_chunk_size",     miscConfig.cacheChunkSize);
         ExtractValue(tbl, "Misc", "template_chunk_size",  miscConfig.templateChunkSize);
+        ExtractValue(tbl, "Misc", "crash_log_dir",        miscConfig.crashLogDir);
     }
     catch(const toml::parse_error& err) {
         logger.Fatal("[Config]: File -> 'wfx.toml', Error -> ", err.what());

@@ -23,9 +23,10 @@ struct BuildConfig {
 };
 
 struct NetworkConfig {
-    std::uint32_t maxSendBufferSize  = 2 * 1024;
-    std::uint32_t maxRecvBufferSize  = 16 * 1024;
-    std::uint32_t bufferIncrSize     = 4 * 1024;
+    std::uint32_t maxSendBufferSize  = 16 * 1024;
+    std::uint32_t maxReadBufferSize  = 16 * 1024;
+    std::uint32_t readBufferIncSize  = 4 * 1024;
+    std::uint32_t sendBufferIncSize  = 4 * 1024;
 
     std::uint32_t maxHeaderTotalSize    = 8 * 1024;
     std::uint32_t maxBodyTotalSize      = 8 * 1024;
@@ -73,8 +74,9 @@ struct OSSpecificConfig {
     std::uint16_t workerThreadCount   = 2;
     std::uint16_t callbackThreadCount = 4;
 #else
-    std::uint32_t workerProcesses = 4;
-    std::uint32_t backlog         = 1024;
+    std::uint32_t workerProcesses       = 4;
+    std::uint32_t backlog               = 1024;
+    std::uint16_t workerShutdownTimeout = 5; // 5 seconds
     
     #ifdef WFX_LINUX_USE_IO_URING
         std::uint16_t batchSize       = 64;
@@ -91,6 +93,7 @@ struct MiscConfig {
     std::uint16_t fileCacheSize     = 20;
     std::uint16_t cacheChunkSize    = 2 * 1024;
     std::uint32_t templateChunkSize = 16 * 1024;
+    std::string   crashLogDir       = "/logs";
 };
 
 // Main Config loader

@@ -3,14 +3,17 @@
 
 #include "shared/apis/http_api.hpp"
 #include "shared/apis/async_api.hpp"
+#include "shared/apis/memory_api.hpp"
 
 namespace WFX::Shared {
 
 // vvv Master table to be injected into user dll vvv
 struct MASTER_API_TABLE {
-    const HTTP_API_TABLE*  (*GetHttpAPIV1)();
-    const ASYNC_API_TABLE* (*GetAsyncAPIV1)();
+    const HTTP_API_TABLE*   (*GetHttpAPIV1)();
+    const ASYNC_API_TABLE*  (*GetAsyncAPIV1)();
+    const MEMORY_API_TABLE* (*GetMemoryAPIV1)();
 };
+static_assert(std::is_standard_layout<MASTER_API_TABLE>::value, "'MASTER_API_TABLE' must be standard layout");
 
 // vvv Hardcoded signature to inject API table to user side vvv
 using RegisterMasterAPIFn = void (*)(const MASTER_API_TABLE*);

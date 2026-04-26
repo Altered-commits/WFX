@@ -5,18 +5,19 @@
 namespace WFX::Http {
 
 using namespace WFX::Utils; // For 'Logger'
+using namespace WFX::Shared; // For every single abi type
 
-const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, HttpCallbackType handler)
+const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, RouteCallback handler)
 {
     if(path.empty() || path[0] != '/')
         Logger::GetInstance().Fatal("[Router]: Path is either empty or does not start with '/'.");
 
     switch(method) {
         case HttpMethod::GET:
-            return getRoutes_.Insert(path, std::move(handler));
+            return getRoutes_.Insert(path, handler);
 
         case HttpMethod::POST:
-            return postRoutes_.Insert(path, std::move(handler));
+            return postRoutes_.Insert(path, handler);
 
         default:
             Logger::GetInstance().Fatal(
