@@ -170,7 +170,8 @@ preferred_config    = "Debug"          # Active build configuration (must match 
 preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure the build directory
 
 [Network]
-send_buffer_max              = 2048    # Max total send buffer size per connection (in bytes)
+send_buffer_max              = 16384   # Max total send buffer size per connection (in bytes)
+send_buffer_incr             = 4096    # Buffer growth step (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
 header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
@@ -230,13 +231,8 @@ crash_log_dir       = "logs"  # Relative to project directory e.g. <project>/log
 
     // 3. Bridge between engine and user code
     CreateFile(projBase / "src/api_entry.cpp", R"(#include <core/deferred_init_vector.hpp>
-#include <shared/apis/master_api.hpp>
+#include <core/core.hpp>
 #include <shared/utils/compiler_macro.hpp>
-
-// WARNING: DO NOT MODIFY THIS SYMBOL OR THIS FILE
-// __WFXApi is reserved for WFX internal API injection
-// Modifying or redefining it will break the interface between WFX and USER
-const WFX::Shared::MASTER_API_TABLE* __WFXApi = nullptr;
 
 // To prevent name mangling 
 extern "C" {
@@ -247,9 +243,8 @@ extern "C" {
             return;
 
         if(api) {
-            __WFXApi = api;
-
-            WFX::Shared::__ExecuteAndEraseDeferred();
+            WFX::Core::SetMasterApi(api);
+            WFX::Core::__ExecuteAndEraseDeferred();
 
             registered = true;
         }
@@ -257,17 +252,33 @@ extern "C" {
 })");
 
     // 4. Code example
-    CreateFile(projBase / "src/main.cpp", R"cxx(#include <http/routes.hpp>
+    CreateFile(projBase / "src/main.cpp", R"cxx(#include <wfx/http.hpp>
 
-WFX_GET("/text", [](WFX::Http::Request req, WFX::Http::Response res) {
+WFX_GET("/text", [](WFX::Request req, WFX::Response res) {
     res.SendText("Hello from WFX :)");
-});
+})
+
+WFX_GET("/im-json", [](WFX::Request req, WFX::Response res) {
+    auto j = WFX::ImJson(res);
+    j.Write("WFX", "Says hello!");
+})
+
+WFX_GET("/rm-json", [](WFX::Request req, WFX::Response res) {
+    auto o = WFX::RmJson();
+    o["WFX"] = "Ain't this FRAMEWORK soooo, WEIRD? EXACTLY!";
+
+    o.Write(res);
+})
+
+WFX_GET("/template", [](WFX::Request req, WFX::Response res) {
+    res.SendTemplate("index.html", WFX::JsonObject{});
+})
 )cxx");
 
     // 5. Create example template and static asset
     CreateFile(projBase / "templates/index.html", R"(<html><head><link rel="stylesheet" href="/public/style.css"></head><body><h1>Hello from WFX Template</h1><script src="/public/script.js"></script></body></html>)");
     CreateFile(projBase / "public/style.css", "body { font-family: sans-serif; }");
-    CreateFile(projBase / "public/script.js", "console.log(\"Hello from WFX\")");
+    CreateFile(projBase / "public/script.js", "console.log(\"WFX? Weird ain't it...\")");
 
     Logger::GetInstance().Info("[WFX]: Project '", projectName, "' created successfully!");
 }
