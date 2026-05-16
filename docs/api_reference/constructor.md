@@ -5,11 +5,13 @@ WFX constructors provide a simple way to run **one-time user code at engine star
 A constructor is the **first user-level callback executed**, before any other user macros such as routes, middleware, or similar registrations.
 
 !!! important
-    Constructor requires the user to always include the following header at the top of the file:
+    If no other `wfx/*` header has already been included, the following header must be included before using `Constructor`:
+
     ```cpp
-    #include <core/constructor.hpp>
+    #include <wfx/app.hpp>
     ```
 
+    Most higher-level WFX headers already include this internally, so manual inclusion is typically only required when working directly with application-level functionality.
 ---
 
 ## What it does

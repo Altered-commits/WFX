@@ -5,18 +5,10 @@
 #include "validators.hpp"
 #include "sanitizers.hpp"
 #include "renders.hpp"
-#include "http/aliases.hpp"
-#include "third_party/json/json.hpp"
+#include "http/request.hpp"
 #include <array>
 
-// The magic key is purely for SSR json use
-// Do not use this key anywhere else
-#define FORM_SCHEMA_JSON_KEY "__\x01"
-
-// For ease of use :)
-using Json = nlohmann::json;
-
-namespace Form {
+namespace WFX::Form {
 
 // vvv Field Builders vvv
 template<typename Rule>
@@ -132,23 +124,21 @@ public:
 
 public: // Main Functions
     // Auto select the parsing type looking at the header
-    FormError Parse(Request& req, CleanedType& out) const
+    FormError Parse(Http::Request req, CleanedType& out) const
     {
-        auto [exists, hptr] = req.headers.CheckAndGetHeader("Content-Type");
-        if(!exists)
+        std::string_view contentType;
+        if(!req.GetHeader("Content-Type", contentType))
             return FormError::UNSUPPORTED_CONTENT_TYPE;
 
         // Content-Type can contain multiple fields seperated by ';'
         // What we need is the initial one
-        auto ct = WFX::Utils::TrimView(
-            (*hptr).substr(0, hptr->find(';'))
-        );
+        auto ct = Utils::TrimView(contentType.substr(0, contentType.find(';')));
 
         // In memory simple form
-        if(WFX::Utils::StringCanonical::InsensitiveStringCompare(
+        if(Utils::StringCanonical::InsensitiveStringCompare(
             ct, "application/x-www-form-urlencoded"
         ))
-            return ParseStatic(req.body, out);
+            return ParseStatic(req.Body(), out);
 
         // Other types of forms are not supported for now
         return FormError::UNSUPPORTED_CONTENT_TYPE;
@@ -204,7 +194,7 @@ private: // Helper Functions
                 return false;
 
             // Decode value in place
-            if(!WFX::Utils::StringCanonical::DecodePercentInplace(value))
+            if(!Utils::StringCanonical::DecodePercentInplace(value))
                 return false;
 
             out[fieldIdx++] = value;
@@ -303,43 +293,6 @@ private: // Storage
     std::string      preRenderedFields;
 };
 
-// vvv Function for wrapping form as a pointer (so json doesn't copy fields during construction) vvv
-// Totally optional, use only for SSR context
-template<typename... Fields>
-inline Json FormToJson(const FormSchema<Fields...>& form)
-{
-    static_assert(!std::is_rvalue_reference_v<decltype(form)>,
-                  "FormToJson: 'form' cannot be a rvalue, it must strictly be lvalue");
-
-    auto renderWrapper = [](const void* formPtr) -> std::string_view {
-        return static_cast<const FormSchema<Fields...>*>(formPtr)->Render();
-    };
-
-    return {
-        FORM_SCHEMA_JSON_KEY,
-        reinterpret_cast<std::uintptr_t>(+renderWrapper),
-        reinterpret_cast<std::uintptr_t>(&form)
-    };
-}
-
-// NOTE: 'nullptr' check is assumed to be done before passing in 'Json*'
-inline std::string_view JsonToFormRender(const Json* json)
-{
-    // Invalid or not SSR form
-    if((json->size() != 3) || ((*json)[0].get<std::string>() != FORM_SCHEMA_JSON_KEY))
-        return {};
-
-    // Extract pointers
-    auto fnPtr   = reinterpret_cast<std::string_view(*)(const void*)>((*json)[1].get<std::uintptr_t>());
-    auto formPtr = reinterpret_cast<const void*>((*json)[2].get<std::uintptr_t>());
-
-    if(!fnPtr || !formPtr)
-        return {};
-
-    // Call type-erased render
-    return fnPtr(formPtr);
-}
-
-} // namespace Form
+} // namespace WFX::Form
 
 #endif // WFX_INC_FORMS_HPP

@@ -20,12 +20,16 @@ WFX is under active development.
 
 ### ABI Stability
 
-- **Not guaranteed at this stage**
-- No effort is currently made to preserve binary compatibility
-- Engine and application must be built with matching toolchains and headers
+- **Partially implemented**
+- A C-compatible ABI layer using POD types and stable layouts has been introduced
+- Initial cross-toolchain testing indicates consistent binary compatibility
+- **However:**
+    - This has **not been exhaustively validated**
+    - Edge cases (e.g. struct padding, alignment differences, compiler-specific behavior) may still exist
+    - No formal ABI compatibility guarantees are made yet
 
 !!! note
-    ABI stability may be introduced in the future, but no guarantees are made at this time.
+    The ABI layer is designed with long-term stability in mind, but should be treated as **experimental** until broader validation is complete.
 
 ---
 

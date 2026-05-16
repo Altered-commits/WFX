@@ -1,9 +1,11 @@
 #include "template_engine.hpp"
 #include "config/config.hpp"
-#include "utils/process/process.hpp"
-#include "utils/crypt/hash.hpp"
-#include "utils/backport/string.hpp"
+#include "shared/utils/hash.hpp"
 #include "shared/utils/compiler_macro.hpp"
+#include "utils/process/process.hpp"
+#include "utils/backport/string.hpp"
+#include <numeric>
+#include <bit>
 
 namespace WFX::Core {
 
@@ -34,8 +36,7 @@ std::uint32_t TemplateEngine::GetConstId(TranspilationContext& ctx, const Value&
 
 TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
     TranspilationContext& ctx, std::string_view tagView
-)
-{
+) {
     auto [tagName, tagArgs] = ExtractTag(tagView);
     if(tagName.empty()) {
         logger_.Error("[TemplateEngine].[CodeGen:IR]: Malformed tag (empty name)");
@@ -301,8 +302,7 @@ __Failure:
 //  vvv Parsing Functions vvv
 TemplateEngine::ParseResult TemplateEngine::ParseExpr(
     TranspilationContext& ctx, std::string_view expression
-)
-{
+) {
     RPNBytecode outputQueue;
     std::vector<Legacy::Token> operatorStack;
     Legacy::Lexer lexer{expression}; // My trusty old lexer :)
@@ -509,7 +509,7 @@ bool TemplateEngine::IsRightAssociative(Legacy::TokenType type)
 }
 
 //  vvv Emitter Functions vvv
-std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::uint32_t rpnIndex)
+std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::uint32_t rpnIndex, bool asBool)
 {
     std::vector<std::vector<std::string>> pathStack;
     std::vector<std::string>              exprStack;
@@ -529,9 +529,14 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
             for(std::size_t i = 0; i < path.size(); ++i) {
                 if(i)
                     out += ", ";
+
                 out += "\"" + path[i] + "\"";
             }
+
             out += "})";
+            if(asBool)
+                out += ".Valid()";
+
             pathStack.pop_back();
         }
     };
@@ -623,9 +628,14 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
          for(std::size_t i = 0; i < keys.size(); ++i) {
             if(i)
                 outExpr += ", ";
+
             outExpr += "\"" + keys[i] + "\"";
         }
+
         outExpr += "})";
+        if(asBool)
+            outExpr += ".Valid()";
+
         return outExpr;
     }
 
@@ -828,8 +838,7 @@ bool TemplateEngine::GenerateCxxFromIR(
     TranspilationContext& ctx,
     const std::string& outCxxPath,
     const std::string& funcName
-)
-{
+) {
     auto outFile = FileSystem::OpenFileWrite(outCxxPath.c_str());
 
     if(!outFile) {
@@ -849,23 +858,23 @@ bool TemplateEngine::GenerateCxxFromIR(
     writeResult = SafeWrite(ioCtx, R"(/*
  * AUTO-GENERATED FILE, DO NOT MODIFY :)
  */
-#include "engine/template_interface.hpp"
+#include "shared/json/json_object.hpp"
+#include "shared/non_abis/template_interface.hpp"
 #include "shared/utils/compiler_macro.hpp"
-
-using Json = nlohmann::json;
 
 // Output
 using WFX::Core::StateResult;
 using WFX::Core::FileChunk;
 using WFX::Core::VariableChunk;
 
+// Json
+using WFX::Core::SafeGetJson;
+using WFX::Shared::JsonObject;
+
 // Interface
 using WFX::Core::BaseTemplateGenerator;
 
-// Helper Functions
-using WFX::Core::SafeGetJson;
-
-)", 369);
+)", 406);
     if(!writeResult) {
         logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to write cxx header to: ", outCxxPath);
         return false;
@@ -881,7 +890,7 @@ using WFX::Core::SafeGetJson;
         "        return " + UInt64ToStr(irCode.size()) + ";\n"
         "    }\n\n"
 
-        "    StateResult GetState(std::size_t state, Json& ctx) const noexcept override {\n"
+        "    StateResult GetState(std::size_t state, JsonObject& ctx) const noexcept override {\n"
         "        while(true) {\n"
         "            switch(state) {\n";
 
@@ -924,7 +933,7 @@ using WFX::Core::SafeGetJson;
                 std::uint32_t exprIdx = std::get<std::uint32_t>(op.payload);
 
                 line = " return {" + UInt64ToStr(i + 1) +
-                                ", VariableChunk{ " + GenerateCxxFromRPN(ctx, exprIdx) +
+                                ", VariableChunk{ " + GenerateCxxFromRPN(ctx, exprIdx, false) +
                                 " }};\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
@@ -934,7 +943,7 @@ using WFX::Core::SafeGetJson;
             case OpType::IF:
             case OpType::ELIF: {
                 const auto& [jump, exprIdx] = std::get<ConditionalValue>(op.payload);
-                std::string expr = GenerateCxxFromRPN(ctx, exprIdx);
+                std::string expr = GenerateCxxFromRPN(ctx, exprIdx, true);
 
                 line =
                     " {\n"
@@ -969,20 +978,19 @@ using WFX::Core::SafeGetJson;
 
             case OpType::FOR: { // Initializer
                 const auto& [jump, exprIdx, varId] = std::get<ForLoopValue>(op.payload);
-                std::string expr    = GenerateCxxFromRPN(ctx, exprIdx);
+                std::string expr    = GenerateCxxFromRPN(ctx, exprIdx, false);
                 std::string loopVar = ctx.staticVarNames[varId];
                 std::string jumpVar = UInt64ToStr(jump);
 
                 line =
                     " {\n"
-                    "                    auto* res = " + expr + ";\n"
-                    "                    if(!res || !res->is_array() || res->get_ref<Json::array_t&>().empty()) {\n"
+                    "                    auto arr = " + expr + ";\n"
+                    "                    if(!arr.Valid() || !arr.IsArray() || arr.Length() == 0) {\n"
                     "                        state = " + UInt64ToStr(jump + 1) + ";\n"
                     "                        continue;\n"
                     "                    }\n"
-                    "                    auto& arr = res->get_ref<Json::array_t&>();\n"
-                    "                    ctx[\"" + loopVar + "\"] = arr.front();\n"
-                    "                    ctx[\"__linf_" + jumpVar + "\"] = (std::uint64_t("+ UInt64ToStr(i + 1) + ") << 32) | std::uint32_t(1);\n"
+                    "                    ctx.Set(\"" + loopVar + "\", arr[0]);\n"
+                    "                    ctx.Set(\"__linf_" + jumpVar + "\", (std::uint64_t(" + UInt64ToStr(i + 1) + ") << 32) | std::uint64_t(1));\n"
                     "                    [[fallthrough]];\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
@@ -991,25 +999,25 @@ using WFX::Core::SafeGetJson;
 
             case OpType::ENDFOR: { // Checker and Finisher
                 const auto& [jump, exprIdx, varId] = std::get<ForLoopValue>(op.payload);
-                std::string expr    = GenerateCxxFromRPN(ctx, exprIdx);
+                std::string expr    = GenerateCxxFromRPN(ctx, exprIdx, false);
                 std::string loopVar = ctx.staticVarNames[varId];
                 std::string jumpVar = UInt64ToStr(jump);
 
                 line =
                     " {\n"
-                    "                    auto& arr = " + expr + "->get_ref<Json::array_t&>();\n"
-                    "                    auto& linfVal = ctx[\"__linf_" + jumpVar + "\"];\n"
-                    "                    std::uint64_t linf = linfVal.get<std::uint64_t>();\n"
-                    "                    std::uint32_t iid = linf >> 32;\n"
-                    "                    std::uint32_t idx = linf & 0xFFFFFFFFu;\n"
-                    "                    if(idx < arr.size()) {\n"
-                    "                        ctx[\"" + loopVar + "\"] = arr[idx];\n"
-                    "                        linfVal = (std::uint64_t(iid) << 32) | (idx + 1);\n"
+                    "                    auto arr  = " + expr + ";\n"
+                    "                    auto linf = ctx.Get(\"__linf_" + jumpVar + "\");\n"
+                    "                    std::uint64_t linfVal = linf.AsUInt();\n"
+                    "                    std::uint32_t iid     = linfVal >> 32;\n"
+                    "                    std::uint32_t idx     = linfVal & 0xFFFFFFFFu;\n"
+                    "                    if(idx < arr.Length()) {\n"
+                    "                        ctx.Set(\"" + loopVar + "\", arr[idx]);\n"
+                    "                        ctx.Set(\"__linf_" + jumpVar + "\", (std::uint64_t(iid) << 32) | std::uint64_t(idx + 1));\n"
                     "                        state = iid;\n"
                     "                        continue;\n"
                     "                    }\n"
-                    "                    ctx.erase(\"" + loopVar + "\");\n"
-                    "                    ctx.erase(\"__linf_" + jumpVar + "\");\n"
+                    "                    ctx.Erase(\"" + loopVar + "\");\n"
+                    "                    ctx.Erase(\"__linf_" + jumpVar + "\");\n"
                     "                    [[fallthrough]];\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
@@ -1062,8 +1070,7 @@ R"(                default:
 
 bool TemplateEngine::GenerateCxxFromTemplate(
     const std::string& inHtmlPath, const std::string& outCxxPath, const std::string& funcName
-)
-{
+) {
     std::uint32_t chunkSize = config_.miscConfig.templateChunkSize;
     BaseFilePtr   inFile    = FileSystem::OpenFileRead(inHtmlPath.c_str(), true);
     
@@ -1100,11 +1107,11 @@ std::uint64_t TemplateEngine::HashBytecode(const RPNBytecode& rpn)
     std::uint64_t seed = rpn.size();
 
     for(const auto& op : rpn) {
-        seed = HashUtils::Rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
-                ^ HashUtils::Distribute(static_cast<std::uint64_t>(op.code));
+        seed = std::rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
+                ^ Shared::Hasher::Murmur3Mix64(static_cast<std::uint64_t>(op.code));
 
-        seed = HashUtils::Rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
-                ^ HashUtils::Distribute(static_cast<std::uint64_t>(op.arg));
+        seed = std::rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
+                ^ Shared::Hasher::Murmur3Mix64(static_cast<std::uint64_t>(op.arg));
     }
 
     return seed;

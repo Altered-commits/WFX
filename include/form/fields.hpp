@@ -5,7 +5,7 @@
 #include <string_view>
 #include <cstdint>
 
-namespace Form {
+namespace WFX::Form {
 
 // Input: Form data, Form field (type erased)
 using ValidatorFn = bool (*)(std::string_view, const void*);
@@ -66,6 +66,6 @@ struct FieldDesc {
     SanitizerFn<RawType> sanitizer = nullptr;
 };
 
-} // namespace Form
+} // namespace WFX::Form
 
 #endif // WFX_INC_FORM_FIELDS_HPP

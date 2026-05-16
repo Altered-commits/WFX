@@ -19,20 +19,19 @@ struct alignas(8) ValidRegion {
     std::size_t len = 0;
 };
 
-// For write buffer: 8-byte aligned, minimal
-struct alignas(8) WriteMetadata {
-    std::uint32_t bufferSize    = 0;
-    std::uint32_t dataLength    = 0;
-    std::uint32_t writtenLength = 0;
-};
-
-// For read buffer: includes buffer pool pointer
-struct alignas(8) ReadMetadata {
+// For ease of generic functions
+struct alignas(8) RWBaseMetadata {
     std::uint32_t bufferSize = 0;
     std::uint32_t dataLength = 0;
 };
 
-class alignas(16) RWBuffer {
+struct WriteMetadata : public RWBaseMetadata {
+    std::uint32_t writtenLength = 0;
+};
+
+struct ReadMetadata : public RWBaseMetadata {};
+
+class alignas(8) RWBuffer {
 public:
     RWBuffer();
     ~RWBuffer();
@@ -43,6 +42,9 @@ public: // Init / Reset
 
     void ResetBuffer();
     void ClearBuffer();
+
+    void ClearWriteBuffer();
+    void ClearReadBuffer();
 
 public: // Getter functions
     char*          GetWriteData()        const noexcept;
@@ -55,14 +57,25 @@ public: // Getter functions
     bool           IsWriteInitialized()  const noexcept;
 
 public: // Read buffer management
-    bool        GrowReadBuffer(std::uint32_t defaultSize, std::uint32_t maxSize);
-    ValidRegion GetWritableReadRegion()       const noexcept;
+    bool        GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize);
+    bool        AppendReadData(const char* data, std::uint32_t size, std::uint32_t incSize, std::uint32_t maxSize);
     void        AdvanceReadLength(std::uint32_t n)  noexcept;
+    ValidRegion GetWritableReadRegion()       const noexcept;
     
 public: // Write buffer management
-    bool        AppendData(const char* data, std::uint32_t size);
+    bool        GrowWriteBuffer(std::uint32_t growSize, std::uint32_t maxSize);
+    bool        AppendWriteData(const char* data, std::uint32_t size, std::uint32_t incSize, std::uint32_t maxSize);
     void        AdvanceWriteLength(std::uint32_t n) noexcept;
     ValidRegion GetWritableWriteRegion()      const noexcept;
+
+private: // Internal functions
+    bool GenericGrowBuffer(
+        char*& buffer, std::uint32_t metaSize, std::uint32_t growSize, std::uint32_t maxSize
+    );
+    bool GenericAppendData(
+        char*& buffer, std::uint32_t metaSize, const char* data,
+        std::uint32_t size, std::uint32_t growSize, std::uint32_t maxSize
+    );
 
 private:
     char* writeBuffer_ = nullptr;

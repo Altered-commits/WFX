@@ -1,16 +1,12 @@
 #ifndef WFX_SHARED_ASYNC_API_HPP
 #define WFX_SHARED_ASYNC_API_HPP
 
-#include <cstdint>
+#include "shared/abis/types.hpp"
 
 // Fwd declare stuff
-namespace WFX::Http {
-    class HttpConnectionHandler;
-}
+namespace WFX::Http { class HttpConnectionHandler; }
 
 namespace WFX::Shared {
-
-using WFX::Http::HttpConnectionHandler;
 
 enum class AsyncAPIVersion : std::uint8_t {
     V1 = 1,
@@ -18,11 +14,11 @@ enum class AsyncAPIVersion : std::uint8_t {
 
 // Data internally used by Async API
 struct AsyncAPIDataV1 {
-    HttpConnectionHandler* connHandler = nullptr;
+    Http::HttpConnectionHandler* connHandler = nullptr;
 };
 
 // vvv All aliases for clarity vvv
-using RegisterAsyncTimerFn = bool (*)(void*, std::uint32_t);
+using RegisterAsyncTimerFn = bool(*)(void* ctx, std::uint32_t delayMs, AsyncData asyncData);
 
 // vvv API declarations vvv
 struct ASYNC_API_TABLE {
@@ -32,10 +28,11 @@ struct ASYNC_API_TABLE {
     // Metadata
     AsyncAPIVersion apiVersion;
 };
+static_assert(std::is_standard_layout<ASYNC_API_TABLE>::value, "'ASYNC_API_TABLE' must be standard layout");
 
 // vvv Getter & Initializers vvv
 const ASYNC_API_TABLE* GetAsyncAPIV1();
-void                   InitAsyncAPIV1(HttpConnectionHandler*);
+void                   InitAsyncAPIV1(Http::HttpConnectionHandler*);
 
 } // namespace WFX::Shared
 

@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # -----------------------------
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING
-        "Choose the type of build.")
+        "Choose the type of build." FORCE)
 endif()
 
 # -----------------------------
@@ -36,9 +36,8 @@ include(cmake/third_party.cmake)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # -----------------------------
-# Gather sources (exclude utils here)
+# Helper function to filter sources by OS
 # -----------------------------
-# But before we do it, add this helper function to root out specific OS folders
 function(filter_sources_by_os out_var)
     set(filtered_sources "")
     foreach(src IN LISTS ${out_var})
@@ -51,20 +50,27 @@ function(filter_sources_by_os out_var)
     set(${out_var} "${filtered_sources}" PARENT_SCOPE)
 endfunction()
 
-if(CMAKE_BUILD_TYPE MATCHES "Debug")
-    add_compile_definitions(
-        $<$<CONFIG:Debug>:WFX_DEBUG>
-    )
-endif()
+# -----------------------------
+# Compile definitions
+# -----------------------------
+add_compile_definitions(
+    $<$<CONFIG:Debug>:WFX_DEBUG>
+)
 
+# -----------------------------
+# Gather sources
+# -----------------------------
 file(GLOB_RECURSE WFX_CLI_SOURCES         "${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cpp")
 file(GLOB_RECURSE WFX_CONFIG_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/config/*.cpp")
 file(GLOB_RECURSE WFX_ENGINE_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/engine/*.cpp")
 file(GLOB_RECURSE WFX_HTTP_SOURCES        "${CMAKE_CURRENT_SOURCE_DIR}/http/*.cpp")
 file(GLOB_RECURSE WFX_SHARED_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/shared/*.cpp")
 file(GLOB_RECURSE WFX_OS_SPECIFIC_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/os_specific/*.cpp")
+file(GLOB_RECURSE WFX_UTILS_SOURCES       "${CMAKE_CURRENT_SOURCE_DIR}/utils/*.cpp")
 
+# Filter OS-specific sources
 filter_sources_by_os(WFX_OS_SPECIFIC_SOURCES)
+filter_sources_by_os(WFX_UTILS_SOURCES)
 
 # -----------------------------
 # Engine executable target
@@ -76,6 +82,7 @@ add_executable(wfx
     ${WFX_HTTP_SOURCES}
     ${WFX_SHARED_SOURCES}
     ${WFX_OS_SPECIFIC_SOURCES}
+    ${WFX_UTILS_SOURCES}       # utils now compiled directly into engine
 )
 
 target_include_directories(wfx PRIVATE
@@ -83,10 +90,14 @@ target_include_directories(wfx PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
-# Include ssl dependencies
+# -----------------------------
+# SSL dependencies
+# -----------------------------
 include(cmake/ssl.cmake)
 
-# Compile/link time optimizations
+# -----------------------------
+# Compiler options
+# -----------------------------
 target_compile_options(wfx PRIVATE
     # Debug
     $<$<CONFIG:Debug>:-g -O0>
@@ -112,6 +123,9 @@ target_compile_options(wfx PRIVATE
     >
 )
 
+# -----------------------------
+# Linker options
+# -----------------------------
 target_link_options(wfx PRIVATE
     # Release (GCC / Clang / AppleClang / Intel)
     $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:IntelLLVM>>>:
@@ -124,7 +138,9 @@ target_link_options(wfx PRIVATE
     >
 )
 
+# -----------------------------
 # OS-specific system libraries
+# -----------------------------
 if(WIN32)
     target_link_libraries(wfx PRIVATE
         Ws2_32
@@ -140,54 +156,19 @@ elseif(UNIX)
     endif()
 endif()
 
-# Link third-party libraries
+# -----------------------------
+# Third-party libraries
+# -----------------------------
 target_link_libraries(wfx PRIVATE
     tlsf
     tomlplusplus
 )
 
 # -----------------------------
-# Utils shared library target
+# Build summary
 # -----------------------------
-file(GLOB_RECURSE WFX_UTILS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/utils/*.cpp")
-filter_sources_by_os(WFX_UTILS_SOURCES)
-
-add_library(wfxutils SHARED ${WFX_UTILS_SOURCES})
-
-target_include_directories(wfxutils PUBLIC
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-if(WIN32)
-    target_link_libraries(wfxutils PRIVATE bcrypt)
-elseif(UNIX)
-    target_link_libraries(wfxutils PRIVATE dl)
-endif()
-
-target_link_libraries(wfxutils PRIVATE
-    tlsf
-)
-
-set_target_properties(wfxutils PROPERTIES
-    PREFIX ""
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib
-    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib
-)
-
-# -----------------------------
-# Engine links against utils
-# -----------------------------
-target_link_libraries(wfx PRIVATE wfxutils)
-
-# -----------------
-# | Build summary |
-# -----------------
 message(STATUS "==================== WFX Build Summary ====================")
-message(STATUS "Targets available:")
-message(STATUS "  - wfx")
-message(STATUS "  - wfxutils")
+message(STATUS "Target available: wfx (utils now part of engine)")
 message(STATUS "Build type           : ${CMAKE_BUILD_TYPE}")
 message(STATUS "Generator            : ${CMAKE_GENERATOR}")
 message(STATUS "Compiler             : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")

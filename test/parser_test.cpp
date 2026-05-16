@@ -1,6 +1,6 @@
 /*
  * Build: g++ -O3 -s -I. test/parser_test.cpp\
-          http/formatters/parser/http_parser.cpp\
+          http/parser/http_parser.cpp\
           htpp/headers/http_headers.cpp
  */
 
@@ -14,7 +14,7 @@
 #include <cstring>
 #include <iostream>
 
-#include "http/formatters/parser/http_parser.hpp"
+#include "http/parser/http_parser.hpp"
 #include "http/connection/http_connection.hpp"
 
 using namespace WFX::Http;

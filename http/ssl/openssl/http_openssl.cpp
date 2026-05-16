@@ -6,6 +6,7 @@
 #include "utils/logger/logger.hpp"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/x509v3.h>
 #include <algorithm>
 
 namespace WFX::Http {
@@ -28,7 +29,12 @@ HttpOpenSSL::HttpOpenSSL()
     if(!ctx)
         logger.Fatal("[HttpOpenSSL]: Failed to create SSL_CTX");
 
-    // Level 2 provides 112-bit security disabling weak ciphers and RSA keys < 2048 bits
+    // Load system root CAs for client verification
+    // TODO: Allow user to specify their own certificate paths if they have custom certs later on
+    if(SSL_CTX_set_default_verify_paths(ctx) != 1)
+        LogOpenSSLError("Failed to load default system CA certificates");
+
+    // Set security level based on user preference
     SSL_CTX_set_security_level(ctx, std::clamp(sslConfig.securityLevel, 0, 5));
 
     // Set the minimum protocol version
@@ -138,13 +144,80 @@ void* HttpOpenSSL::Wrap(SSLSocket sock)
     }
 #endif
 
+    // We are the server and we are accepting connections
+    // So tell OpenSSL this connection is supposed to be accepted
+    SSL_set_accept_state(ssl);
+
+    return ssl;
+}
+
+void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host)
+{
+    SSL* ssl = SSL_new(ctx);
+    if(!ssl)
+        return nullptr;
+
+#ifdef _WIN32
+    BIO* bio = BIO_new_socket(sock, BIO_NOCLOSE);
+    if(!bio) {
+        SSL_free(ssl);
+        return nullptr;
+    }
+    SSL_set_bio(ssl, bio, bio);
+#else
+    if(!SSL_set_fd(ssl, sock)) {
+        SSL_free(ssl);
+        return nullptr;
+    }
+#endif
+    // Instruct OpenSSL to initiate the 'ClientHello'
+    SSL_set_connect_state(ssl);
+
+    // Enforce strict peer verification. Without this, encryption is useless against MitM attack
+    SSL_set_verify(ssl, SSL_VERIFY_PEER, nullptr);
+
+    X509_VERIFY_PARAM* param = SSL_get0_param(ssl);
+
+    // RFC 6066 states SNI must ONLY be sent for hostnames, never literal IPs
+    // We attempt to parse 'hostname' as an IP. If it succeeds, its an IP
+    if(X509_VERIFY_PARAM_set1_ip_asc(param, host) == 1) {
+        // Target is an IP Address:
+        // Do NOT send SNI. Verification is strictly checked against the IP
+    } 
+    else {
+        // Target is a Domain Name:
+        // Set Server Name Indication (SNI)
+        if(SSL_set_tlsext_host_name(ssl, host) != 1) {
+            SSL_free(ssl);
+            return nullptr;
+        }
+
+        // X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS prevents attackers from using 
+        // wildcard certs (e.g., *.*.com) to impersonate your target.
+        X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+
+        // Register the expected domain name
+        if(X509_VERIFY_PARAM_set1_host(param, host, 0) != 1) {
+            SSL_free(ssl);
+            return nullptr;
+        }
+    }
+
+    // ALPN (Application-Layer Protocol Negotiation)
+    // For now, because we only support HTTP/1.1, force connections to use HTTP/1.1
+    const unsigned char alpn[] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
+    if(SSL_set_alpn_protos(ssl, alpn, sizeof(alpn)) != 0) {
+        SSL_free(ssl);
+        return nullptr; 
+    }
+
     return ssl;
 }
 
 SSLReturn HttpOpenSSL::Handshake(void* conn)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int  ret = SSL_accept(ssl);
+    int  ret = SSL_do_handshake(ssl);
 
     // Handshake complete
     if(ret == 1)

@@ -2,16 +2,13 @@
 #define WFX_HTTP_ROUTE_TRIE_HPP
 
 #include "route_segment.hpp"
-
 #include <string_view>
 
 namespace WFX::Http {
 
-using namespace WFX::Utils; // For 'MoveOnlyFunction', 'Logger'
-
 class RouteTrie {
 public:    
-    const TrieNode* Insert(std::string_view fullRoute, HttpCallbackType handler);
+    const TrieNode* Insert(std::string_view fullRoute, Shared::RouteCallback handler);
     const TrieNode* Match(std::string_view requestPath, PathSegments& outParams) const;
 
     void PushGroup(std::string_view prefix);
@@ -22,7 +19,7 @@ private: // Helper functions
     static std::string_view StripRoute(std::string_view route);
 
 private:
-    TrieNode root_;
+    TrieNode root_{};
     TrieNode* insertCursor_ = &root_;    // Current node where routes get inserted to
     std::vector<TrieNode*> cursorStack_; // For nesting
 };

@@ -42,7 +42,8 @@ public:
     virtual ~HttpWFXSSL() = default;
 
     // Wrap a socket and return opaque handle
-    virtual void* Wrap(SSLSocket fd) = 0;
+    virtual void* Wrap(SSLSocket fd)                         = 0;
+    virtual void* WrapClient(SSLSocket fd, const char* host) = 0;
 
     // Handshake; returns true if done
     virtual SSLReturn Handshake(void* conn) = 0;

@@ -58,7 +58,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
                     "[WFX]: Project name is required. Usage: wfx run <project-folder-name> [options]"
                 );
 
-            int port = 8080;
+            std::uint16_t port = 8080;
 
             try {
                 port = std::stoi(options.at("--port"));

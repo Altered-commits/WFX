@@ -83,6 +83,17 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         
         logger_.Info("[TemplateEngine]: Found template: ", inPath);
 
+        // Strip leading slash cuz we will use this as key inside of templates_ map
+        // We expect that user, inside of 'SendTemplate' function, inputs path without leading slash
+        // And because 'SendTemplate' uses templates_ map, we cannot use leading slash
+        std::string relPath = std::string(inPath.begin() + inputDir.size(), inPath.end());
+        relPath.erase(0, relPath.find_first_not_of("/\\"));
+
+        // Every file is initially written to the static folder, even the dynamic .html files.
+        // After the .html file is completely stripped off static tags, and IF dynamic tags still-
+        // -remain, we move onto stage two of compiling. That is when we use the dynamic folder
+        const std::string outPath = staticOutputDir + "/" + relPath;
+
         // Cache checking
         FileStats     diskStats  = {};
         FileMetadata* cacheStats = fileMeta.Get(inPath);
@@ -90,8 +101,17 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         if(FileSystem::GetFileStats(inPath.c_str(), diskStats)) {
             if(cacheStats) {
                 // Basic check, did file modified time change? if not, then no need to compile this file
-                if(diskStats.modifiedNs == cacheStats->modifiedTime)
+                if(diskStats.modifiedNs == cacheStats->modifiedTime) {
+                    std::size_t offset{0};
+
+                    templates_.emplace(std::move(relPath), TemplateMeta{
+                        cacheStats->Pop<TemplateType>(offset),
+                        cacheStats->Pop<std::size_t>(offset),
+                        std::move(outPath)
+                    });
+
                     return;
+                }
     
                 // Rn we don't check for hash and all, just modified time
                 // Later we check for other cool shit
@@ -108,17 +128,6 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                 "[TemplateEngine]: Failed to check [disk / cache] stats for file: ", inPath.c_str(),
                 ". Continuing with full compilation"
             );
-
-        // Strip leading slash cuz we will use this as key inside of templates_ map
-        // We expect that user, inside of 'SendTemplate' function, inputs path without leading slash
-        // And because 'SendTemplate' uses templates_ map, we cannot use leading slash
-        std::string relPath = std::string(inPath.begin() + inputDir.size(), inPath.end());
-        relPath.erase(0, relPath.find_first_not_of("/\\"));
-
-        // Every file is initially written to the static folder, even the dynamic .html files.
-        // After the .html file is completely stripped off static tags, and IF dynamic tags still-
-        // -remain, we move onto stage two of compiling. That is when we use the dynamic folder
-        const std::string outPath = staticOutputDir + "/" + relPath;
 
         // Ensure target directory exists
         std::string relOutputDir = outPath.substr(0, outPath.find_last_of("/\\"));
@@ -138,9 +147,9 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
             logger_.Error("[TemplateEngine]: Failed to open input template file: ", inPath);
             return;
         }
-        auto inSize = in->Size();
 
         // File empty
+        auto inSize = in->Size();
         if(inSize == 0)
             return;
 
@@ -177,7 +186,7 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                 std::move(relPath), TemplateMeta{type, outSize, std::move(outPath)}
             );
 
-        // Websites dynamic, sigh, get ready for some fuckery
+        // Websites dynamic, *sigh*, get ready for some fuckery
         else {
             hasDynamicElement = true;
             logger_.Info("[TemplateEngine]: Staging dynamic template for compilation: ", relPath);
@@ -201,16 +210,26 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         }
 
         // Either new file or existing file has been updated
-        if(setCacheStats)
-            fileMeta.Set(std::move(inPath), {
-                diskStats.modifiedNs,
-                "" // Hash will be used later on
-            });
+        /*
+         * IMPORTANT: Template data will be stored exactly in the format:
+         *              - Template Type
+         *              - Template Size
+         */
+        if(setCacheStats) {
+            auto fmd = FileMetadata{diskStats.modifiedNs, ""};
+            fmd.Push(type);
+            fmd.Push(outSize);
+
+            fileMeta.Set(std::move(inPath), std::move(fmd));
+        }
     });
 
-    // We will save cache files regardless of errors
+    if(errors > 0) {
+        logger_.Warn("[TemplateEngine]: Template compilation complete with ", errors, " error(s)");
+        return TemplateCompilationResult{false, false};
+    }
+
     if(resaveCacheFile) {
-        // Finally, save the cache, if OS allows us to :)
         switch(fileMeta.Save()) {
             case FileMetaStatus::SUCCESS:
                 logger_.Info("[TemplateEngine]: Saved template cache file successfully");
@@ -222,25 +241,19 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         }
     }
 
-    if(errors > 0) {
-        logger_.Warn("[TemplateEngine]: Template compilation complete with ", errors, " error(s)");
-        return TemplateCompilationResult{false, false};
-    }
-
     logger_.Info("[TemplateEngine]: Template compilation completed successfully");
     return TemplateCompilationResult{true, hasDynamicElement};
 }
 
 void TemplateEngine::LoadDynamicTemplatesFromLib()
 {
-    // Load the user_templates.[dll/so/dylib] from <project>/build/
-    // Now its the callers responsibility to make sure it exists, if it doesn't-
-    // -we go boom boom
+    // Load the user_templates.[dll/so/dylib] from <project>/build/ if it exists-
+    // -else we just ignore this entirely
     const std::string inputDir = config_.projectConfig.projectName + STATIC_FOLDER;
     const std::string dllPath  = config_.projectConfig.projectName + TEMPLATE_LIB_PATH;
 
     if(!FileSystem::FileExists(dllPath.c_str()))
-        logger_.Fatal("[TemplateEngine]: Dynamic template loader couldn't find ", dllPath);
+        return;
 
 #if defined(_WIN32)
     static_assert(false, "No impl for TemplateEngine.LoadDynamicTemplatesFromLib for Windows");
@@ -283,7 +296,7 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
     }
 
 #endif
-    logger_.Info("[TemplateEngine]: Successfully initialized dynamic template module(s): ", dllPath);
+    logger_.Info("[TemplateEngine]: Successfully initialized dynamic template(s) from: ", dllPath);
 }
 
 TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)

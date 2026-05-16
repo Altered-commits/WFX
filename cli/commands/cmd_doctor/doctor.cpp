@@ -6,7 +6,7 @@ namespace WFX::CLI {
 
 int WFXDoctor()
 {
-    auto& logger = WFX::Utils::Logger::GetInstance();
+    auto& logger = Utils::Logger::GetInstance();
     logger.Info("-----------------------------------------------------");
     logger.Info("[Doctor]: Deprecated for now, might be used in future");
     logger.Info("-----------------------------------------------------");

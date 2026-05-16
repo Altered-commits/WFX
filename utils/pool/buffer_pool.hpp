@@ -3,28 +3,40 @@
 
 #include "utils/logger/logger.hpp"
 #include <functional>
+#include <vector>
 
 namespace WFX::Utils {
 
 struct BufferShard {
     std::size_t        poolSize      = 0;
+    std::size_t        usableSize    = 0;
     void*              tlsfAllocator = nullptr;
     std::vector<void*> memorySegments;
+};
+
+struct BufferPoolStats {
+    std::size_t totalAllocations   = 0;
+    std::size_t totalFrees         = 0;
+    std::size_t totalReallocs      = 0;
+    std::size_t poolExpansions     = 0;
+    std::size_t allocationFailures = 0;
 };
 
 // Wrapper around TLSF by Matthew Conte
 class BufferPool final {
     using ResizeCallback = std::function<std::size_t(std::size_t)>;
+    using OOMCallback    = std::function<void(std::size_t, std::size_t, const BufferPoolStats&)>;
 
 public:
     static BufferPool& GetInstance();
-    void Init(std::size_t initialSize, ResizeCallback resizeCb = nullptr);
-    bool IsInitialized();
+    void Init(std::size_t initialSize, ResizeCallback resizeCb = nullptr, OOMCallback oomCb = nullptr);
+    bool IsInitialized() const;
 
 public:
-    void* Lease(std::size_t size);
-    void* Reacquire(void* ptr, std::size_t newSize);
-    void  Release(void* ptr);
+    void*                  Alloc(std::size_t size);
+    void*                  Realloc(void* ptr, std::size_t newSize);
+    void                   Free(void* ptr);
+    const BufferPoolStats& GetStats() const;
 
 private:
     BufferPool() = default;
@@ -37,9 +49,9 @@ private:
     BufferPool& operator=(BufferPool&&)      = delete;
 
 private:
-    void* AllocateFromShard(std::size_t totalSize);
+    void* AllocateFromShard(std::size_t size);
+    void* ExpandAndAllocate(std::size_t size);
 
-    // Platform-specific memory alignment functions
     void* AlignedMalloc(std::size_t size, std::size_t alignment);
     void  AlignedFree(void* ptr);
 
@@ -47,8 +59,9 @@ private:
     Logger& logger_ = Logger::GetInstance();
 
     BufferShard    shard_;
-    std::size_t    initialSize_;
+    BufferPoolStats stats_;
     ResizeCallback resizeCallback_;
+    OOMCallback    oomCallback_;
 };
 
 } // namespace WFX::Utils

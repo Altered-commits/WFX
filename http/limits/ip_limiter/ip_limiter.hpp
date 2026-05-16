@@ -6,11 +6,9 @@
 
 namespace WFX::Http {
 
-using namespace WFX::Utils; // For 'HashShard', 'BufferPool'
-
 class IpLimiter : BaseLimiter {
 public:
-    IpLimiter(BufferPool& poolRef);
+    IpLimiter(Utils::BufferPool& poolRef);
     ~IpLimiter() = default;
 
 public:
@@ -40,7 +38,7 @@ private:
         TokenBucket bucket;
     };
 
-    HashShard<WFXIpAddress, IpLimiterEntry> ipLimits_;
+    Utils::HashShard<WFXIpAddress, IpLimiterEntry> ipLimits_;
 };
 
 } // namespace WFX::Http

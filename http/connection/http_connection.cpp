@@ -1,15 +1,20 @@
 #include "http_connection.hpp"
+#include "http/request/http_request.hpp"
 #include "http/response/http_response.hpp"
 #include "shared/apis/http_api.hpp"
+#include "utils/pool/buffer_pool.hpp"
 
 namespace WFX::Http {
+
+using namespace WFX::Shared; // For every single abi type
 
 // vvv Ip Address Methods vvv
 WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
 {
-    ipType = other.ipType;
+    type = other.type;
+    port = other.port;
 
-    switch(ipType) {
+    switch(type) {
         case AF_INET:
             memcpy(&ip.v4, &other.ip.v4, sizeof(in_addr));
             break;
@@ -28,10 +33,11 @@ WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
 
 bool WFXIpAddress::operator==(const WFXIpAddress& other) const
 {
-    if(ipType != other.ipType)
-        return false;
+    std::size_t len = (type == AF_INET) ? 4 : 16;
 
-    return memcmp(ip.raw, other.ip.raw, ipType == AF_INET ? 4 : 16) == 0;
+    return port == other.port
+            && type == other.type
+            && memcmp(ip.raw, other.ip.raw, len) == 0;
 }
 
 // Helper functions
@@ -40,12 +46,12 @@ std::string_view WFXIpAddress::GetIpStr() const
     // Use thread-local static buffer to avoid heap allocation
     thread_local char ipStrBuf[INET6_ADDRSTRLEN] = {};
 
-    const void* addr = (ipType == AF_INET)
+    const void* addr = (type == AF_INET)
         ? static_cast<const void*>(&ip.v4)
         : static_cast<const void*>(&ip.v6);
 
     // Convert to printable form
-    if(inet_ntop(ipType, addr, ipStrBuf, sizeof(ipStrBuf)))
+    if(inet_ntop(type, addr, ipStrBuf, sizeof(ipStrBuf)))
         return std::string_view(ipStrBuf);
 
     return std::string_view("ip-malformed");
@@ -53,36 +59,75 @@ std::string_view WFXIpAddress::GetIpStr() const
 
 const char* WFXIpAddress::GetIpType() const
 {
-    return ipType == AF_INET ? "IPv4" : "IPv6";
+    return type == AF_INET ? "IPv4" : "IPv6";
+}
+
+bool WFXIpAddress::ToSockAddr(sockaddr_storage& out, socklen_t& len) const
+{
+    switch(type) {
+        case AF_INET:
+        {
+            auto* addr = reinterpret_cast<sockaddr_in*>(&out);
+            addr->sin_family = AF_INET;
+            addr->sin_port   = htons(port);
+            addr->sin_addr   = ip.v4;
+
+            len = sizeof(sockaddr_in);
+
+            return true;
+        }
+        case AF_INET6:
+        {
+            auto* addr = reinterpret_cast<sockaddr_in6*>(&out);
+            addr->sin6_family = AF_INET6;
+            addr->sin6_port   = htons(port);
+            addr->sin6_addr   = ip.v6;
+
+            len = sizeof(sockaddr_in6);
+
+            return true;
+        }
+        default:
+            return false;
+    }
 }
 
 // vvv Connection Context Methods vvv
 void ConnectionContext::ResetContext()
 {
     rwBuffer.ResetBuffer();
-    parentCoro.Reset();
     
     if(requestInfo)  { delete requestInfo;  requestInfo  = nullptr; }
     if(responseInfo) { delete responseInfo; responseInfo = nullptr; }
-    if(fileInfo)     { delete fileInfo;     fileInfo     = nullptr; }
 
-    __Flags            = 0;
-    connInfo           = WFXIpAddress{};
+    CleanupStreamGenerator();
+
+    // Clear all flags except 'endpointState', tis special
+    const bool keep = endpointState;
+    __Flags = 0;
+    endpointState = keep;
+
+    // Rest of the stuff
     expectedBodyLength = 0;
     eventType          = EventType::EVENT_ACCEPT;
     parseState         = 0;
     trackBytes         = 0;
     socket             = WFX_INVALID_SOCKET;
+    fileInfo           = FileInfo{};
+    connInfo           = WFXIpAddress{};
+    asyncData          = AsyncData{};
+    clientContext      = nullptr;
+    endpointContext    = nullptr;
 }
 
 void ConnectionContext::ClearContext()
 {
     rwBuffer.ClearBuffer();
-    parentCoro.Reset();
 
     if(requestInfo)  requestInfo->ClearInfo();
-    if(responseInfo) responseInfo->ClearInfo();
-    if(fileInfo)     *fileInfo = FileInfo{};
+    if(responseInfo) responseInfo->Reset();
+
+    CleanupStreamGenerator();
 
     isFileOperation       = 0;
     isStreamOperation     = 0;
@@ -90,20 +135,40 @@ void ConnectionContext::ClearContext()
     streamChunked         = 0;
     expectedBodyLength    = 0;
     trackBytes            = 0;
-    // eventType          = EventType::EVENT_ACCEPT;
-    // connInfo           = WFXIpAddress{};
-    // timeoutTick        = 0;
-    // parseState         = 0;
+    fileInfo              = FileInfo{};
+    asyncData             = AsyncData{};
+    clientContext         = nullptr;
+    endpointContext       = nullptr;
+}
+
+void ConnectionContext::CleanupStreamGenerator()
+{
+    if(streamGenerator.ctx && streamGenerator.Destroy)
+        streamGenerator.Destroy(streamGenerator.ctx);
+
+    streamGenerator.ctx     = nullptr;
+    streamGenerator.Next    = nullptr;
+    streamGenerator.Destroy = nullptr;
 }
 
 void ConnectionContext::SetParseState(HttpParseState newState)
 {
-    parseState = static_cast<std::uint8_t>(newState);
+    parseState = static_cast<std::uint16_t>(newState);
 }
 
 void ConnectionContext::SetConnectionState(ConnectionState newState)
 {
-    connectionState = static_cast<std::uint8_t>(newState);
+    connectionState = static_cast<std::uint16_t>(newState);
+}
+
+void ConnectionContext::SetEndpointState(EndpointState newState)
+{
+    endpointState = static_cast<std::uint16_t>(newState);
+}
+
+void ConnectionContext::SetEndpointStatus(EndpointStatus newStatus)
+{
+    endpointStatus = static_cast<std::uint16_t>(newStatus);
 }
 
 HttpParseState ConnectionContext::GetParseState() const
@@ -116,59 +181,24 @@ ConnectionState ConnectionContext::GetConnectionState() const
     return static_cast<ConnectionState>(connectionState);
 }
 
-bool ConnectionContext::IsAsyncOperation() const
+EndpointState ConnectionContext::GetEndpointState() const
 {
-    return static_cast<bool>(parentCoro);
+    return static_cast<EndpointState>(endpointState);
 }
 
-Async::Status ConnectionContext::TryFinishCoroutines()
+EndpointStatus ConnectionContext::GetEndpointStatus() const
 {
-    /*
-     * So return value logic is simple:
-     *  - NONE means ignore it and move on
-     *  - COMPLETED means serialize the response
-     *  - OTHERS are just errors
-     */
-    // Sanity checks, is the connection still alive or no
-    if(GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
-        return Async::Status::NONE;
+    return static_cast<EndpointStatus>(endpointStatus);
+}
 
-    // Something went wrong uk
-    if(!static_cast<bool>(parentCoro))
-        return Async::Status::NONE;
+bool ConnectionContext::IsEndpoint() const
+{
+    return GetEndpointState() != EndpointState::ENDPOINT_NONE;
+}
 
-    // THE MOST IMPORTANT THING, ASYNC FUNCTIONS EXPECT US TO SET CTX (current connection context)-
-    // -VIA HTTP API
-    auto httpApi = WFX::Shared::GetHttpAPIV1();
-    httpApi->SetGlobalPtrData(this);
-
-    // Resume the parent coroutine and check for:
-    //  - completion status
-    //  - any error which may have propagated
-    parentCoro.Resume();
-    if(!parentCoro.IsFinished())
-        return Async::Status::NONE;
-
-    // WE WILL SET IT TO NULLPTR ONCE WE ARE DONE USING IT, WE DON'T WANT DANGLING POINTERS
-    httpApi->SetGlobalPtrData(nullptr);
-
-    auto eLevel = trackAsync.GetELevel();
-
-    if(eLevel == ExecutionLevel::MIDDLEWARE) {
-        auto& promise = parentCoro.GetPromise<Async::Promise<MiddlewareAction>>();
-        if(promise.error_ != Async::Status::NONE)
-            return promise.error_;
-
-        // For middleware, we need to set the action ourselves (inside of trackAsync)
-        *trackAsync.GetMAction() = promise.value_;
-    }
-    else {
-        auto err = parentCoro.GetPromise<Async::Promise<void>>().error_;
-        if(err != Async::Status::NONE)
-            return err;
-    }
-
-    return Async::Status::COMPLETED;
+bool ConnectionContext::IsAsyncOperation() const
+{
+    return asyncData.AsyncComplete != nullptr;
 }
 
 } // namespace WFX::Http

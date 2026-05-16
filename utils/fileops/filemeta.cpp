@@ -40,48 +40,48 @@ FileMetaStatus FileMeta::Load()
     meta_.reserve(std::max(fileSize / LINE_SIZE, MINIMUM_ENTRIES));
 
     // Format (STRICT, one line per record):
-    // <file><sep><size><sep><mtime><sep><hash>\n
+    // <file><sep><mtime><sep><hash><sep><ud_size><sep><ud_bytes>\n
     // ^^^ ...
     std::size_t i       = 0;
     std::size_t entries = 0;
     while(i < fileSize) {
-        const std::size_t midx = FindSeparator(buffer, i + 1);
-        if(midx == BUFFER_END) return FileMetaStatus::CORRUPTED;
-
+        const std::size_t midx = FindSeparator(buffer, i);
         const std::size_t hidx = FindSeparator(buffer, midx + 1);
-        if(hidx == BUFFER_END) return FileMetaStatus::CORRUPTED;
+        const std::size_t sidx = FindSeparator(buffer, hidx + 1);
+        const std::size_t didx = FindSeparator(buffer, sidx + 1);
 
-        // Expect newline immediately after hash field
-        std::size_t eol = hidx + 1;
-        while(eol < fileSize && buffer[eol] != '\n')
-            ++eol;
-
-        if(eol >= fileSize) return FileMetaStatus::CORRUPTED;
-
-        // vvv Field extraction vvv
-        std::string file(&buffer[i], midx - i);
-
-        std::int64_t modifiedtime = 0;
-        if(!StrToInt64(
-            std::string_view(&buffer[midx + 1], hidx - midx - 1), modifiedtime
-        ))
+        if(midx == BUFFER_END || hidx == BUFFER_END || sidx == BUFFER_END || didx == BUFFER_END)
             return FileMetaStatus::CORRUPTED;
 
-        std::string hash(&buffer[hidx + 1], eol - hidx - 1);
+        std::string file(&buffer[i], midx - i);
 
-        meta_.emplace(
-            std::move(file),
-            FileMetadata{
-                modifiedtime,
-                std::move(hash)
-            }
-        );
+        std::int64_t modifiedTime = 0;
+        if(!StrToInt64({&buffer[midx + 1], hidx - midx - 1}, modifiedTime))
+            return FileMetaStatus::CORRUPTED;
 
-        // Move to next record if we haven't violated constraints
+        std::string hash(&buffer[hidx + 1], sidx - hidx - 1);
+
+        std::uint64_t udSize = 0;
+        if(!StrToUInt64({&buffer[sidx + 1], didx - sidx - 1}, udSize))
+            return FileMetaStatus::CORRUPTED;
+
+        std::size_t dataStart = didx + 1;
+        std::size_t dataEnd   = dataStart + udSize;
+
+        if(dataEnd >= fileSize || buffer[dataEnd] != '\n')
+            return FileMetaStatus::CORRUPTED;
+
+        FileMetadata meta;
+        meta.modifiedTime = modifiedTime;
+        meta.hash         = std::move(hash);
+        meta.userData.assign(&buffer[dataStart], &buffer[dataEnd]);
+
+        meta_.emplace(std::move(file), std::move(meta));
+
         if(++entries > ENTRY_THRESHOLD)
             return FileMetaStatus::TOO_MANY_ENTRIES;
 
-        i = eol + 1;
+        i = dataEnd + 1;
     }
 
     return FileMetaStatus::SUCCESS;
@@ -120,6 +120,20 @@ FileMetaStatus FileMeta::Save() const
 
         // Hash
         buffer.insert(buffer.end(), meta.hash.begin(), meta.hash.end());
+        buffer.push_back(FIELD_SEPARATOR);
+
+        // User data size
+        std::uint64_t udSize = meta.userData.size();
+        {
+            auto [ptr, ec] = std::to_chars(numBuf, numBuf + sizeof(numBuf), udSize);
+            if(ec != std::errc{})
+                return FileMetaStatus::CORRUPTED;
+            buffer.insert(buffer.end(), numBuf, ptr);
+        }
+        buffer.push_back(FIELD_SEPARATOR);
+
+        // User data raw bytes
+        buffer.insert(buffer.end(), meta.userData.begin(), meta.userData.end());
         buffer.push_back('\n');
     }
 
