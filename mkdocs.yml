@@ -45,3 +45,4 @@ nav:
     - Async: api_reference/async.md
     - Templates: api_reference/templates.md
     - Forms: api_reference/forms.md
+    - Json: api_reference/json.md

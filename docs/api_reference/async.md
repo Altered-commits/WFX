@@ -6,12 +6,12 @@ standard C++20 coroutines using `Task<>` and `Promise<>` types.
 Everything is driven by explicit `co_await` suspension and resumption.
 
 !!! important
-    All async functionality in WFX lives inside the `Async::` namespace.
+    All async functionality in WFX lives inside the `WFX::` namespace.
 
     If you want to **directly use built-in async functions** such as `SleepFor`, you **must** include:
 
     ```cpp
-    #include <async/builtins.hpp>
+    #include <wfx/async.hpp>
     ```
 ---
 
@@ -27,6 +27,26 @@ Async coroutines:
 - suspend explicitly
 - resume only when the engine schedules them
 - finish exactly once
+
+---
+
+## Async Status Constants
+
+Builtin async operations internally return `Shared::AsyncStatus` values.
+
+However, user code should generally prefer the exported `WFX::` constexpr aliases instead of referencing the internal enum types directly.
+
+Preferred user-facing constants:
+
+```cpp
+WFX::AsyncOk
+WFX::AsyncTimerFailure
+WFX::AsyncIoFailure
+WFX::AsyncInternalFailure
+WFX::AsyncNone
+```
+
+These map directly to the underlying engine async status values while providing a cleaner and more stable public API surface.
 
 ---
 
@@ -49,7 +69,7 @@ All builtins are implemented as **C++20 awaitable types** with:
 
 This section documents each builtin and how to use it correctly.
 
-### `Async::SleepFor`
+### `WFX::SleepFor`
 
 ```cpp
 SleepForAwaitable SleepFor(std::uint32_t delayMs);
@@ -77,9 +97,9 @@ Suspends the current coroutine for `delayMs` milliseconds
 **Example**
 
 ```cpp
-Async::Status status = co_await Async::SleepFor(500);
+auto status = co_await WFX::SleepFor(500);
 
-if(status != Async::Status::NONE) {
-    // handle timer failure
+if(status != WFX::AsyncOk) {
+    // handle async failure
 }
 ```

@@ -6,71 +6,62 @@ Understanding how requests and responses work is fundamental to using WFX effect
 
 ## Request
 
-`Request` represents an incoming HTTP request. It contains all data associated with the request lifecycle, including metadata, headers, body, and parsed path information. It also exposes a per-request context store that can be used to share data between middleware, routes, and user code.
+`Request` represents an incoming HTTP request. It is an **opaque handle** backed by the engine. All data is accessed through API calls, ensuring strict control over memory, lifetime, and performance characteristics.
 
-!!! note
-    Although the underlying type is `HttpRequest`, it is internally aliased to `Request` for user-facing APIs.  
-    This is done intentionally to mirror `Response`, which is also a user-side abstraction, and to keep request and response usage consistent in user code.
+The request object is **valid only during the request lifecycle**. Any data returned (e.g., `std::string_view`) must not be retained beyond that scope unless copied.
 
 Below are the primary members exposed by the `Request` structure.
 
-- **`method`** - `HttpMethod`  
+- **`Method()`** - `HttpMethod`  
     Represents the HTTP method of the request (`GET`, `POST`, etc.).  
     **Read-only**, set by the engine.  
 
     ```cpp
-    if(req.method == HttpMethod::GET) { /* handle GET */ }
+    if(req.Method() == WFX::HttpMethod::GET) { /* handle GET */ }
     ```
 
-- **`version`** - `HttpVersion`  
+- **`Version()`** - `HttpVersion`  
     HTTP version (`HTTP_1_0`, `HTTP_1_1`, `HTTP_2_0`, etc.).  
     **Read-only**, set by the engine.
 
     ```cpp
-    if(req.version == HttpVersion::HTTP_1_1) { /* handle HTTP/1.1 */ }
+    if(req.Version() == WFX::HttpVersion::HTTP_1_1) { /* handle HTTP/1.1 */ }
     ```
 
-- **`path`** - `std::string_view`  
+- **`Path()`** - `std::string_view`  
     The requested path as a view into the request buffer.  
     Essentially **read-only**, but can be modified under controlled circumstances as long as you do not exceed the original size. Do not retain references beyond the request lifecycle.
 
     ```cpp
-    if(req.path == "/login") { /* handle login */ }
+    if(req.Path() == "/login") { /* handle login */ }
     ```
 
-- **`body`** - `std::string_view`
+- **`Body()`** - `std::string_view`  
     Raw request body. For POST/PUT requests, contains the payload.  
     Essentially **read-only**, but can be modified in place as long as you do not exceed the buffer size.
 
     ```cpp
-    auto data = std::string(req.body); // copy if you need to keep it
+    auto data = std::string(req.Body()); // copy if you need to keep it
     ```
 
-- **`headers`** - `std::unordered_map<std::string_view, std::string_view>`  
-    Represents HTTP headers. Provides lookup and iteration.
+- **`Headers`**  
+    Represents HTTP headers. Headers are accessed via lookup functions. No direct container is exposed.
 
     ```cpp
-    // 'GetHeader' returns an empty std::string_view if not found
-    auto ua = req.headers.GetHeader("User-Agent");
-    printf("User-Agent: %.*s\n", (int)ua.size(), ua.data());
-
-    // You can also use 'CheckAndGetHeader' to get a pair {exists?, value}
-    auto [exists, token] = req.headers.CheckAndGetHeader("X-Token");
-    if(!exists) { /* handle error */ }
-    else        { /* handle token */ }
-
-    // Or you can set header, unlikely but possible via 'SetHeader'
-    req.headers.SetHeader("My-Value", "WFX");
+    // 'GetHeader' returns true if header exists and writes value to 'ua'
+    std::string_view ua;
+    if(req.GetHeader("User-Agent", ua))
+        printf("User-Agent: %.*s\n", (int)ua.size(), ua.data());
     ```
 
-- **`pathSegments`** - `std::vector<std::variant<...>>`  
+- **`Path Segments`**  
     Contains the parsed components of the request path. Each segment represents either a literal path component or a typed route parameter extracted from the URL (for example integers or UUIDs).
 
     This allows route handlers to access route parameters in a type-safe manner without performing manual string parsing or conversions.
 
     **Example route**:  
     ```cpp
-    WFX_GET("/users/<int>/posts/<uint>", [](Request& req, Respons& res) {
+    WFX_GET("/users/<int>/posts/<uint>", [](WFX::Request req, WFX::Respons res) {
         /* ... */
     });
     ```
@@ -86,142 +77,325 @@ Below are the primary members exposed by the `Request` structure.
     ]
     ```
 
-    **Accessing values manually**:
+    **Accessed via an index-based API**:
     ```cpp
-    auto userId = std::get<int64_t>(req.pathSegments[0]);
-    auto postId = std::get<uint64_t>(req.pathSegments[1]);
-    ```
+    // Returns number of parsed segments
+    std::uint64_t segCount = req.SegmentCount();
 
-    **Accessing values using segment macros**:
-    ```cpp
-    auto userId = GetSegmentAsInt(req.pathSegments[0]);
-    auto postId = GetSegmentAsUInt(req.pathSegments[1]);
+    // Returns the typed segment at the given index
+    auto segment = req.GetSegment(0); // Access 42
+
+    // However, 'segment' itself is a variant type. To access the value:
+    segment.AsInt();
+
+    // or directly:
+    req.GetSegment(0).AsInt();
     ```
 
     !!! note
         The purpose and usage of `pathSegments` will become much clearer in the Routing section.
     
-- **`context`** - `std::unordered_map<std::string, std::any>`
-    Allows storing arbitrary values for the lifetime of the request. It is useful for passing data between middleware and route handlers.
+- **`Context Store`**  
+    Allows storing request-scoped values for the lifetime of the active request lifecycle.
 
+    The context store is primarily intended for passing state between middleware, route handlers, and internal request-processing stages.
+
+    Context values are type-aware and support both trivially copyable inline storage and dynamically allocated object storage depending on the stored type characteristics.
+
+    **Store a value**:
     ```cpp
-    // Store a value
     req.SetContext<int>("user_id", 42);
 
-    // Retrieve a value (returns pointer to value if it exists, else nullptr)
-    if(auto id = req.GetContext<int>("user_id")) {
-        printf("User ID: %d\n", *id);
-    }
-
-    // Initialize or get value
-    auto* ptr = req.InitOrGetContext<std::string>("session", "default_session");
+    req.SetContext<std::string>(
+        "session",
+        "default_session"
+    );
     ```
 
+    **Retrieve a trivially copyable value**:
+    ```cpp
+    auto [id, ok] = req.GetContext<int>("user_id");
+
+    if(ok)
+        printf("User ID: %d\n", id);
+    ```
+
+    **Retrieve a non-trivial value**:
+    ```cpp
+    auto [session, ok] = req.GetContext<std::string>("session");
+
+    if(ok && session)
+        printf("Session: %s\n", session->c_str());
+    ```
+
+    **Erase a context value**:
+    ```cpp
+    req.EraseContext("session");
+    ```
+
+    !!! important
+        `GetContext<T>()` behaves differently depending on the requested type category.
+
+        For trivially copyable inline-stored types, it returns:
+
+        ```cpp
+        std::pair<T, bool>
+        ```
+
+        For dynamically stored non-trivial types, it returns:
+
+        ```cpp
+        std::pair<T*, bool>
+        ```
+
+        Type mismatches result in failed retrieval.
+
+    !!! note
+        Small trivially copyable types may be stored inline internally without heap allocation.
+
+        Larger or non-trivial types are allocated through the engine memory allocator and automatically destroyed at request cleanup time.
+
     !!! tip
-        While the context map is flexible, it is not cheap. Each entry involves a hash lookup, a std::string key, and a std::any allocation. Avoid storing large objects or excessive transient data in the context. Prefer storing small, well-defined values that are genuinely needed across middleware and handlers. Overusing the context can negatively impact performance and cache locality.
+        The context store is intended for lightweight request-scoped coordination data.
+
+        Each context operation may involve:
+
+        - hash lookups,
+        - string-key processing,
+        - type metadata handling,
+        - and possible dynamic allocation.
+
+        Avoid storing large objects, high-frequency transient data, or performance-critical hot-path state inside the context store.
+
+        Prefer compact, well-defined values genuinely needed across execution boundaries.
 
 ## Response
 
-`Response` represents the outgoing HTTP response. It is the primary interface used by application code to control status codes, headers, and the response body sent back to the client.
+`Response` represents the outgoing HTTP response associated with the current request.
 
-It is a **user-facing abstraction**: internally, all operations are forwarded to the engine via provided APIs. Users never interact directly with the underlying response implementation.
+It provides a lightweight user-facing interface for:
+
+- setting HTTP status codes,
+- adding response headers,
+- writing response bodies incrementally,
+- sending files and templates,
+- and registering streaming response generators.
+
+`Response` itself does not own the underlying response state and acts only as a thin wrapper around engine-managed resources.
+Internally, all operations are forwarded to the registered HTTP backend APIs.
+
+Unlike traditional buffered HTTP abstractions, `Response` operates as a strict forward-only response builder with lifecycle-locked stages.
+
+Response operations write into the engine-managed response pipeline buffers and metadata structures. Actual network transmission occurs later under backend control after route execution completes.
 
 !!! note
-    `Response` does not own the underlying response object and internally holds pointers to engine-managed state.
+    `Response` instances are only valid for the lifetime of the route execution scope managed by the engine.
 
-    In **synchronous routes**, the `Response` instance is guaranteed to be valid for the entire duration of the user callback.
-
-    In **asynchronous routes**, this guarantee no longer holds once execution yields. If an async operation needs to continue using the response after yielding, the response state **must be explicitly copied**. This is required because the underlying HTTP response object is only guaranteed to exist while the connection is alive and under engine control.
-
-    This pattern is **not recommended** and should only be used when absolutely necessary. Prefer designing async logic such that the response is finalized within the intended execution scope.
+    Users must not store, move across execution boundaries, or access `Response` objects outside their intended request lifecycle unless explicitly supported by the active execution model.
 
 !!! danger
-    **All send and stream operations are single-use per request–response lifecycle.**
+    `Response` enforces a strict ordered lifecycle model.
 
-    Any `Send*` or `Stream*` function **must be called exactly once** during a single request–response cycle.  
-    Calling any send or stream function again within the same cycle is **fatal** and will **terminate the engine**.
+    The valid response progression is:
 
-    After the request–response lifecycle completes, if the connection is still alive, the engine will automatically reset its internal state, allowing send/stream operations to be used again for the next cycle.
+    ```text
+    Status -> Header(s) -> Body Operations -> Commit (optional)
+    ```
+
+    Where body operations include:
+
+    - `Write(...)`
+    - `SendText(...)`
+    - `SendFile(...)`
+    - `SendTemplate(...)`
+    - `Stream(...)`
+
+    Each lifecycle stage permanently locks all previous stages.
+
+    This means:
+
+    - once headers are added, status modification becomes invalid,
+    - once body operations begin, both status and headers become immutable,
+    - once committed, the entire response becomes immutable.
+
+    Invalid lifecycle transitions are considered fatal engine misuse errors and may immediately terminate the engine through internal fatal validation handlers.
+
+    Invalid operation examples include:
+
+    ```cpp
+    res.Header("X-Test", "1");
+    res.Status(HttpStatus::OK); // INVALID
+    ```
+
+    ```cpp
+    res.Write("Hello");
+    res.Header("Content-Type", "text/plain"); // INVALID
+    ```
+
+    ```cpp
+    res.SendText("Hello");
+    res.Write("More"); // INVALID
+    ```
+
+    ```cpp
+    res.Commit();
+    res.Commit(); // INVALID
+    ```
 
 Below are the primary methods exposed by `Response`.
 
 - **`Status(HttpStatus code)`**  
-    Sets the HTTP status code for the response.
+  **`Status(std::uint16_t code)`**  
+    Sets the HTTP status code for the response. Returns a reference to `Response` to allow chaining.
 
-    Returns a reference to `Response` to allow chaining.
+    If no explicit status is provided before body operations begin, the engine automatically defaults the response status to `200 OK`.
+
+    !!! important
+        Status may only be configured before headers or body operations begin.
+
+        Once headers are added or body transmission starts, the response status becomes permanently locked.
 
     **Without chaining**:
     ```cpp
     res.Status(HttpStatus::OK);
-    res.Set("Location", "/users/42");
+    res.Header("Location", "/users/42");
     ```
 
     **With chaining**:
     ```cpp
     res.Status(HttpStatus::CREATED)
-        .Set("Location", "/users/42");
+        .Header("Location", "/users/42");
     ```
 
-- **`Set(std::string key, std::string value)`**  
-    Sets or overrides an HTTP response header.
-    Both key and value are moved into the response. Header names are treated as-is.  
-    
-    Returns a reference to `Response` to allow chaining.
+- **`Header(std::string_view key, std::string_view value)`**  
+    Adds an HTTP response header to the outgoing response metadata. Returns a reference to `Response` to allow chaining.
+
+    The engine automatically appends all required protocol-level response headers internally, regardless of whether custom headers were provided by the user.
+
+    !!! important
+        Headers may only be added after status configuration and before body operations begin.
+
+        Once the response body starts, all response metadata becomes permanently immutable.
 
     **Without chaining**:
     ```cpp
-    res.Set("Content-Type", "application/json");
-    res.Set("X-Powered-By", "WFX");
+    res.Header("Content-Type", "application/json");
+    res.Header("X-Powered-By", "WFX");
     ```
 
     **With chaining**:
     ```cpp
-    res.Set("Content-Type", "application/json")
-        .Set("X-Powered-By", "WFX");
+    res.Header("Content-Type", "application/json")
+        .Header("X-Powered-By", "WFX");
     ```
 
-- **`SendText(...)`**  
-    Sends a plain text response body. The appropriate content type (`text/plain`) is set internally.
+- **`Write(...)`**  
+    Writes response body data incrementally into the engine-managed response pipeline buffers.
 
-    **Overloads**:
+    `Write()` supports multiple overloads for common primitive and utility types.
 
-    - `SendText(const char* cstr)`
-    - `SendText(std::string&& str)`
+    **Supported overload categories**:
+
+    ```cpp
+    Write(std::string_view)
+    Write(const char*)
+
+    Write(const Shared::UUID&)
+
+    Write(std::int64_t)
+    Write(std::uint64_t)
+
+    Write(std::int32_t)
+    Write(std::uint32_t)
+
+    Write(std::int16_t)
+    Write(std::uint16_t)
+
+    Write(std::int8_t)
+    Write(std::uint8_t)
+
+    Write(double)
+    Write(float)
+
+    Write(bool)
+    ```
+
+    Numeric values are internally formatted using stack-local conversion buffers without heap allocation.
+
+    Multiple `Write()` calls may be chained freely during the body stage:
+
+    ```cpp
+    res.Write("User ID: ")
+        .Write(42)
+        .Write("\n")
+        .Write("Premium: ")
+        .Write(true);
+    ```
+
+- **`Commit()`**  
+    Finalizes the active response pipeline.
+
+    Internally, `Commit()` locks the response lifecycle completely and allows the backend to finalize protocol metadata such as content length handling and transmission state preparation.
+
+    `Commit()` is primarily intended for manual `Write()` based response construction.
 
     **Example**:
     ```cpp
-    // Uses const char* overload
+    res.Header("Content-Type", "text/plain");
+
+    res.Write("Hello ")
+        .Write("World ")
+        .Write(42);
+
+    res.Commit();
+    ```
+
+    !!! note
+        Calling `Commit()` manually is optional in many cases.
+
+        The engine may automatically finalize uncommitted responses internally when route execution completes.
+
+        `Send*` functions already commit internally and do not require explicit manual commits.
+
+- **`SendText(std::string_view data)`**  
+    Convenience wrapper for sending plain text responses.
+
+    Internally, `SendText()`:
+
+    1. adds `Content-Type: text/plain`,
+    2. writes the provided body into the response pipeline,
+    3. and commits the response.
+
+    Equivalent behavior:
+    ```cpp
+    res.Header("Content-Type", "text/plain")
+        .Write(data)
+        .Commit();
+    ```
+
+    **Example**:
+    ```cpp
     res.SendText("Hello from WFX");
-
-    // Uses std::string overload
-    res.SendText(std::string("Dynamic response"));
-    ```
-
-- **`SendJson(const Json& j)`**  
-    Sends a JSON response. The appropriate content type (`application/json`) is set internally.
-
-    **Example**:
-    ```cpp
-    res.SendJson(Json::object({
-        {"status", "ok"},
-        {"value", 42}
-    }));
     ```
 
 - **`SendFile(...)`**  
-    Sends a file from disk as the response body. The appropriate content type is handled internally (**based on file extension**).
+    Sends a file through the backend file transmission pipeline.
 
     **Overloads**:
 
-    - `SendFile(const char* path, bool autoHandle404 = true)`
-    - `SendFile(std::string&& path, bool autoHandle404 = true)`
+    ```cpp
+    SendFile(std::string_view path, bool autoHandle404 = true)
+    SendFile(Shared::StringView path, bool autoHandle404 = true)
+    ```
 
-    If `autoHandle404` is enabled and the file does not exist, the engine will automatically handle the error response.  
-    If `autoHandle404` is disabled and the file does not exist, the networking backend will handle the situation as a fallback. However, this is not recommended, as it is intended only to prevent **undefined behavior or server crashes**, not as a **primary error-handling mechanism**.
+    Depending on the configured backend, optimized zero-copy transmission paths may be used internally.
+
+    If `autoHandle404` is enabled and the target file does not exist, the engine automatically handles the failure response internally.
+
+    The engine automatically appends all required protocol-level response headers internally, regardless of whether custom headers were provided by the user.
 
     **Example**:
     ```cpp
-    // Uses const char* overload
     res.SendFile("static/index.html");
     ```
 
@@ -229,90 +403,121 @@ Below are the primary methods exposed by `Response`.
         The provided path must be either:
 
         - an absolute path, or
-        - a path **relative to the engine's working directory**.
+        - a path relative to the engine working directory.
 
-        Relative paths are resolved against the engine location itself, **not** the caller's source file or project root.
+        Relative paths are resolved against the engine runtime location, not the caller source file or project root.
 
 - **`SendTemplate(...)`**  
-    Renders and sends a template. The appropriate content type (`text/html`) is set internally.
+    Renders and sends a template response.
 
     **Overloads**:
 
-    - `SendTemplate(const char* path, Json&& ctx = {})`
-    - `SendTemplate(std::string&& path, Json&& ctx = {})`
+    ```cpp
+    SendTemplate(std::string_view path, Shared::JsonObject&& ctx)
+    SendTemplate(Shared::StringView path, Shared::JsonObject&& ctx)
+    ```
 
-    The optional JSON context is provided to the template renderer to populate dynamic content.  
-    If the specified template cannot be found, the engine will automatically send a **404 Template Not Found** response.
+    The provided JSON context is forwarded to the template renderer for dynamic value binding.
+
+    Internally, template rendering, body generation, and response finalization are handled entirely by the backend pipeline.
+
+    The engine automatically appends all required protocol-level response headers internally, regardless of whether custom headers were provided by the user.
 
     **Example**:
     ```cpp
-    // Uses const char* overload + no JSON context provided (static template)
-    res.SendTemplate("index.html");
+    auto o = WFX::RmJson();
+    o["username"] = "atomic";
+    o["id"] = 42;
 
-    // Uses const char* overload + JSON context provied (dynamic template)
-    res.SendTemplate("profile.html", Json::object({
-        {"username", "atomic"},
-        {"id", 42}
-    }));
+    res.SendTemplate("profile.html", std::move(o));
     ```
 
+    !!! important
+        Template paths are resolved relative to the project template directory.
+
+        Example:
+        ```cpp
+        res.SendTemplate("hello.html", ctx);
+        ```
+
+        resolves internally against:
+
+        ```text
+        templates/hello.html
+        ```
+
     !!! tip
-        For detailed information about template syntax, compilation, rendering modes, and data binding,
-        see the [**Templates**](templates.md) section.
+        For detailed information about template syntax, rendering behavior, and data binding,
+        see the [**Templates**](templates.md) section.  
+        For detailed information about json semantics, see the [**Json**](json.md) section.
 
-- **`Stream(StreamGenerator generator, bool streamChunked = true)`**  
-    Initiates a streaming response. The provided generator is repeatedly called by the networking backend whenever it is ready to accept more data. This allows incremental or large responses to be sent without buffering the entire payload in memory.
+- **`Stream(Fn&& fn, bool chunked = true)`**  
+    Registers a streaming response generator with the backend.
 
-    **Important**: `Stream` does not set `Content-Type` header internally.
+    The provided callable is repeatedly invoked by the backend whenever additional response body data is required.
+
+    This allows incremental generation of large or dynamically produced responses without buffering the full payload in memory.
+
+    `Stream()` does not automatically add `Content-Type`.
+
+    **Streaming callback signature**:
+    ```cpp
+    Shared::StreamResult(Shared::StreamBuffer)
+    ```
 
     **Definitions**:
     ```cpp
     enum class StreamAction {
-        CONTINUE,             // Continue streaming
-        STOP_AND_ALIVE_CONN,  // Stop streaming and keep the connection alive
-        STOP_AND_CLOSE_CONN   // Stop streaming and close the connection
+        CONTINUE,
+        STOP_AND_ALIVE_CONN,
+        STOP_AND_CLOSE_CONN
     };
 
     struct StreamResult {
-        std::size_t  writtenBytes; // Number of bytes written into buffer
-        StreamAction action;       // Action to take after this invocation
+        std::size_t  writtenBytes;
+        StreamAction action;
     };
 
     struct StreamBuffer {
-        char*       buffer; // Writable buffer provided by the engine
-        std::size_t size;   // Size of the buffer in bytes
+        char*       buffer;
+        std::size_t size;
     };
-
-    // Streaming generator signature
-    using StreamGenerator = MoveOnlyFunction<StreamResult(StreamBuffer)>;
     ```
+
+    The provided callable is internally allocated through the engine memory allocator and remains owned by the backend until stream completion.
+
+    !!! important
+        Streaming callbacks may outlive the route callback that created them.
+
+        Captured references must remain valid for the entire streaming lifetime.
+
+        Capturing stack references is unsafe unless lifetime guarantees are externally enforced.
 
     **Example**:
     ```cpp
-    // Streaming a file-like source
+    res.Header("Content-Type", "application/octet-stream");
+
     res.Stream([
         offset = std::size_t{0}
-    ](StreamBuffer buffer) mutable {
+    ](Shared::StreamBuffer buffer) mutable -> Shared::StreamResult {
+
         std::size_t bytes = ReadFromSource(offset, buffer.buffer, buffer.size);
-        
-        // End of data
-        // Stop streaming and keep the connection alive
+
         if(bytes == 0) {
-            return StreamResult{
+            return {
                 0,
-                StreamAction::STOP_AND_ALIVE_CONN
+                Shared::StreamAction::STOP_AND_ALIVE_CONN
             };
         }
 
-        // Continue streaming for more data
         offset += bytes;
-        return StreamResult{
+
+        return {
             bytes,
-            StreamAction::CONTINUE
+            Shared::StreamAction::CONTINUE
         };
     }, false);
     ```
 
     !!! note
-        - Streaming generators are executed under the engine's control. They are invoked only when the networking backend is ready to send data. This model avoids buffering entire responses in memory and provides explicit control over connection lifetime.
-        - Buffer capacity is controlled by the `[Network] send_buffer_max` value in `wfx.toml`.
+        Stream buffer capacity is controlled by the `[Network] send_buffer_max` configuration value in `wfx.toml`.

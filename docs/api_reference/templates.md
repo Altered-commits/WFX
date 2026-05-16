@@ -8,6 +8,9 @@ It is designed for **server-side HTML rendering** with a strong focus on:
 - predictable behavior,
 - and extreme performance in production.
 
+!!! tip
+    For detailed information about `Json` semantics used in this section, see the [**Json**](json.md) section.
+
 ---
 
 ## Overview
@@ -116,10 +119,11 @@ Variables must be **explicitly declared** before they can be used.
 
 **C++ usage**:
 ```cpp
-res.SendTemplate("welcome.html", Json::object({
-    {"name", "Alice"},
-    {"logged_in", true}
-}));
+auto o = WFX::RmJson();
+o["name"] = "alice";
+o["logged_in"] = true;
+
+res.SendTemplate("welcome.html", std::move(o));
 ```
 
 **Key points**:
@@ -150,17 +154,13 @@ Conditionals control whether a block of HTML is rendered.
 
 **C++ usage**:
 ```cpp
-res.SendTemplate("status.html", Json::object({
-    {
-        "logged_in", true
-    },
-    {
-        "user", Json::object({
-            {"name", "Alice"},
-            {"is_verified", false}
-        })
-    }
-}));
+auto o = WFX::RmJson();
+
+o["logged_in"] = true;
+o["user"]["name"] = "alice";
+o["user"]["is_verified"] = false;
+
+res.SendTemplate("status.html", std::move(o));
 ```
 
 **Key points**:
@@ -196,10 +196,11 @@ Their behavior matches C++.
 
 **C++ usage**:
 ```cpp
-res.SendTemplate("access.html", Json::object({
-    {"logged_in", true},
-    {"age", 21}
-}));
+auto o = WFX::RmJson();
+o["logged_in"] = true;
+o["age"] = 21;
+
+res.SendTemplate("access.html", std::move(o));
 ```
 
 #### Nested access
@@ -219,18 +220,12 @@ WTX supports nested access into **JSON objects** using the dot (`.`) operator.
 
 **C++ usage**:
 ```cpp
-res.SendTemplate("profile.html", Json::object({
-    {
-        "user", Json::object({
-            {
-                "profile", Json::object({
-                    {"is_active", true},
-                    {"email", "alice@example.com"}
-                })
-            }
-        })
-    }
-}));
+auto o = WFX::RmJson();
+
+o["user"]["profile"]["is_active"] = true;
+o["user"]["profile"]["email"] = "alice@example.com";
+
+res.SendTemplate("profile.html", std::move(o));
 ```
 
 **Key points**:
@@ -261,20 +256,19 @@ Loops allow repeated rendering over arrays provided in the JSON context.
 
 **C++ usage**:
 ```cpp
-res.SendTemplate("users.html", Json::object({
-    {
-        "users", Json::array({
-            Json::object({
-                {"name", "Alice"},
-                {"age", 21}
-            }),
-            Json::object({
-                {"name", "Bob"},
-                {"age", 30}
-            })
-        })
-    }
-}));
+auto o = WFX::RmJson();
+
+auto users = o["users"];
+
+auto u1 = users.PushBack();
+u1["name"] = "alice";
+u1["age"]  = 21;
+
+auto u2 = users.PushBack();
+u2["name"] = "bob";
+u2["age"]  = 30;
+
+res.SendTemplate("users.html", std::move(o));
 ```
 
 **Key points**:
@@ -336,13 +330,11 @@ A template marked as `partial` is intended to be **used only as a base** (via `i
 
 **C++ usage**:
 ```cpp
-res.SendTemplate("page.html", Json::object({
-    {
-        "user", Json::object({
-            {"name", "Alice"}
-        })
-    }
-}));
+auto o = WFX::RmJson();
+
+o["user"]["name"] = "alice";
+
+res.SendTemplate("page.html", std::move(o));
 ```
 
 **Key points**:
