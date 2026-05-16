@@ -8,7 +8,7 @@ Middleware can be registered globally or per-route. This page documents both **s
 !!! important
     Middleware requires the user to always include the following header at the top of the file:
     ```cpp
-    #include <http/middleware.hpp>
+    #include <wfx/http.hpp>
     ```
 
 ---
@@ -39,6 +39,27 @@ enum class MiddlewareAction : std::uint8_t {
     If the current middleware is `A`, the next middleware `B` is skipped and execution continues with `C` (if present).  
     If there is no next middleware to skip, execution continues normally.
 
+!!! important
+    Although middleware internally operates on the `MiddlewareAction` enum, user code will typically use the exported `WFX` constexpr aliases instead.
+
+    Preferred usage:
+
+    ```cpp
+    return WFX::MwContinue;
+    return WFX::MwSkipNext;
+    return WFX::MwBreak;
+    ```
+
+    Instead of:
+
+    ```cpp
+    return MiddlewareAction::CONTINUE;
+    return MiddlewareAction::SKIP_NEXT;
+    return MiddlewareAction::BREAK;
+    ```
+
+    The aliases are provided for cleaner syntax consistency across the framework and are the recommended public-facing API surface.
+
 ## Basic Middleware
 
 Middleware must be registered before it can be used by any route.  
@@ -48,16 +69,16 @@ Registration is done using macros and follows the same deferred initialization m
 
 ```cpp
 // Using a lambda
-WFX_MIDDLEWARE("auth", [](Request& req, Response res) {
+WFX_MIDDLEWARE("auth", [](WFX::Request req, WFX::Response res) {
     /* ... */
-    return MiddlewareAction::CONTINUE; // mandatory
+    return WFX::MwContinue; // mandatory
 });
 
 // Using a function
-MiddlewareAction AuthMiddleware(Request& req, Response res)
+WFX::MiddlewareAction AuthMiddleware(WFX::Request req, WFX::Response res)
 {
     /* ... */
-    return MiddlewareAction::CONTINUE; // mandatory
+    return WFX::MwContinue; // mandatory
 }
 
 WFX_MIDDLEWARE("auth", AuthMiddleware);
@@ -96,21 +117,22 @@ The only difference is that execution occurs inside a coroutine.
 /*
  * NOTE: This header is mandatory when using any builtin async utilities-
  *       -such as functions like 'SleepFor'. It also brings in the core-
- *       -async machinery, including 'AsyncMiddlewareAction' and related types
+ *       -async machinery, including 'WFX::MwCoro' and related types
  */
-#include <async/builtins.hpp>
+#include <wfx/http.hpp>
+#include <wfx/async.hpp>
 
-WFX_MIDDLEWARE("RequestCooldown", [](Request& _, Response res) -> AsyncMiddlewareAction {
-    auto err = co_await Async::SleepFor(2000);
+WFX_MIDDLEWARE("RequestCooldown", [](WFX::Request _, WFX::Response res) -> WFX::MwCoro {
+    auto err = co_await WFX::SleepFor(2000);
 
-    if(err != Async::Status::NONE) {
-        res.Status(HttpStatus::INTERNAL_SERVER_ERROR)
+    if(err != WFX::AsyncOk) {
+        res.Status(WFX::HttpStatus::INTERNAL_SERVER_ERROR)
             .SendText("Middleware Failed to sleep for 2 seconds :(");
 
-        co_return MiddlewareAction::BREAK;
+        co_return WFX::MwBreak;
     }
 
-    co_return MiddlewareAction::CONTINUE;
+    co_return WFX::MwContinue;
 })
 ```
 

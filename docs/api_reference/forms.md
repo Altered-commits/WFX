@@ -4,11 +4,11 @@ Forms in WFX provide a **statically-defined, explicit, and deterministic** way t
 They are designed to **fail fast**, avoid ambiguity, and prevent malformed data from ever reaching application logic.
 
 !!! important
-    All form functionality in WFX lives inside the `Form::` namespace.
+    All form functionality in WFX lives inside the `WFX::Form::` namespace.
 
     To use forms, you **must** include the forms header at the top of your file:
     ```cpp
-    #include <core/forms.hpp>
+    #include <wfx/forms.hpp>
     ```
 
 ---
@@ -353,7 +353,7 @@ A custom rule must expose:
 
 **Example (Defining custom rules)**:
 ```cpp
-#include <form/forms.hpp>
+#include <wfx/forms.hpp>
 #include <cctype>
 #include <charconv>
 
@@ -496,20 +496,20 @@ Future support (no code changes required from you):
  * NOTE: 'LoginForm' is assumed to be the one defined in 'Schema' section
  *        of this documentation
  */
-WFX_MIDDLEWARE("ParseForm", [](Request& req, Response res) {
-    if(req.method != HttpMethod::POST)
-        return MiddlewareAction::CONTINUE;
+WFX_MIDDLEWARE("ParseForm", [](WFX::Request req, WFX::Response res) {
+    if(req.method != WFX::HttpMethod::POST)
+        return WFX::MwContinue;
 
     LoginFormSchema::CleanedType output;
 
     if(LoginForm.Parse(req, output) != Form::FormError::NONE) {
-        res.Status(HttpStatus::BAD_REQUEST)
+        res.Status(WFX::HttpStatus::BAD_REQUEST)
            .SendText("Invalid form data");
-        return MiddlewareAction::BREAK;
+        return WFX::MwBreak;
     }
 
     req.SetContext("login-form", std::move(output));
-    return MiddlewareAction::CONTINUE;
+    return WFX::MwContinue;
 });
 
 /*
@@ -643,30 +643,17 @@ These are always the responsibility of the user.
 
 **C++ Source Code**:
 ```cpp
-// There are two supported ways to pass rendered form fields to templates:
-//
-// 1. Using Render()
+// Using Render()
 //    - Returns a pre-rendered HTML string_view
 //    - Simple and straightforward
-//
-// 2. Using FormToJson()
-//    - Avoids an extra copy / allocation
-//    - Technically more efficient
-//
-WFX_GET("/form", [](Request& req, Response res) {
-    res.SendTemplate("login-page.html", Json::object({
-        { "login_form_fields", LoginForm.Render() }
-        /* ... */
-    }));
-});
 
-// Same result as above, but more optimized
-WFX_GET("/form", [](Request& req, Response res) {
-    res.SendTemplate("login-page.html", Json::object({
-        { "login_form_fields", Form::FormToJson(LoginForm) }
-        /* ... */
-    }));
-});
+auto o = WFX::RmJson();
+
+o["login_form_fields"] = LoginForm.Render();
+
+WFX_GET("/form", [](WFX::Request req, WFX::Response res) {
+    res.SendTemplate("login-page.html", std::move(o));
+})
 ```
 
 **Rendered HTML**:

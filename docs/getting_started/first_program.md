@@ -30,9 +30,10 @@ By default:
 
 - The server runs on 127.0.0.1:8080
 - Three routes are preconfigured in `main.cpp` inside of `src/` directory:
-    - /     -> serves the `index.html` from `templates/` directory
-    - /text -> returns plain text
-    - /json -> returns JSON object
+    - `/text` -> returns plain text
+    - `/im-json` -> streams JSON directly to the response
+    - `/rm-json` -> builds a JSON object in memory before sending
+    - `/template` -> renders `index.html` from the `templates/` directory
 
 Open your browser and visit these routes to verify the content. If you see the expected output, WFX is working correctly.
 
