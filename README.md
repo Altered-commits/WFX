@@ -34,12 +34,7 @@ Request flow:
 **os_specific/** - Linux and Windows platform code  
 **shared/** - internal shared logic  
 **include/** - public headers for user extensions  
-
-## Shared Libraries (`lib/`)
-
-Each shared module is self-contained and linked into the core runtime.
-
-- **utils/** - logging, crypto, memory, file I/O, etc.  
+**utils/** - logging, crypto, memory, file I/O, etc.  
 
 ## Getting Started
 
