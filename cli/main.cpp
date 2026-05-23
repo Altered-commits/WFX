@@ -23,7 +23,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
         [](const std::unordered_map<std::string, std::string>&,
            const std::vector<std::string>& positionalArgs) -> int {
             if(positionalArgs.empty())
-                Logger::GetInstance().Fatal("[WFX]: Project name required. Usage: wfx new <project-name>");
+                GetLogger().Fatal("[WFX]: Project name required. Usage: wfx new <project-name>");
 
             return CLI::CreateProject(positionalArgs[0]);
         });
@@ -39,7 +39,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
         [](const std::unordered_map<std::string, std::string>& options,
            const std::vector<std::string>& positionalArgs) -> int {
             if(positionalArgs.size() != 2)
-                Logger::GetInstance().Fatal(
+                GetLogger().Fatal(
                     "[WFX]: Build type is required. Usage: wfx build <project-folder-name> [templates|source]"
                 );
 
@@ -51,7 +51,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
     parser.AddCommand("run", "Start WFX server",
         [](const std::unordered_map<std::string, std::string>& options,
            const std::vector<std::string>& positionalArgs) -> int {
-            auto& logger = Logger::GetInstance();
+            auto& logger = GetLogger();
             
             if(positionalArgs.size() != 1)
                 logger.Fatal(

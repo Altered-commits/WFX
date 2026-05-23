@@ -19,10 +19,12 @@ namespace WFX::Utils {
 static constexpr std::size_t MAX_EXPANSION_ATTEMPTS = 4;
 
 // vvv Main stuff vvv
-BufferPool& BufferPool::GetInstance()
+// Global pool instance
+static BufferPool __GlobalBufferPool;
+
+BufferPool& GetBufferPool() noexcept
 {
-    static BufferPool pool;
-    return pool;
+    return __GlobalBufferPool;
 }
 
 BufferPool::~BufferPool()
@@ -33,14 +35,18 @@ BufferPool::~BufferPool()
     for(void* segment : shard_.memorySegments)
         AlignedFree(segment);
 
-    logger_.Info(
-        "[BufferPool]: Shutdown successfully. Metrics: ",
-        "allocs=",     stats_.totalAllocations,   ", ",
-        "frees=",      stats_.totalFrees,         ", ",
-        "reallocs=",   stats_.totalReallocs,      ", ",
-        "expansions=", stats_.poolExpansions,     ", ",
-        "failures=",   stats_.allocationFailures
-    );
+    // Need to do this because now every singleton in this system initializes itself-
+    // -asap as its all global statics. Meaning it would exist in master process as well
+    // And it will print garbage metrics unecessarily
+    if(IsInitialized())
+        logger_.Info(
+            "[BufferPool]: Shutdown successfully. Metrics: ",
+            "allocs=",     stats_.totalAllocations,   ", ",
+            "frees=",      stats_.totalFrees,         ", ",
+            "reallocs=",   stats_.totalReallocs,      ", ",
+            "expansions=", stats_.poolExpansions,     ", ",
+            "failures=",   stats_.allocationFailures
+        );
 }
 
 void BufferPool::Init(std::size_t initialSize, ResizeCallback resizeCb, OOMCallback oomCb)

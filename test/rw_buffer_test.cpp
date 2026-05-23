@@ -26,7 +26,7 @@ constexpr std::size_t DEFAULT_SIZE = 64;
 constexpr std::size_t MAX_SIZE     = 4096;
 
 int main() {
-    Logger::GetInstance().SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
+    GetLogger().SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
     BufferPool pool{1, 1024 * 4, [](std::size_t curSize) { return curSize * 2; }};
 
     // Use unique_ptr to avoid vector moving RWBuffer objects
@@ -35,9 +35,9 @@ int main() {
     for (std::size_t i = 0; i < NUM_BUFFERS; ++i) {
         auto buf = std::make_unique<RWBuffer>();
         if (!buf->InitReadBuffer(pool, DEFAULT_SIZE))
-            Logger::GetInstance().Fatal("Failed to init read buffer");
+            GetLogger().Fatal("Failed to init read buffer");
         if (!buf->InitWriteBuffer(DEFAULT_SIZE))
-            Logger::GetInstance().Fatal("Failed to init write buffer");
+            GetLogger().Fatal("Failed to init write buffer");
         buffers.push_back(std::move(buf));
     }
 

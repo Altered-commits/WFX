@@ -93,15 +93,15 @@ private: // Helper Functions
     ssize_t            WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);
 
 private: // Misc
-    Config&            config_     = Config::GetInstance();
-    Logger&            logger_     = Logger::GetInstance();
-    FileCache&         fileCache_  = FileCache::GetInstance();
-    BufferPool&        pool_       = BufferPool::GetInstance();
+    Config&            config_     = GetConfig();
+    Logger&            logger_     = GetLogger();
+    FileCache&         fileCache_  = GetFileCache();
+    BufferPool&        pool_       = GetBufferPool();
 
-    IpLimiter          ipLimiter_         = {pool_};
-    ReceiveCallback    onReceive_         = {};
-    std::atomic<bool>  running_           = true;
-    bool               useHttps_          = false;
+    IpLimiter          ipLimiter_  = {pool_};
+    ReceiveCallback    onReceive_  = {};
+    std::atomic<bool>  running_    = true;
+    bool               useHttps_   = false;
 
 private: // Constexpr stuff
     constexpr static char          CHUNK_END[]            = "0\r\n\r\n";

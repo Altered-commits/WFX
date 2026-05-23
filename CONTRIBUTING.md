@@ -26,10 +26,12 @@ User code doesn't need global namespaces unless you wish to create them (like wh
 
 ### Coding Conventions
 
-- **Namespaces / Classes / Structs / Enums / Function identifier:** `PascalCase`
+- **Namespaces / Classes / Structs / Enums / Function identifiers:** `PascalCase`
 - **Variables / Function parameters / Locals:** `camelCase`
-- **Globals / Constants / Enum values:** `SCREAMING_SNAKE_CASE`
-- **Internal engine-facing symbols:** prefix `__` (this is a bit debatable for now, use sparingly)
+- **Member variables:** `camelCase_` (trailing underscore)
+- **Constants / Enum values:** `SCREAMING_SNAKE_CASE`
+- **Globals:** `__PascalCase` (e.g. `__GlobalLogger`)
+- **Macros:** `SCREAMING_SNAKE_CASE` (e.g. `WFX_IS_TTY`)
 
 **Formatting:** 4 spaces, no tabs. Braces: same line for **almost** everything except function definitions (unless u wish to write entire function in a single line).
 

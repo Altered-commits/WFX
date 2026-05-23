@@ -2,8 +2,8 @@
 
 #include "http_openssl.hpp"
 #include "config/config.hpp"
-#include "http/common/http_global_state.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/crypt/hash.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/x509v3.h>
@@ -17,8 +17,8 @@ using namespace WFX::Core;  // For 'Config'
 // vvv Constructors and Destructors vvv
 HttpOpenSSL::HttpOpenSSL()
 {
-    auto& logger    = Logger::GetInstance();
-    auto& sslConfig = Config::GetInstance().sslConfig;
+    auto& logger    = GetLogger();
+    auto& sslConfig = GetConfig().sslConfig;
 
     // Start of pain and suffering :(
     GlobalOpenSSLInit();
@@ -64,7 +64,7 @@ HttpOpenSSL::HttpOpenSSL()
         SSL_CTX_sess_set_cache_size(ctx, sslConfig.sessionCacheSize);
     }
 
-    auto& ticketKey = GetGlobalState().sslKey;
+    auto& ticketKey = GetRandomPool().GetSSLKey();
     if(SSL_CTX_set_tlsext_ticket_keys(ctx, ticketKey.data(), ticketKey.size()) != 1)
         LogOpenSSLError("Failed to set session ticket keys");
     
@@ -120,7 +120,7 @@ HttpOpenSSL::~HttpOpenSSL()
         ctx = nullptr;
     }
 
-    Logger::GetInstance().Info("[HttpOpenSSL]: Successfully cleaned up SSL context");
+    GetLogger().Info("[HttpOpenSSL]: Successfully cleaned up SSL context");
 }
 
 // vvv Main Functions vvv
@@ -350,7 +350,7 @@ void HttpOpenSSL::GlobalOpenSSLInit()
         return;
 
     if(OPENSSL_init_ssl(OPENSSL_INIT_LOAD_CONFIG, nullptr) != 1)
-        Logger::GetInstance().Fatal("[HttpOpenSSL]: Initialization failed");
+        GetLogger().Fatal("[HttpOpenSSL]: Initialization failed");
 
     initialized = true;
 }
@@ -373,9 +373,9 @@ void HttpOpenSSL::LogOpenSSLError(const char* message, bool fatal)
         : std::string(message) + ". OpenSSL Reason(s): " + allErrors;
 
     if(fatal)
-        Logger::GetInstance().Fatal("[HttpOpenSSL]: ", fullMessage);
+        GetLogger().Fatal("[HttpOpenSSL]: ", fullMessage);
     else
-        Logger::GetInstance().Error("[HttpOpenSSL]: ", fullMessage);
+        GetLogger().Error("[HttpOpenSSL]: ", fullMessage);
 }
 
 } // namespace WFX::Http

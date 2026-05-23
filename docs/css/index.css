@@ -1,0 +1,200 @@
+.wfx-hero {
+  padding: 5rem 0 3.5rem;
+  text-align: center;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  margin-bottom: 2.5rem;
+}
+
+.wfx-badge {
+  display: inline-block;
+  font-family: var(--md-code-font-family);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  color: var(--md-default-fg-color--light);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 99px;
+  padding: 3px 14px;
+  margin-bottom: 1.5rem;
+}
+
+.wfx-title {
+  font-size: 4rem;
+  font-weight: 700;
+  letter-spacing: -1.5px;
+  line-height: 1;
+  margin: 0 0 1.25rem !important;
+}
+
+.wfx-sub {
+  font-size: 1rem;
+  color: var(--md-default-fg-color--light);
+  line-height: 1.75;
+  max-width: 480px;
+  margin: 0 auto 2rem !important;
+}
+
+.wfx-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.wfx-section-label {
+  font-family: var(--md-code-font-family);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--md-default-fg-color--lighter);
+  margin-top: 2.5rem !important;
+  margin-bottom: 1rem !important;
+}
+
+.wfx-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--md-default-fg-color--lightest);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.wfx-card {
+  background: var(--md-default-bg-color);
+  padding: 1.1rem 1.25rem;
+}
+
+.wfx-card-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--md-default-fg-color);
+  margin: 0 0 4px !important;
+}
+
+.wfx-card-body {
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light);
+  line-height: 1.6;
+  margin: 0 !important;
+}
+
+.wfx-card--more {
+  grid-column: 1 / -1;
+  background: var(--md-code-bg-color);
+  padding: 0.8rem 1.25rem;
+  opacity: 0.55;
+}
+
+.wfx-card--more .wfx-card-title,
+.wfx-card--more .wfx-card-body {
+  display: inline;
+}
+
+.wfx-card--more .wfx-card-title::after {
+  content: " — ";
+  font-weight: 400;
+}
+
+.wfx-principles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.wfx-principle {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 8px;
+  padding: 1.1rem 1.25rem;
+}
+
+.wfx-principle-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--md-default-fg-color);
+  margin: 0 0 5px !important;
+}
+
+.wfx-principle-body {
+  font-size: 0.77rem;
+  color: var(--md-default-fg-color--light);
+  line-height: 1.65;
+  margin: 0 !important;
+}
+
+.wfx-fit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.wfx-fit-col {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.wfx-fit-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.55rem 1rem;
+  margin: 0 !important;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.wfx-fit-header--good {
+  color: #2e7d32;
+  background: rgba(46, 125, 50, 0.07);
+}
+
+.wfx-fit-header--bad {
+  color: var(--md-default-fg-color--light);
+  background: rgba(180, 50, 50, 0.05);
+}
+
+.wfx-fit-list {
+  list-style: none;
+  margin: 0 !important;
+  padding: 0.25rem 1rem 0.5rem !important;
+}
+
+.wfx-fit-list li {
+  font-size: 0.78rem;
+  color: var(--md-default-fg-color--light);
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  line-height: 1.5;
+}
+
+.wfx-fit-list li:last-child {
+  border-bottom: none;
+}
+
+.wfx-devnote {
+  border-left: 3px solid var(--md-default-fg-color--lightest);
+  padding: 0.25rem 1.25rem;
+  margin-top: 0.5rem;
+  margin-bottom: 4rem;
+}
+
+.wfx-devnote p {
+  font-size: 0.85rem;
+  color: var(--md-default-fg-color--light);
+  line-height: 1.8;
+  margin: 0 0 0.6rem !important;
+}
+
+.wfx-devnote p:last-child {
+  margin: 0 !important;
+}
+
+@media (max-width: 960px) {
+  .wfx-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .wfx-title { font-size: 2.75rem; }
+  .wfx-grid { grid-template-columns: repeat(2, 1fr); }
+  .wfx-principles { grid-template-columns: 1fr; }
+  .wfx-fit { grid-template-columns: 1fr; }
+}

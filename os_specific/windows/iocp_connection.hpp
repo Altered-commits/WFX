@@ -8,7 +8,7 @@
 #include "http/limits/tick_scheduler/tick_scheduler.hpp"
 #include "utils/fixed_pool/fixed_pool.hpp"
 #include "utils/hash_map/concurrent_map/concurrent_hash_map.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include "utils/perf_timer/perf_timer.hpp" // For debugging
 
 #include <concurrentqueue.h>
@@ -122,7 +122,7 @@ public: // Write Buffer flushing stuff
     DWORD  flushPeriodMs_ = 5;
 
 public:
-    Logger&    logger_  = Logger::GetInstance();
+    Logger&    logger_  = GetLogger();
     IpLimiter& limiter_ = IpLimiter::GetInstance();
     Config&    config_  = Config::GetInstance();
 

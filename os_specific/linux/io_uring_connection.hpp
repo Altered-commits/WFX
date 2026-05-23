@@ -66,11 +66,11 @@ private:
     // Misc
     IpLimiter&        ipLimiter_  = IpLimiter::GetInstance();
     Config&           config_     = Config::GetInstance();
-    Logger&           logger_     = Logger::GetInstance();
+    Logger&           logger_     = GetLogger();
     std::atomic<bool> running_    = true;
     ReceiveCallback   onReceive_;
     BufferPool        pool_{1, 1024 * 1024, [](std::size_t currSize){ return currSize * 2; }};
-    FileCache*        fileCache_  = GetGlobalState().fileCache;
+    FileCache*        fileCache_  = GetMasterState().fileCache;
 
 private:
     // IoUring

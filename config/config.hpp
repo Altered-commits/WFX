@@ -89,19 +89,26 @@ struct OSSpecificConfig {
 #endif // _WIN32
 };
 
+struct LoggingConfig {
+    std::uint8_t  minLevel         = 2;     // 0=trace 1=debug 2=info 3=warn 4=error 5=fatal
+    bool          enableStdout     = true;
+    bool          enableColors     = true;
+    bool          enableTimestamps = true;
+    bool          enablePrometheus = false;
+    bool          enableFile       = false;
+    std::uint16_t maxRotations     = 2;
+    std::uint32_t maxFileSize      = 16 * 1024 * 1024;
+};
+
 struct MiscConfig {
     std::uint16_t fileCacheSize     = 20;
     std::uint16_t cacheChunkSize    = 2 * 1024;
     std::uint32_t templateChunkSize = 16 * 1024;
-    std::string   crashLogDir       = "/logs";
 };
 
 // Main Config loader
 // TODO: Add checks for maxRecvBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
 class Config final {
-public: // Access
-    static Config& GetInstance();
-
 public: // Load from TOML
     void LoadCoreSettings(std::string_view path);
     void LoadFinalSettings(const std::string& projectDir);
@@ -113,17 +120,12 @@ public: // Main storage space for configurations
     ENVConfig        envConfig;
     SSLConfig        sslConfig;
     OSSpecificConfig osSpecificConfig;
+    LoggingConfig    loggingConfig;
     MiscConfig       miscConfig;
-
-private:
-    Config()  = default;
-    ~Config() = default;
-
-    Config(const Config&)            = delete;
-    Config& operator=(const Config&) = delete;
-    Config(Config&&)                 = delete;
-    Config& operator=(Config&&)      = delete;
 };
+
+// Free function declaration (defined in 'config.cpp')
+Config& GetConfig() noexcept;
 
 } // namespace WFX::Core
 

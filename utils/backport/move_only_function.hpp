@@ -2,7 +2,7 @@
 #define WFX_UTILS_MOVE_ONLY_FUNCTION_HPP
 
 #include <type_traits>
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 namespace WFX::Utils {
 
@@ -101,7 +101,7 @@ public:
     R operator()(Args... args)
     {
         if(!impl_)
-            Logger::GetInstance().Fatal("[MoveOnlyFunction]: 'operator()' called but function is nullptr");
+            GetLogger().Fatal("[MoveOnlyFunction]: 'operator()' called but function is nullptr");
 
         return impl_->Invoke(std::forward<Args>(args)...);
     }
@@ -110,7 +110,7 @@ public:
     R operator()(Args... args) const
     {
         if(!impl_)
-            Logger::GetInstance().Fatal("[MoveOnlyFunction]: 'operator() const' called but function is nullptr");
+            GetLogger().Fatal("[MoveOnlyFunction]: 'operator() const' called but function is nullptr");
 
         return impl_->InvokeConst(std::forward<Args>(args)...);
     }

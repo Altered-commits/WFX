@@ -1,6 +1,6 @@
 #include "route_trie.hpp"
 #include "utils/backport/string.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 namespace WFX::Http {
 
@@ -128,7 +128,7 @@ void RouteTrie::PushGroup(std::string_view prefix)
 void RouteTrie::PopGroup()
 {
     if(cursorStack_.empty())
-        Utils::Logger::GetInstance().Fatal("[RouteTrie]: PopGroup called without corresponding PushGroup.");
+        Utils::GetLogger().Fatal("[RouteTrie]: PopGroup called without corresponding PushGroup.");
 
     insertCursor_ = cursorStack_.back();
     cursorStack_.pop_back();
@@ -137,7 +137,7 @@ void RouteTrie::PopGroup()
 // vvv Helper Functions vvv
 TrieNode* RouteTrie::InsertRoute(std::string_view route)
 {
-    auto& logger = Utils::Logger::GetInstance();
+    auto& logger = Utils::GetLogger();
 
     TrieNode* current = insertCursor_;
     route = StripRoute(route);

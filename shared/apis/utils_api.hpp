@@ -5,31 +5,28 @@
 
 namespace WFX::Shared {
 
-enum class UtilsAPIVersion : std::uint8_t {
-    V1 = 1,
-};
-
 // vvv All aliases for clarity vvv
-using LogInfoFn  = void(*)(const char* msg);
-using LogWarnFn  = void(*)(const char* msg);
-using LogErrorFn = void(*)(const char* msg);
-using LogFatalFn = void(*)(const char* msg);
+using LogFn = void(*)(const char* msg);
+
+using PrometheusFlushFn = void(*)(void* backend);
 
 // vvv API declarations vvv
-struct UTILS_API_TABLE {
-    // vvv Logging Operations vvv
-    LogInfoFn   LogInfo;
-    LogWarnFn   LogWarn;
-    LogErrorFn  LogError;
-    LogFatalFn  LogFatal;
+struct UTILS_API_EXT1 {
+    // Logging
+    LogFn LogTrace;
+    LogFn LogDebug;
+    LogFn LogInfo;
+    LogFn LogWarn;
+    LogFn LogError;
+    LogFn LogFatal;
 
-    // Metadata
-    UtilsAPIVersion apiVersion;
+    // Prometheus
+    PrometheusFlushFn PrometheusFlush;
 };
-static_assert(std::is_standard_layout<UTILS_API_TABLE>::value, "'UTILS_API_TABLE' must be standard layout");
+static_assert(std::is_standard_layout<UTILS_API_EXT1>::value, "'UTILS_API_EXT1' must be standard layout");
 
-// vvv Getter & Initializers vvv
-const UTILS_API_TABLE* GetUtilsAPIV1();
+// vvv Getter vvv
+const UTILS_API_EXT1* GetUtilsAPIExt1();
 
 } // namespace WFX::Shared
 

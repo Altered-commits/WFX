@@ -93,7 +93,7 @@ private:
     Shared::StreamGenerator stream_;   // When bodyKind_ == STREAM
 
     // Used in 'Append' alot
-    Core::NetworkConfig& networkConfig_ = Core::Config::GetInstance().networkConfig;
+    Core::NetworkConfig& networkConfig_ = Core::GetConfig().networkConfig;
 };
 
 } // namespace WFX::Http

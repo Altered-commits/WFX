@@ -12,16 +12,18 @@
 
 namespace WFX::Core {
 
-TemplateEngine& TemplateEngine::GetInstance()
+// Global engine instance
+static TemplateEngine __GlobalTemplateEngine;
+
+TemplateEngine& GetTemplateEngine() noexcept
 {
-    static TemplateEngine engine;
-    return engine;
+    return __GlobalTemplateEngine;
 }
 
 // vvv Main Functions vvv
 TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 {
-    auto& projectConfig = Config::GetInstance().projectConfig;
+    auto& projectConfig = GetConfig().projectConfig;
 
     bool               resaveCacheFile     = false;
     bool               hasDynamicElement   = false;
@@ -311,7 +313,7 @@ TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
 // vvv Helper Functions vvv
 TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate)
 {
-    std::uint32_t      chunkSize = Config::GetInstance().miscConfig.templateChunkSize;
+    std::uint32_t      chunkSize = GetConfig().miscConfig.templateChunkSize;
     CompilationContext ctx       = { std::move(outTemplate), chunkSize };
 
     // Initialize stack with main template
@@ -583,7 +585,7 @@ __DefaultChunkProcessing:
 // vvv Helper Functions vvv
 bool TemplateEngine::PushFile(CompilationContext& context, const std::string& relPath)
 {
-    auto& config = Config::GetInstance();
+    auto& config = GetConfig();
 
     std::string fullPath = config.projectConfig.templateDir + "/" + relPath;
 

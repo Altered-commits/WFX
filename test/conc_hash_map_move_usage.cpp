@@ -40,7 +40,7 @@ size_t getProcessMemoryUsageKB() {
 using namespace WFX::Utils;
 
 int main() {
-    Logger::GetInstance().SetLevelMask(WFX_LOG_NONE);
+    GetLogger().SetLevelMask(WFX_LOG_NONE);
 
     constexpr size_t NUM_OPS = 1'000;
     constexpr size_t BUF_SIZE = 4096;

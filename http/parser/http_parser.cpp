@@ -33,9 +33,9 @@ HttpParseState Parse(ConnectionContext* ctx)
         return HttpParseState::PARSE_ERROR;
 
     // Config variables
-    std::uint32_t maxBufferSize      = Config::GetInstance().networkConfig.maxReadBufferSize;
-    std::uint32_t maxBodyTotalSize   = Config::GetInstance().networkConfig.maxBodyTotalSize;
-    std::uint32_t maxHeaderTotalSize = Config::GetInstance().networkConfig.maxHeaderTotalSize;
+    std::uint32_t maxBufferSize      = GetConfig().networkConfig.maxReadBufferSize;
+    std::uint32_t maxBodyTotalSize   = GetConfig().networkConfig.maxBodyTotalSize;
+    std::uint32_t maxHeaderTotalSize = GetConfig().networkConfig.maxHeaderTotalSize;
 
     // Connection Context variables
     std::uint32_t& trackBytes = ctx->trackBytes;
@@ -249,7 +249,7 @@ bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestH
     std::size_t nextPos     = 0;
     std::string_view line;
 
-    auto& networkConfig = Config::GetInstance().networkConfig;
+    auto& networkConfig = GetConfig().networkConfig;
 
     while(true) {
         if(!SafeFindCRLF(data, size, pos, nextPos, line))

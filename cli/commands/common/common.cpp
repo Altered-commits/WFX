@@ -2,8 +2,7 @@
 
 #include "config/config.hpp"
 #include "engine/core_engine.hpp"
-#include "http/common/http_global_state.hpp"
-#include "utils/logger/logger.hpp"
+#include "http/common/http_master_state.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/backport/string.hpp"
@@ -15,14 +14,15 @@
 
 namespace WFX::CLI {
 
+using namespace WFX::Http;  // For 'GetMasterState'
 using namespace WFX::Utils; // For ...
 using namespace WFX::Core;  // For 'Config'
 
 // vvv Common Stuff vvv
 void HandleBuildDirectory()
 {
-    auto& logger = Logger::GetInstance();
-    auto& config = Config::GetInstance();
+    auto& logger = GetLogger();
+    auto& config = GetConfig();
 
     auto& projectConfig = config.projectConfig;
     auto& buildConfig   = config.buildConfig;
@@ -71,8 +71,8 @@ void HandleUserCxxCompilation(CxxCompilationOption opt)
     /*
      * Handles both src and template cxx compilation with one single build directory
      */
-    auto& logger      = Logger::GetInstance();
-    auto& buildConfig = Config::GetInstance().buildConfig;
+    auto& logger      = GetLogger();
+    auto& buildConfig = GetConfig().buildConfig;
 
     std::string cmakeBuildCommand = "cmake --build " + buildConfig.buildDir;
 
@@ -95,35 +95,11 @@ void HandleUserCxxCompilation(CxxCompilationOption opt)
 
 // vvv OS Specific Stuff vvv
 #ifdef _WIN32
-BOOL WINAPI ConsoleHandler(DWORD signal)
-{
-    if(signal == CTRL_C_EVENT) {
-        Logger::GetInstance().Info("[WFX]: Shutting down...");
-        shouldStop = true;
-        return TRUE;
-    }
-    return FALSE;
-}
-
-LONG WINAPI ExceptionFilter(EXCEPTION_POINTERS* ep) {
-    HANDLE file = CreateFileA("crash.dmp", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    
-    if(file != INVALID_HANDLE_VALUE) {
-        MINIDUMP_EXCEPTION_INFORMATION mei{};
-        mei.ThreadId = GetCurrentThreadId();
-        mei.ExceptionPointers = ep;
-        mei.ClientPointers = FALSE;
-        
-        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, MiniDumpWithFullMemory, &mei, nullptr, nullptr);
-        CloseHandle(file);
-    }
-
-    return EXCEPTION_EXECUTE_HANDLER;
-}
+    // Windows: future work
 #else
 void HandleMasterSignal(int)
 {
-    auto& globalState = Http::GetGlobalState();
+    auto& globalState = GetMasterState();
     globalState.shouldStop = true;
 
     if(globalState.workerPGID > 0)
@@ -132,7 +108,7 @@ void HandleMasterSignal(int)
 
 void HandleWorkerSignal(int)
 {
-    auto& globalState = Http::GetGlobalState();
+    auto& globalState = GetMasterState();
     globalState.shouldStop = true;
     
     // Stop is atomic, its safe to call it in signal handler
@@ -151,9 +127,9 @@ void PinWorkerToCPU(int workerIndex) {
     CPU_SET(cpu, &cpuset);
 
     if(sched_setaffinity(0, sizeof(cpuset), &cpuset) < 0)
-        Logger::GetInstance().Error("[WFX-Master]: Failed to pin worker ", workerIndex, " to CPU");
+        GetLogger().Error("[WFX-Master]: Failed to pin worker ", workerIndex, " to CPU");
 
-    Logger::GetInstance().Info("[WFX-Master]: Worker ", workerIndex, " pinned to CPU ", cpu);
+    GetLogger().Info("[WFX-Master]: Worker ", workerIndex, " pinned to CPU ", cpu);
 }
 #endif
 

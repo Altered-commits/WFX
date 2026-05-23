@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include "token.hpp"
 
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 #define SANITY_CHECK(cnd) ((cur_chr != '\0') && (cnd))
 #define IS_DIGIT(char) (char >= '0' && char <= '9')
@@ -74,7 +74,7 @@ class Lexer
         static std::size_t line;
     
     private:
-        Utils::Logger& logger_ = Utils::Logger::GetInstance();
+        Utils::Logger& logger_ = Utils::GetLogger();
 
         //For Differentiation of keyword and identifier
         const std::unordered_map<std::string_view, TokenType> identifier_map = {

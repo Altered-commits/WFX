@@ -6,7 +6,7 @@
 #include "utils/pool/buffer_pool.hpp"
 #include "utils/fileops/filecache.hpp"
 #include "utils/fileops/filesystem.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include "utils/crypt/string.hpp"
 
 #include <cstring>
@@ -95,7 +95,7 @@ void HttpResponse::AbortWithError(HttpStatus status, std::string_view message)
 void HttpResponse::FatalIfCommitted(const char* caller)
 {
     if(phase_ == ResponsePhase::COMMITTED)
-        Logger::GetInstance().Fatal("[HttpResponse]: '", caller, "()' called after Commit()");
+        GetLogger().Fatal("[HttpResponse]: '", caller, "()' called after Commit()");
 }
 
 void HttpResponse::EnsureStatusWritten()
@@ -140,7 +140,7 @@ void HttpResponse::EnsureBodyOpen()
         return;
 
     if(StatusForbidsBody(status_))
-        Logger::GetInstance().Fatal(
+        GetLogger().Fatal(
             "[HttpResponse]: Body not allowed for this status code [1xx, 204 and 304]"
         );
 
@@ -159,7 +159,7 @@ void HttpResponse::WriteStatus(HttpStatus code)
     FatalIfCommitted("WriteStatus");
 
     if(phase_ != ResponsePhase::FRESH)
-        Logger::GetInstance().Fatal("[HttpResponse]: 'WriteStatus()' called after headers already written");
+        GetLogger().Fatal("[HttpResponse]: 'WriteStatus()' called after headers already written");
 
     status_ = code;
 
@@ -185,7 +185,7 @@ void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
 {
     FatalIfCommitted("WriteHeader");
 
-    auto& logger = Logger::GetInstance();
+    auto& logger = GetLogger();
 
     if(phase_ == ResponsePhase::BODY)
         logger.Fatal("[HttpResponse]: 'WriteHeader()' called after body already started");
@@ -220,7 +220,7 @@ void HttpResponse::WriteFile(std::string_view path, bool autoHandle404)
 {
     FatalIfCommitted("WriteFile");
 
-    auto& logger = Logger::GetInstance();
+    auto& logger = GetLogger();
 
     if(phase_ == ResponsePhase::BODY)
         logger.Fatal("[HttpResponse]: 'WriteFile()' called after body already started");
@@ -265,7 +265,7 @@ void HttpResponse::WriteStream(StreamGenerator gen, bool chunked)
 {
     FatalIfCommitted("WriteStream");
 
-    auto& logger = Logger::GetInstance();
+    auto& logger = GetLogger();
 
     if(bodyKind_ != BodyKind::NONE)
         logger.Fatal("[HttpResponse]: 'WriteStream()' called after body kind already set");
@@ -422,7 +422,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
 {
     FatalIfCommitted("SendTemplate");
 
-    auto meta = TemplateEngine::GetInstance().GetTemplate(std::move(path));
+    auto meta = GetTemplateEngine().GetTemplate(std::move(path));
     if(!meta) {
         AbortWithError(HttpStatus::NOT_FOUND, "Template not found :(");
         return;
@@ -441,7 +441,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
         return;
     }
 
-    auto [fd, size] = FileCache::GetInstance().GetFileDesc(meta->filePath);
+    auto [fd, size] = GetFileCache().GetFileDesc(meta->filePath);
     if(fd == WFX_INVALID_FILE) {
         AbortWithError(HttpStatus::INTERNAL_SERVER_ERROR, "Template file descriptor failed");
         return;
@@ -467,7 +467,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
         std::string               carry;
     };
 
-    auto* s = BufferPool::GetInstance().Alloc(sizeof(State));
+    auto* s = GetBufferPool().Alloc(sizeof(State));
     if(!s) {
         AbortWithError(HttpStatus::INTERNAL_SERVER_ERROR, "Template allocation failed");
         return;
@@ -576,7 +576,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
         // Destroy
         [](void* c) {
             static_cast<State*>(c)->~State();
-            BufferPool::GetInstance().Free(c);
+            GetBufferPool().Free(c);
         }
 
     }, true);

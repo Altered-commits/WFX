@@ -272,8 +272,8 @@ struct HttpConnectionHandler {
 
 // Write a std::hash specialization for WFXIpAddress
 namespace std {
-    using WFX::Utils::Logger;
-    using WFX::Utils::RandomPool;
+    using WFX::Utils::GetLogger;
+    using WFX::Utils::GetRandomPool;
     using WFX::Utils::Hasher::SipHash24;
     using WFX::Http::WFXIpAddress;
 
@@ -287,8 +287,8 @@ namespace std {
             static const struct InitKeyOnce {
                 InitKeyOnce()
                 {
-                    if(!RandomPool::GetInstance().GetBytes(sipKey, sizeof(sipKey)))
-                        Logger::GetInstance().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
+                    if(!GetRandomPool().GetBytes(sipKey, sizeof(sipKey)))
+                        GetLogger().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
                 }
             } _initOnce;
 

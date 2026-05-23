@@ -1,6 +1,6 @@
 #include "hash.hpp"
 #include "shared/utils/hash.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include <cstring>
 #include <bit>
 
@@ -24,8 +24,7 @@ using namespace WFX::Shared; // For 'Rotl', 'Rotr', etc.
 // vvv HASHERS vvv
 std::uint64_t Hasher::SipHash24(
     const std::uint8_t* data, std::uint64_t len, const std::uint8_t key[16]
-) noexcept
-{
+) noexcept {
     std::uint64_t k0, k1;
     memcpy(&k0, key, 8);
     memcpy(&k1, key + 8, 8);
@@ -83,17 +82,22 @@ std::uint64_t Hasher::SipHash24(std::string_view str, const std::uint8_t key[16]
     return SipHash24(reinterpret_cast<const std::uint8_t*>(str.data()), str.size(), key);
 }
 
-// vvv TRUE RANDOMIZER vvv
+// vvv RANDOM POOL vvv
+// Global pool instance
+static RandomPool __GlobalRandomPool;
+
+RandomPool& GetRandomPool() noexcept
+{
+    return __GlobalRandomPool;
+}
+
 RandomPool::RandomPool()
 {
     if(!RefillBytes())
-        Logger::GetInstance().Fatal("[RandomPool]: Failed to construct randomized byte pool.");
-}
+        GetLogger().Fatal("[RandomPool]: Failed to construct randomized byte pool.");
 
-RandomPool& RandomPool::GetInstance()
-{
-    static RandomPool pool;
-    return pool;
+    if(!GetBytes(sslKey_.data(), SSL_KEY_SIZE))
+        GetLogger().Fatal("[RandomPool]: Failed to generate SSL key");
 }
 
 bool RandomPool::GetBytes(std::uint8_t* out, std::size_t len)

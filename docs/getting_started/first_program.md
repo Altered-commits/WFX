@@ -29,7 +29,7 @@ To start the server, run this final command:
 By default:
 
 - The server runs on 127.0.0.1:8080
-- Three routes are preconfigured in `main.cpp` inside of `src/` directory:
+- Four routes are preconfigured in `main.cpp` inside of `src/` directory:
     - `/text` -> returns plain text
     - `/im-json` -> streams JSON directly to the response
     - `/rm-json` -> builds a JSON object in memory before sending

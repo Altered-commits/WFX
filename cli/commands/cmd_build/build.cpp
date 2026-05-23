@@ -11,8 +11,8 @@ using namespace WFX::Core; // For 'TemplateEngine', 'Config'
 int BuildProject(const std::string& project, const std::string& buildType, bool isDebug)
 {
     // Used by pretty much everything so yeah
-    auto& config = Config::GetInstance();
-    auto& logger = Logger::GetInstance();
+    auto& config = GetConfig();
+    auto& logger = GetLogger();
 
     if(!FileSystem::DirectoryExists(project.c_str()))
         logger.Fatal("[WFX]: '", project, "' directory does not exist");
@@ -25,7 +25,7 @@ int BuildProject(const std::string& project, const std::string& buildType, bool 
     HandleBuildDirectory();
 
     if(buildType == "templates") {
-        auto& templateEngine = TemplateEngine::GetInstance();
+        auto& templateEngine = GetTemplateEngine();
 
         auto [success, hasDynamic] = templateEngine.PreCompileTemplates();
         if(!success)

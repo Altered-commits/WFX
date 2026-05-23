@@ -6,7 +6,7 @@
 #include "config/config.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/limits/ip_limiter/ip_limiter.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 #include <ws2ipdef.h>
 #include <winsock2.h>
@@ -92,7 +92,7 @@ private:
     WFXSocket   listenSocket_;
     HANDLE      iocp_;
     BufferPool& allocator_;
-    Logger&     logger_      = Logger::GetInstance();
+    Logger&     logger_      = GetLogger();
     IpLimiter&  connLimiter_ = IpLimiter::GetInstance();
     Config&     config_      = Config::GetInstance();
 

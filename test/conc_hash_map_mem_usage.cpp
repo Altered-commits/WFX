@@ -65,10 +65,10 @@ void LeakCheckTestThreaded(
 
 int main()
 {
-    Logger::GetInstance().SetLevelMask(WFX_LOG_INFO);
+    GetLogger().SetLevelMask(WFX_LOG_INFO);
     ConcurrentHashMap<uint64_t, uint64_t> map(512 * 1024);
 
-    Logger::GetInstance().Info("[main] Map initialized successfully.");
+    GetLogger().Info("[main] Map initialized successfully.");
     std::atomic<bool> stopFlag = false;
 
     const int durationSec = 80;
@@ -83,11 +83,11 @@ int main()
         }
     }
 
-    Logger::GetInstance().Info("[main] Starting RSS monitor with ", threadCount, " threads...");
+    GetLogger().Info("[main] Starting RSS monitor with ", threadCount, " threads...");
 
     for (int t = 0; t < durationSec; ++t) {
         std::size_t rss = GetProcessRSS();
-        Logger::GetInstance().Info("[t=", t, "s] RSS = ", (rss / (1024.0 * 1024.0)), " MB");
+        GetLogger().Info("[t=", t, "s] RSS = ", (rss / (1024.0 * 1024.0)), " MB");
         // std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
@@ -95,6 +95,6 @@ int main()
     for (auto& th : threads)
         th.join();
 
-    Logger::GetInstance().Info("[DONE] Leak check complete.");
+    GetLogger().Info("[DONE] Leak check complete.");
     return 0;
 }

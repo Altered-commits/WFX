@@ -20,7 +20,7 @@ bool IpLimiter::AllowConnection(const WFXIpAddress &ip)
 {
     auto* entry = ipLimits_.GetOrInsert(NormalizeIp(ip), {});
     if(entry) {
-        auto& cfg = Config::GetInstance().networkConfig;
+        auto& cfg = GetConfig().networkConfig;
 
         if(entry->connectionCount >= cfg.maxConnectionsPerIp)
             return false;
@@ -40,7 +40,7 @@ bool IpLimiter::AllowRequest(const WFXIpAddress& ip)
     auto* entry = ipLimits_.Get(NormalizeIp(ip));
     if(entry) {
         const auto now = std::chrono::steady_clock::now();
-        const auto& cfg = Config::GetInstance().networkConfig;
+        const auto& cfg = GetConfig().networkConfig;
 
         TokenBucket& bucket = entry->bucket;
 

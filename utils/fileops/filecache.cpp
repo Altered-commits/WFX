@@ -1,5 +1,5 @@
 #include "filecache.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 // For windows, filecache.hpp already includes windows.h anyways
 #ifdef _WIN32
@@ -17,20 +17,22 @@
 
 namespace WFX::Utils {
 
-// vvv Constructor & Destructor vvvv
-FileCache& FileCache::GetInstance()
+// Global cache instance
+static FileCache __GlobalFileCache;
+
+FileCache& GetFileCache() noexcept
 {
-    static FileCache fileCache;
-    return fileCache;
+    return __GlobalFileCache;
 }
 
+// vvv Constructor & Destructor vvvv
 FileCache::~FileCache()
 {
     for(auto& pair : entries_)
         CloseFile(pair.second.fd);
 
     if(!entries_.empty())
-        Logger::GetInstance().Info("[FileCache]: Closed all cached file descriptors successfully");
+        GetLogger().Info("[FileCache]: Closed all cached file descriptors successfully");
 }
 
 void FileCache::Init(std::size_t capacity)

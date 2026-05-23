@@ -1,16 +1,15 @@
 #ifndef WFX_UTILS_ARGUMENT_PARSER_HPP
 #define WFX_UTILS_ARGUMENT_PARSER_HPP
 
-#include "utils/logger/logger.hpp"
-
+#include "utils/diagnostics/logger.hpp"
 #include <string>
 #include <unordered_map>
 #include <vector>
 #include <functional>
 
-using CommandHandler = std::function<int(const std::unordered_map<std::string, std::string>&, const std::vector<std::string>&)>;
-
 namespace WFX::Utils {
+
+using CommandHandler = std::function<int(const std::unordered_map<std::string, std::string>&, const std::vector<std::string>&)>;
 
 class ArgumentParser {
 public:
@@ -39,7 +38,7 @@ public:
 private:
     std::unordered_map<std::string, Command> commands_;
 
-    Logger& logger_ = Logger::GetInstance();
+    Logger& logger_ = GetLogger();
 };
 
 } // namespace WFX::Utils

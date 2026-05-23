@@ -17,9 +17,9 @@ static constexpr std::uint32_t JSON_NIL      = 0xFFFFFFFF;
 static constexpr std::uint32_t JSON_TOMB     = 0xFFFFFFFE;
 static constexpr std::uint32_t JSON_INIT_CAP = 8;
 
-inline void* Alloc(std::size_t n)            noexcept { return WFX::Core::MemoryApi()->Alloc(n); }
-inline void  Free(void* ptr)                 noexcept { WFX::Core::MemoryApi()->Free(ptr); }
-inline void* Realloc(void* p, std::size_t n) noexcept { return WFX::Core::MemoryApi()->Realloc(p, n); }
+inline void* Alloc(std::size_t n)            noexcept { return WFX::Core::MemoryApiExt1()->Alloc(n); }
+inline void  Free(void* ptr)                 noexcept { WFX::Core::MemoryApiExt1()->Free(ptr); }
+inline void* Realloc(void* p, std::size_t n) noexcept { return WFX::Core::MemoryApiExt1()->Realloc(p, n); }
 
 // vvv JsonTag vvv
 //

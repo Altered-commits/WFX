@@ -52,4 +52,43 @@
     #define WFX_UNREACHABLE do {} while(0)
 #endif
 
+// ---------------------------------------------------------------------
+// WFX_FORCE_INLINE: Demand inlining regardless of optimization level
+// Note: compiler may still refuse for recursive or complex functions
+// ---------------------------------------------------------------------
+#if defined(_MSC_VER) || defined(__ICL) || defined(__INTEL_COMPILER)
+    #define WFX_FORCE_INLINE __forceinline
+#elif defined(__clang__) || defined(__GNUC__) || defined(__MINGW32__)
+    #define WFX_FORCE_INLINE inline __attribute__((always_inline))
+#else
+    #define WFX_FORCE_INLINE inline
+#endif
+
+// ---------------------------------------------------------------------
+// WFX_NOINLINE: Prevent inlining
+// ---------------------------------------------------------------------
+#if defined(_MSC_VER) || defined(__ICL) || defined(__INTEL_COMPILER)
+    #define WFX_NOINLINE __declspec(noinline)
+#elif defined(__clang__) || defined(__GNUC__) || defined(__MINGW32__)
+    #define WFX_NOINLINE __attribute__((noinline))
+#else
+    #define WFX_NOINLINE
+#endif
+
+// ---------------------------------------------------------------------
+// WFX_ASSUME(cond): Tell the optimizer the condition is always true
+//   Unlike WFX_UNREACHABLE, this takes an expression. The optimizer-
+//   -uses it as a constraint rather than eliminating the block entirely
+// ---------------------------------------------------------------------
+#if defined(_MSC_VER) || defined(__ICL) || defined(__INTEL_COMPILER)
+    #define WFX_ASSUME(cond) __assume(cond)
+#elif defined(__clang__)
+    #define WFX_ASSUME(cond) __builtin_assume(cond)
+#elif defined(__GNUC__) || defined(__MINGW32__)
+    // GCC has no __builtin_assume; synthesize it via unreachable
+    #define WFX_ASSUME(cond) do { if(!(cond)) __builtin_unreachable(); } while(0)
+#else
+    #define WFX_ASSUME(cond) (void)(cond)
+#endif
+
 #endif // WFX_SHARED_COMPILER_MACROS_HPP

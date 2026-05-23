@@ -5,7 +5,7 @@
 #include "http/request/http_request.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/common/http_error_msgs.hpp"
-#include "http/common/http_global_state.hpp"
+#include "http/common/http_master_state.hpp"
 #include "http/parser/http_parser.hpp"
 #include "shared/apis/master_api.hpp"
 #include "utils/backport/string.hpp"
@@ -39,8 +39,8 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 
     // Initialize API backend before anything else
-    Shared::InitHttpAPIV1(connHandler_.get(), &router_, &middleware_);
-    Shared::InitAsyncAPIV1(connHandler_.get());
+    Shared::InitHttpAPIExt1(connHandler_.get(), &router_, &middleware_);
+    Shared::InitAsyncAPIExt1(connHandler_.get());
 
     // We set it on our end because each compiled binary has its own copy of '__WFXApi'
     // If we want it to work on our end, we gotta set it here as well
@@ -222,7 +222,7 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
 {
     WFX_TRACE();
 
-    auto* httpApi = Shared::GetHttpAPIV1();
+    auto* httpApi = Shared::GetHttpAPIExt1();
     auto& req     = *ctx->requestInfo;
     auto& res     = *ctx->responseInfo;
     auto* node    = static_cast<const TrieNode*>(req.routeNode_);
@@ -291,7 +291,7 @@ __HandleResponse:
 void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
 {
     auto* ctx    = static_cast<ConnectionContext*>(ud);
-    auto* engine = GetGlobalState().enginePtr;
+    auto* engine = GetMasterState().enginePtr;
 
     if(result.status != AsyncStatus::COMPLETED) {
         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
