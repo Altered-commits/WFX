@@ -11,7 +11,7 @@
 #include <cstring>
 
 // Include your RandomPool implementation here
-#include "utils/crypt/hash.hpp"
+#include "utils/hash/hash.hpp"
 #include "utils/diagnostics/logger.hpp"
 
 using namespace WFX::Utils;

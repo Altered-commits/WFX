@@ -1,6 +1,6 @@
 #include "dotenv.hpp"
 
-#include "utils/backport/string.hpp"
+#include "utils/string/string.hpp"
 
 #include <cstring>
 #include <cerrno>
@@ -113,10 +113,13 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
             close(fd);
             return false;
         }
+
         if(r == 0)
             break;
+
         off += static_cast<size_t>(r);
     }
+
     close(fd);
 
     bool mlocked = false;
@@ -151,7 +154,6 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
     return true;
 
 #elif WFX_USE_WINDOWS
-    // Minimal Windows implementation
     WIN32_FILE_ATTRIBUTE_DATA fad;
     if(!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &fad))
         return false;
@@ -159,6 +161,7 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
     std::ifstream ifs(path, std::ios::binary);
     if(!ifs.is_open())
         return false;
+
     std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     ifs.close();
 
@@ -208,7 +211,7 @@ StringMap Dotenv::ParseFromBuffer(const std::vector<char>& buf_)
             continue;
 
         if(c == '\n') {
-            TrimInline(line);
+            StringUtils::TrimInline(line);
 
             if(!line.empty() && line[0] != '#') {
                 std::size_t eq = line.find('=');
@@ -217,14 +220,15 @@ StringMap Dotenv::ParseFromBuffer(const std::vector<char>& buf_)
                     std::string key = line.substr(0, eq);
                     std::string val = line.substr(eq + 1);
 
-                    TrimInline(key); TrimInline(val);
+                    StringUtils::TrimInline(key);
+                    StringUtils::TrimInline(val);
 
-                    if(!val.empty()
+                    if(
+                        !val.empty()
                         && ((val.front() == '"' && val.back() == '"')
-                        || (val.front() == '\'' && val.back() == '\'')))
-                    {
+                        || (val.front() == '\'' && val.back() == '\''))
+                    )
                         val = val.substr(1, val.size() - 2);
-                    }
 
                     if(!key.empty())
                         out.emplace(std::move(key), std::move(val));

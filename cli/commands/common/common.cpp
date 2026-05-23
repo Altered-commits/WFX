@@ -5,7 +5,7 @@
 #include "http/common/http_master_state.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
-#include "utils/backport/string.hpp"
+#include "utils/string/string.hpp"
 
 // Linux
 #ifdef __linux__

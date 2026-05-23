@@ -4,15 +4,14 @@
 // Sinks (all optional, composable):
 //   Stdout     : ANSI colors, gray timestamps, colored level tags
 //   File       : plain text, no ANSI codes, circular / size-rotating
-//   Prometheus : zero-alloc scrape via PrometheusWrite(buf, size)
 //
 // NOT thread-safe by design. One instance per worker
 
+#include "metric_tracer.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include <array>
 #include <charconv>
 #include <chrono>
-#include <cstdint>
 #include <cstring>
 #include <cstdio>
 #include <string_view>
@@ -44,26 +43,6 @@
 
 namespace WFX::Utils {
 
-// ----------------------------------------------------------------------------
-// Per-level line counters, plain integers
-// ----------------------------------------------------------------------------
-class PrometheusCounters {
-public:
-    using WriteFn = void(*)(void* ctx, const char* data, std::uint32_t len);
-
-    void Increment(std::uint8_t lvl) noexcept;
-    void Flush(void* ctx, WriteFn write) const noexcept;
-
-private:
-    static char* RawCopy(char* p, char* end, const char* s) noexcept;
-
-    static constexpr int kCount = 6;
-    std::uint64_t counts_[kCount] = {};
-};
-
-// ----------------------------------------------------------------------------
-// Circular file sink via WFX::Utils::FileSystem
-//
 // On Open()   : OpenFileWrite truncates and starts fresh. Size tracked via
 //               file_->Size() which LinuxFile/WinFile maintains internally
 //
@@ -72,40 +51,40 @@ private:
 //
 // Restart behaviour: truncates existing log, starts fresh
 // Rotated copies (.1 .. .N) survive across restarts
-// ----------------------------------------------------------------------------
 class CircularFileSink {
 public:
     static constexpr std::size_t kDefaultMaxBytes  = 16 * 1024 * 1024;
     static constexpr int         kDefaultKeepFiles = 4;
+    static constexpr int         kMaxKeep          = 32;
 
-    CircularFileSink()  = default;
-    ~CircularFileSink();
+public:
+    CircularFileSink() = default;
+    ~CircularFileSink() = default;
 
     CircularFileSink(const CircularFileSink&)            = delete;
     CircularFileSink& operator=(const CircularFileSink&) = delete;
 
+public:
     bool IsOpen() const noexcept { return file_ && file_->IsOpen(); }
 
     bool Open(const char* path, std::size_t maxBytes = kDefaultMaxBytes, int keepFiles = kDefaultKeepFiles) noexcept;
     void Write(const char* data, std::size_t len) noexcept;
 
 private:
-    bool OpenFresh() noexcept;
-    void Rotate()    noexcept;
+    bool OpenFresh()     noexcept;
+    void Rotate()        noexcept;
+    void CloseInternal() noexcept;
 
-    static constexpr int kMaxKeep = 32;
-
+private:
     char        path_[512] = {};
     std::size_t maxBytes_  = kDefaultMaxBytes;
     int         keepFiles_ = kDefaultKeepFiles;
     BaseFilePtr file_      = nullptr;
 };
 
-// ----------------------------------------------------------------------------
 // localtime_r/localtime_s costs 300-700ns (glibc mutex, tz lookup)
-// Called once per second; sub-second tracked via steady_clock delta,
-// which is a vDSO read + integer math (~10ns, no syscall)
-// ----------------------------------------------------------------------------
+// Called once per second; sub-second tracked via steady_clock delta,-
+// -which is a vDSO read + integer math (~10ns, no syscall)
 class TimestampCache {
 public:
     // Writes [HH:MM:SS.mmm] into out. Returns updated pointer.
@@ -158,12 +137,10 @@ private:
     bool synced_     = false;
 };
 
-// ----------------------------------------------------------------------------
 // Memory layout per instance:
 //   msgBuf_    : 1056 bytes, formatted message body (plain, no ANSI)
 //   prefixBuf_ :   64 bytes, colored prefix for stdout only
 // Total: ~1.1 KiB per worker instance
-// ----------------------------------------------------------------------------
 class Logger final {
 public:
     using LevelMask = std::uint32_t;
@@ -200,15 +177,12 @@ public:
     void EnableTimestamps(bool v)     noexcept;
     void EnableColors(bool v)         noexcept;
     void EnableStdout(bool v)         noexcept;
-    void EnablePrometheus(bool v)     noexcept;
 
     bool OpenFile(
         const char* path,
         std::size_t maxBytes  = CircularFileSink::kDefaultMaxBytes,
         int         keepFiles = CircularFileSink::kDefaultKeepFiles
     ) noexcept;
-
-    void PrometheusFlush(void* ctx, PrometheusCounters::WriteFn write) const noexcept;
 
 public:
     template<typename... Args>
@@ -332,8 +306,13 @@ private:
                 WFX_STDOUT_WRITE(msgBuf_.data(), totalLen);
         }
 
-        if(prometheus_)
-            prom_.Increment(static_cast<std::uint8_t>(lvl));
+        // IMPORTANT: This works assuming every metric is in the order:
+        //   -> trace, debug, info, warn, error, fatal
+        // Order is decided in 'shared/abis/types.hpp' -> 'LogMetrics'
+        if(auto* metrics = MetricTracer::Current()) {
+            std::uint64_t* lines = &metrics->log.trace;
+            lines[static_cast<std::uint8_t>(lvl)]++;
+        }
     }
 
 #if !defined(_WIN32)
@@ -418,14 +397,12 @@ private:
     bool timestamps_ = true;
     bool colors_     = true;
     bool stdout_     = true;
-    bool prometheus_ = false;
 
     std::array<char, kMsgBufSize>    msgBuf_{};
     std::array<char, kPrefixBufSize> prefixBuf_{};
 
-    TimestampCache     tsCache_;
-    CircularFileSink   fileSink_;
-    PrometheusCounters prom_;
+    TimestampCache   tsCache_;
+    CircularFileSink fileSink_;
 };
 
 // Free function declaration (defined in 'logger.cpp')

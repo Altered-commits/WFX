@@ -8,7 +8,10 @@ namespace WFX::Shared {
 // vvv All aliases for clarity vvv
 using LogFn = void(*)(const char* msg);
 
-using PrometheusFlushFn = void(*)(void* backend);
+using GetLogMetricsWorkerFn    = LogMetrics(*)();
+using GetNetMetricsWorkerFn    = NetworkMetrics(*)();
+using GetLogMetricsAggregateFn = LogMetrics(*)();
+using GetNetMetricsAggregateFn = NetworkMetrics(*)();
 
 // vvv API declarations vvv
 struct UTILS_API_EXT1 {
@@ -20,8 +23,11 @@ struct UTILS_API_EXT1 {
     LogFn LogError;
     LogFn LogFatal;
 
-    // Prometheus
-    PrometheusFlushFn PrometheusFlush;
+    // Metrics
+    GetLogMetricsWorkerFn    GetLogMetricsWorker;
+    GetNetMetricsWorkerFn    GetNetMetricsWorker;
+    GetLogMetricsAggregateFn GetLogMetricsAggregate;
+    GetNetMetricsAggregateFn GetNetMetricsAggregate;
 };
 static_assert(std::is_standard_layout<UTILS_API_EXT1>::value, "'UTILS_API_EXT1' must be standard layout");
 

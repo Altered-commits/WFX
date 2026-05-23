@@ -7,7 +7,7 @@
 #include "utils/fileops/filecache.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include "utils/diagnostics/logger.hpp"
-#include "utils/crypt/string.hpp"
+#include "utils/string/string.hpp"
 
 #include <cstring>
 
@@ -192,7 +192,7 @@ void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
 
     // Engine-owned header, user must not set this
     // TODO: Think if we should also block Content-Length and Transfer-Encoding key as well
-    if(Utils::StringCanonical::InsensitiveStringCompare(key, "connection"))
+    if(Utils::StringUtils::InsensitiveStringCompare(key, "connection"))
         logger.Fatal("[HttpResponse]: 'Connection' header is engine-owned, do not set it manually");
 
     EnsureHeadersOpen();

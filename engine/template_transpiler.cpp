@@ -3,7 +3,7 @@
 #include "shared/utils/hash.hpp"
 #include "shared/utils/compiler_macro.hpp"
 #include "utils/process/process.hpp"
-#include "utils/backport/string.hpp"
+#include "utils/string/string.hpp"
 #include <numeric>
 #include <bit>
 
@@ -887,7 +887,7 @@ using WFX::Core::BaseTemplateGenerator;
         "    CLS" + funcName + "() = default;\n\n"
 
         "    std::size_t GetStateCount() const noexcept override {\n"
-        "        return " + UInt64ToStr(irCode.size()) + ";\n"
+        "        return " + StringUtils::UInt64ToStr(irCode.size()) + ";\n"
         "    }\n\n"
 
         "    StateResult GetState(std::size_t state, JsonObject& ctx) const noexcept override {\n"
@@ -909,7 +909,7 @@ using WFX::Core::BaseTemplateGenerator;
         writeResult     = true;
 
         // Initial 'case ...:' line
-        std::string line = "                case " + UInt64ToStr(i) + ":";
+        std::string line = "                case " + StringUtils::UInt64ToStr(i) + ":";
         if(!SafeWrite(ioCtx, line.c_str(), line.size())) {
             logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to write cxx switch case to: ", outCxxPath);
             return false;
@@ -920,9 +920,9 @@ using WFX::Core::BaseTemplateGenerator;
                 needEndingBrace = false;
                 auto [off, len] = std::get<LiteralValue>(op.payload);
 
-                line = " return {" + UInt64ToStr(i + 1) +
-                                ", FileChunk{" + UInt64ToStr(off) + ", " +
-                                UInt64ToStr(len) + "}};\n";
+                line = " return {" + StringUtils::UInt64ToStr(i + 1) +
+                                ", FileChunk{" + StringUtils::UInt64ToStr(off) + ", " +
+                                StringUtils::UInt64ToStr(len) + "}};\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
                 break;
@@ -932,7 +932,7 @@ using WFX::Core::BaseTemplateGenerator;
                 needEndingBrace = false;
                 std::uint32_t exprIdx = std::get<std::uint32_t>(op.payload);
 
-                line = " return {" + UInt64ToStr(i + 1) +
+                line = " return {" + StringUtils::UInt64ToStr(i + 1) +
                                 ", VariableChunk{ " + GenerateCxxFromRPN(ctx, exprIdx, false) +
                                 " }};\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
@@ -948,7 +948,7 @@ using WFX::Core::BaseTemplateGenerator;
                 line =
                     " {\n"
                     "                    if(!(" + expr + ")) {\n"
-                    "                        state = " + UInt64ToStr(jump) + ";\n"
+                    "                        state = " + StringUtils::UInt64ToStr(jump) + ";\n"
                     "                        continue;\n"
                     "                    }\n"
                     "                    [[fallthrough]];\n";
@@ -969,7 +969,7 @@ using WFX::Core::BaseTemplateGenerator;
 
                 line =
                     " {\n"
-                    "                    state = " + UInt64ToStr(jump) + ";\n"
+                    "                    state = " + StringUtils::UInt64ToStr(jump) + ";\n"
                     "                    continue;\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
@@ -980,17 +980,17 @@ using WFX::Core::BaseTemplateGenerator;
                 const auto& [jump, exprIdx, varId] = std::get<ForLoopValue>(op.payload);
                 std::string expr    = GenerateCxxFromRPN(ctx, exprIdx, false);
                 std::string loopVar = ctx.staticVarNames[varId];
-                std::string jumpVar = UInt64ToStr(jump);
+                std::string jumpVar = StringUtils::UInt64ToStr(jump);
 
                 line =
                     " {\n"
                     "                    auto arr = " + expr + ";\n"
                     "                    if(!arr.Valid() || !arr.IsArray() || arr.Length() == 0) {\n"
-                    "                        state = " + UInt64ToStr(jump + 1) + ";\n"
+                    "                        state = " + StringUtils::UInt64ToStr(jump + 1) + ";\n"
                     "                        continue;\n"
                     "                    }\n"
                     "                    ctx.Set(\"" + loopVar + "\", arr[0]);\n"
-                    "                    ctx.Set(\"__linf_" + jumpVar + "\", (std::uint64_t(" + UInt64ToStr(i + 1) + ") << 32) | std::uint64_t(1));\n"
+                    "                    ctx.Set(\"__linf_" + jumpVar + "\", (std::uint64_t(" + StringUtils::UInt64ToStr(i + 1) + ") << 32) | std::uint64_t(1));\n"
                     "                    [[fallthrough]];\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
@@ -1001,7 +1001,7 @@ using WFX::Core::BaseTemplateGenerator;
                 const auto& [jump, exprIdx, varId] = std::get<ForLoopValue>(op.payload);
                 std::string expr    = GenerateCxxFromRPN(ctx, exprIdx, false);
                 std::string loopVar = ctx.staticVarNames[varId];
-                std::string jumpVar = UInt64ToStr(jump);
+                std::string jumpVar = StringUtils::UInt64ToStr(jump);
 
                 line =
                     " {\n"

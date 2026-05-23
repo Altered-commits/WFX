@@ -2,7 +2,7 @@
 
 #include "http_openssl.hpp"
 #include "config/config.hpp"
-#include "utils/crypt/hash.hpp"
+#include "utils/hash/hash.hpp"
 #include "utils/diagnostics/logger.hpp"
 #include <openssl/ssl.h>
 #include <openssl/err.h>

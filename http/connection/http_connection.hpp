@@ -2,7 +2,7 @@
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
 #include "shared/abis/types.hpp"
-#include "utils/crypt/hash.hpp"
+#include "utils/hash/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
 
 #ifdef _WIN32

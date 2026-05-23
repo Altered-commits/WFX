@@ -3,8 +3,8 @@
 #include "config/config.hpp"
 #include "http/headers/http_headers.hpp"
 #include "http/request/http_request.hpp"
-#include "utils/backport/string.hpp"
-#include "utils/crypt/string.hpp"
+#include "utils/string/string.hpp"
+#include "utils/string/string.hpp"
 
 namespace WFX::Http {
 
@@ -91,7 +91,7 @@ HttpParseState Parse(ConnectionContext* ctx)
             auto contentLengthHeader = request.headers.GetHeader("Content-Length");
             auto encodingHeader      = request.headers.GetHeader("Transfer-Encoding");
 
-            bool hasExpectHeader        = !expectHeader.empty() && StringCanonical::InsensitiveStringCompare(expectHeader, "100-continue");
+            bool hasExpectHeader        = !expectHeader.empty() && StringUtils::InsensitiveStringCompare(expectHeader, "100-continue");
             bool hasContentLengthHeader = !contentLengthHeader.empty();
             bool hasEncodingHeader      = !encodingHeader.empty();
 
@@ -107,7 +107,7 @@ HttpParseState Parse(ConnectionContext* ctx)
             if(hasContentLengthHeader) {
                 std::size_t contentLen = 0;
                 // Malformed Content-Length
-                if(!StrToUInt64(contentLengthHeader, contentLen))
+                if(!StringUtils::StrToUInt64(contentLengthHeader, contentLen))
                     return HttpParseState::PARSE_ERROR;
 
                 // Sanity check: are we about to exceed our max buffer size or max body size?
@@ -161,7 +161,7 @@ HttpParseState Parse(ConnectionContext* ctx)
             // Data is chunked / gzip / whatever [future support]
             if(hasEncodingHeader) {
                 // Only 'chunked' is supported for now
-                if(!StringCanonical::InsensitiveStringCompare(encodingHeader, "chunked"))
+                if(!StringUtils::InsensitiveStringCompare(encodingHeader, "chunked"))
                     return HttpParseState::PARSE_ERROR;
 
                 // Parser will not try to buffer the full body, instead user will handle chunks
@@ -232,7 +232,7 @@ bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequ
     outRequest.path = std::string_view(data + pathStart, pathEnd - pathStart);
 
     // Normalize the path, reject if its malformed
-    if(!StringCanonical::NormalizeURIPathInplace(outRequest.path))
+    if(!StringUtils::NormalizeURIPathInplace(outRequest.path))
         return false;
 
     std::string_view versionStr = line.substr(pathEnd + 1);

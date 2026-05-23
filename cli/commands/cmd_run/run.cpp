@@ -7,7 +7,8 @@
 #include "http/common/http_master_state.hpp"
 #include "utils/dotenv/dotenv.hpp"
 #include "utils/fileops/filesystem.hpp"
-#include "utils/crash_tracer/crash_tracer.hpp"
+#include "utils/diagnostics/crash_tracer.hpp"
+#include "utils/diagnostics/metric_tracer.hpp"
 
 #ifdef _WIN32
     #include <windows.h>
@@ -70,15 +71,19 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
 #else
 int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir)
 {
-    auto& globalState = GetMasterState();
-    auto& logger      = GetLogger();
-    auto& config      = GetConfig();
-    auto& osConfig    = config.osSpecificConfig;
-    auto& buildConfig = config.buildConfig;
+    auto& globalState   = GetMasterState();
+    auto& logger        = GetLogger();
+    auto& config        = GetConfig();
+    auto& osConfig      = config.osSpecificConfig;
+    auto& buildConfig   = config.buildConfig;
+    auto& loggingConfig = config.loggingConfig;
 
     // -------------------- INITIALIZING PHASE --------------------
     signal(SIGINT, HandleMasterSignal);
     signal(SIGTERM, HandleMasterSignal);
+
+    if(!MetricTracer::Create(osConfig.workerProcesses))
+        logger.Fatal("[WFX-Master]: Failed to initialize metric tracer region");
 
     // -------------------- TEMPLATE / USER CODE COMPILATION PHASE --------------------
     HandleBuildDirectory();
@@ -107,11 +112,10 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     logger.Info("[WFX-Master]: Press Ctrl+C to stop");
 
     // User logging preferences start from now on
-    logger.SetMinLevel(static_cast<Logger::Level>(config.loggingConfig.minLevel));
-    logger.EnableStdout(config.loggingConfig.enableStdout);
-    logger.EnableColors(config.loggingConfig.enableColors);
-    logger.EnableTimestamps(config.loggingConfig.enableTimestamps);
-    logger.EnablePrometheus(config.loggingConfig.enablePrometheus);
+    logger.SetMinLevel(static_cast<Logger::Level>(loggingConfig.minLevel));
+    logger.EnableStdout(loggingConfig.enableStdout);
+    logger.EnableColors(loggingConfig.enableColors);
+    logger.EnableTimestamps(loggingConfig.enableTimestamps);
 
     // -------------------- WORKERS SPAWNING PHASE --------------------
     const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
@@ -125,21 +129,22 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
             else
                 setpgid(0, globalState.workerPGID); // Join first worker's group
 
-            // Every process will have its own crash tracer
+            // Every process will have its own metric tracer
+            MetricTracer::InitWorker(i);
+
+            // AND A CRASH tracer for good luck
             char workerName[32];
             std::snprintf(workerName, sizeof(workerName), "worker-%d", i);
             CrashTracer::SetWorkerName(workerName);
             CrashTracer::Install(crashLogsDir.c_str());
 
-            // And every single process will also have its own log tracer IF ENABLED
-            if(config.loggingConfig.enableFile)
+            // AND ITS OWN LOGGING IF ENABLED
+            if(loggingConfig.enableFile)
                 logger.OpenFile(
-                    (logsDir + workerName + ".log").c_str(),
-                    config.loggingConfig.maxFileSize,
-                    config.loggingConfig.maxRotations
+                    (logsDir + workerName + ".log").c_str(), loggingConfig.maxFileSize, loggingConfig.maxRotations
                 );
 
-            // For every process initialize its own BufferPool and FileCache
+            // AAAAAAAAAAAAND ITS OWNNNNNNNNNNNNN BufferPool and FileCache
             GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
             GetFileCache().Init(config.miscConfig.fileCacheSize);
 
@@ -211,9 +216,13 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         }
     }
 
+    // Hygiene (Not that it matters, OS would reclaim it anyways if this crashes)
+    MetricTracer::Destroy();
+
     // GG
     logger.Info("[WFX-Master]: Shutdown successfully");
     return 0;
 }
 #endif // _WIN32
+
 }  // namespace WFX::CLI

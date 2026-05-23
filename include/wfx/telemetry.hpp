@@ -1,20 +1,31 @@
-#ifndef WFX_INC_WFX_LOG_HPP
-#define WFX_INC_WFX_LOG_HPP
+#ifndef WFX_INC_WFX_TELEMETRY_HPP
+#define WFX_INC_WFX_TELEMETRY_HPP
 
 // -----------------------------------------------------------------------
-// wfx/log.hpp
-// Zero-alloc logging for user code. Formats on the user side, crosses-
-// -the ABI boundary as a single null-terminated string per call
+// wfx/telemetry.hpp
+// Zero-alloc logging and metrics for user code.
+//
+// Logging crosses the ABI boundary as a single null-terminated string.
+// Metrics are aggregated across all workers via shared mmap and returned-
+// -as plain structs.
 //
 // Provides:
 //   WFX::LogTrace  / WFX::LogDebug  / WFX::LogInfo
 //   WFX::LogWarn   / WFX::LogError  / WFX::LogFatal
+//
+//   WFX::GetLogMetrics()          -- this worker's log counters
+//   WFX::GetNetworkMetrics()      -- this worker's network counters
+//   WFX::GetLogMetricsAll()       -- aggregated across all workers
+//   WFX::GetNetworkMetricsAll()   -- aggregated across all workers
 //
 // Usage:
 //   WFX::LogInfo("[MyHandler]: started on port ", port);
 //   WFX::LogWarn("[Auth]: token expiring in ", seconds, "s");
 //   WFX::LogError("[DB]: query failed, code=", code);
 //   WFX::LogFatal("[Init]: cannot continue");  // aborts
+//
+//   auto net = WFX::GetNetworkMetricsAll();
+//   WFX::LogInfo("total requests: ", net.requests);
 // -----------------------------------------------------------------------
 
 #include "core/core.hpp"
@@ -64,7 +75,9 @@ inline std::enable_if_t<
 >
 LogFmt(char* p, char* end, T value) noexcept
 {
-    if(end - p < 24) return p;
+    if(end - p < 24)
+        return p;
+
     auto [ep, ec] = std::to_chars(p, p + 24, value);
     return ec == std::errc() ? ep : p;
 }
@@ -73,7 +86,9 @@ template<typename T>
 inline std::enable_if_t<std::is_floating_point_v<T>, char*>
 LogFmt(char* p, char* end, T value) noexcept
 {
-    if(end - p < 32) return p;
+    if(end - p < 32)
+        return p;
+
     auto [ep, ec] = std::to_chars(p, p + 32, value);
     return ec == std::errc() ? ep : p;
 }
@@ -85,8 +100,12 @@ inline std::enable_if_t<
 >
 LogFmt(char* p, char* end, T value) noexcept
 {
-    if(end - p < 20) return p;
-    *p++ = '0'; *p++ = 'x';
+    if(end - p < 20)
+        return p;
+
+    *p++ = '0';
+    *p++ = 'x';
+
     auto [ep, ec] = std::to_chars(p, p + 16, reinterpret_cast<std::uintptr_t>(value), 16);
     return ec == std::errc() ? ep : p;
 }
@@ -153,21 +172,41 @@ template<typename... Args>
     WFX_UNREACHABLE;
 }
 
-// vvv Prometheus API vvv
-inline void LogPrometheus(Http::Response res) noexcept
+// vvv Metrics API vvv
+inline Shared::LogMetrics GetLogMetrics() noexcept
+{
+    const auto* api = Core::UtilsApiExt1();
+    if(!api) return {};
+    return api->GetLogMetricsWorker();
+}
+
+inline Shared::NetworkMetrics GetNetworkMetrics() noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
-        return;
+        return {};
 
-    // It is text based sending
-    // 'version' is necessary for prometheus to work properly
-    res.Header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
-    
-    // 'PrometheusFlush' will write body data, rest its our job
-    api->PrometheusFlush(res.GetBackend());
+    return api->GetNetMetricsWorker();
+}
+
+inline Shared::LogMetrics GetLogMetricsAll() noexcept
+{
+    const auto* api = Core::UtilsApiExt1();
+    if(!api)
+        return {};
+
+    return api->GetLogMetricsAggregate();
+}
+
+inline Shared::NetworkMetrics GetNetworkMetricsAll() noexcept
+{
+    const auto* api = Core::UtilsApiExt1();
+    if(!api)
+        return {};
+
+    return api->GetNetMetricsAggregate();
 }
 
 } // namespace WFX
 
-#endif // WFX_INC_WFX_LOG_HPP
+#endif // WFX_INC_WFX_TELEMETRY_HPP

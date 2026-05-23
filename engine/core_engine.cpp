@@ -8,10 +8,10 @@
 #include "http/common/http_master_state.hpp"
 #include "http/parser/http_parser.hpp"
 #include "shared/apis/master_api.hpp"
-#include "utils/backport/string.hpp"
+#include "utils/string/string.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
-#include "utils/crash_tracer/crash_tracer.hpp"
+#include "utils/diagnostics/crash_tracer.hpp"
 
 #if defined(__linux__)
     #include <dlfcn.h>
@@ -110,6 +110,8 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
 
         case HttpParseState::PARSE_SUCCESS:
         {
+            metrics_->network.requests++;
+
             // After parsing, ctx->trackBytes becomes the compact state register used by-
             // -'HandleSuccess' for async resumption IF needed that is
             // For now reset ctx->trackBytes so ctx->trackAsync becomes zeroed out 'HandleSuccess'
@@ -155,7 +157,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             res.SetShouldClose(shouldClose);
 
             // Public file shortcut
-            if(StartsWith(reqInfo.path, "/public/")) {
+            if(reqInfo.path.starts_with("/public/")) {
                 std::string_view relativePath = reqInfo.path.substr(7);
                 std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
@@ -203,6 +205,14 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     // Sanity checks
     if(!res.IsCommitted())
         res.Commit();
+
+    // Metrics
+    auto code = static_cast<std::uint16_t>(res.GetStatus());
+    metrics_->network.response1xx += (code >= 100 && code < 200);
+    metrics_->network.response2xx += (code >= 200 && code < 300);
+    metrics_->network.response3xx += (code >= 300 && code < 400);
+    metrics_->network.response4xx += (code >= 400 && code < 500);
+    metrics_->network.response5xx += (code >= 500 && code < 600);
 
     if(res.IsFile()) {
         connHandler_->WriteFile(ctx, res.TakeFilePath());
@@ -340,10 +350,10 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
             end = size;
 
         // Extract token substring trimming leading and trailing spaces / tabs
-        std::string_view token = TrimView(header.substr(start, end - start));
+        std::string_view token = StringUtils::TrimView(header.substr(start, end - start));
 
         // CLOSE
-        if(StringCanonical::InsensitiveStringCompare(token, "close")) {
+        if(StringUtils::InsensitiveStringCompare(token, "close")) {
             if(mask & ConnectionHeader::KEEP_ALIVE)
                 return ConnectionHeader::ERROR; // Mutually exclusive
 
@@ -351,7 +361,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
         }
 
         // KEEP-ALIVE
-        else if(StringCanonical::InsensitiveStringCompare(token, "keep-alive")) {
+        else if(StringUtils::InsensitiveStringCompare(token, "keep-alive")) {
             if(mask & ConnectionHeader::CLOSE)
                 return ConnectionHeader::ERROR; // Mutually exclusive
 
@@ -359,7 +369,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
         }
 
         // UPGRADE
-        else if(StringCanonical::InsensitiveStringCompare(token, "upgrade"))
+        else if(StringUtils::InsensitiveStringCompare(token, "upgrade"))
             mask |= ConnectionHeader::UPGRADE;
 
         // UNKNOWN

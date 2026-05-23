@@ -233,7 +233,6 @@ enable_timestamps = true       # Prepend [HH:MM:SS.mmm] to each line
 enable_file       = false      # Write to log files
 max_file_size     = 16777216   # Max log file size before rotation (in bytes) [if enable_file = true]
 max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
-enable_prometheus = false      # Track per-level counters for /metrics scrape
 
 [Misc]
 file_cache_size     = 20      # Number of files cached for efficiency (LFU)

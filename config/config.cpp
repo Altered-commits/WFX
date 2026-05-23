@@ -112,7 +112,6 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Logging", "enable_file",       loggingConfig.enableFile);
         ExtractValue(tbl, "Logging", "max_file_size",     loggingConfig.maxFileSize);
         ExtractValue(tbl, "Logging", "max_rotations",     loggingConfig.maxRotations);
-        ExtractValue(tbl, "Logging", "enable_prometheus", loggingConfig.enablePrometheus);
 
         // vvv Misc vvv
         ExtractValue(tbl, "Misc", "file_cache_size",      miscConfig.fileCacheSize);

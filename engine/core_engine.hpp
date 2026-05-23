@@ -32,8 +32,9 @@ private: // Helper Functions
     void         HandleMiddlewareLoading();
 
 private:
-    Config&        config_ = GetConfig();
-    Utils::Logger& logger_ = Utils::GetLogger();
+    Config&                config_  = GetConfig();
+    Utils::Logger&         logger_  = Utils::GetLogger();
+    Shared::WorkerMetrics* metrics_ = Utils::MetricTracer::Current();
     
     Http::HttpMiddleware middleware_;
     Http::Router         router_;

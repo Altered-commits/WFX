@@ -94,7 +94,6 @@ struct LoggingConfig {
     bool          enableStdout     = true;
     bool          enableColors     = true;
     bool          enableTimestamps = true;
-    bool          enablePrometheus = false;
     bool          enableFile       = false;
     std::uint16_t maxRotations     = 2;
     std::uint32_t maxFileSize      = 16 * 1024 * 1024;

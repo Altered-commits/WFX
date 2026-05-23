@@ -148,6 +148,46 @@ enum class EndpointTLSConfig : std::uint8_t {
     FORCE_INSECURE  // Explicitly allow no TLS even on secure ports
 };
 
+// vvv Server Metrics vvv
+// IMPORTANT: DO NOT CHANGE THE ORDER OF THESE METRICS, 'logger.hpp' depends on the order
+struct LogMetrics {
+    std::uint64_t trace = 0;
+    std::uint64_t debug = 0;
+    std::uint64_t info  = 0;
+    std::uint64_t warn  = 0;
+    std::uint64_t error = 0;
+    std::uint64_t fatal = 0;
+};
+static_assert(sizeof(LogMetrics) == 48, "'LogMetrics' must be exactly 48 bytes");
+
+struct NetworkMetrics {
+    std::uint64_t accepts          = 0;
+    std::uint64_t reads            = 0;
+    std::uint64_t bytesRead        = 0;
+    std::uint64_t writes           = 0;
+    std::uint64_t bytesWritten     = 0;
+    std::uint64_t fileCalls        = 0;
+    std::uint64_t fileFallbacks    = 0;
+    std::uint64_t fileBytesWritten = 0;
+    std::uint64_t activeConns      = 0;
+    std::uint64_t requests         = 0;
+    std::uint64_t response1xx      = 0;
+    std::uint64_t response2xx      = 0;
+    std::uint64_t response3xx      = 0;
+    std::uint64_t response4xx      = 0;
+    std::uint64_t response5xx      = 0;
+};
+static_assert(sizeof(NetworkMetrics) == 120, "'NetworkMetrics' must be exactly 120 bytes");
+
+// One slot per worker in shared mmap
+// Embeds user-facing metric structs directly (add fields there, not here)
+// alignas(64) prevents false sharing between adjacent worker slots
+struct alignas(64) WorkerMetrics {
+    LogMetrics     log     = {};
+    NetworkMetrics network = {};
+};
+static_assert(sizeof(WorkerMetrics) % 64 == 0, "'WorkerMetrics' must be a multiple of 64 bytes");
+
 } // namespace WFX::Shared
 
 #endif // WFX_SHARED_ABI_TYPES_HPP

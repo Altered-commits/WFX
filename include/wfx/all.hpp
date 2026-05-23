@@ -7,11 +7,12 @@
 // Use this during prototyping or for small projects.
 //
 // For larger projects prefer individual headers to reduce compile times:
-//   #include "wfx/http.hpp"   : Request, Response, route/middleware macros, Endpoint, all status aliases
-//   #include "wfx/async.hpp"  : Coro, MwCoro, SleepFor
-//   #include "wfx/form.hpp"   : Form parsing, Schema, Field
-//   #include "wfx/app.hpp"    : App lifecycle (WFX_CONSTRUCTOR)
-//   #include "wfx/types.hpp"  : Just types and aliases, no HTTP machinery
+//   #include "wfx/http.hpp"       : Request, Response, route/middleware macros, Endpoint, all status aliases
+//   #include "wfx/async.hpp"      : Coro, MwCoro, SleepFor
+//   #include "wfx/form.hpp"       : Form parsing, Schema, Field
+//   #include "wfx/app.hpp"        : App lifecycle (WFX_CONSTRUCTOR)
+//   #include "wfx/types.hpp"      : Just types and aliases, no HTTP machinery
+//   #include "wfx/telemetry.hpp"  : Logging and metrics
 // -----------------------------------------------------------------------
 
 #include "wfx/http.hpp"
@@ -19,5 +20,6 @@
 #include "wfx/form.hpp"
 #include "wfx/app.hpp"
 #include "wfx/types.hpp"
+#include "wfx/telemetry.hpp"
 
 #endif // WFX_INC_WFX_ALL_HPP

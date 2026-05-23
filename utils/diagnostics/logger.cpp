@@ -2,12 +2,13 @@
 
 namespace WFX::Utils {
 
-// Global logger instance
-static Logger __GlobalLogger;
-
+// Heap allocated intentionally as logger must outlive all other globals
+// Static destruction order across translation units is undefined, so any-
+// -global that logs in its destructor would crash if logger destructed first
 Logger& GetLogger() noexcept
 {
-    return __GlobalLogger;
+    static Logger* __GlobalLogger = new Logger();
+    return *__GlobalLogger;
 }
 
 // vvv Constructor vvv
@@ -21,7 +22,6 @@ void Logger::SetLevelMask(LevelMask mask) noexcept { levelMask_  = mask; }
 void Logger::SetMinLevel(Level lvl)       noexcept { levelMask_  = ALL_MASK << static_cast<std::uint8_t>(lvl); }
 void Logger::EnableTimestamps(bool v)     noexcept { timestamps_ = v; }
 void Logger::EnableStdout(bool v)         noexcept { stdout_     = v; }
-void Logger::EnablePrometheus(bool v)     noexcept { prometheus_ = v; }
 
 void Logger::EnableColors(bool v) noexcept
 {
@@ -31,11 +31,6 @@ void Logger::EnableColors(bool v) noexcept
 bool Logger::OpenFile(const char* path, std::size_t maxBytes, int keepFiles) noexcept
 {
     return fileSink_.Open(path, maxBytes, keepFiles);
-}
-
-void Logger::PrometheusFlush(void* ctx, PrometheusCounters::WriteFn write) const noexcept
-{
-    prom_.Flush(ctx, write);
 }
 
 // vvv Helper Functions vvv
@@ -49,7 +44,6 @@ void Logger::WriteRetry(int fd, const char* data, std::size_t len) noexcept
             data += n;
             len  -= static_cast<std::size_t>(n);
         }
-
         else if(errno != EINTR)
             break;
     }
@@ -80,10 +74,16 @@ void TimestampCache::Sync(std::chrono::steady_clock::time_point now) noexcept
 }
 
 //  CircularFileSink
-CircularFileSink::~CircularFileSink()
+void CircularFileSink::CloseInternal() noexcept
 {
-    if(file_)
-        file_->Close();
+    if(!file_)
+        return;
+
+    // Call Close() explicitly before reset so LinuxFile gets fd_ = -1-
+    // -before the unique_ptr destructor runs. This prevents double close-
+    // -if the LinuxFile destructor also calls Close()
+    file_->Close();
+    file_.reset();
 }
 
 bool CircularFileSink::Open(const char* path, std::size_t maxBytes, int keepFiles) noexcept
@@ -112,10 +112,7 @@ bool CircularFileSink::OpenFresh() noexcept
 
 void CircularFileSink::Rotate() noexcept
 {
-    if(file_) {
-        file_->Close();
-        file_.reset();
-    }
+    CloseInternal();
 
     char src[512];
     char dst[512];
@@ -130,52 +127,6 @@ void CircularFileSink::Rotate() noexcept
     FileSystem::RenameFile(path_, dst);
 
     OpenFresh();
-}
-
-//  PrometheusCounters
-void PrometheusCounters::Increment(std::uint8_t lvl) noexcept
-{
-    if(lvl < kCount)
-        counts_[lvl]++;
-}
-
-void PrometheusCounters::Flush(void* ctx, WriteFn write) const noexcept
-{
-    static constexpr const char* kNames[kCount] = {
-        "trace", "debug", "info", "warn", "error", "fatal"
-    };
-
-    static constexpr const char* kHeader =
-        "# HELP wfx_log_lines_total Log lines emitted per level\n"
-        "# TYPE wfx_log_lines_total counter\n";
-
-    write(ctx, kHeader, 90);
-
-    for(int i = 0; i < kCount; ++i) {
-        char tmp[64];
-        char* p   = tmp;
-        char* end = tmp + sizeof(tmp);
-
-        p = RawCopy(p, end, "wfx_log_lines_total{level=\"");
-        p = RawCopy(p, end, kNames[i]);
-        p = RawCopy(p, end, "\"} ");
-
-        auto [ep, ec] = std::to_chars(p, end, counts_[i]);
-        if(ec != std::errc())
-            return;
-
-        p = ep;
-        *p++ = '\n';
-
-        write(ctx, tmp, static_cast<std::uint32_t>(p - tmp));
-    }
-}
-
-char* PrometheusCounters::RawCopy(char* p, char* end, const char* s) noexcept
-{
-    while(*s && p < end)
-        *p++ = *s++;
-    return p;
 }
 
 } // namespace WFX::Utils

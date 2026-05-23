@@ -7,6 +7,7 @@
 #include "http/connection/http_connection.hpp"
 #include "http/limits/ip_limiter/ip_limiter.hpp"
 #include "http/ssl/http_ssl.hpp"
+#include "utils/diagnostics/metric_tracer.hpp"
 #include "utils/fileops/filecache.hpp"
 #include "utils/pool/bitmap_pool.hpp"
 #include "utils/timer/timer_wheel.hpp"
@@ -97,6 +98,7 @@ private: // Misc
     Logger&            logger_     = GetLogger();
     FileCache&         fileCache_  = GetFileCache();
     BufferPool&        pool_       = GetBufferPool();
+    WorkerMetrics*     metrics_    = MetricTracer::Current();
 
     IpLimiter          ipLimiter_  = {pool_};
     ReceiveCallback    onReceive_  = {};
@@ -130,9 +132,6 @@ private: // Epoll + SSL
 private: // Connection Context
     ConnectionPool connections_ = {config_.networkConfig.maxConnections};
     EndpointPool   endpoints_   = {};
-
-    // TODO: FOR DEBUG ONLY, REMOVE IT AFTER
-    std::uint64_t numConnectionsAlive_ = 0;
 };
 
 } // namespace WFX::OSSpecific
