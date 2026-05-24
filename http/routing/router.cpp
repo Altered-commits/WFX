@@ -1,5 +1,5 @@
 #include "router.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include "shared/utils/compiler_macro.hpp"
 
 namespace WFX::Http {
@@ -10,7 +10,7 @@ using namespace WFX::Shared; // For every single abi type
 const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, RouteCallback handler)
 {
     if(path.empty() || path[0] != '/')
-        Logger::GetInstance().Fatal("[Router]: Path is either empty or does not start with '/'.");
+        GetLogger().Fatal("[Router]: Path is either empty or does not start with '/'.");
 
     switch(method) {
         case HttpMethod::GET:
@@ -20,7 +20,7 @@ const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, 
             return postRoutes_.Insert(path, handler);
 
         default:
-            Logger::GetInstance().Fatal(
+            GetLogger().Fatal(
                 "[Router]: Unsupported HTTP method found in RegisterRoute. Use HttpMethod::GET or HttpMethod::POST."
             );
             WFX_UNREACHABLE;

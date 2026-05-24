@@ -13,7 +13,7 @@
         struct WFX_MW_CLASS(uniq) {                                    \
             WFX_MW_CLASS(uniq)() {                                     \
                 WFX::Core::__WFXDeferred.emplace_back([] {             \
-                    WFX::Core::HttpApi()->RegisterMiddleware(          \
+                    WFX::Core::HttpApiExt1()->RegisterMiddleware(          \
                         WFX::Shared::StringView::FromCString(name),    \
                         WFX::Http::MakeMwCallback(__VA_ARGS__)         \
                     );                                                 \

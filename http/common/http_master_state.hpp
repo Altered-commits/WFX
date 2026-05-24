@@ -5,20 +5,20 @@
 #include <array>
 #include <vector>
 
+/*
+ * Master process lifecycle state. Contains coordination data for the master <-> worker process group
+ */
+
 // Forward declare to not create dependency hell
 namespace WFX::Core {
     class CoreEngine;
-    class TemplateEngine;
 }
 
 namespace WFX::Http {
 
-using SSLKey = std::array<std::uint8_t, 80>;
-
-struct WFXGlobalState {
-    std::atomic<bool> shouldStop = false;
+struct WFXMasterState {
     Core::CoreEngine* enginePtr  = nullptr;
-    SSLKey            sslKey     = { 0 };
+    std::atomic<bool> shouldStop = false;
 
 #ifdef _WIN32
     // Nothing in Windows for now...
@@ -28,11 +28,8 @@ struct WFXGlobalState {
 #endif
 };
 
-inline WFXGlobalState& GetGlobalState()
-{
-    static WFXGlobalState instance;
-    return instance;
-}
+// Free function declaration (defined in 'http_master_state.cpp')
+WFXMasterState& GetMasterState() noexcept;
 
 } // namespace WFX::Http
 

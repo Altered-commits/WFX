@@ -67,10 +67,10 @@ public: // vvv Factory vvv
     }
 };
 
-static_assert(sizeof(StringView) == 16,                      "WFX_StringView ABI size mismatch");
-static_assert(alignof(StringView) == alignof(void*),         "WFX_StringView alignment mismatch");
-static_assert(std::is_standard_layout<StringView>::value,    "WFX_StringView must be standard layout");
-static_assert(std::is_trivially_copyable<StringView>::value, "WFX_StringView must be trivially copyable");
+static_assert(sizeof(StringView) == 16,                      "'WFX_StringView' ABI size mismatch");
+static_assert(alignof(StringView) == alignof(void*),         "'WFX_StringView' alignment mismatch");
+static_assert(std::is_standard_layout<StringView>::value,    "'WFX_StringView' must be standard layout");
+static_assert(std::is_trivially_copyable<StringView>::value, "'WFX_StringView' must be trivially copyable");
 
 } // namespace WFX::Shared
 

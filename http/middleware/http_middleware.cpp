@@ -3,7 +3,7 @@
 #include "http/request.hpp"  // |
 #include "http/response.hpp" // | -> User side implementations
 #include "shared/apis/http_api.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include <unordered_set>
 
 namespace WFX::Http {
@@ -15,14 +15,14 @@ void HttpMiddleware::RegisterMiddleware(std::string_view name, MwCallback mw)
 {
     auto&& [it, inserted] = middlewareFactories_.emplace(name, mw);
     if(!inserted) {
-        auto& logger = WFX::Utils::Logger::GetInstance();
+        auto& logger = Utils::GetLogger();
         logger.Fatal("[HttpMiddleware]: Duplicate registration attempt for middleware '", name, '\'');
     }
 }
 
 void HttpMiddleware::RegisterPerRouteMiddleware(const TrieNode* node, MiddlewareStack mwStack)
 {
-    auto& logger = WFX::Utils::Logger::GetInstance();
+    auto& logger = Utils::GetLogger();
     if(!node)
         logger.Fatal(
             "[HttpMiddleware]: Route node is nullptr for per-route middleware registeration"
@@ -67,7 +67,7 @@ void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareConfigOrder order)
 {
     middlewareGlobalCallbacks_.clear();
 
-    auto& logger = WFX::Utils::Logger::GetInstance();
+    auto& logger = Utils::GetLogger();
     std::unordered_set<std::string_view> loadedNames;
 
     for(const auto& nameStr : order) {
@@ -164,14 +164,14 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(
 MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(
     ConnectionContext* ctx, Request req, Response res, MwCallback mw
 ) {
-    auto& logger = WFX::Utils::Logger::GetInstance();
+    auto& logger = WFX::Utils::GetLogger();
 
     // Check if its a sync function, it directly returns value
     if(mw.kind == CallbackKind::SYNC)
         return {mw.sync(req, res), false};
 
     // Async path, call through C boundary
-    auto* httpApi = WFX::Shared::GetHttpAPIV1();
+    auto* httpApi = WFX::Shared::GetHttpAPIExt1();
     httpApi->SetGlobalPtrData(static_cast<void*>(ctx));
 
     // Engine passes its own callback into the async middleware

@@ -19,8 +19,8 @@ struct BasePromise {
     void*           onDoneUd_ = nullptr;
 
 public:
-    void* operator new(std::size_t size) { return Core::MemoryApi()->Alloc(size); }
-    void  operator delete(void* ptr)     { Core::MemoryApi()->Free(ptr); }
+    void* operator new(std::size_t size) { return Core::MemoryApiExt1()->Alloc(size); }
+    void  operator delete(void* ptr)     { Core::MemoryApiExt1()->Free(ptr); }
 
 public:
     std::suspend_always initial_suspend() noexcept { return {}; }

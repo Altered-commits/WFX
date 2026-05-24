@@ -30,8 +30,8 @@ public: // Main setup
     bool await_ready() const noexcept { return false; }
 
     void await_suspend(std::coroutine_handle<> h) noexcept {
-        status = Core::HttpApi()->WriteEndpoint(
-                            Core::HttpApi()->GetGlobalPtrData(),
+        status = Core::HttpApiExt1()->WriteEndpoint(
+                            Core::HttpApiExt1()->GetGlobalPtrData(),
                             endpointIdx,
                             payload.data(),
                             payload.size()
@@ -57,7 +57,7 @@ public: // Constructor
         value_.__Url = url;
 
         Core::__WFXDeferred.emplace_back([=, this] {
-            value_.__IntrnlIdx = Core::HttpApi()->AllocateEndpoint(
+            value_.__IntrnlIdx = Core::HttpApiExt1()->AllocateEndpoint(
                                     Shared::StringView{url.data(), url.size()},
                                     connLimit,
                                     inFlightLimit,

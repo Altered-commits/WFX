@@ -16,7 +16,7 @@
         struct WFX_ROUTE_CLASS(method, uniq) {                            \
             WFX_ROUTE_CLASS(method, uniq)() {                             \
                 WFX::Core::__WFXDeferred.emplace_back([] {                \
-                    WFX::Core::HttpApi()->RegisterRoute(                  \
+                    WFX::Core::HttpApiExt1()->RegisterRoute(                  \
                         WFX::Shared::HttpMethod::method,                  \
                         WFX::Shared::StringView::FromCString(path),       \
                         WFX::Http::MakeRouteCallback(__VA_ARGS__)         \
@@ -33,7 +33,7 @@
                 auto mwArr = mw;                                           \
                 WFX::Core::__WFXDeferred.emplace_back(                     \
                     [mwArr]() mutable {                                    \
-                        WFX::Core::HttpApi()->RegisterRouteEx(             \
+                        WFX::Core::HttpApiExt1()->RegisterRouteEx(             \
                             WFX::Shared::HttpMethod::method,               \
                             WFX::Shared::StringView::FromCString(path),    \
                             mwArr.Data(), mwArr.Count(),                   \
@@ -67,7 +67,7 @@
         struct WFX_CONCAT(WFXGroupStart_, id) {                       \
             WFX_CONCAT(WFXGroupStart_, id)() {                        \
                 WFX::Shared::__WFXDeferredSimple.emplace_back([] {    \
-                    WFX::Core::HttpApi()->PushRoutePrefix(path);      \
+                    WFX::Core::HttpApiExt1()->PushRoutePrefix(path);      \
                 });                                                   \
             }                                                         \
         } WFX_CONCAT(WFXGroupStartInst_, id);                         \
@@ -78,7 +78,7 @@
         struct WFX_CONCAT(WFXGroupEnd_, id) {                         \
             WFX_CONCAT(WFXGroupEnd_, id)() {                          \
                 WFX::Shared::__WFXDeferredSimple.emplace_back([] {    \
-                    WFX::Core::HttpApi()->PopRoutePrefix();           \
+                    WFX::Core::HttpApiExt1()->PopRoutePrefix();           \
                 });                                                   \
             }                                                         \
         } WFX_CONCAT(WFXGroupEndInst_, id);                           \

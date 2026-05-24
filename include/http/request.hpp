@@ -16,23 +16,23 @@ public:
 public:
     Shared::HttpMethod Method() const
     {
-        return Core::HttpApi()->GetMethod(backend_);
+        return Core::HttpApiExt1()->GetMethod(backend_);
     }
 
     Shared::HttpVersion Version() const
     {
-        return Core::HttpApi()->GetVersion(backend_);
+        return Core::HttpApiExt1()->GetVersion(backend_);
     }
 
     std::string_view Path() const
     {
-        auto sv = Core::HttpApi()->GetPath(backend_);
+        auto sv = Core::HttpApiExt1()->GetPath(backend_);
         return { sv.data, static_cast<std::size_t>(sv.length) };
     }
 
     std::string_view Body() const
     {
-        auto sv = Core::HttpApi()->GetBody(backend_);
+        auto sv = Core::HttpApiExt1()->GetBody(backend_);
         return { sv.data, static_cast<std::size_t>(sv.length) };
     }
 
@@ -42,7 +42,7 @@ public:
         Shared::StringView k = ToSV(key);
         Shared::StringView val{};
 
-        bool ok = Core::HttpApi()->GetHeader(backend_, k, &val);
+        bool ok = Core::HttpApiExt1()->GetHeader(backend_, k, &val);
         if(!ok)
             return false;
 
@@ -53,12 +53,12 @@ public:
 public:
     std::uint64_t SegmentCount() const
     {
-        return Core::HttpApi()->GetSegmentCount(backend_);
+        return Core::HttpApiExt1()->GetSegmentCount(backend_);
     }
 
     Shared::SegmentVariant GetSegment(std::uint64_t index) const
     {
-        return Core::HttpApi()->GetSegment(backend_, index);
+        return Core::HttpApiExt1()->GetSegment(backend_, index);
     }
 
 public:
@@ -83,7 +83,7 @@ public:
             any.destructor = nullptr;
         }
         else {
-            void* mem = Core::MemoryApi()->Alloc(sizeof(U));
+            void* mem = Core::MemoryApiExt1()->Alloc(sizeof(U));
             if(!mem)
                 return false;
 
@@ -92,11 +92,11 @@ public:
 
             any.destructor = [](void* p) {
                 static_cast<U*>(p)->~U();
-                Core::MemoryApi()->Free(p);
+                Core::MemoryApiExt1()->Free(p);
             };
         }
 
-        Core::HttpApi()->SetContext(backend_, k, any);
+        Core::HttpApiExt1()->SetContext(backend_, k, any);
         return true;
     }
 
@@ -116,7 +116,7 @@ public:
             && std::is_trivially_destructible_v<U>
         ) {
             if(
-                !Core::HttpApi()->GetContext(backend_, k, &any)
+                !Core::HttpApiExt1()->GetContext(backend_, k, &any)
                 || any.typeID != Shared::Any::TypeIDOf<U>()
             )
                 return std::pair<U, bool>{{}, false};
@@ -128,7 +128,7 @@ public:
         }
         // For non-trivial types, we return ptr + bool
         else {
-            if(!Core::HttpApi()->GetContext(backend_, k, &any))
+            if(!Core::HttpApiExt1()->GetContext(backend_, k, &any))
                 return std::pair<U*, bool>{nullptr, false};
 
             return std::pair<U*, bool>{any.As<U>(), true};
@@ -138,7 +138,7 @@ public:
     void EraseContext(std::string_view key)
     {
         auto k = ToSV(key);
-        Core::HttpApi()->EraseContext(backend_, k);
+        Core::HttpApiExt1()->EraseContext(backend_, k);
     }
 
 private:

@@ -2,7 +2,7 @@
 #define WFX_HTTP_HEADERS_HPP
 
 #include "shared/utils/hash.hpp"
-#include "utils/crypt/string.hpp"
+#include "utils/string/string.hpp"
 
 #include <string>
 #include <unordered_map>

@@ -1,7 +1,7 @@
 #ifndef WFX_UTILS_BUFFER_POOL_HPP
 #define WFX_UTILS_BUFFER_POOL_HPP
 
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include <functional>
 #include <vector>
 
@@ -28,7 +28,10 @@ class BufferPool final {
     using OOMCallback    = std::function<void(std::size_t, std::size_t, const BufferPoolStats&)>;
 
 public:
-    static BufferPool& GetInstance();
+    BufferPool() = default;
+    ~BufferPool();
+
+public:
     void Init(std::size_t initialSize, ResizeCallback resizeCb = nullptr, OOMCallback oomCb = nullptr);
     bool IsInitialized() const;
 
@@ -39,16 +42,6 @@ public:
     const BufferPoolStats& GetStats() const;
 
 private:
-    BufferPool() = default;
-    ~BufferPool();
-
-    // No need for copy / move semantics
-    BufferPool(const BufferPool&)            = delete;
-    BufferPool& operator=(const BufferPool&) = delete;
-    BufferPool(BufferPool&&)                 = delete;
-    BufferPool& operator=(BufferPool&&)      = delete;
-
-private:
     void* AllocateFromShard(std::size_t size);
     void* ExpandAndAllocate(std::size_t size);
 
@@ -56,13 +49,16 @@ private:
     void  AlignedFree(void* ptr);
 
 private:
-    Logger& logger_ = Logger::GetInstance();
+    Logger& logger_ = GetLogger();
 
-    BufferShard    shard_;
+    BufferShard     shard_;
     BufferPoolStats stats_;
-    ResizeCallback resizeCallback_;
-    OOMCallback    oomCallback_;
+    ResizeCallback  resizeCallback_;
+    OOMCallback     oomCallback_;
 };
+
+// Free function declaration (definition in 'buffer_pool.hpp')
+BufferPool& GetBufferPool() noexcept;
 
 } // namespace WFX::Utils
 

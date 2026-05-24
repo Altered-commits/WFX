@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <array>
 
 namespace WFX::Utils {
 
@@ -12,32 +13,36 @@ namespace Hasher {
     std::uint64_t SipHash24(std::string_view data, const std::uint8_t key[16])                       noexcept;
 } // namespace Hasher
 
-// vvv TRUE RANDOMIZER vvv
+// vvv RANDOM BYTES GENERATOR vvv
 class RandomPool final {
-    static constexpr std::size_t BUFFER_SIZE = 1024 * 1024; // Stores 1MB worth of random bytes
-    static constexpr std::size_t MAX_RETRIES = 32;          // Retries for GetBytes function
+    static constexpr std::size_t BUFFER_SIZE  = 1024 * 1024; // Stores 1MB worth of random bytes
+    static constexpr std::size_t SSL_KEY_SIZE = 80;          // In bytes
 
-public:
-    static RandomPool& GetInstance();
-
-    bool GetBytes(std::uint8_t* out, std::size_t len);
+    using SSLKey = std::array<std::uint8_t, SSL_KEY_SIZE>;
     
-private:
+public:
     RandomPool();
 
-    // No copying or moving
-    RandomPool(const RandomPool&) = delete;
-    RandomPool& operator=(const RandomPool&) = delete;
-    RandomPool(RandomPool&&) = delete;
-    RandomPool& operator=(RandomPool&&) = delete;
+public:
+    bool GenerateSSLKey(); // Call once in master before fork
+
+    SSLKey& GetSSLKey();
+    bool    GetBytes(std::uint8_t* out, std::size_t len);
+    
+private:
+    bool RefillBytes();
 
 private:
-    bool RefillBytes(); // Actual shit
-
-private:
+    // Core
     std::uint8_t randomPool_[BUFFER_SIZE];
     std::size_t  cursor_{0};
+
+    // SSL
+    SSLKey sslKey_ = {};
 };
+
+// Free function declaration (defined in 'hash.cpp')
+RandomPool& GetRandomPool() noexcept;
 
 } // namespace WFX::Utils
 

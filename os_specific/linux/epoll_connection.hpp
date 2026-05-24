@@ -7,6 +7,7 @@
 #include "http/connection/http_connection.hpp"
 #include "http/limits/ip_limiter/ip_limiter.hpp"
 #include "http/ssl/http_ssl.hpp"
+#include "utils/diagnostics/metric_tracer.hpp"
 #include "utils/fileops/filecache.hpp"
 #include "utils/pool/bitmap_pool.hpp"
 #include "utils/timer/timer_wheel.hpp"
@@ -93,15 +94,16 @@ private: // Helper Functions
     ssize_t            WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);
 
 private: // Misc
-    Config&            config_     = Config::GetInstance();
-    Logger&            logger_     = Logger::GetInstance();
-    FileCache&         fileCache_  = FileCache::GetInstance();
-    BufferPool&        pool_       = BufferPool::GetInstance();
+    Config&            config_     = GetConfig();
+    Logger&            logger_     = GetLogger();
+    FileCache&         fileCache_  = GetFileCache();
+    BufferPool&        pool_       = GetBufferPool();
+    WorkerMetrics*     metrics_    = MetricTracer::Current();
 
-    IpLimiter          ipLimiter_         = {pool_};
-    ReceiveCallback    onReceive_         = {};
-    std::atomic<bool>  running_           = true;
-    bool               useHttps_          = false;
+    IpLimiter          ipLimiter_  = {pool_};
+    ReceiveCallback    onReceive_  = {};
+    std::atomic<bool>  running_    = true;
+    bool               useHttps_   = false;
 
 private: // Constexpr stuff
     constexpr static char          CHUNK_END[]            = "0\r\n\r\n";
@@ -130,9 +132,6 @@ private: // Epoll + SSL
 private: // Connection Context
     ConnectionPool connections_ = {config_.networkConfig.maxConnections};
     EndpointPool   endpoints_   = {};
-
-    // TODO: FOR DEBUG ONLY, REMOVE IT AFTER
-    std::uint64_t numConnectionsAlive_ = 0;
 };
 
 } // namespace WFX::OSSpecific

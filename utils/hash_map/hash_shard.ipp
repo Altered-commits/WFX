@@ -1,7 +1,7 @@
 #ifndef WFX_UTILS_HASH_SHARD_IPP
 #define WFX_UTILS_HASH_SHARD_IPP
 
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include <cstring>
 
 #if defined(_MSC_VER)
@@ -35,7 +35,7 @@ void HashShard<K, V>::Init(std::size_t cap)
     entries_               = reinterpret_cast<Entry*>(pool_.Alloc(cap * sizeof(Entry)));
     
     if(!entries_)
-        Logger::GetInstance().Fatal("[HashShard]: Failed to get memory for entries");
+        GetLogger().Fatal("[HashShard]: Failed to get memory for entries");
 
     for(std::size_t i = 0; i < cap; ++i)
         new (&entries_[i]) Entry{};
@@ -61,7 +61,7 @@ void HashShard<K, V>::Resize(std::size_t newCapacity)
 
     Entry* newEntries = reinterpret_cast<Entry*>(pool_.Alloc(newCapacity * sizeof(Entry)));
     if(!newEntries)
-        Logger::GetInstance().Fatal("[HashShard]: Failed to resize entries");
+        GetLogger().Fatal("[HashShard]: Failed to resize entries");
     
     for(std::size_t i = 0; i < newCapacity; ++i)
         new (&newEntries[i]) Entry{};

@@ -10,15 +10,18 @@ namespace WFX::Core {
 using namespace WFX::Utils;
 using namespace WFX::Core::ConfigHelpers;
 
-Config& Config::GetInstance()
+// Global configuration instance
+static Config __GlobalConfig;
+
+Config& GetConfig() noexcept
 {
-    static Config config;
-    return config;
+    return __GlobalConfig;
 }
 
+// vvv Public Functions vvv
 void Config::LoadCoreSettings(std::string_view path)
 {
-    Logger& logger = Logger::GetInstance();
+    Logger& logger = GetLogger();
 
     try {
         auto tbl = toml::parse_file(path);
@@ -101,11 +104,19 @@ void Config::LoadCoreSettings(std::string_view path)
         #endif // WFX_LINUX_USE_IO_URING
     #endif // _WIN32
 
+        // vvv Logging vvv
+        ExtractValue(tbl, "Logging", "min_level",         loggingConfig.minLevel);
+        ExtractValue(tbl, "Logging", "enable_stdout",     loggingConfig.enableStdout);
+        ExtractValue(tbl, "Logging", "enable_colors",     loggingConfig.enableColors);
+        ExtractValue(tbl, "Logging", "enable_timestamps", loggingConfig.enableTimestamps);
+        ExtractValue(tbl, "Logging", "enable_file",       loggingConfig.enableFile);
+        ExtractValue(tbl, "Logging", "max_file_size",     loggingConfig.maxFileSize);
+        ExtractValue(tbl, "Logging", "max_rotations",     loggingConfig.maxRotations);
+
         // vvv Misc vvv
         ExtractValue(tbl, "Misc", "file_cache_size",      miscConfig.fileCacheSize);
         ExtractValue(tbl, "Misc", "cache_chunk_size",     miscConfig.cacheChunkSize);
         ExtractValue(tbl, "Misc", "template_chunk_size",  miscConfig.templateChunkSize);
-        ExtractValue(tbl, "Misc", "crash_log_dir",        miscConfig.crashLogDir);
     }
     catch(const toml::parse_error& err) {
         logger.Fatal("[Config]: File -> 'wfx.toml', Error -> ", err.what());

@@ -1,50 +1,46 @@
 #include "async_api.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include "http/connection/http_connection.hpp"
 
 namespace WFX::Shared {
 
 using WFX::Http::ConnectionContext;
-using WFX::Utils::Logger;
 
 // Important stuff :)
-static AsyncAPIDataV1 __GlobalAsyncDataV1;
+static AsyncAPIDataExt1 __GlobalAsyncDataExt1;
 
-const ASYNC_API_TABLE* GetAsyncAPIV1()
+const ASYNC_API_EXT1* GetAsyncAPIExt1()
 {
     // 'ctx' is ConnectionContext just type erased so user doesn't DO anything
-    static ASYNC_API_TABLE __GlobalAsyncAPIV1 = {
+    static ASYNC_API_EXT1 __GlobalAsyncAPIExt1 = {
         // vvv Async Functions vvv
         [](void* ctx, std::uint32_t delayMs, AsyncData asyncData) { // RegisterAsyncTimer
-            auto& logger = Logger::GetInstance();
+            auto& logger = Utils::GetLogger();
 
             if(!ctx) {
-                logger.Warn("[AsyncApi]: 'RegisterAsyncTimer' recived null context");
+                logger.Warn("[AsyncApiExt1]: 'RegisterAsyncTimer' recived null context");
                 return false;
             }
 
             auto  cctx        = static_cast<ConnectionContext*>(ctx);
-            auto* connHandler = __GlobalAsyncDataV1.connHandler;
+            auto* connHandler = __GlobalAsyncDataExt1.connHandler;
 
             // Shouldn't happen considering we set it in core_engine.cpp
             if(!connHandler) {
-                logger.Warn("[AsyncApi]: 'RegisterAsyncTimer' recived null connection handler");
+                logger.Warn("[AsyncApiExt1]: 'RegisterAsyncTimer' recived null connection handler");
                 return false;
             }
 
             return connHandler->RefreshAsyncTimer(cctx, delayMs, asyncData);
-        },
-
-        // Version
-        AsyncAPIVersion::V1
+        }
     };
 
-    return &__GlobalAsyncAPIV1;
+    return &__GlobalAsyncAPIExt1;
 }
 
-void InitAsyncAPIV1(Http::HttpConnectionHandler* connHandler)
+void InitAsyncAPIExt1(Http::HttpConnectionHandler* connHandler)
 {
-    __GlobalAsyncDataV1.connHandler = connHandler;
+    __GlobalAsyncDataExt1.connHandler = connHandler;
 }
 
 } // namespace WFX::Shared

@@ -1,12 +1,12 @@
 #include "doctor.hpp"
 
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 namespace WFX::CLI {
 
 int WFXDoctor()
 {
-    auto& logger = Utils::Logger::GetInstance();
+    auto& logger = Utils::GetLogger();
     logger.Info("-----------------------------------------------------");
     logger.Info("[Doctor]: Deprecated for now, might be used in future");
     logger.Info("-----------------------------------------------------");

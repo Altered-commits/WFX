@@ -4,12 +4,11 @@
 #include "config/config.hpp"
 #include "engine/core_engine.hpp"
 #include "engine/template_engine.hpp"
-#include "http/common/http_global_state.hpp"
+#include "http/common/http_master_state.hpp"
 #include "utils/dotenv/dotenv.hpp"
-#include "utils/logger/logger.hpp"
 #include "utils/fileops/filesystem.hpp"
-#include "utils/backport/string.hpp"
-#include "utils/crash_tracer/crash_tracer.hpp"
+#include "utils/diagnostics/crash_tracer.hpp"
+#include "utils/diagnostics/metric_tracer.hpp"
 
 #ifdef _WIN32
     #include <windows.h>
@@ -17,6 +16,7 @@
     #include <wait.h>
     #include <signal.h>
 #endif
+
 #include <thread>
 
 namespace WFX::CLI {
@@ -25,26 +25,29 @@ using namespace WFX::Http;  // For 'WFXGlobalState', ...
 using namespace WFX::Utils; // For 'Logger', 'BufferPool', 'FileCache', ...
 using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 
+// Implemented by each OS differently
+int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir);
+
+// Entrypoint
 int RunServer(const std::string& project, const ServerConfig& cfg)
 {
-    auto& logger      = Logger::GetInstance();
-    auto& config      = Config::GetInstance();
-    auto& globalState = GetGlobalState();
-    auto& osConfig    = config.osSpecificConfig;
-    auto& buildConfig = config.buildConfig;
+    auto& logger = GetLogger();
+    auto& config = GetConfig();
 
-    // Sanity check project directory existence
+    logger.SetMinLevel(Logger::Level::INFO);
+
     if(!FileSystem::DirectoryExists(project.c_str())) 
         logger.Fatal("[WFX]: '", project, "' directory does not exist");
 
-    // Create directory for logs if not exists
-    const std::string crashLogDir = project + "/" + config.miscConfig.crashLogDir;
-    if(!FileSystem::DirectoryExists(crashLogDir.c_str()) && !FileSystem::CreateDirectory(crashLogDir))
-        logger.Fatal("[WFX]: Failed to create '", crashLogDir, "' directory for crash dumps");
+    const std::string logsDir      = project + "/logs/default_logs/";
+    const std::string crashLogsDir = project + "/logs/crash_logs/";
 
-#ifdef _WIN32
-    logger.Fatal("[WFX]: Re-implement 'Run' for 'Windows' properly!");
-#else
+    if(!FileSystem::DirectoryExists(logsDir.c_str()) && !FileSystem::CreateDirectory(logsDir))
+        logger.Fatal("[WFX]: Failed to create '", logsDir, "' directory for log dumps");
+
+    if(!FileSystem::DirectoryExists(crashLogsDir.c_str()) && !FileSystem::CreateDirectory(crashLogsDir))
+        logger.Fatal("[WFX]: Failed to create '", crashLogsDir, "' directory for crash dumps");
+
     // -------------------- LOADING PHASE --------------------
     config.LoadCoreSettings(project + "/wfx.toml");
     config.LoadFinalSettings(project);
@@ -56,18 +59,39 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     if(Dotenv::LoadFromFile(config.envConfig.envPath, envConfig))
         logger.Info("[WFX-Master]: Loaded '.env' successfully");
 
+    return RunServerImpl(cfg, logsDir, crashLogsDir);
+}
+
+#ifdef _WIN32
+int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir)
+{
+    GetLogger().Fatal("[WFX-Master]: Windows implementation not defined!");
+    return 0;
+}
+#else
+int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir)
+{
+    auto& globalState   = GetMasterState();
+    auto& logger        = GetLogger();
+    auto& config        = GetConfig();
+    auto& osConfig      = config.osSpecificConfig;
+    auto& buildConfig   = config.buildConfig;
+    auto& loggingConfig = config.loggingConfig;
+
     // -------------------- INITIALIZING PHASE --------------------
     signal(SIGINT, HandleMasterSignal);
     signal(SIGTERM, HandleMasterSignal);
 
-    // Handle initialization of SSL key before we do anything else
-    if(!RandomPool::GetInstance().GetBytes(globalState.sslKey.data(), globalState.sslKey.size()))
-        logger.Fatal("[WFX-Master]: Failed to initialize SSL key");
+    if(!GetRandomPool().GenerateSSLKey())
+        logger.Fatal("[WFX-Master]: Failed to generate SSL key");
+
+    if(!MetricTracer::Create(osConfig.workerProcesses))
+        logger.Fatal("[WFX-Master]: Failed to initialize metric tracer region");
 
     // -------------------- TEMPLATE / USER CODE COMPILATION PHASE --------------------
     HandleBuildDirectory();
 
-    auto& templateEngine = TemplateEngine::GetInstance();
+    auto& templateEngine = GetTemplateEngine();
     auto [success, hasDynamic] = templateEngine.PreCompileTemplates();
 
     // Compile only user source
@@ -89,7 +113,12 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
 
     logger.Info("[WFX-Master]: Dev server running at ", useHttps ? "https://" : "http://", cfg.host, ':', port);
     logger.Info("[WFX-Master]: Press Ctrl+C to stop");
-    logger.SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
+
+    // User logging preferences start from now on
+    logger.SetMinLevel(static_cast<Logger::Level>(loggingConfig.minLevel));
+    logger.EnableStdout(loggingConfig.enableStdout);
+    logger.EnableColors(loggingConfig.enableColors);
+    logger.EnableTimestamps(loggingConfig.enableTimestamps);
 
     // -------------------- WORKERS SPAWNING PHASE --------------------
     const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
@@ -99,19 +128,28 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
         // --- Child Worker ---
         if(pid == 0) {
             if(i == 0)
-                setpgid(0, 0);          // First worker becomes group leader
+                setpgid(0, 0);                      // First worker becomes group leader
             else
                 setpgid(0, globalState.workerPGID); // Join first worker's group
 
-            // Same as below, every process will have its own crash tracer
+            // Every process will have its own metric tracer
+            MetricTracer::InitWorker(i);
+
+            // AND A CRASH tracer for good luck
             char workerName[32];
             std::snprintf(workerName, sizeof(workerName), "worker-%d", i);
             CrashTracer::SetWorkerName(workerName);
-            CrashTracer::Install(crashLogDir.c_str());
+            CrashTracer::Install(crashLogsDir.c_str());
 
-            // For every process initialize its own BufferPool and FileCache
-            BufferPool::GetInstance().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
-            FileCache::GetInstance().Init(config.miscConfig.fileCacheSize);
+            // AND ITS OWN LOGGING IF ENABLED
+            if(loggingConfig.enableFile)
+                logger.OpenFile(
+                    (logsDir + workerName + ".log").c_str(), loggingConfig.maxFileSize, loggingConfig.maxRotations
+                );
+
+            // AAAAAAAAAAAAND ITS OWNNNNNNNNNNNNN BufferPool and FileCache
+            GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
+            GetFileCache().Init(config.miscConfig.fileCacheSize);
 
             Core::CoreEngine engine{dllDir.c_str(), useHttps};
             globalState.enginePtr = &engine;
@@ -147,6 +185,12 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     while(!globalState.shouldStop)
         pause();
 
+    // Before shutting down, reset all the logging capabilities
+    // Also i will only be enabling stdout (IF NOT ALREADY ENABLED, don't care about other stuff)
+    // Cuz WHY NOT
+    logger.EnableStdout(true);
+    logger.SetMinLevel(Logger::Level::INFO);
+
     logger.Info("[WFX-Master]: Signal received (INT / TERM), waiting for workers to shutdown...");
 
     // -------------------- SHUTDOWN PHASE --------------------
@@ -174,10 +218,14 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
             waitpid(pid, nullptr, 0); // Reap zombie
         }
     }
-#endif // _WIN32
 
+    // Hygiene (Not that it matters, OS would reclaim it anyways if this crashes)
+    MetricTracer::Destroy();
+
+    // GG
     logger.Info("[WFX-Master]: Shutdown successfully");
     return 0;
 }
+#endif // _WIN32
 
 }  // namespace WFX::CLI

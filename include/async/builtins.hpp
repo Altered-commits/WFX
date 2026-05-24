@@ -21,8 +21,8 @@ public:
         handle_ = h;
 
         // Passed by engine, guaranteed
-        void* connCtx   = Core::HttpApi()->GetGlobalPtrData();
-        bool  scheduled = Core::AsyncApi()->RegisterAsyncTimer(
+        void* connCtx   = Core::HttpApiExt1()->GetGlobalPtrData();
+        bool  scheduled = Core::AsyncApiExt1()->RegisterAsyncTimer(
             connCtx, delayMs, {this, OnComplete, OnDestroy}
         );
 

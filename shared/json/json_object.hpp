@@ -17,9 +17,9 @@ static constexpr std::uint32_t JSON_NIL      = 0xFFFFFFFF;
 static constexpr std::uint32_t JSON_TOMB     = 0xFFFFFFFE;
 static constexpr std::uint32_t JSON_INIT_CAP = 8;
 
-inline void* Alloc(std::size_t n)            noexcept { return WFX::Core::MemoryApi()->Alloc(n); }
-inline void  Free(void* ptr)                 noexcept { WFX::Core::MemoryApi()->Free(ptr); }
-inline void* Realloc(void* p, std::size_t n) noexcept { return WFX::Core::MemoryApi()->Realloc(p, n); }
+inline void* Alloc(std::size_t n)            noexcept { return WFX::Core::MemoryApiExt1()->Alloc(n); }
+inline void  Free(void* ptr)                 noexcept { WFX::Core::MemoryApiExt1()->Free(ptr); }
+inline void* Realloc(void* p, std::size_t n) noexcept { return WFX::Core::MemoryApiExt1()->Realloc(p, n); }
 
 // vvv JsonTag vvv
 //
@@ -47,7 +47,6 @@ inline void* Realloc(void* p, std::size_t n) noexcept { return WFX::Core::Memory
 //            htCap is stored at buf[0] so we can read it without a separate field.
 //            kvList  : JsonKV indices in insertion order
 //            htSlots : open-addressing HT, JSON_NIL=empty, JSON_TOMB=deleted, else=JsonKV index
-//
 enum class JsonTag : std::uint8_t {
     EMPTY    = 0,
     BOOL     = 1,
@@ -92,12 +91,10 @@ static_assert(offsetof(JsonNode, tag)  == 0,          "JsonNode::tag offset chan
 static_assert(offsetof(JsonNode, u64a) == 8,          "JsonNode::u64a offset changed");
 static_assert(offsetof(JsonNode, u64b) == 16,         "JsonNode::u64b offset changed");
 
-//
 // vvv JsonKV  (16 bytes, standard layout, trivially copyable) vvv
 // Keys always copied into JsonStore::strs
 // valIdx = JSON_NIL means erased (on free-list)
 // _Pad reused as free-list next pointer when valIdx == JSON_NIL
-//
 struct JsonKV {
     std::uint32_t keyOff = JSON_NIL;
     std::uint32_t keyLen = 0;
@@ -117,7 +114,6 @@ static_assert(std::is_trivially_copyable_v<JsonKV>, "'JsonKV' must be trivially 
 //   buf[2+kvCap..2+kvCap+htCap-1] = htSlots (open-addressing HT)
 //
 // Accessed via free functions so JsonNode methods stay thin
-//
 inline std::uint32_t        ObjHtCap (const std::uint32_t* buf)                      noexcept { return buf[0]; }
 inline std::uint32_t*       ObjKVList(std::uint32_t* buf)                            noexcept { return buf + 2; }
 inline std::uint32_t*       ObjHTSlot(std::uint32_t* buf, std::uint32_t kvCap)       noexcept { return buf + 2 + kvCap; }
@@ -278,7 +274,6 @@ static_assert(offsetof(JsonStore, kvFree)  == 32,    "JsonStore::kvFree offset c
 static_assert(offsetof(JsonStore, strs)    == 40,    "JsonStore::strs offset changed");
 
 // vvv JsonRef (stack only proxy into a JsonStore, never crosses ABI boundaries) vvv
-//
 class JsonObject;
 class JsonParser;
 
@@ -911,7 +906,6 @@ static_assert(sizeof(JsonRef) == 16,                 "JsonRef must be 16 bytes")
 static_assert(std::is_trivially_copyable_v<JsonRef>, "JsonRef must be trivially copyable");
 
 // vvv JsonObject (owns the JsonStore, crosses module boundaries safely) vvv
-//
 class JsonObject {
 public:
     ~JsonObject() noexcept { Destroy(); }

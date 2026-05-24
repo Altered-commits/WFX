@@ -18,14 +18,20 @@ theme:
     - content.tabs.link
 
 extra_css:
+  - css/index.css
   - css/code_format.css
   - css/scrollbar_format.css
 
 markdown_extensions:
   - admonition
+  - attr_list
   - pymdownx.highlight:
       use_pygments: true
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 
 nav:
   - Home: index.md
@@ -46,3 +52,11 @@ nav:
     - Templates: api_reference/templates.md
     - Forms: api_reference/forms.md
     - Json: api_reference/json.md
+    - Telemetry: api_reference/telemetry.md
+  - Developer Reference:
+    - Overview: dev_reference/overview.md
+    - Architecture: dev_reference/architecture.md
+    - Codebase Architecture: dev_reference/codebase_architecture.md
+    - Globals & Singletons: dev_reference/globals_and_singletons.md
+    - ABI Layer: dev_reference/abi_layer.md
+    - Metrics & Observability: dev_reference/metrics_and_observability.md

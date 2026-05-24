@@ -23,7 +23,8 @@ To implement (In no specific order):
 13. Server <-> Server request-response handling (Working on it)
 14. Async (Done)
 16. Form handling (Done)
-17. ABI Stability (Working on it)
+17. ABI Stability (Done, Need to test it)
+18. Logging and Metrics (Done)
 
 To Fix:
 1. Add write budget for backend (epoll/io_uring/iocp/kqueue), don't let one question hoard writing

@@ -18,21 +18,14 @@ struct CacheEntry {
 
 class FileCache final {
 public:
-    static FileCache& GetInstance();
+    FileCache() = default;
+    ~FileCache();
+
+public:
     void Init(std::size_t capacity);
 
 public:
     std::pair<WFXFileDescriptor, WFXFileSize> GetFileDesc(const std::string& path);
-
-private:
-    FileCache() = default;
-    ~FileCache();
-
-    // No need for copy / move semantics
-    FileCache(const FileCache&)            = delete;
-    FileCache(FileCache&&)                 = delete;
-    FileCache& operator=(const FileCache&) = delete;
-    FileCache& operator=(FileCache&&)      = delete;
 
 private: // Helper Functions
     void Touch(const std::string& key);
@@ -49,6 +42,9 @@ private:
     // Frequency -> list of keys (for LFU eviction)
     std::unordered_map<std::uint64_t, std::list<std::string>> freqBuckets_;
 };
+
+// Free function declaration (definition in 'filecache.cpp')
+FileCache& GetFileCache() noexcept;
 
 } // namespace WFX::Utils
 

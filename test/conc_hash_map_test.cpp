@@ -11,7 +11,7 @@
  */
 
 #include "utils/hash_map/concurrent_hash_map.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 using namespace WFX::Utils;
 
@@ -35,7 +35,7 @@ void erase_worker(MapType& map, const std::vector<uint64_t>& keys, size_t start,
 }
 
 int main() {
-    Logger::GetInstance().SetLevelMask(WFX_LOG_WARNINGS);
+    GetLogger().SetLevelMask(WFX_LOG_WARNINGS);
     MapType map;
     std::vector<uint64_t> keys(TOTAL_KEYS);
 

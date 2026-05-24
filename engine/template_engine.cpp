@@ -2,8 +2,8 @@
 
 #include "config/config.hpp"
 #include "utils/fileops/filemeta.hpp"
-#include "utils/backport/string.hpp"
-#include "utils/crypt/string.hpp"
+#include "utils/string/string.hpp"
+#include "utils/string/string.hpp"
 #include <cstring>
 
 #if defined(__linux__)
@@ -12,16 +12,18 @@
 
 namespace WFX::Core {
 
-TemplateEngine& TemplateEngine::GetInstance()
+// Global engine instance
+static TemplateEngine __GlobalTemplateEngine;
+
+TemplateEngine& GetTemplateEngine() noexcept
 {
-    static TemplateEngine engine;
-    return engine;
+    return __GlobalTemplateEngine;
 }
 
 // vvv Main Functions vvv
 TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 {
-    auto& projectConfig = Config::GetInstance().projectConfig;
+    auto& projectConfig = GetConfig().projectConfig;
 
     bool               resaveCacheFile     = false;
     bool               hasDynamicElement   = false;
@@ -78,7 +80,7 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         // Reset this flag every iteration so we don't accidentally set random files in cache
         setCacheStats = false;
 
-        if(!EndsWith(inPath, ".html") && !EndsWith(inPath, ".htm"))
+        if(!inPath.ends_with(".html") && !inPath.ends_with(".htm"))
             return;
         
         logger_.Info("[TemplateEngine]: Found template: ", inPath);
@@ -162,7 +164,7 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
             }
 
             // No need to compile
-            if(StartsWith(temp, PARTIAL_TAG))
+            if(std::string_view{temp, PARTIAL_TAG_SIZE}.starts_with(PARTIAL_TAG))
                 return;
         }
 
@@ -190,9 +192,9 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         else {
             hasDynamicElement = true;
             logger_.Info("[TemplateEngine]: Staging dynamic template for compilation: ", relPath);
+
             // Create a unique, C compatible function name
-            std::string funcName = 
-                StringCanonical::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
+            std::string funcName = StringUtils::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
 
             // Define path for the new .cpp file
             std::string cppPath = dynamicCxxOutputDir + "/" + relPath + ".cpp";
@@ -281,7 +283,7 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
         std::string relPath = std::string(tmpl.filePath.begin() + inputDir.size(), tmpl.filePath.end());
         relPath.erase(0, relPath.find_first_not_of("/\\"));
 
-        std::string symbol = StringCanonical::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
+        std::string symbol = StringUtils::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
 
         void* rawSym = dlsym(handle, symbol.c_str());
         const char* dlsymErr = dlerror();
@@ -311,7 +313,7 @@ TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
 // vvv Helper Functions vvv
 TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate)
 {
-    std::uint32_t      chunkSize = Config::GetInstance().miscConfig.templateChunkSize;
+    std::uint32_t      chunkSize = GetConfig().miscConfig.templateChunkSize;
     CompilationContext ctx       = { std::move(outTemplate), chunkSize };
 
     // Initialize stack with main template
@@ -376,7 +378,7 @@ __ContinueReading:
             frame.firstRead = false;
             if(
                 frame.bytesRead >= PARTIAL_TAG_SIZE
-                && StartsWith(std::string_view(bufPtr, PARTIAL_TAG_SIZE), PARTIAL_TAG)
+                && std::string_view(bufPtr, PARTIAL_TAG_SIZE).starts_with(PARTIAL_TAG)
             )
                 frame.readOffset += PARTIAL_TAG_SIZE + 1;
         }
@@ -469,7 +471,7 @@ __DefaultChunkProcessing:
                 // Example -> Data: <...> {% block id %} <...>
                 //         -> Chunk 1: "<...> {" , Chunk 2: "% block id %} <...>"
                 // So we write what we know is a literal to output and throw '{' inside of carry
-                bool maybeTag = EndsWith(bodyView, "{");
+                bool maybeTag = bodyView.ends_with("{");
                 outSize = maybeTag ? bodyView.size() - 1 : bodyView.size();
 
                 // We only append content to block if we aren't in parent template
@@ -583,7 +585,7 @@ __DefaultChunkProcessing:
 // vvv Helper Functions vvv
 bool TemplateEngine::PushFile(CompilationContext& context, const std::string& relPath)
 {
-    auto& config = Config::GetInstance();
+    auto& config = GetConfig();
 
     std::string fullPath = config.projectConfig.templateDir + "/" + relPath;
 
@@ -779,7 +781,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(
             }
 
             // Trim the content a bit for cleaner output
-            TrimInline(context.currentBlockContent);
+            StringUtils::TrimInline(context.currentBlockContent);
 
             context.inBlock = false;
             context.childBlocks.emplace(

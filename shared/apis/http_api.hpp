@@ -19,12 +19,8 @@ class HttpConnectionHandler;
 
 namespace WFX::Shared {
 
-enum class HttpAPIVersion : std::uint8_t {
-    V1 = 1,
-};
-
 // Data internally used by Http API
-struct HttpAPIDataV1 {
+struct HttpAPIDataExt1 {
     Http::Router*                router      = nullptr;
     Http::HttpMiddleware*        middleware  = nullptr;
     Http::HttpConnectionHandler* connHandler = nullptr;
@@ -75,7 +71,7 @@ using SetGlobalPtrDataFn = void  (*)(void*);
 using GetGlobalPtrDataFn = void* (*)();
 
 // vvv API declarations vvv
-struct HTTP_API_TABLE {
+struct HTTP_API_EXT1 {
     // Routing
     RegisterRouteFn         RegisterRoute;
     RegisterRouteExFn       RegisterRouteEx;
@@ -113,15 +109,12 @@ struct HTTP_API_TABLE {
     // Data API
     SetGlobalPtrDataFn      SetGlobalPtrData;
     GetGlobalPtrDataFn      GetGlobalPtrData;
-
-    // Metadata
-    HttpAPIVersion          apiVersion;
 };
-static_assert(std::is_standard_layout<HTTP_API_TABLE>::value, "'HTTP_API_TABLE' must be standard layout");
+static_assert(std::is_standard_layout<HTTP_API_EXT1>::value, "'HTTP_API_EXT1' must be standard layout");
 
 // vvv Getter & Initializers vvv
-const HTTP_API_TABLE* GetHttpAPIV1();
-void                  InitHttpAPIV1(Http::HttpConnectionHandler*, Http::Router*, Http::HttpMiddleware*);
+const HTTP_API_EXT1* GetHttpAPIExt1();
+void                 InitHttpAPIExt1(Http::HttpConnectionHandler*, Http::Router*, Http::HttpMiddleware*);
 
 } // namespace WFX::Shared
 

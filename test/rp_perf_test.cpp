@@ -11,8 +11,8 @@
 #include <cstring>
 
 // Include your RandomPool implementation here
-#include "utils/crypt/hash.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/hash/hash.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 using namespace WFX::Utils;
 
@@ -30,16 +30,16 @@ void BenchmarkThread(RandomPool& pool, std::atomic<std::size_t>& counter, std::a
 
         if (!pool.GetBytes(buffer.data(), kPerThreadChunk)) {
             failed.store(true, std::memory_order_relaxed);
-            Logger::GetInstance().Info("Thread failed to get random bytes");
+            GetLogger().Info("Thread failed to get random bytes");
             break;
         }
     }
 }
 
 int main() {
-    Logger::GetInstance().Info("[+] Starting RandomPool benchmark...");
+    GetLogger().Info("[+] Starting RandomPool benchmark...");
 
-    RandomPool& pool = RandomPool::GetInstance();
+    RandomPool& pool = GetRandomPool();
     std::atomic<std::size_t> counter{0};
     std::atomic<bool> failed{false};
 
@@ -70,13 +70,13 @@ int main() {
         << "    Calls (GetBytes)   : " << static_cast<size_t>(calls) << "\n"
         << "    Time per Call      : " << ns_per_call << " ns\n";
 
-    Logger::GetInstance().Info(oss.str());
+    GetLogger().Info(oss.str());
 
     if (failed.load()) {
-        Logger::GetInstance().Info("[!] At least one thread failed to get random bytes");
+        GetLogger().Info("[!] At least one thread failed to get random bytes");
         return 1;
     }
 
-    Logger::GetInstance().Info("[+] RandomPool benchmark completed successfully");
+    GetLogger().Info("[+] RandomPool benchmark completed successfully");
     return 0;
 }

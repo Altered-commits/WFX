@@ -4,13 +4,10 @@
 #include "config/config.hpp"
 #include "legacy/lexer.hpp"
 #include "shared/non_abis/template_interface.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include "utils/fileops/filesystem.hpp"
-#include <string>
-#include <vector>
 #include <unordered_map>
 #include <variant>
-#include <cstdint>
 
 namespace WFX::Core {
 
@@ -41,8 +38,6 @@ using Tag            = std::pair<std::string_view, std::string_view>;
 
 class TemplateEngine final {
 public:
-    static TemplateEngine& GetInstance();
-
     TemplateCompilationResult PreCompileTemplates();          // -|
     void                      LoadDynamicTemplatesFromLib();  // -| > To be called in master process only
     TemplateMeta*             GetTemplate(std::string&& relPath);
@@ -263,16 +258,6 @@ private: // IO functions
     bool FlushWrite(IOContext& context, bool force = false);
     bool SafeWrite(IOContext& context, const void* data, std::size_t size, bool skipSpaces = false);
 
-private:
-    TemplateEngine()  = default;
-    ~TemplateEngine() = default;
-
-    // Don't need any copy / move semantics
-    TemplateEngine(const TemplateEngine&)            = delete;
-    TemplateEngine(TemplateEngine&&)                 = delete;
-    TemplateEngine& operator=(const TemplateEngine&) = delete;
-    TemplateEngine& operator=(TemplateEngine&&)      = delete;
-
 private: // For ease of use across functions
     constexpr static std::string_view PARTIAL_TAG      = "{% partial %}";
     constexpr static std::size_t      PARTIAL_TAG_SIZE = PARTIAL_TAG.size();
@@ -286,8 +271,8 @@ private: // For ease of use across functions
     constexpr static const char*      DYNAMIC_FUNC_PREFIX = "__TmplSM_";
 
 private: // Storage
-    Logger& logger_ = Logger::GetInstance();
-    Config& config_ = Config::GetInstance();
+    Logger& logger_ = GetLogger();
+    Config& config_ = GetConfig();
 
     // For simplification of conditional checking in ProcessTag.. functions
     const std::unordered_map<std::string_view, TagType> tagViewToType = {
@@ -310,6 +295,9 @@ private: // Storage
     // -removing, or reloading templates) will cause dangling pointers and crash the server
     std::unordered_map<std::string, TemplateMeta> templates_;
 };
+
+// Free function declaration (definition in 'template_engine.cpp')
+TemplateEngine& GetTemplateEngine() noexcept;
 
 } // namespace WFX::Core
 

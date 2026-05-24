@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <bit>
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 namespace WFX::Utils {
 
@@ -28,7 +28,7 @@ public: // vvv Constructor and Destructor vvv
         bitmap_ = new std::uint64_t[words_]{0};
 
         if(!pool_ || !bitmap_)
-            Logger::GetInstance().Fatal("[BitmapPool]: Failed to create pools (Allocation returned nullptr)");
+            GetLogger().Fatal("[BitmapPool]: Failed to create pools (Allocation returned nullptr)");
     }
 
     ~BitmapPool()

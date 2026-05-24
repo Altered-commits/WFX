@@ -1,14 +1,12 @@
 #ifndef WFX_CONFIG_HELPERS_HPP
 #define WFX_CONFIG_HELPERS_HPP
 
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include <toml++/toml.hpp>
 #include <string>
 #include <vector>
 
 namespace WFX::Core::ConfigHelpers {
-
-using WFX::Utils::Logger;
 
 // vvv Helper Helper Functions vvv
 toml::node_view<const toml::node> ResolveTomlPath(const toml::table& tbl, const char* section)
@@ -45,8 +43,7 @@ toml::node_view<const toml::node> ResolveTomlPath(const toml::table& tbl, const 
 template<typename T>
 bool ExtractValue(
     const toml::table& tbl, const char* section, const char* field, T& target
-)
-{
+) {
     auto node = ResolveTomlPath(tbl, section);
     if(node && node.is_table()) {
         if(auto val = node[field].value<T>()) {
@@ -55,7 +52,7 @@ bool ExtractValue(
         }
     }
 
-    Logger::GetInstance().Warn(
+    Utils::GetLogger().Warn(
         "[Config]: Missing or invalid entry: [", section, "] ", field,
         ". Using default value: ", target
     );
@@ -65,8 +62,7 @@ bool ExtractValue(
 template<typename T>
 void ExtractValueOrFatal(
     const toml::table& tbl, const char* section, const char* field, T& target
-)
-{
+) {
     auto node = ResolveTomlPath(tbl, section);
     if(node && node.is_table()) {
         if(auto val = node[field].value<T>()) {
@@ -75,7 +71,7 @@ void ExtractValueOrFatal(
         }
     }
 
-    Logger::GetInstance().Fatal(
+    Utils::GetLogger().Fatal(
         "[Config]: Missing or invalid entry: [", section, "] ", field, '.'
     );
 }
@@ -84,9 +80,8 @@ template<typename T>
 bool ExtractAutoOrAll(
     const toml::table& tbl, const char* section, const char* field,
     T& target, const T& autoValue, const T& allValue
-)
-{
-    auto& logger = Logger::GetInstance();
+) {
+    auto& logger = Utils::GetLogger();
 
     if(auto val = tbl[section][field].value<T>()) {
         target = *val;
@@ -112,9 +107,8 @@ bool ExtractAutoOrAll(
 inline void ExtractStringArrayOrFatal(
     const toml::table& tbl, const char* section,
     const char* field, std::vector<std::string>& target
-)
-{
-    auto& logger = Logger::GetInstance();
+) {
+    auto& logger = Utils::GetLogger();
 
     if(auto arr = tbl[section][field].as_array()) {
         target.clear();

@@ -1,7 +1,7 @@
 #include "filemeta.hpp"
 
 #include "utils/fileops/filesystem.hpp"
-#include "utils/backport/string.hpp"
+#include "utils/string/string.hpp"
 #include <charconv>
 
 namespace WFX::Utils {
@@ -56,13 +56,13 @@ FileMetaStatus FileMeta::Load()
         std::string file(&buffer[i], midx - i);
 
         std::int64_t modifiedTime = 0;
-        if(!StrToInt64({&buffer[midx + 1], hidx - midx - 1}, modifiedTime))
+        if(!StringUtils::StrToInt64({&buffer[midx + 1], hidx - midx - 1}, modifiedTime))
             return FileMetaStatus::CORRUPTED;
 
         std::string hash(&buffer[hidx + 1], sidx - hidx - 1);
 
         std::uint64_t udSize = 0;
-        if(!StrToUInt64({&buffer[sidx + 1], didx - sidx - 1}, udSize))
+        if(!StringUtils::StrToUInt64({&buffer[sidx + 1], didx - sidx - 1}, udSize))
             return FileMetaStatus::CORRUPTED;
 
         std::size_t dataStart = didx + 1;

@@ -61,7 +61,7 @@ static inline uint64_t now_ms() {
 }
 
 int main() {
-    BufferPool& pool = BufferPool::GetInstance();
+    BufferPool& pool = GetBufferPool();
     pool.Init(1024 * 1024 * 500, [](std::size_t cs){ return cs * 1.2; }); // 500MB pool
 
     TimerHeap heap(pool);

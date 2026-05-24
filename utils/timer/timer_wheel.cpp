@@ -1,5 +1,5 @@
 #include "timer_wheel.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 #if defined(_MSC_VER)
     #include <intrin.h>
@@ -46,7 +46,7 @@ void TimerWheel::Init(
     TimeUnit unit, OnExpireCallback onExpire
 )
 {
-    auto& logger = Logger::GetInstance();
+    auto& logger = GetLogger();
 
     if(!onExpire)
         logger.Fatal("[TimerWheel]: 'onExpire' function was nullptr");
@@ -92,7 +92,7 @@ void TimerWheel::Schedule(std::uint32_t pos, std::uint32_t extra, std::uint64_t 
 {
     // Sanity checks
     if(pos >= cap_)
-        Logger::GetInstance().Fatal(
+        GetLogger().Fatal(
             "[TimerWheel]: 'Schedule' expected 'pos' to be less than wheel capacity, got: ", pos
         );
 
@@ -138,7 +138,7 @@ void TimerWheel::Schedule(std::uint32_t pos, std::uint32_t extra, std::uint64_t 
 void TimerWheel::Cancel(std::uint32_t pos)
 {
     if(pos >= cap_)
-        Logger::GetInstance().Fatal(
+        GetLogger().Fatal(
             "[TimerWheel]: 'Cancel' expected 'pos' to be less than wheel capacity, got: ", pos
         );
 
@@ -177,7 +177,7 @@ void TimerWheel::Unlink(std::uint32_t pos)
 {
     // Sanity checks
     if(pos >= cap_)
-        Logger::GetInstance().Fatal(
+        GetLogger().Fatal(
             "[TimerWheel]: 'Unlink' expected 'pos' to be less than wheel capacity, got: ", pos
         );
 
