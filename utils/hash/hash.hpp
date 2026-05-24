@@ -24,8 +24,10 @@ public:
     RandomPool();
 
 public:
+    bool GenerateSSLKey(); // Call once in master before fork
+
+    SSLKey& GetSSLKey();
     bool    GetBytes(std::uint8_t* out, std::size_t len);
-    SSLKey& GetSSLKey() { return sslKey_; }
     
 private:
     bool RefillBytes();

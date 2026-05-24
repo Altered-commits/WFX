@@ -82,6 +82,9 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     signal(SIGINT, HandleMasterSignal);
     signal(SIGTERM, HandleMasterSignal);
 
+    if(!GetRandomPool().GenerateSSLKey())
+        logger.Fatal("[WFX-Master]: Failed to generate SSL key");
+
     if(!MetricTracer::Create(osConfig.workerProcesses))
         logger.Fatal("[WFX-Master]: Failed to initialize metric tracer region");
 

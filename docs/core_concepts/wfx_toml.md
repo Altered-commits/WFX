@@ -59,7 +59,8 @@ Connection-level configuration. All values are **optional**; defaults are applie
 
 <pre class="code-format">
 [Network]
-send_buffer_max              = 2048    # 32-bit Unsigned Integer (In bytes)
+send_buffer_max              = 16384   # 32-bit Unsigned Integer (In bytes)
+send_buffer_incr             = 4096    # 32-bit Unsigned Integer (In bytes)
 recv_buffer_max              = 16384   # 32-bit Unsigned Integer (In bytes)
 recv_buffer_incr             = 4096    # 32-bit Unsigned Integer (In bytes)
 header_reserve_hint          = 512     # 16-bit Unsigned Integer (In bytes)
@@ -78,6 +79,7 @@ max_requests_per_ip_per_sec  = 5       # 32-bit Unsigned Integer
 ### Buffers
 
 - `send_buffer_max`: Max total outbound buffer per connection
+- `send_buffer_incr`: Growth increment when send buffer expands
 - `recv_buffer_max`: Max total inbound buffer per connection
 - `recv_buffer_incr`: Growth increment when receive buffer expands
 - `header_reserve_hint`: Initial allocation hint for headers
@@ -205,13 +207,17 @@ Socket and worker configuration for **Linux systems only**. All settings in this
 
 <pre class="code-format">
 [Linux]
-worker_processes = 2     # 32-bit Unsigned Integer
-backlog          = 1024  # 32-bit Unsigned Integer
+worker_processes        = 2     # 32-bit Unsigned Integer
+worker_shutdown_timeout = 5     # 16-bit Unsigned Integer (In seconds)
+backlog                 = 1024  # 32-bit Unsigned Integer
 </pre>
 
 - `worker_processes`  
   Controls how many worker processes WFX starts to handle incoming requests. More workers allow better CPU usage on multi-core systems, but too many can waste memory or cause contention.  
   **Guidance**: Start with significantly fewer workers than total CPU cores, leaving ample headroom for the OS, networking, TLS, and background tasks. Increase gradually only after load testing shows CPU saturation.
+
+- `worker_shutdown_timeout`  
+  Seconds to wait for a worker to exit cleanly after receiving SIGTERM before force-killing it with SIGKILL.
 
 - `backlog`  
   Sets the maximum number of incoming connections the OS can queue while workers are busy. If this limit is too low, new connections may be rejected during traffic spikes even if the server is healthy.
@@ -232,6 +238,31 @@ max_events = 1024 # 16-bit Unsigned Integer
 
 - `max_events`  
   Defines how many I/O events `epoll_wait` can return at once. Higher values allow the server to process more ready connections per loop, while lower values reduce per-iteration work but may increase latency under load.
+
+---
+
+## `[Logging]`
+
+Controls how WFX emits log output. This section is **optional**.
+
+<pre class="code-format">
+[Logging]
+min_level         = 2         # 8-bit Unsigned Integer (0 to 5)
+enable_stdout     = true      # Boolean
+enable_colors     = true      # Boolean
+enable_timestamps = true      # Boolean
+enable_file       = false     # Boolean
+max_file_size     = 16777216  # 32-bit Unsigned Integer (In bytes)
+max_rotations     = 2         # 16-bit Unsigned Integer
+</pre>
+
+- `min_level`: Minimum log level to emit. `0` = trace, `1` = debug, `2` = info, `3` = warn, `4` = error, `5` = fatal. Lines below this level are discarded entirely.
+- `enable_stdout`: Write log output to stdout.
+- `enable_colors`: ANSI color codes on stdout. Automatically disabled if stdout is not a TTY.
+- `enable_timestamps`: Prepend `[HH:MM:SS.mmm]` to each log line.
+- `enable_file`: Write log output to per-worker log files under `logs/default_logs/`.
+- `max_file_size`: Max size of a single log file before it rotates. Only applies when `enable_file = true`.
+- `max_rotations`: Number of rotated log files to keep. Files are named `.1` through `.N`, oldest are discarded. Only applies when `enable_file = true`.
 
 ---
 

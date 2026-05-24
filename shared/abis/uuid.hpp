@@ -10,9 +10,9 @@ struct UUIDString {
     char data[37];
 };
 
-static_assert(sizeof(UUIDString) == 37,                      "WFX_UUID_STRING must be 37 bytes");
-static_assert(std::is_standard_layout<UUIDString>::value,    "WFX_UUID_STRING must be standard layout");
-static_assert(std::is_trivially_copyable<UUIDString>::value, "WFX_UUID_STRING must be trivially copyable");
+static_assert(sizeof(UUIDString) == 37,                      "'WFX_UUID_STRING' must be 37 bytes");
+static_assert(std::is_standard_layout<UUIDString>::value,    "'WFX_UUID_STRING' must be standard layout");
+static_assert(std::is_trivially_copyable<UUIDString>::value, "'WFX_UUID_STRING' must be trivially copyable");
 
 struct UUID {
 public:
@@ -158,9 +158,9 @@ public: // vvv Factory vvv
     }
 };
 
-static_assert(sizeof(UUID) == 16,                      "WFX_UUID must be 16 bytes");
-static_assert(std::is_standard_layout<UUID>::value,    "WFX_UUID must be standard layout");
-static_assert(std::is_trivially_copyable<UUID>::value, "WFX_UUID must be trivially copyable");
+static_assert(sizeof(UUID) == 16,                      "'WFX_UUID' must be 16 bytes");
+static_assert(std::is_standard_layout<UUID>::value,    "'WFX_UUID' must be standard layout");
+static_assert(std::is_trivially_copyable<UUID>::value, "'WFX_UUID' must be trivially copyable");
 
 } // namespace WFX::Shared
 

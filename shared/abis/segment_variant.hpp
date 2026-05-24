@@ -80,10 +80,10 @@ public: // vvv Factory vvv
     }
 };
 
-static_assert(alignof(SegmentVariant) == 8,                      "WFX_Variant alignment mismatch");
-static_assert(sizeof(SegmentVariant) == 24,                      "WFX_Variant must be 24 bytes");
-static_assert(std::is_standard_layout<SegmentVariant>::value,    "WFX_Variant must be standard layout");
-static_assert(std::is_trivially_copyable<SegmentVariant>::value, "WFX_Variant must be trivially copyable");
+static_assert(alignof(SegmentVariant) == 8,                      "'WFX_Variant' alignment mismatch");
+static_assert(sizeof(SegmentVariant) == 24,                      "'WFX_Variant' must be 24 bytes");
+static_assert(std::is_standard_layout<SegmentVariant>::value,    "'WFX_Variant' must be standard layout");
+static_assert(std::is_trivially_copyable<SegmentVariant>::value, "'WFX_Variant' must be trivially copyable");
 
 } // namespace WFX::Shared
 

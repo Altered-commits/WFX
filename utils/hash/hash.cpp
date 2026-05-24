@@ -95,9 +95,17 @@ RandomPool::RandomPool()
 {
     if(!RefillBytes())
         GetLogger().Fatal("[RandomPool]: Failed to construct randomized byte pool.");
+}
 
-    if(!GetBytes(sslKey_.data(), SSL_KEY_SIZE))
-        GetLogger().Fatal("[RandomPool]: Failed to generate SSL key");
+// vvv Public Functions vvv
+bool RandomPool::GenerateSSLKey()
+{
+    return GetBytes(sslKey_.data(), SSL_KEY_SIZE);
+}
+
+RandomPool::SSLKey& RandomPool::GetSSLKey()
+{
+    return sslKey_;
 }
 
 bool RandomPool::GetBytes(std::uint8_t* out, std::size_t len)

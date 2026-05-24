@@ -40,7 +40,8 @@ struct AsyncResult {
     MiddlewareAction action;     // CONTINUE for non-middleware
     AsyncStatus      status;
 };
-static_assert(sizeof(AsyncResult) == 16, "'AsyncResult' must be exactly 16 bytes.");
+static_assert(sizeof(AsyncResult) == 16,              "'AsyncResult' must be exactly 16 bytes.");
+static_assert(std::is_standard_layout_v<AsyncResult>, "'AsyncResult' must be standard layout");
 
 using AsyncCompleteFn = void(*)(void* userData, AsyncResult result);
 using AsyncDestroyFn  = void(*)(void* userData);
@@ -50,7 +51,8 @@ struct AsyncData {
     AsyncCompleteFn AsyncComplete;  // | -> For cleaner storage on engine side i suppose
     AsyncDestroyFn  AsyncDestroy;   // |
 };
-static_assert(sizeof(AsyncData) == 24, "'AsyncData' must be exactly 24 bytes.");
+static_assert(sizeof(AsyncData) == 24,              "'AsyncData' must be exactly 24 bytes.");
+static_assert(std::is_standard_layout_v<AsyncData>, "'AsyncData' must be standard layout");
 
 // vvv Route Callbacks vvv
 using SyncRouteFn  = void (*)(Http::Request, Http::Response);
@@ -75,7 +77,8 @@ struct RouteCallback {
         return kind == CallbackKind::SYNC ? sync  == nullptr : async == nullptr;
     }
 };
-static_assert(sizeof(RouteCallback) == 16, "'RouteCallback' must be exactly 16 bytes.");
+static_assert(sizeof(RouteCallback) == 16,              "'RouteCallback' must be exactly 16 bytes.");
+static_assert(std::is_standard_layout_v<RouteCallback>, "'RouteCallback' must be standard layout");
 
 struct MwCallback {
     CallbackKind kind;
@@ -89,7 +92,8 @@ struct MwCallback {
         return kind == CallbackKind::SYNC ? sync  == nullptr : async == nullptr;
     }
 };
-static_assert(sizeof(MwCallback) == 16, "'MwCallback' must be exactly 16 bytes.");
+static_assert(sizeof(MwCallback) == 16,              "'MwCallback' must be exactly 16 bytes.");
+static_assert(std::is_standard_layout_v<MwCallback>, "'MwCallback' must be standard layout");
 
 // vvv Outbound Streaming vvv
 enum class StreamAction : std::uint8_t {
@@ -102,21 +106,23 @@ struct StreamResult {
     std::size_t  writtenBytes;
     StreamAction action;
 };
-static_assert(sizeof(StreamResult) == 16, "'StreamResult' must be exactly 16 bytes.");
+static_assert(sizeof(StreamResult) == 16,              "'StreamResult' must be exactly 16 bytes.");
+static_assert(std::is_standard_layout_v<StreamResult>, "'StreamResult' must be standard layout");
 
 struct StreamBuffer {
     char*       buffer;
     std::size_t size;
 };
-static_assert(sizeof(StreamBuffer) == 16, "'StreamBuffer' must be exactly 16 bytes.");
+static_assert(sizeof(StreamBuffer) == 16,              "'StreamBuffer' must be exactly 16 bytes.");
+static_assert(std::is_standard_layout_v<StreamBuffer>, "'StreamBuffer' must be standard layout");
 
 struct StreamGenerator {
     void* ctx;
-
     StreamResult (*Next)(void* ctx, StreamBuffer buffer);
     void         (*Destroy)(void* ctx);
 };
-static_assert(sizeof(StreamGenerator) == 24, "'StreamGenerator' must be exactly 24 bytes.");
+static_assert(sizeof(StreamGenerator) == 24,              "'StreamGenerator' must be exactly 24 bytes.");
+static_assert(std::is_standard_layout_v<StreamGenerator>, "'StreamGenerator' must be standard layout");
 
 // vvv Endpoint vvv
 enum class EndpointStatus : std::uint8_t {
@@ -158,7 +164,8 @@ struct LogMetrics {
     std::uint64_t error = 0;
     std::uint64_t fatal = 0;
 };
-static_assert(sizeof(LogMetrics) == 48, "'LogMetrics' must be exactly 48 bytes");
+static_assert(sizeof(LogMetrics) == 48,              "'LogMetrics' must be exactly 48 bytes");
+static_assert(std::is_standard_layout_v<LogMetrics>, "'LogMetrics' must be standard layout");
 
 struct NetworkMetrics {
     std::uint64_t accepts          = 0;
@@ -177,7 +184,8 @@ struct NetworkMetrics {
     std::uint64_t response4xx      = 0;
     std::uint64_t response5xx      = 0;
 };
-static_assert(sizeof(NetworkMetrics) == 120, "'NetworkMetrics' must be exactly 120 bytes");
+static_assert(sizeof(NetworkMetrics) == 120,             "'NetworkMetrics' must be exactly 120 bytes");
+static_assert(std::is_standard_layout_v<NetworkMetrics>, "'NetworkMetrics' must be standard layout");
 
 // One slot per worker in shared mmap
 // Embeds user-facing metric structs directly (add fields there, not here)
@@ -186,7 +194,8 @@ struct alignas(64) WorkerMetrics {
     LogMetrics     log     = {};
     NetworkMetrics network = {};
 };
-static_assert(sizeof(WorkerMetrics) % 64 == 0, "'WorkerMetrics' must be a multiple of 64 bytes");
+static_assert(sizeof(WorkerMetrics) % 64 == 0,          "'WorkerMetrics' must be a multiple of 64 bytes");
+static_assert(std::is_standard_layout_v<WorkerMetrics>, "'WorkerMetrics' must be standard layout");
 
 } // namespace WFX::Shared
 
