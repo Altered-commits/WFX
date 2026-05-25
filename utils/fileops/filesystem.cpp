@@ -318,6 +318,27 @@ void ListDirectoryImpl(std::string& path, bool shouldRecurse, const FileCallback
 #endif
 }
 
+// vvv Path Queries vvv
+std::string GetCurrentPath()
+{
+#ifdef _WIN32
+    char buf[MAX_PATH];
+
+    DWORD len = GetCurrentDirectoryA(MAX_PATH, buf);
+    if(len == 0 || len >= MAX_PATH)
+        return "";
+
+    return std::string(buf, len);
+#else
+    char buf[PATH_MAX];
+
+    if(!getcwd(buf, sizeof(buf)))
+        return "";
+
+    return std::string(buf);
+#endif
+}
+
 } // namespace Filesystem
 
 } // namespace WFX::Utils

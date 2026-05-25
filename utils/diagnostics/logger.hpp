@@ -204,7 +204,7 @@ public:
     [[noreturn]] void Fatal(Args&&... args) noexcept
     {
         Emit(Level::FATAL, std::forward<Args>(args)...);
-        std::abort();
+        std::exit(1);
     }
 
     // Raw stdout print: no timestamp, no level tag, no sinks

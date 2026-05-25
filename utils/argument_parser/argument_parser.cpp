@@ -7,9 +7,10 @@ void ArgumentParser::AddCommand(const std::string& name, const std::string& desc
     commands_[name] = { description, {}, std::move(handler) };
 }
 
-void ArgumentParser::AddOption(const std::string& command, const std::string& name, const std::string& description,
-                                bool isFlag, const std::string& defaultValue, bool required)
-{
+void ArgumentParser::AddOption(
+    const std::string& command, const std::string& name, const std::string& description,
+    bool isFlag, const std::string& defaultValue, bool required
+) {
     auto& cmd = commands_[command];
     cmd.options[name] = { description, defaultValue, isFlag, required };
 }
@@ -31,6 +32,7 @@ int ArgumentParser::Parse(int argc, char* argv[])
 
     const auto& cmd = cmdIt->second;
     const auto& opts = cmd.options;
+
     std::unordered_map<std::string, std::string> parsedOptions;
     std::vector<std::string> positionalArgs;
 
@@ -90,7 +92,7 @@ void ArgumentParser::PrintUsage() const
                  
     logger_.Print(
                 "[Usage]\n"
-                "./wfx <command> [options]\n\n[Available Commands]"
+                "wfx <command> [options]\n\n[Available Commands]"
             );
 
     for(const auto& [name, cmd] : commands_)

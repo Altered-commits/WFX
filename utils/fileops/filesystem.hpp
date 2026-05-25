@@ -79,6 +79,9 @@ bool          DeleteDirectory(const char* path);
 DirectoryList ListDirectory(std::string path, bool shouldRecurse);
 void          ListDirectory(std::string path, bool shouldRecurse, const FileCallback& onEntry);
 
+// Path Queries
+std::string GetCurrentPath();
+
 } // namespace FileSystem
 
 } // namespace WFX::Utils

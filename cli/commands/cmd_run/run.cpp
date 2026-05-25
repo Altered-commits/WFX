@@ -6,7 +6,7 @@
 #include "engine/template_engine.hpp"
 #include "http/common/http_master_state.hpp"
 #include "utils/dotenv/dotenv.hpp"
-#include "utils/fileops/filesystem.hpp"
+#include "utils/daemon/daemon_registry.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
 #include "utils/diagnostics/metric_tracer.hpp"
 
@@ -15,8 +15,10 @@
 #else
     #include <wait.h>
     #include <signal.h>
+    #include <fcntl.h>
 #endif
 
+#include <ctime>
 #include <thread>
 
 namespace WFX::CLI {
@@ -25,22 +27,27 @@ using namespace WFX::Http;  // For 'WFXGlobalState', ...
 using namespace WFX::Utils; // For 'Logger', 'BufferPool', 'FileCache', ...
 using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 
-// Implemented by each OS differently
-int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir);
+// Forward declarations
+int  RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir);
+void CheckAlreadyRunning(const std::string& projectName);
 
 // Entrypoint
-int RunServer(const std::string& project, const ServerConfig& cfg)
+int RunServer(const std::string& projectName, const ServerConfig& cfg)
 {
     auto& logger = GetLogger();
     auto& config = GetConfig();
 
     logger.SetMinLevel(Logger::Level::INFO);
 
-    if(!FileSystem::DirectoryExists(project.c_str())) 
-        logger.Fatal("[WFX]: '", project, "' directory does not exist");
+    // -------------------- DUPLICATE CALL CHECK --------------------
+    CheckAlreadyRunning(projectName);
 
-    const std::string logsDir      = project + "/logs/default_logs/";
-    const std::string crashLogsDir = project + "/logs/crash_logs/";
+    // -------------------- STARTUP PHASE --------------------
+    if(!FileSystem::DirectoryExists(projectName.c_str()))
+        logger.Fatal("[WFX]: '", projectName, "' directory does not exist");
+
+    const std::string logsDir      = projectName + "/logs/default_logs/";
+    const std::string crashLogsDir = projectName + "/logs/crash_logs/";
 
     if(!FileSystem::DirectoryExists(logsDir.c_str()) && !FileSystem::CreateDirectory(logsDir))
         logger.Fatal("[WFX]: Failed to create '", logsDir, "' directory for log dumps");
@@ -49,8 +56,8 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
         logger.Fatal("[WFX]: Failed to create '", crashLogsDir, "' directory for crash dumps");
 
     // -------------------- LOADING PHASE --------------------
-    config.LoadCoreSettings(project + "/wfx.toml");
-    config.LoadFinalSettings(project);
+    config.LoadCoreSettings(projectName + "/wfx.toml");
+    config.LoadFinalSettings(projectName);
 
     EnvConfig envConfig;
     envConfig.SetFlag(EnvFlags::REQUIRE_OWNER_UID);
@@ -77,6 +84,10 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     auto& osConfig      = config.osSpecificConfig;
     auto& buildConfig   = config.buildConfig;
     auto& loggingConfig = config.loggingConfig;
+
+    // Used in daemon registry
+    auto& projectName         = config.projectConfig.projectName;
+    auto& projectAbsolutePath = config.projectConfig.projectPath;
 
     // -------------------- INITIALIZING PHASE --------------------
     signal(SIGINT, HandleMasterSignal);
@@ -111,8 +122,52 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     // Switch ports if we enable https and we don't want to override https default port
     std::uint16_t port = useHttps && !ohp ? 443U : cfg.port;
 
-    logger.Info("[WFX-Master]: Dev server running at ", useHttps ? "https://" : "http://", cfg.host, ':', port);
+    logger.Info("[WFX-Master]: Server running at ", useHttps ? "https://" : "http://", cfg.host, ':', port);
     logger.Info("[WFX-Master]: Press Ctrl+C to stop");
+
+    // -------------------- DAEMON CONVERSION PHASE (IF ENABLED) --------------------
+    if(cfg.GetFlag(ServerFlags::USE_DAEMON)) {
+        pid_t pid = fork();
+
+        if(pid < 0)
+            logger.Fatal("[WFX-Master]: Failed to detach from terminal");
+
+        // Parent (launcher) exits, child continues as daemon master
+        if(pid > 0) {
+            logger.Info("[WFX-Master]: Exec as daemon. Master pid = ", pid);
+            std::exit(0);
+        }
+
+        // Child becomes session leader
+        if(setsid() < 0)
+            logger.Fatal("[WFX-Master]: Failed to create new session");
+
+        // Redirect stdio to /dev/null
+        int devNull = open("/dev/null", O_RDWR);
+        if(devNull < 0)
+            logger.Fatal("[WFX-Master]: Failed to open /dev/null: ", strerror(errno));
+
+        dup2(devNull, STDIN_FILENO);
+        dup2(devNull, STDOUT_FILENO);
+        dup2(devNull, STDERR_FILENO);
+        close(devNull);
+    }
+
+    // Written after detach logic (if enabled) so PID reflects actual daemon master
+    {
+        DaemonInfo info;
+        info.project = projectName;
+        info.path    = projectAbsolutePath;
+        info.host    = cfg.host;
+        info.port    = port;
+        info.https   = useHttps;
+        info.workers = osConfig.workerProcesses;
+        info.started = static_cast<std::int64_t>(std::time(nullptr));
+        info.pid     = getpid();
+
+        if(!DaemonRegistry::Write(info))
+            logger.Fatal("[WFX-Master]: Failed to write PID file for '", projectName, "'");
+    }
 
     // User logging preferences start from now on
     logger.SetMinLevel(static_cast<Logger::Level>(loggingConfig.minLevel));
@@ -175,13 +230,20 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
             setpgid(pid, globalState.workerPGID);
         }
 
+        // --- Failure ---
         else {
             logger.Error("[WFX-Master]: Failed to fork worker ", i);
+
+            // Clean up before bailing
+            MetricTracer::Destroy();
+            if(!DaemonRegistry::Delete(projectName))
+                logger.Warn("[WFX-Master]: Failed to delete PID file during fork failure cleanup");
+
             return 1;
         }
     }
 
-    // --- Master ---
+    // --- Master wait loop ---
     while(!globalState.shouldStop)
         pause();
 
@@ -208,7 +270,6 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
                 break;
             }
 
-            // Poll every 100ms
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
@@ -222,10 +283,54 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     // Hygiene (Not that it matters, OS would reclaim it anyways if this crashes)
     MetricTracer::Destroy();
 
+    if(!DaemonRegistry::Delete(config.projectConfig.projectName))
+        logger.Warn("[WFX-Master]: Failed to delete PID file on shutdown");
+
     // GG
     logger.Info("[WFX-Master]: Shutdown successfully");
     return 0;
 }
 #endif // _WIN32
 
-}  // namespace WFX::CLI
+void CheckAlreadyRunning(const std::string& projectName)
+{
+    auto& logger = GetLogger();
+
+    DaemonInfo existing;
+    switch(DaemonRegistry::Read(projectName, existing)) {
+        case ReadResult::NOT_FOUND:
+            return; // Good to go
+
+        case ReadResult::IO_ERROR:
+            logger.Fatal(
+                "[WFX-Master]: Failed to read PID file for '", projectName, "'. "
+                "Check permissions on '", DaemonRegistry::PidFilePath(projectName), "'"
+            );
+
+        case ReadResult::CORRUPTED:
+            logger.Warn("[WFX-Master]: Corrupted PID file found for '", projectName, "', removing it");
+
+            if(!DaemonRegistry::Delete(projectName))
+                logger.Fatal("[WFX-Master]: Failed to delete corrupted PID file for '", projectName, "'");
+
+            return;
+
+        case ReadResult::OK:
+            break;
+    }
+
+    if(DaemonRegistry::IsAlive(existing.pid)) {
+        logger.Fatal(
+            "[WFX-Master]: Project '", projectName, "' is already running (pid=", existing.pid, "). "
+            "Use 'wfx control stop ", projectName, "' to stop it or Ctrl+C if running in terminal"
+        );
+    }
+
+    // Process is dead but PID file exists, clean it up
+    logger.Warn("[WFX-Master]: Removing stale PID file for '", projectName, "'");
+
+    if(!DaemonRegistry::Delete(projectName))
+        logger.Fatal("[WFX-Master]: Failed to delete stale PID file for '", projectName, "'");
+}
+
+} // namespace WFX::CLI

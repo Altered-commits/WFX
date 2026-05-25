@@ -47,10 +47,16 @@ set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
 # Compile configuration
 # --------------------------------------------------
 function(configure_compile target)
+    if(WIN32)
+        set(WFX_HOME "$ENV{USERPROFILE}/.wfx/src")
+    else()
+        set(WFX_HOME "$ENV{HOME}/.wfx/src")
+    endif()
+
     target_include_directories(${target} PRIVATE
         "${CMAKE_SOURCE_DIR}"
-        "${CMAKE_SOURCE_DIR}/../WFX/include"
-        "${CMAKE_SOURCE_DIR}/../WFX"
+        "${WFX_HOME}/include"
+        "${WFX_HOME}"
     )
 
     if(MSVC)

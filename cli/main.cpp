@@ -8,6 +8,7 @@
 #include "commands/cmd_new/new.hpp"
 #include "commands/cmd_doctor/doctor.hpp"
 #include "commands/cmd_run/run.hpp"
+#include "commands/cmd_control/control.hpp"
 #include "utils/argument_parser/argument_parser.hpp"
 
 namespace WFX {
@@ -76,6 +77,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
             if(options.count("--use-https") > 0)           cfg.SetFlag(CLI::ServerFlags::USE_HTTPS);
             if(options.count("--https-port-override") > 0) cfg.SetFlag(CLI::ServerFlags::OVERRIDE_HTTPS_PORT);
             if(options.count("--debug") > 0)               cfg.SetFlag(CLI::ServerFlags::USE_DEBUG);
+            if(options.count("--detach") > 0)              cfg.SetFlag(CLI::ServerFlags::USE_DAEMON);
 
             return CLI::RunServer(positionalArgs[0], cfg);
         });
@@ -84,7 +86,23 @@ int WFXEntryPoint(int argc, char* argv[]) {
     parser.AddOption("run", "--pin-to-cpu",          "Pin worker to CPU core",      true,  "",          false);
     parser.AddOption("run", "--use-https",           "Use HTTPS connection",        true,  "",          false);
     parser.AddOption("run", "--https-port-override", "Override default HTTPS port", true,  "",          false);
+    parser.AddOption("run", "--detach",              "Run server as daemon",        true,  "",          false);
     parser.AddOption("run", "--debug",               "For runtime debugging",       true,  "",          false);
+
+    // --- Command: control ---
+    parser.AddCommand("control", "Manage running WFX servers",
+        [](const std::unordered_map<std::string, std::string>&,
+           const std::vector<std::string>& positionalArgs) -> int {
+            if(positionalArgs.empty())
+                GetLogger().Fatal(
+                    "[WFX]: Subcommand required. Usage: wfx control <list|folder|stop> [project-folder-name]"
+                );
+
+            std::string subcommand = positionalArgs[0];
+            std::string project    = positionalArgs.size() > 1 ? positionalArgs[1] : "";
+
+            return CLI::ControlCommand(subcommand, project);
+        });
 
     return parser.Parse(argc, argv);
 }

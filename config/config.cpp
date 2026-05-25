@@ -1,5 +1,6 @@
 #include "config.hpp"
 #include "config_helper.hpp"
+#include "utils/fileops/filesystem.hpp"
 
 #ifdef _WIN32
     #include <thread>
@@ -7,8 +8,8 @@
 
 namespace WFX::Core {
 
-using namespace WFX::Utils;
-using namespace WFX::Core::ConfigHelpers;
+using namespace WFX::Utils;               // For 'Logger', 'Filesystem'
+using namespace WFX::Core::ConfigHelpers; // I mean, its quite obvious
 
 // Global configuration instance
 static Config __GlobalConfig;
@@ -125,7 +126,12 @@ void Config::LoadCoreSettings(std::string_view path)
 
 void Config::LoadFinalSettings(const std::string& projectDir)
 {
+    std::string cwd = FileSystem::GetCurrentPath();
+    if(cwd.empty())
+        GetLogger().Fatal("[Config]: Failed to resolve current working directory");
+
     // Its our job to set some of the project configuration (as we have that info)
+    projectConfig.projectPath = cwd + "/" + projectDir;
     projectConfig.projectName = projectDir;
     projectConfig.publicDir   = projectDir + "/public";
     projectConfig.templateDir = projectDir + "/templates";

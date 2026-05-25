@@ -10,7 +10,8 @@ namespace WFX::Core {
 // Every struct represents a section of configuration (except three below)
 struct ProjectConfig {
     std::string projectName; // --
-    std::string publicDir;   //  | These will be set from within the master process
+    std::string projectPath; //  | These will be set from within the master process
+    std::string publicDir;   //  | Note: 'projectPath' is absolute path while others are relative paths
     std::string templateDir; // --
 
     std::vector<std::string> middlewareList;
