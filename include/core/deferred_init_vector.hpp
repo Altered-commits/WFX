@@ -7,7 +7,7 @@
 namespace WFX::Core {
 
 using DeferredCallback = std::function<void()>;
-using DeferredVector   = std::vector<DeferredCallback>;
+using DeferredVector = std::vector<DeferredCallback>;
 
 // vvv Global Registries vvv
 inline DeferredVector __WFXDeferred;

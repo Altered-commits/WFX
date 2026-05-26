@@ -9,17 +9,15 @@
 
 namespace WFX::Utils {
 
-template <typename T>
-inline std::size_t WFXHash(const T& key)
+template <typename T> inline std::size_t WFXHash(const T& key)
 {
     return std::hash<T>{}(key);
 }
 
-template <typename K, typename V>
-class HashShard {
-    static constexpr std::size_t MAX_PROBE_LIMIT     = 64;
-    static constexpr float       KLOAD_FACTOR_GROW   = 0.7f;
-    static constexpr float       KLOAD_FACTOR_SHRINK = 0.2f;
+template <typename K, typename V> class HashShard {
+    static constexpr std::size_t MAX_PROBE_LIMIT = 64;
+    static constexpr float KLOAD_FACTOR_GROW = 0.7f;
+    static constexpr float KLOAD_FACTOR_SHRINK = 0.2f;
 
 public:
     explicit HashShard(BufferPool& pool);
@@ -28,20 +26,18 @@ public:
 public: // Main Functions
     // Initializing
     void Init(std::size_t cap);
-    
+
     // Operations
     bool Emplace(const K& key, V&& value);
     bool Insert(const K& key, const V& value);
-    V*   Get(const K& key) const;
+    V* Get(const K& key) const;
     bool Erase(const K& key);
-    V*   GetOrInsert(const K& key, const V& defaultValue = V{});
+    V* GetOrInsert(const K& key, const V& defaultValue = V{});
 
     // Looping
-    template<typename Fn>
-    void ForEach(Fn&& cb) const;
-    
-    template<typename Fn>
-    void ForEachEraseIf(Fn&& cb);
+    template <typename Fn> void ForEach(Fn&& cb) const;
+
+    template <typename Fn> void ForEachEraseIf(Fn&& cb);
 
     // Locks
     std::unique_lock<std::shared_mutex> UniqueLock() const;
@@ -55,17 +51,17 @@ private: // Helper Functions
 
 private: // Storage
     struct Entry {
-        K            key;
-        V            value;
+        K key;
+        V value;
         std::uint8_t probeLength;
-        bool         occupied;
+        bool occupied;
     };
 
     BufferPool& pool_;
-    Entry*      entries_               = nullptr;
-    std::size_t capacity_              = 0;
+    Entry* entries_ = nullptr;
+    std::size_t capacity_ = 0;
     std::size_t initialBucketCapacity_ = 0;
-    std::size_t size_                  = 0;
+    std::size_t size_ = 0;
 
     // For concurrent hash map, if needed
     mutable std::shared_mutex mutex_;

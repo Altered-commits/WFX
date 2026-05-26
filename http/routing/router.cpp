@@ -4,7 +4,7 @@
 
 namespace WFX::Http {
 
-using namespace WFX::Utils; // For 'Logger'
+using namespace WFX::Utils;  // For 'Logger'
 using namespace WFX::Shared; // For every single abi type
 
 const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, RouteCallback handler)
@@ -21,8 +21,7 @@ const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, 
 
         default:
             GetLogger().Fatal(
-                "[Router]: Unsupported HTTP method found in RegisterRoute. Use HttpMethod::GET or HttpMethod::POST."
-            );
+                "[Router]: Unsupported HTTP method found in RegisterRoute. Use HttpMethod::GET or HttpMethod::POST.");
             WFX_UNREACHABLE;
     }
 }

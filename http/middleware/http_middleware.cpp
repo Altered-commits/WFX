@@ -24,20 +24,16 @@ void HttpMiddleware::RegisterPerRouteMiddleware(const TrieNode* node, Middleware
 {
     auto& logger = Utils::GetLogger();
     if(!node)
-        logger.Fatal(
-            "[HttpMiddleware]: Route node is nullptr for per-route middleware registeration"
-        );
+        logger.Fatal("[HttpMiddleware]: Route node is nullptr for per-route middleware registeration");
 
     auto&& [it, inserted] = middlewarePerRouteCallbacks_.emplace(node, std::move(mwStack));
     if(!inserted)
-        logger.Fatal(
-            "[HttpMiddleware]: Duplicate registration attempt for route node '", (void*)node, '\''
-        );
+        logger.Fatal("[HttpMiddleware]: Duplicate registration attempt for route node '", (void*)node, '\'');
 }
 
-MiddlewareResult HttpMiddleware::ExecuteMiddleware(
-    ConnectionContext* ctx, const TrieNode* node, Request req, Response res
-) {
+MiddlewareResult HttpMiddleware::ExecuteMiddleware(ConnectionContext* ctx, const TrieNode* node, Request req,
+                                                   Response res)
+{
     if(ctx->trackAsync.GetMLevel() == MiddlewareLevel::GLOBAL) {
         // Initially execute the global middleware stack
         auto mwRes = ExecuteHelper(ctx, req, res, middlewareGlobalCallbacks_);
@@ -54,7 +50,7 @@ MiddlewareResult HttpMiddleware::ExecuteMiddleware(
         return {true, false};
 
     auto elem = middlewarePerRouteCallbacks_.find(node);
-    
+
     // Node exists but no middleware exist, return true
     if(elem == middlewarePerRouteCallbacks_.end())
         return {true, false};
@@ -75,22 +71,15 @@ void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareConfigOrder order)
 
         // Duplicate middleware name from config
         if(!loadedNames.insert(name).second)
-            logger.Fatal(
-                "[HttpMiddleware]: Middleware '",
-                name,
-                "' is listed multiple times in config"
-            );
+            logger.Fatal("[HttpMiddleware]: Middleware '", name, "' is listed multiple times in config");
 
         auto it = middlewareFactories_.find(name);
         if(it != middlewareFactories_.end())
             middlewareGlobalCallbacks_.push_back(std::move(it->second));
         else
-            logger.Fatal(
-                "[HttpMiddleware]: Middleware '",
-                name,
-                "' was listed in config but has not been registered."
-                " This may be a typo or missing registration"
-            );
+            logger.Fatal("[HttpMiddleware]: Middleware '", name,
+                         "' was listed in config but has not been registered."
+                         " This may be a typo or missing registration");
     }
 }
 
@@ -101,9 +90,9 @@ void HttpMiddleware::DiscardFactoryMap()
 }
 
 // vvv Helper Functions vvv
-MiddlewareResult HttpMiddleware::ExecuteHelper(
-    ConnectionContext* ctx, Request req, Response res, MiddlewareStack& stack
-) {
+MiddlewareResult HttpMiddleware::ExecuteHelper(ConnectionContext* ctx, Request req, Response res,
+                                               MiddlewareStack& stack)
+{
     std::size_t stackSize = stack.size();
     if(stackSize == 0)
         return {true, false};
@@ -161,9 +150,9 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(
     return {true, false};
 }
 
-MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(
-    ConnectionContext* ctx, Request req, Response res, MwCallback mw
-) {
+MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(ConnectionContext* ctx, Request req, Response res,
+                                                         MwCallback mw)
+{
     auto& logger = WFX::Utils::GetLogger();
 
     // Check if its a sync function, it directly returns value
@@ -180,7 +169,7 @@ MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(
 
     httpApi->SetGlobalPtrData(nullptr);
 
-    return { MiddlewareAction::CONTINUE, true };
+    return {MiddlewareAction::CONTINUE, true};
 }
 
 } // namespace WFX::Http

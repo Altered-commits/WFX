@@ -24,7 +24,7 @@ static void CreateFile(const fs::path& path, const std::string& content)
 
 static void ScaffoldProject(const std::string& projectName)
 {
-    const fs::path base     = fs::current_path();
+    const fs::path base = fs::current_path();
     const fs::path projBase = base / projectName;
 
     // 1. Create core project folders
@@ -293,7 +293,9 @@ WFX_GET("/template", [](WFX::Request req, WFX::Response res) {
 )cxx");
 
     // 5. Create example template and static asset
-    CreateFile(projBase / "templates/index.html", R"(<html><head><link rel="stylesheet" href="/public/style.css"></head><body><h1>Hello from WFX Template</h1><script src="/public/script.js"></script></body></html>)");
+    CreateFile(
+        projBase / "templates/index.html",
+        R"(<html><head><link rel="stylesheet" href="/public/style.css"></head><body><h1>Hello from WFX Template</h1><script src="/public/script.js"></script></body></html>)");
     CreateFile(projBase / "public/style.css", "body { font-family: sans-serif; }");
     CreateFile(projBase / "public/script.js", "console.log(\"WFX? Weird ain't it...\")");
 
@@ -311,4 +313,4 @@ int CreateProject(const std::string& projectName)
     return 0;
 }
 
-}  // namespace WFX::New
+} // namespace WFX::CLI

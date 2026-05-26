@@ -3,14 +3,14 @@
 
 // For windows, filecache.hpp already includes windows.h anyways
 #ifdef _WIN32
-    #define CloseFile(fd) CloseHandle(fd)
+#define CloseFile(fd) CloseHandle(fd)
 #else
-    #include <sys/stat.h>
-    #include <sys/resource.h>
-    #include <fcntl.h>
-    #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/resource.h>
+#include <fcntl.h>
+#include <unistd.h>
 
-    #define CloseFile(fd) close(fd)
+#define CloseFile(fd) close(fd)
 #endif
 
 #include <cassert>
@@ -46,7 +46,7 @@ void FileCache::Init(std::size_t capacity)
     if(getrlimit(RLIMIT_NOFILE, &rl) == 0)
         safe = rl.rlim_cur / 2;
 #endif
-    
+
     capacity_ = std::min(capacity, safe);
 }
 
@@ -59,19 +59,12 @@ std::pair<WFXFileDescriptor, WFXFileSize> FileCache::GetFileDesc(const std::stri
         return {it->second.fd, it->second.fileSize};
     }
 
-    WFXFileDescriptor fd   = 0;
-    WFXFileSize       size = 0;
+    WFXFileDescriptor fd = 0;
+    WFXFileSize size = 0;
 
 #ifdef _WIN32
-    fd = CreateFileA(
-        path.c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ,
-        nullptr,
-        OPEN_EXISTING,
-        FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OVERLAPPED,
-        nullptr
-    );
+    fd = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                     FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OVERLAPPED, nullptr);
 
     if(fd == WFX_INVALID_FILE)
         return {WFX_INVALID_FILE, 0};
@@ -104,10 +97,10 @@ std::pair<WFXFileDescriptor, WFXFileSize> FileCache::GetFileDesc(const std::stri
 // vvv Helper Functions vvv
 void FileCache::Touch(const std::string& key)
 {
-    auto &entry = entries_[key];
+    auto& entry = entries_[key];
     int oldFreq = entry.freq;
     int newFreq = oldFreq + 1;
-    
+
     entry.freq = newFreq;
 
     // Remove from old bucket
@@ -139,7 +132,7 @@ void FileCache::Evict()
     assert(!freqBuckets_.empty());
 
     // Evict from minFreq bucket, oldest entry (back of list)
-    auto &bucket = freqBuckets_[minFreq_];
+    auto& bucket = freqBuckets_[minFreq_];
     std::string keyToEvict = bucket.back();
     bucket.pop_back();
 

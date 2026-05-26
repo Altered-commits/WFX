@@ -6,12 +6,12 @@
 namespace WFX::Shared {
 
 // vvv All aliases for clarity vvv
-using LogFn = void(*)(const char* msg);
+using LogFn = void (*)(const char* msg);
 
-using GetLogMetricsWorkerFn    = LogMetrics(*)();
-using GetNetMetricsWorkerFn    = NetworkMetrics(*)();
-using GetLogMetricsAggregateFn = LogMetrics(*)();
-using GetNetMetricsAggregateFn = NetworkMetrics(*)();
+using GetLogMetricsWorkerFn = LogMetrics (*)();
+using GetNetMetricsWorkerFn = NetworkMetrics (*)();
+using GetLogMetricsAggregateFn = LogMetrics (*)();
+using GetNetMetricsAggregateFn = NetworkMetrics (*)();
 
 // vvv API declarations vvv
 struct UTILS_API_EXT1 {
@@ -24,8 +24,8 @@ struct UTILS_API_EXT1 {
     LogFn LogFatal;
 
     // Metrics
-    GetLogMetricsWorkerFn    GetLogMetricsWorker;
-    GetNetMetricsWorkerFn    GetNetMetricsWorker;
+    GetLogMetricsWorkerFn GetLogMetricsWorker;
+    GetNetMetricsWorkerFn GetNetMetricsWorker;
     GetLogMetricsAggregateFn GetLogMetricsAggregate;
     GetNetMetricsAggregateFn GetNetMetricsAggregate;
 };

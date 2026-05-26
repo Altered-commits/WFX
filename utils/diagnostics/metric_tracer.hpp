@@ -27,9 +27,9 @@
 #include <cstddef>
 
 #ifdef _WIN32
-    // Windows: future work
+// Windows: future work
 #else
-    #include <sys/mman.h>
+#include <sys/mman.h>
 #endif
 
 namespace WFX::Utils {
@@ -51,9 +51,9 @@ public:
         if(mem == MAP_FAILED)
             return false;
 
-        slots_       = static_cast<Shared::WorkerMetrics*>(mem);
+        slots_ = static_cast<Shared::WorkerMetrics*>(mem);
         workerCount_ = workerCount;
-        mmapSize_    = size;
+        mmapSize_ = size;
 
         return true;
 #endif
@@ -71,10 +71,10 @@ public:
 #ifndef _WIN32
         if(slots_) {
             ::munmap(slots_, mmapSize_);
-            slots_       = nullptr;
+            slots_ = nullptr;
             workerCount_ = 0;
             workerIndex_ = -1;
-            mmapSize_    = 0;
+            mmapSize_ = 0;
         }
 #endif
     }
@@ -108,8 +108,8 @@ public:
             const Shared::LogMetrics& l = slots_[i].log;
             out.trace += l.trace;
             out.debug += l.debug;
-            out.info  += l.info;
-            out.warn  += l.warn;
+            out.info += l.info;
+            out.warn += l.warn;
             out.error += l.error;
             out.fatal += l.fatal;
         }
@@ -126,41 +126,50 @@ public:
 
         for(int i = 0; i < workerCount_; ++i) {
             const Shared::NetworkMetrics& n = slots_[i].network;
-            out.accepts      += n.accepts;
-            out.reads        += n.reads;
-            out.writes       += n.writes;
-            out.bytesRead    += n.bytesRead;
+            out.accepts += n.accepts;
+            out.reads += n.reads;
+            out.writes += n.writes;
+            out.bytesRead += n.bytesRead;
             out.bytesWritten += n.bytesWritten;
-            out.activeConns  += n.activeConns;
-            out.requests     += n.requests;
-            out.response1xx  += n.response1xx;
-            out.response2xx  += n.response2xx;
-            out.response3xx  += n.response3xx;
-            out.response4xx  += n.response4xx;
-            out.response5xx  += n.response5xx;
+            out.activeConns += n.activeConns;
+            out.requests += n.requests;
+            out.response1xx += n.response1xx;
+            out.response2xx += n.response2xx;
+            out.response3xx += n.response3xx;
+            out.response4xx += n.response4xx;
+            out.response5xx += n.response5xx;
         }
 
         return out;
     }
 
-    static int  WorkerCount() noexcept { return workerCount_; }
-    static int  WorkerIndex() noexcept { return workerIndex_; }
-    static bool IsReady()     noexcept { return slots_ != nullptr; }
+    static int WorkerCount() noexcept
+    {
+        return workerCount_;
+    }
+    static int WorkerIndex() noexcept
+    {
+        return workerIndex_;
+    }
+    static bool IsReady() noexcept
+    {
+        return slots_ != nullptr;
+    }
 
 private:
-    MetricTracer()  = delete;
+    MetricTracer() = delete;
     ~MetricTracer() = delete;
 
-    static Shared::WorkerMetrics* slots_;       // points into shared mmap
-    static int                    workerCount_; // process-local copy
-    static int                    workerIndex_; // process-local, set after fork
-    static std::size_t            mmapSize_;    // for munmap
+    static Shared::WorkerMetrics* slots_; // points into shared mmap
+    static int workerCount_;              // process-local copy
+    static int workerIndex_;              // process-local, set after fork
+    static std::size_t mmapSize_;         // for munmap
 };
 
-inline Shared::WorkerMetrics* MetricTracer::slots_       = nullptr;
-inline int                    MetricTracer::workerCount_ = 0;
-inline int                    MetricTracer::workerIndex_ = -1;
-inline std::size_t            MetricTracer::mmapSize_    = 0;
+inline Shared::WorkerMetrics* MetricTracer::slots_ = nullptr;
+inline int MetricTracer::workerCount_ = 0;
+inline int MetricTracer::workerIndex_ = -1;
+inline std::size_t MetricTracer::mmapSize_ = 0;
 
 } // namespace WFX::Utils
 

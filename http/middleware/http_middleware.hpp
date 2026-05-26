@@ -12,15 +12,15 @@ namespace WFX::Http {
 struct TrieNode;
 struct ConnectionContext;
 
-using MiddlewareStack       = std::vector<Shared::MwCallback>;
+using MiddlewareStack = std::vector<Shared::MwCallback>;
 using MiddlewareConfigOrder = const std::vector<std::string>&;
-using MiddlewareFactory     = std::unordered_map<std::string_view, Shared::MwCallback>;
-using MiddlewarePerRoute    = std::unordered_map<const TrieNode*, MiddlewareStack>;
+using MiddlewareFactory = std::unordered_map<std::string_view, Shared::MwCallback>;
+using MiddlewarePerRoute = std::unordered_map<const TrieNode*, MiddlewareStack>;
 
 struct MiddlewareResult {
     bool success;
-    bool isAsync;           // true = engine should wait for callback
-    bool isBroken = false;  // true = middleware returned MwBreak, stop the chain entirely
+    bool isAsync;          // true = engine should wait for callback
+    bool isBroken = false; // true = middleware returned MwBreak, stop the chain entirely
 };
 
 struct MiddlewareFunctionResult {
@@ -30,40 +30,34 @@ struct MiddlewareFunctionResult {
 
 class HttpMiddleware {
 public:
-    HttpMiddleware()  = default;
+    HttpMiddleware() = default;
     ~HttpMiddleware() = default;
 
 public:
     void RegisterMiddleware(std::string_view name, Shared::MwCallback mw);
     void RegisterPerRouteMiddleware(const TrieNode* node, MiddlewareStack mwStack);
 
-    MiddlewareResult ExecuteMiddleware(
-        ConnectionContext* ctx, const TrieNode* node, Request req, Response res
-    );
+    MiddlewareResult ExecuteMiddleware(ConnectionContext* ctx, const TrieNode* node, Request req, Response res);
 
     // Using std::string because TOML loader returns vector<string>
     void LoadMiddlewareFromConfig(MiddlewareConfigOrder order);
     void DiscardFactoryMap();
 
 private:
-    HttpMiddleware(const HttpMiddleware&)            = delete;
+    HttpMiddleware(const HttpMiddleware&) = delete;
     HttpMiddleware& operator=(const HttpMiddleware&) = delete;
 
 private: // Helper functions
-    MiddlewareResult ExecuteHelper(
-        ConnectionContext* ctx, Request req, Response res, MiddlewareStack& stack
-    );
-    MiddlewareFunctionResult ExecuteFunction(
-        ConnectionContext* ctx, Request req, Response res, Shared::MwCallback mw
-    );
+    MiddlewareResult ExecuteHelper(ConnectionContext* ctx, Request req, Response res, MiddlewareStack& stack);
+    MiddlewareFunctionResult ExecuteFunction(ConnectionContext* ctx, Request req, Response res, Shared::MwCallback mw);
 
 private:
     // Temporary construct
     MiddlewareFactory middlewareFactories_;
 
     // Main stuff
-    MiddlewareStack     middlewareGlobalCallbacks_;
-    MiddlewarePerRoute  middlewarePerRouteCallbacks_;
+    MiddlewareStack middlewareGlobalCallbacks_;
+    MiddlewarePerRoute middlewarePerRouteCallbacks_;
 };
 
 } // namespace WFX::Http

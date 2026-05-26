@@ -6,12 +6,12 @@
 namespace WFX::Http {
 
 namespace MimeDetector {
-    std::string_view DetectMimeFromExt(std::string_view path);
-    std::string_view DetectExtFromMime(std::string_view mime);
+std::string_view DetectMimeFromExt(std::string_view path);
+std::string_view DetectExtFromMime(std::string_view mime);
 } // namespace MimeDetector
 
 namespace PortDetector {
-    std::string_view DetectFromProtocol(std::string_view protocol);
+std::string_view DetectFromProtocol(std::string_view protocol);
 }
 
 } // namespace WFX::Http

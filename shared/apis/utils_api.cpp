@@ -7,6 +7,7 @@ namespace WFX::Shared {
 // vvv Main Shit vvv
 const UTILS_API_EXT1* GetUtilsAPIExt1()
 {
+    // clang-format off
     static UTILS_API_EXT1 __GlobalUtilsAPIExt1 = {
         // vvv Logging vvv
         [](const char* m) { Utils::GetLogger().Trace(m); },
@@ -28,6 +29,7 @@ const UTILS_API_EXT1* GetUtilsAPIExt1()
         []() -> LogMetrics     { return Utils::MetricTracer::AggregateLog(); },
         []() -> NetworkMetrics { return Utils::MetricTracer::AggregateNetwork(); }
     };
+    // clang-format on
 
     return &__GlobalUtilsAPIExt1;
 }

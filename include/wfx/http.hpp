@@ -48,7 +48,7 @@ namespace WFX {
 // -----------------------------------------------------------------------
 // Core HTTP types
 // -----------------------------------------------------------------------
-using Request  = Http::Request;
+using Request = Http::Request;
 using Response = Http::Response;
 
 } // namespace WFX

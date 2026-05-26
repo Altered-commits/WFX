@@ -6,53 +6,53 @@
 #include <vector>
 
 #ifndef _WIN32
-    #include <sys/types.h>
+#include <sys/types.h>
 #else
-    using pid_t = int;
+using pid_t = int;
 #endif
 
 namespace WFX::Utils {
 
 struct DaemonInfo {
-    std::string   project;
-    std::string   path;
-    std::string   host;
-    std::uint16_t port    = 0;
-    bool          https   = false;
-    pid_t         pid     = -1;
-    int           workers = 0;
-    std::int64_t  started = 0; // Unix timestamp
+    std::string project;
+    std::string path;
+    std::string host;
+    std::uint16_t port = 0;
+    bool https = false;
+    pid_t pid = -1;
+    int workers = 0;
+    std::int64_t started = 0; // Unix timestamp
 };
 
 enum class ReadResult : std::uint8_t {
-    OK,           // Read and parsed successfully
-    NOT_FOUND,    // PID file does not exist
-    CORRUPTED,    // File exists but could not be parsed or PID is invalid
-    IO_ERROR      // File exists but could not be opened or read
+    OK,        // Read and parsed successfully
+    NOT_FOUND, // PID file does not exist
+    CORRUPTED, // File exists but could not be parsed or PID is invalid
+    IO_ERROR   // File exists but could not be opened or read
 };
 
 enum class StopResult : std::uint8_t {
-    STOPPED,        // Clean shutdown via SIGTERM
-    FORCE_KILLED,   // Timed out, killed via SIGKILL
-    NOT_FOUND,      // No PID file for that project
-    NOT_RUNNING,    // PID file exists but process is dead, cleaned up
-    FAILED          // Could not send signal
+    STOPPED,      // Clean shutdown via SIGTERM
+    FORCE_KILLED, // Timed out, killed via SIGKILL
+    NOT_FOUND,    // No PID file for that project
+    NOT_RUNNING,  // PID file exists but process is dead, cleaned up
+    FAILED        // Could not send signal
 };
 
 namespace DaemonRegistry {
 
 // vvv Path Helpers vvv
-std::string DaemonsDir()                            noexcept;
+std::string DaemonsDir() noexcept;
 std::string PidFilePath(const std::string& project) noexcept;
 
 // vvv File Operations vvv
-bool                    Write(const DaemonInfo& info)                     noexcept;
-ReadResult              Read(const std::string& project, DaemonInfo& out) noexcept;
-bool                    Delete(const std::string& project)                noexcept;
-std::vector<DaemonInfo> List()                                            noexcept;
+bool Write(const DaemonInfo& info) noexcept;
+ReadResult Read(const std::string& project, DaemonInfo& out) noexcept;
+bool Delete(const std::string& project) noexcept;
+std::vector<DaemonInfo> List() noexcept;
 
 // vvv Process Operations vvv
-bool       IsAlive(pid_t pid)                                       noexcept;
+bool IsAlive(pid_t pid) noexcept;
 StopResult Stop(const std::string& project, int timeoutSeconds = 5) noexcept;
 
 } // namespace DaemonRegistry

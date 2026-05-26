@@ -7,10 +7,15 @@ set -euo pipefail
 # Usage:
 #   ./scripts/format.sh
 #   ./scripts/format.sh --dry-run
+#   ./scripts/format.sh --files path/to/file.cpp path/to/other.hpp
+#   ./scripts/format.sh --dry-run --files path/to/file.cpp
 #
 # Modes:
 #   default     -> modifies files in-place
 #   --dry-run   -> validates formatting, shows diff of what clang-format wants
+#
+# Options:
+#   --files     -> run only on the specified files instead of scanning the repo
 # ---------------------------------------------------------------
 
 # ---------------------------------------------------------------
@@ -42,16 +47,31 @@ error()   { printf "\033[1;31m[FORMAT]\033[0m %s\n" "$*" >&2; exit 1; }
 # Parse arguments
 # ---------------------------------------------------------------
 MODE="format"
+CUSTOM_FILES=()
+FILES_MODE=0
 
-for arg in "$@"; do
+i=1
+while [ "$i" -le "$#" ]; do
+    arg="${!i}"
     case "$arg" in
         --dry-run)
             MODE="dry-run"
             ;;
-        *)
+        --files)
+            FILES_MODE=1
+            ;;
+        -*)
             error "Unknown argument: $arg"
             ;;
+        *)
+            if [ "$FILES_MODE" = "1" ]; then
+                CUSTOM_FILES+=("$arg")
+            else
+                error "Unknown argument: $arg"
+            fi
+            ;;
     esac
+    i=$((i + 1))
 done
 
 # ---------------------------------------------------------------
@@ -93,44 +113,52 @@ fi
 echo ""
 
 # ---------------------------------------------------------------
-# Build find arguments
-# ---------------------------------------------------------------
-FIND_ARGS=()
-
-if [ ${#IGNORE_DIRECTORIES[@]} -gt 0 ]; then
-    FIND_ARGS+=( "(" )
-
-    for i in "${!IGNORE_DIRECTORIES[@]}"; do
-        FIND_ARGS+=( -path "${IGNORE_DIRECTORIES[$i]}" )
-
-        if [ "$i" -lt $((${#IGNORE_DIRECTORIES[@]} - 1)) ]; then
-            FIND_ARGS+=( -o )
-        fi
-    done
-
-    FIND_ARGS+=( ")" -prune -o )
-fi
-
-FIND_ARGS+=( "(" )
-
-for i in "${!SOURCE_EXTENSIONS[@]}"; do
-    FIND_ARGS+=( -name "*.${SOURCE_EXTENSIONS[$i]}" )
-
-    if [ "$i" -lt $((${#SOURCE_EXTENSIONS[@]} - 1)) ]; then
-        FIND_ARGS+=( -o )
-    fi
-done
-
-FIND_ARGS+=( ")" -print0 )
-
-# ---------------------------------------------------------------
 # Collect files
 # ---------------------------------------------------------------
 FILES=()
 
-while IFS= read -r -d '' file; do
-    FILES+=("$file")
-done < <(find . "${FIND_ARGS[@]}")
+if [ "${#CUSTOM_FILES[@]}" -gt 0 ]; then
+    for f in "${CUSTOM_FILES[@]}"; do
+        if [ ! -f "$f" ]; then
+            warn "File not found, skipping: $f"
+            continue
+        fi
+        FILES+=("$f")
+    done
+else
+    # Build find arguments
+    FIND_ARGS=()
+
+    if [ ${#IGNORE_DIRECTORIES[@]} -gt 0 ]; then
+        FIND_ARGS+=( "(" )
+
+        for i in "${!IGNORE_DIRECTORIES[@]}"; do
+            FIND_ARGS+=( -path "${IGNORE_DIRECTORIES[$i]}" )
+
+            if [ "$i" -lt $((${#IGNORE_DIRECTORIES[@]} - 1)) ]; then
+                FIND_ARGS+=( -o )
+            fi
+        done
+
+        FIND_ARGS+=( ")" -prune -o )
+    fi
+
+    FIND_ARGS+=( "(" )
+
+    for i in "${!SOURCE_EXTENSIONS[@]}"; do
+        FIND_ARGS+=( -name "*.${SOURCE_EXTENSIONS[$i]}" )
+
+        if [ "$i" -lt $((${#SOURCE_EXTENSIONS[@]} - 1)) ]; then
+            FIND_ARGS+=( -o )
+        fi
+    done
+
+    FIND_ARGS+=( ")" -print0 )
+
+    while IFS= read -r -d '' file; do
+        FILES+=("$file")
+    done < <(find . "${FIND_ARGS[@]}")
+fi
 
 FILE_COUNT=${#FILES[@]}
 
@@ -153,7 +181,6 @@ for file in "${FILES[@]}"; do
     printf "[%d/%d] %s\n" "$((PROCESSED + 1))" "$FILE_COUNT" "$file"
 
     if [ "$MODE" = "dry-run" ]; then
-        # Generate what clang-format wants the file to look like
         FORMATTED=$("$CLANG_FORMAT" "$file")
         ORIGINAL=$(cat "$file")
 
@@ -163,7 +190,6 @@ for file in "${FILES[@]}"; do
             printf "\033[1;33m  Violations in: %s\033[0m\n" "$file"
             echo "  --- original"
             echo "  +++ clang-format wants"
-            # Show unified diff with 3 lines of context, indent for readability
             diff --unified=3 <(echo "$ORIGINAL") <(echo "$FORMATTED") \
                 | tail -n +3 \
                 | sed 's/^/  /' \

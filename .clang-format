@@ -7,13 +7,13 @@ IndentWidth: 4
 TabWidth: 4
 UseTab: Never
 IndentCaseLabels: true
-IndentCaseBlocks: true
+IndentCaseBlocks: false
 
 # ---------------------------------------------------------------
 # General formatting
 # ---------------------------------------------------------------
 ColumnLimit: 120
-
+SpacesInAngles: Never
 SpacesInParentheses: false
 SpaceAfterCStyleCast: false
 
@@ -42,8 +42,8 @@ BraceWrapping:
     AfterNamespace: false
     AfterControlStatement: false
     AfterCaseLabel: false
-    BeforeCatch: false
-    BeforeElse: false
+    BeforeCatch: true
+    BeforeElse: true
     SplitEmptyFunction: false
     SplitEmptyRecord: false
     SplitEmptyNamespace: false

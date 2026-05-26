@@ -9,7 +9,7 @@
 
 // Linux
 #ifdef __linux__
-    #include <wait.h>
+#include <wait.h>
 #endif
 
 namespace WFX::CLI {
@@ -25,39 +25,34 @@ void HandleBuildDirectory()
     auto& config = GetConfig();
 
     auto& projectConfig = config.projectConfig;
-    auto& buildConfig   = config.buildConfig;
-    
+    auto& buildConfig = config.buildConfig;
+
     // Short circuit if build/ directory already exists
     // Any unwanted changes inside of build/ is solely users fault
     if(FileSystem::DirectoryExists(buildConfig.buildDir.c_str()))
         return;
 
-    std::string intDir   = projectConfig.projectName + "/intermediate/dynamic";
+    std::string intDir = projectConfig.projectName + "/intermediate/dynamic";
     std::string intDummy = intDir + "/_d.cpp";
 
     // If intermediate directory doesn't exist, handle its creation (to ensure cmake succeeds)
     if(!FileSystem::DirectoryExists(intDir.c_str())) {
         if(!FileSystem::CreateDirectory(std::move(intDir)))
-            logger.Fatal(
-                "[WFX-Master]: Failed to create intermediate directory (needed for CMake to work)"
-            );
+            logger.Fatal("[WFX-Master]: Failed to create intermediate directory (needed for CMake to work)");
 
         if(!FileSystem::CreateFile(intDummy.c_str())) {
             // Cleanup the intermediate/ directory
             if(!FileSystem::DeleteDirectory((projectConfig.projectName + "/intermediate").c_str()))
                 logger.Error("[WFX-Master]: Failed to delete intermediate/ (incoming 'Fatal' error)");
 
-            logger.Fatal(
-                "[WFX-Master]: Failed to create intermediate dummy (needed for CMake to work)"
-            );
+            logger.Fatal("[WFX-Master]: Failed to create intermediate dummy (needed for CMake to work)");
         }
     }
 
     // Now do the fancy cmake command and run it
-    std::string cmakeInitCommand = "cmake -DCMAKE_BUILD_TYPE=" + buildConfig.buildType
-                                    + " -S " + projectConfig.projectName
-                                    + " -B " + buildConfig.buildDir
-                                    + " -G \"" + buildConfig.buildGenerator + '"';
+    std::string cmakeInitCommand = "cmake -DCMAKE_BUILD_TYPE=" + buildConfig.buildType + " -S " +
+                                   projectConfig.projectName + " -B " + buildConfig.buildDir + " -G \"" +
+                                   buildConfig.buildGenerator + '"';
 
     auto initResult = ProcessUtils::RunProcess(cmakeInitCommand);
     if(initResult.exitCode != 0)
@@ -71,19 +66,19 @@ void HandleUserCxxCompilation(CxxCompilationOption opt)
     /*
      * Handles both src and template cxx compilation with one single build directory
      */
-    auto& logger      = GetLogger();
+    auto& logger = GetLogger();
     auto& buildConfig = GetConfig().buildConfig;
 
     std::string cmakeBuildCommand = "cmake --build " + buildConfig.buildDir;
 
-    switch(opt) {    
+    switch(opt) {
         case CxxCompilationOption::SOURCE_ONLY:
             cmakeBuildCommand += " --target user_entry";
             break;
         case CxxCompilationOption::TEMPLATES_ONLY:
             cmakeBuildCommand += " --target user_templates";
             break;
-        // Ignore everything else
+            // Ignore everything else
     }
 
     auto buildResult = ProcessUtils::RunProcess(cmakeBuildCommand);
@@ -95,7 +90,7 @@ void HandleUserCxxCompilation(CxxCompilationOption opt)
 
 // vvv OS Specific Stuff vvv
 #ifdef _WIN32
-    // Windows: future work
+// Windows: future work
 #else
 void HandleMasterSignal(int)
 {
@@ -110,7 +105,7 @@ void HandleWorkerSignal(int)
 {
     auto& globalState = GetMasterState();
     globalState.shouldStop = true;
-    
+
     // Stop is atomic, its safe to call it in signal handler
     if(globalState.enginePtr) {
         globalState.enginePtr->Stop();
@@ -118,7 +113,8 @@ void HandleWorkerSignal(int)
     }
 }
 
-void PinWorkerToCPU(int workerIndex) {
+void PinWorkerToCPU(int workerIndex)
+{
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
 

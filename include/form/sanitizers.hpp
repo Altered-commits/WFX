@@ -2,17 +2,16 @@
 #define WFX_INC_FORM_SANITIZERS_HPP
 
 #include "fields.hpp"
-#include "utils/string/string.hpp"
 #include <cstdint>
 #include <string_view>
 
 namespace WFX::Form {
 
 // vvv Helper Aliases vvv
-using TextOutputType  = DecayedType<Text>::Type;
+using TextOutputType = DecayedType<Text>::Type;
 using EmailOutputType = DecayedType<Email>::Type;
-using IntOutputType   = DecayedType<Int>::Type;
-using UIntOutputType  = DecayedType<UInt>::Type;
+using IntOutputType = DecayedType<Int>::Type;
+using UIntOutputType = DecayedType<UInt>::Type;
 using FloatOutputType = DecayedType<Float>::Type;
 
 // No processing needed, validation handles everything
@@ -65,12 +64,7 @@ static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPt
 
     double v = std::strtod(sv.data(), &end);
 
-    if(
-        errno != 0
-        || end != sv.data() + sv.size()
-        || v < r.min
-        || v > r.max
-    )
+    if(errno != 0 || end != sv.data() + sv.size() || v < r.min || v > r.max)
         return false;
 
     out = v;
@@ -78,11 +72,26 @@ static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPt
 }
 
 // vvv Dispatchers vvv
-static constexpr SanitizerFn<TextOutputType>  DefaultSanitizerFor(const Text&)  { return DefaultSanitizeText;  }
-static constexpr SanitizerFn<EmailOutputType> DefaultSanitizerFor(const Email&) { return DefaultSanitizeEmail; }
-static constexpr SanitizerFn<IntOutputType>   DefaultSanitizerFor(const Int&)   { return DefaultSanitizeInt;   }
-static constexpr SanitizerFn<UIntOutputType>  DefaultSanitizerFor(const UInt&)  { return DefaultSanitizeUInt;  }
-static constexpr SanitizerFn<FloatOutputType> DefaultSanitizerFor(const Float&) { return DefaultSanitizeFloat; }
+static constexpr SanitizerFn<TextOutputType> DefaultSanitizerFor(const Text&)
+{
+    return DefaultSanitizeText;
+}
+static constexpr SanitizerFn<EmailOutputType> DefaultSanitizerFor(const Email&)
+{
+    return DefaultSanitizeEmail;
+}
+static constexpr SanitizerFn<IntOutputType> DefaultSanitizerFor(const Int&)
+{
+    return DefaultSanitizeInt;
+}
+static constexpr SanitizerFn<UIntOutputType> DefaultSanitizerFor(const UInt&)
+{
+    return DefaultSanitizeUInt;
+}
+static constexpr SanitizerFn<FloatOutputType> DefaultSanitizerFor(const Float&)
+{
+    return DefaultSanitizeFloat;
+}
 
 } // namespace WFX::Form
 

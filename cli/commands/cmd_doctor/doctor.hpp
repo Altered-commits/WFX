@@ -5,6 +5,6 @@ namespace WFX::CLI {
 
 int WFXDoctor();
 
-}  // namespace WFX::CLI
+} // namespace WFX::CLI
 
-#endif  // WFX_CLI_COMMANDS_DOCTOR_HPP
+#endif // WFX_CLI_COMMANDS_DOCTOR_HPP

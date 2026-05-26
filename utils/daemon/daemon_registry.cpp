@@ -6,13 +6,13 @@
 #include <ctime>
 
 #ifdef _WIN32
-    // Windows: future work
+// Windows: future work
 #else
-    #include <signal.h>
-    #include <unistd.h>
-    #include <dirent.h>
-    #include <thread>
-    #include <chrono>
+#include <signal.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <thread>
+#include <chrono>
 #endif
 
 namespace WFX::Utils::DaemonRegistry {
@@ -73,25 +73,18 @@ bool Write(const DaemonInfo& info) noexcept
     // Build content
     char buf[MAX_FILE_SIZE];
 
-    int len = std::snprintf(
-        buf, sizeof(buf),
-        "pid=%d\n"
-        "project=%s\n"
-        "path=%s\n"
-        "host=%s\n"
-        "port=%d\n"
-        "https=%s\n"
-        "workers=%d\n"
-        "started=%lld\n",
-        static_cast<int>(info.pid),
-        info.project.c_str(),
-        info.path.c_str(),
-        info.host.c_str(),
-        static_cast<int>(info.port),
-        info.https ? "true" : "false",
-        info.workers,
-        static_cast<long long>(info.started)
-    );
+    int len = std::snprintf(buf, sizeof(buf),
+                            "pid=%d\n"
+                            "project=%s\n"
+                            "path=%s\n"
+                            "host=%s\n"
+                            "port=%d\n"
+                            "https=%s\n"
+                            "workers=%d\n"
+                            "started=%lld\n",
+                            static_cast<int>(info.pid), info.project.c_str(), info.path.c_str(), info.host.c_str(),
+                            static_cast<int>(info.port), info.https ? "true" : "false", info.workers,
+                            static_cast<long long>(info.started));
 
     if(len <= 0 || len >= static_cast<int>(sizeof(buf)))
         return false;
@@ -136,14 +129,22 @@ ReadResult Read(const std::string& project, DaemonInfo& out) noexcept
             std::string_view key = line.substr(0, eq);
             std::string_view val = line.substr(eq + 1);
 
-            if(key == "pid")           out.pid     = static_cast<pid_t>(std::atoi(val.data()));
-            else if(key == "project")  out.project.assign(val);
-            else if(key == "host")     out.host.assign(val);
-            else if(key == "port")     out.port    = static_cast<std::uint16_t>(std::atoi(val.data()));
-            else if(key == "https")    out.https   = (val == "true");
-            else if(key == "workers")  out.workers = std::atoi(val.data());
-            else if(key == "path")     out.path.assign(val);
-            else if(key == "started")  out.started = static_cast<std::int64_t>(std::atoll(val.data()));
+            if(key == "pid")
+                out.pid = static_cast<pid_t>(std::atoi(val.data()));
+            else if(key == "project")
+                out.project.assign(val);
+            else if(key == "host")
+                out.host.assign(val);
+            else if(key == "port")
+                out.port = static_cast<std::uint16_t>(std::atoi(val.data()));
+            else if(key == "https")
+                out.https = (val == "true");
+            else if(key == "workers")
+                out.workers = std::atoi(val.data());
+            else if(key == "path")
+                out.path.assign(val);
+            else if(key == "started")
+                out.started = static_cast<std::int64_t>(std::atoll(val.data()));
         }
 
         pos = end + 1;
@@ -214,7 +215,7 @@ bool IsAlive(pid_t pid) noexcept
         return false;
 
 #ifdef _WIN32
-    // Windows: future work
+        // Windows: future work
 #else
     return kill(pid, 0) == 0;
 #endif
@@ -245,10 +246,8 @@ StopResult Stop(const std::string& project, int timeoutSeconds) noexcept
     // Windows: future work
 #else
     if(kill(info.pid, SIGTERM) != 0) {
-        logger.Error(
-            "[DaemonRegistry]: Failed to send SIGTERM to '", project,
-            "' (pid=", info.pid, "): ", strerror(errno)
-        );
+        logger.Error("[DaemonRegistry]: Failed to send SIGTERM to '", project, "' (pid=", info.pid,
+                     "): ", strerror(errno));
 
         return StopResult::FAILED;
     }
@@ -265,10 +264,8 @@ StopResult Stop(const std::string& project, int timeoutSeconds) noexcept
     // Timed out, retry SIGKILL up to 3 times
     for(int attempt = 0; attempt < 3; attempt++) {
         if(kill(info.pid, SIGKILL) != 0) {
-            logger.Error(
-                "[DaemonRegistry]: Failed to send SIGKILL to '", project,
-                "' (pid=", info.pid, ") attempt ", attempt + 1, ": ", strerror(errno)
-            );
+            logger.Error("[DaemonRegistry]: Failed to send SIGKILL to '", project, "' (pid=", info.pid, ") attempt ",
+                         attempt + 1, ": ", strerror(errno));
 
             continue;
         }
@@ -286,9 +283,7 @@ StopResult Stop(const std::string& project, int timeoutSeconds) noexcept
     }
 
     // Process survived SIGKILL, something is very wrong
-    logger.Error(
-        "[DaemonRegistry]: Process '", project, "' (pid=", info.pid, ") survived SIGKILL, *wfx dies inside*"
-    );
+    logger.Error("[DaemonRegistry]: Process '", project, "' (pid=", info.pid, ") survived SIGKILL, *wfx dies inside*");
 
     return StopResult::FAILED;
 #endif

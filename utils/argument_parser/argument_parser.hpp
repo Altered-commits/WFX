@@ -9,15 +9,16 @@
 
 namespace WFX::Utils {
 
-using CommandHandler = std::function<int(const std::unordered_map<std::string, std::string>&, const std::vector<std::string>&)>;
+using CommandHandler =
+    std::function<int(const std::unordered_map<std::string, std::string>&, const std::vector<std::string>&)>;
 
 class ArgumentParser {
 public:
     struct Option {
         std::string description;
         std::string defaultValue;
-        bool        isFlag;
-        bool        required;
+        bool isFlag;
+        bool required;
     };
 
     struct Command {
@@ -26,13 +27,12 @@ public:
         CommandHandler handler;
     };
 
-    void AddCommand(const std::string& name, const std::string& description,
-                    CommandHandler handler);
+    void AddCommand(const std::string& name, const std::string& description, CommandHandler handler);
 
     void AddOption(const std::string& command, const std::string& name, const std::string& description,
                    bool isFlag = false, const std::string& defaultValue = {}, bool required = false);
 
-    int  Parse(int argc, char* argv[]);
+    int Parse(int argc, char* argv[]);
     void PrintUsage() const;
 
 private:

@@ -14,57 +14,45 @@ namespace WFX::Core {
 using namespace WFX::Utils; // For 'Logger', ...
 
 enum class TemplateType : std::uint8_t {
-    FAILURE,    // Failed to compile
-    STATIC,     // No template semantics / Was compiled entirely, served from build/templates/static/
-    DYNAMIC     // Cannot be precompiled entierly,                served from build/templates/dynamic/
+    FAILURE, // Failed to compile
+    STATIC,  // No template semantics / Was compiled entirely, served from build/templates/static/
+    DYNAMIC  // Cannot be precompiled entierly,                served from build/templates/dynamic/
 };
 
 struct TemplateMeta {
-    TemplateType         type{TemplateType::STATIC};
-    std::size_t          size{0};
-    std::string          filePath{};
+    TemplateType type{TemplateType::STATIC};
+    std::size_t size{0};
+    std::string filePath{};
     TemplateGeneratorPtr gen{nullptr}; // For dynamic templates only
 };
 
 struct TemplateCompilationResult {
-    bool success    = false;
+    bool success = false;
     bool hasDynamic = false;
 };
 
 // <Type, FileSize>
 using TemplateResult = std::pair<TemplateType, std::size_t>;
-using BufferPtr      = std::unique_ptr<char[]>;
-using Tag            = std::pair<std::string_view, std::string_view>;
+using BufferPtr = std::unique_ptr<char[]>;
+using Tag = std::pair<std::string_view, std::string_view>;
 
 class TemplateEngine final {
 public:
-    TemplateCompilationResult PreCompileTemplates();          // -|
-    void                      LoadDynamicTemplatesFromLib();  // -| > To be called in master process only
-    TemplateMeta*             GetTemplate(std::string&& relPath);
+    TemplateCompilationResult PreCompileTemplates(); // -|
+    void LoadDynamicTemplatesFromLib();              // -| > To be called in master process only
+    TemplateMeta* GetTemplate(std::string&& relPath);
 
 private: // Nested helper types for the parser
-    enum class TagType : std::uint8_t {
-        INCLUDE,
-        EXTENDS,
-        BLOCK,
-        ENDBLOCK,
-        VAR,
-        IF,
-        ELIF,
-        ELSE,
-        ENDIF,
-        FOR,
-        ENDFOR
-    };
+    enum class TagType : std::uint8_t { INCLUDE, EXTENDS, BLOCK, ENDBLOCK, VAR, IF, ELIF, ELSE, ENDIF, FOR, ENDFOR };
 
     enum class TagResult : std::uint8_t {
-        FAILURE,                  // Ded
-        SUCCESS,                  // Processed tag
-        CONTROL_TO_ANOTHER_FILE,  // For include' and 'extends' tags
-        PASSTHROUGH_DYNAMIC       // For dynamic tag ('if', 'for', variables, etc)
+        FAILURE,                 // Ded
+        SUCCESS,                 // Processed tag
+        CONTROL_TO_ANOTHER_FILE, // For include' and 'extends' tags
+        PASSTHROUGH_DYNAMIC      // For dynamic tag ('if', 'for', variables, etc)
     };
 
-    enum class OpType : std::uint8_t { 
+    enum class OpType : std::uint8_t {
         LITERAL, // Stream static data
         VAR,     // Stream a dynamic variable
         IF,      // Conditional jump
@@ -94,42 +82,39 @@ private: // Nested helper types for the parser
 
     // Generic buffered I/O for writing
     struct IOContext {
-        BaseFilePtr   file;
-        BufferPtr     buffer;
+        BaseFilePtr file;
+        BufferPtr buffer;
         std::uint32_t chunkSize{0};
         std::uint32_t offset{0};
 
         IOContext(BaseFilePtr f, std::uint32_t chunk)
-            : file(std::move(f)),
-            buffer(std::make_unique<char[]>(chunk)),
-            chunkSize(chunk)
+            : file(std::move(f)), buffer(std::make_unique<char[]>(chunk)), chunkSize(chunk)
         {}
     };
 
     struct TemplateFrame {
-        BaseFilePtr   file;
-        BufferPtr     readBuf;
-        std::string   carry;
-        std::size_t   readOffset{0};
-        std::int64_t  bytesRead{0};
-        bool          firstRead{true};
+        BaseFilePtr file;
+        BufferPtr readBuf;
+        std::string carry;
+        std::size_t readOffset{0};
+        std::int64_t bytesRead{0};
+        bool firstRead{true};
 
         TemplateFrame(BaseFilePtr f, std::uint32_t chunkSize)
-            : file(std::move(f)),
-            readBuf(std::make_unique<char[]>(chunkSize))
+            : file(std::move(f)), readBuf(std::make_unique<char[]>(chunkSize))
         {}
     };
-    
+
     // Compilation context
     struct CompilationContext {
-        IOContext                  io;          // Unified write buffer
-        std::vector<TemplateFrame> stack;       // Recursive includes
-        std::size_t                chunkSize{0};
+        IOContext io;                     // Unified write buffer
+        std::vector<TemplateFrame> stack; // Recursive includes
+        std::size_t chunkSize{0};
 
-        bool foundDynamicTag{false};    // ---
-        bool inBlock{false};            //   | Aligned to-
-        bool skipUntilFlag{false};      //   | -8 bytes
-        bool justProcessedTag{false};   // ---
+        bool foundDynamicTag{false};  // ---
+        bool inBlock{false};          //   | Aligned to-
+        bool skipUntilFlag{false};    //   | -8 bytes
+        bool justProcessedTag{false}; // ---
 
         // {% extends ... %} stuff
         std::string currentExtendsName;
@@ -139,20 +124,18 @@ private: // Nested helper types for the parser
         std::string currentBlockName;
         std::string currentBlockContent;
 
-        CompilationContext(BaseFilePtr out, std::uint32_t chunk)
-            : io(std::move(out), chunk),
-            chunkSize(chunk)
+        CompilationContext(BaseFilePtr out, std::uint32_t chunk) : io(std::move(out), chunk), chunkSize(chunk)
         {}
     };
 
     // A single RPN instruction (8 bytes)
     struct RPNOp {
-        RPNOpCode     code = {};
-        std::uint32_t arg  = 0; // Index for PUSH_CONST or PUSH_VAR
+        RPNOpCode code = {};
+        std::uint32_t arg = 0; // Index for PUSH_CONST or PUSH_VAR
 
-        bool operator==(const RPNOp& other) const {
-            return this->code == other.code
-                && this->arg == other.arg;
+        bool operator==(const RPNOp& other) const
+        {
+            return this->code == other.code && this->arg == other.arg;
         }
     };
 
@@ -160,15 +143,10 @@ private: // Nested helper types for the parser
     using RPNBytecode = std::vector<RPNOp>;
 
     // For constants
-    using Value = std::variant<
-        std::monostate, // Represents 'null'
-        bool,
-        double,
-        std::int64_t,
-        std::string
-    >;
+    using Value = std::variant<std::monostate, // Represents 'null'
+                               bool, double, std::int64_t, std::string>;
 
-    using LiteralValue     = std::pair<std::uint64_t, std::uint64_t>; // offset, length
+    using LiteralValue = std::pair<std::uint64_t, std::uint64_t>;     // offset, length
     using ConditionalValue = std::pair<std::uint32_t, std::uint32_t>; // jump_state, expr_index
     struct ForLoopValue {
         std::uint32_t jumpState;
@@ -179,79 +157,71 @@ private: // Nested helper types for the parser
     using ParseResult = std::pair<bool, std::uint32_t>; // success?, expr_index
 
     struct Op {
-        OpType type  = {};
-        bool   patch = false; // For conditions, whether it needs patching jump states or not
+        OpType type = {};
+        bool patch = false; // For conditions, whether it needs patching jump states or not
 
-        std::variant<
-            std::monostate,   // For JUMP, ELSE, ENDIF
-            std::uint32_t,    // For VAR (stores expr_index), JUMP (stored unconditional jum_offset)
-            LiteralValue,     // For LITERAL (stores offset, length)
-            ConditionalValue, // For IF, ELIF (stores the jump_state, expr_index)
-            ForLoopValue      // For FOR, ENDFOR
-        > payload{};
+        std::variant<std::monostate,   // For JUMP, ELSE, ENDIF
+                     std::uint32_t,    // For VAR (stores expr_index), JUMP (stored unconditional jum_offset)
+                     LiteralValue,     // For LITERAL (stores offset, length)
+                     ConditionalValue, // For IF, ELIF (stores the jump_state, expr_index)
+                     ForLoopValue      // For FOR, ENDFOR
+                     >
+            payload{};
     };
 
     using IRCode = std::vector<Op>;
 
     struct TranspilationContext {
         TemplateFrame frame;
-        IRCode        ir;
+        IRCode ir;
 
         std::vector<std::vector<std::uint32_t>> offsetPatchStack;
 
         // Optimization ig
         std::unordered_map<std::string, std::uint32_t> varNameMap;
         std::unordered_map<std::size_t, std::uint32_t> rpnMap;
-        std::unordered_map<Value, std::uint32_t>       constMap;
-        std::vector<RPNBytecode>                       rpnPool;
-        std::vector<std::string>                       staticVarNames;
-        std::vector<Value>                             staticConstants;
+        std::unordered_map<Value, std::uint32_t> constMap;
+        std::vector<RPNBytecode> rpnPool;
+        std::vector<std::string> staticVarNames;
+        std::vector<Value> staticConstants;
 
         // Used during cxx codegen
         std::unordered_map<std::string, std::uint32_t> loopVarToJump;
 
         std::uint64_t currentLiteralStartOffset = 0;
-        std::uint64_t currentLiteralLength      = 0;
-        std::uint32_t chunkSize                 = 0;
+        std::uint64_t currentLiteralLength = 0;
+        std::uint32_t chunkSize = 0;
 
-        TranspilationContext(BaseFilePtr in, std::uint32_t chunk)
-            : frame(std::move(in), chunk), chunkSize(chunk)
+        TranspilationContext(BaseFilePtr in, std::uint32_t chunk) : frame(std::move(in), chunk), chunkSize(chunk)
         {}
     };
 
 private: // Helper functions
     TemplateResult CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate);
-    bool           PushFile(CompilationContext& context, const std::string& relPath);
-    Tag            ExtractTag(std::string_view line);
-    TagResult      ProcessTag(CompilationContext& context, std::string_view tagView);
-    TagResult      ProcessTagIR(TranspilationContext& ctx, std::string_view tagView);
-    std::uint32_t  GetVarNameId(TranspilationContext& ctx, const std::string& name);
-    std::uint32_t  GetConstId(TranspilationContext& ctx, const Value& val);
+    bool PushFile(CompilationContext& context, const std::string& relPath);
+    Tag ExtractTag(std::string_view line);
+    TagResult ProcessTag(CompilationContext& context, std::string_view tagView);
+    TagResult ProcessTagIR(TranspilationContext& ctx, std::string_view tagView);
+    std::uint32_t GetVarNameId(TranspilationContext& ctx, const std::string& name);
+    std::uint32_t GetConstId(TranspilationContext& ctx, const Value& val);
 
 private: // Transpiler Functions (Impl in template_transpiler.cpp)
     // Parsing Functions
-    ParseResult   ParseExpr(TranspilationContext& ctx, std::string_view expression);
+    ParseResult ParseExpr(TranspilationContext& ctx, std::string_view expression);
     std::uint32_t GetOperatorPrecedence(Legacy::TokenType type);
-    bool          PopOperator(std::vector<Legacy::Token>& opStack, RPNBytecode& outputQueue);
-    bool          IsOperator(Legacy::TokenType type);
-    bool          IsRightAssociative(Legacy::TokenType type);
+    bool PopOperator(std::vector<Legacy::Token>& opStack, RPNBytecode& outputQueue);
+    bool IsOperator(Legacy::TokenType type);
+    bool IsRightAssociative(Legacy::TokenType type);
 
     // Emitter Functions
-    std::string GenerateCxxFromRPN(
-        TranspilationContext& ctx, std::uint32_t rpnIndex, bool asBool
-    );
-    bool GenerateIRFromTemplate(
-        TranspilationContext& ctx, const std::string& staticHtmlPath
-    );
-    bool GenerateCxxFromIR(
-        TranspilationContext& ctx, const std::string& outCxxPath, const std::string& funcName
-    );
-    bool GenerateCxxFromTemplate(
-        const std::string& inHtmlPath, const std::string& outCxxPath, const std::string& funcName
-    );
+    std::string GenerateCxxFromRPN(TranspilationContext& ctx, std::uint32_t rpnIndex, bool asBool);
+    bool GenerateIRFromTemplate(TranspilationContext& ctx, const std::string& staticHtmlPath);
+    bool GenerateCxxFromIR(TranspilationContext& ctx, const std::string& outCxxPath, const std::string& funcName);
+    bool GenerateCxxFromTemplate(const std::string& inHtmlPath, const std::string& outCxxPath,
+                                 const std::string& funcName);
 
     // Helper Functions
-    RPNOpCode     TokenToOpCode(Legacy::TokenType type);
+    RPNOpCode TokenToOpCode(Legacy::TokenType type);
     std::uint64_t HashBytecode(const RPNBytecode& rpn);
 
 private: // IO functions
@@ -259,35 +229,27 @@ private: // IO functions
     bool SafeWrite(IOContext& context, const void* data, std::size_t size, bool skipSpaces = false);
 
 private: // For ease of use across functions
-    constexpr static std::string_view PARTIAL_TAG      = "{% partial %}";
-    constexpr static std::size_t      PARTIAL_TAG_SIZE = PARTIAL_TAG.size();
-    constexpr static std::size_t      MAX_TAG_LENGTH   = 300;
+    constexpr static std::string_view PARTIAL_TAG = "{% partial %}";
+    constexpr static std::size_t PARTIAL_TAG_SIZE = PARTIAL_TAG.size();
+    constexpr static std::size_t MAX_TAG_LENGTH = 300;
 
-    constexpr static const char*      TEMPLATE_LIB_PATH   = "/build/user_templates.so";
-    constexpr static const char*      TEMPLATE_CACHE_PATH = "/intermediate/template.wfxmeta";
-    constexpr static const char*      STATIC_FOLDER       = "/intermediate/static";
-    constexpr static const char*      DYNAMIC_FOLDER      = "/intermediate/dynamic";
+    constexpr static const char* TEMPLATE_LIB_PATH = "/build/user_templates.so";
+    constexpr static const char* TEMPLATE_CACHE_PATH = "/intermediate/template.wfxmeta";
+    constexpr static const char* STATIC_FOLDER = "/intermediate/static";
+    constexpr static const char* DYNAMIC_FOLDER = "/intermediate/dynamic";
 
-    constexpr static const char*      DYNAMIC_FUNC_PREFIX = "__TmplSM_";
+    constexpr static const char* DYNAMIC_FUNC_PREFIX = "__TmplSM_";
 
 private: // Storage
     Logger& logger_ = GetLogger();
     Config& config_ = GetConfig();
 
     // For simplification of conditional checking in ProcessTag.. functions
-    const std::unordered_map<std::string_view, TagType> tagViewToType = {
-        {"include",  TagType::INCLUDE},
-        {"extends",  TagType::EXTENDS},
-        {"block",    TagType::BLOCK},
-        {"endblock", TagType::ENDBLOCK},
-        {"var",      TagType::VAR},
-        {"if",       TagType::IF},
-        {"elif",     TagType::ELIF},
-        {"else",     TagType::ELSE},
-        {"endif",    TagType::ENDIF},
-        {"for",      TagType::FOR},
-        {"endfor",   TagType::ENDFOR}
-    };
+    const std::unordered_map<std::string_view, TagType> tagViewToType =
+        {{"include", TagType::INCLUDE},   {"extends", TagType::EXTENDS}, {"block", TagType::BLOCK},
+         {"endblock", TagType::ENDBLOCK}, {"var", TagType::VAR},         {"if", TagType::IF},
+         {"elif", TagType::ELIF},         {"else", TagType::ELSE},       {"endif", TagType::ENDIF},
+         {"for", TagType::FOR},           {"endfor", TagType::ENDFOR}};
 
     // CRITICAL WARNING: The data in this map MUST be treated as immutable after initial-
     // -population. Internal engine code may store string_views that point directly to the-

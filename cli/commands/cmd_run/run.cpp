@@ -11,11 +11,11 @@
 #include "utils/diagnostics/metric_tracer.hpp"
 
 #ifdef _WIN32
-    #include <windows.h>
+#include <windows.h>
 #else
-    #include <wait.h>
-    #include <signal.h>
-    #include <fcntl.h>
+#include <wait.h>
+#include <signal.h>
+#include <fcntl.h>
 #endif
 
 #include <ctime>
@@ -28,7 +28,7 @@ using namespace WFX::Utils; // For 'Logger', 'BufferPool', 'FileCache', ...
 using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 
 // Forward declarations
-int  RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir);
+int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir);
 void CheckAlreadyRunning(const std::string& projectName);
 
 // Entrypoint
@@ -46,7 +46,7 @@ int RunServer(const std::string& projectName, const ServerConfig& cfg)
     if(!FileSystem::DirectoryExists(projectName.c_str()))
         logger.Fatal("[WFX]: '", projectName, "' directory does not exist");
 
-    const std::string logsDir      = projectName + "/logs/default_logs/";
+    const std::string logsDir = projectName + "/logs/default_logs/";
     const std::string crashLogsDir = projectName + "/logs/crash_logs/";
 
     if(!FileSystem::DirectoryExists(logsDir.c_str()) && !FileSystem::CreateDirectory(logsDir))
@@ -78,15 +78,15 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
 #else
 int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir)
 {
-    auto& globalState   = GetMasterState();
-    auto& logger        = GetLogger();
-    auto& config        = GetConfig();
-    auto& osConfig      = config.osSpecificConfig;
-    auto& buildConfig   = config.buildConfig;
+    auto& globalState = GetMasterState();
+    auto& logger = GetLogger();
+    auto& config = GetConfig();
+    auto& osConfig = config.osSpecificConfig;
+    auto& buildConfig = config.buildConfig;
     auto& loggingConfig = config.loggingConfig;
 
     // Used in daemon registry
-    auto& projectName         = config.projectConfig.projectName;
+    auto& projectName = config.projectConfig.projectName;
     auto& projectAbsolutePath = config.projectConfig.projectPath;
 
     // -------------------- INITIALIZING PHASE --------------------
@@ -117,7 +117,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
 
     bool pinToCpu = cfg.GetFlag(ServerFlags::PIN_TO_CPU);
     bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
-    bool ohp      = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
+    bool ohp = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
 
     // Switch ports if we enable https and we don't want to override https default port
     std::uint16_t port = useHttps && !ohp ? 443U : cfg.port;
@@ -157,13 +157,13 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     {
         DaemonInfo info;
         info.project = projectName;
-        info.path    = projectAbsolutePath;
-        info.host    = cfg.host;
-        info.port    = port;
-        info.https   = useHttps;
+        info.path = projectAbsolutePath;
+        info.host = cfg.host;
+        info.port = port;
+        info.https = useHttps;
         info.workers = osConfig.workerProcesses;
         info.started = static_cast<std::int64_t>(std::time(nullptr));
-        info.pid     = getpid();
+        info.pid = getpid();
 
         if(!DaemonRegistry::Write(info))
             logger.Fatal("[WFX-Master]: Failed to write PID file for '", projectName, "'");
@@ -183,7 +183,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         // --- Child Worker ---
         if(pid == 0) {
             if(i == 0)
-                setpgid(0, 0);                      // First worker becomes group leader
+                setpgid(0, 0); // First worker becomes group leader
             else
                 setpgid(0, globalState.workerPGID); // Join first worker's group
 
@@ -198,9 +198,8 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
 
             // AND ITS OWN LOGGING IF ENABLED
             if(loggingConfig.enableFile)
-                logger.OpenFile(
-                    (logsDir + workerName + ".log").c_str(), loggingConfig.maxFileSize, loggingConfig.maxRotations
-                );
+                logger.OpenFile((logsDir + workerName + ".log").c_str(), loggingConfig.maxFileSize,
+                                loggingConfig.maxRotations);
 
             // AAAAAAAAAAAAND ITS OWNNNNNNNNNNNNN BufferPool and FileCache
             GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
@@ -257,8 +256,8 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
 
     // -------------------- SHUTDOWN PHASE --------------------
     for(std::uint32_t i = 0; i < osConfig.workerProcesses; i++) {
-        pid_t pid    = globalState.workerPids[i];
-        bool  exited = false;
+        pid_t pid = globalState.workerPids[i];
+        bool exited = false;
 
         for(std::uint32_t t = 0; t < config.osSpecificConfig.workerShutdownTimeout * 10; t++) {
             int status;
@@ -302,10 +301,10 @@ void CheckAlreadyRunning(const std::string& projectName)
             return; // Good to go
 
         case ReadResult::IO_ERROR:
-            logger.Fatal(
-                "[WFX-Master]: Failed to read PID file for '", projectName, "'. "
-                "Check permissions on '", DaemonRegistry::PidFilePath(projectName), "'"
-            );
+            logger.Fatal("[WFX-Master]: Failed to read PID file for '", projectName,
+                         "'. "
+                         "Check permissions on '",
+                         DaemonRegistry::PidFilePath(projectName), "'");
 
         case ReadResult::CORRUPTED:
             logger.Warn("[WFX-Master]: Corrupted PID file found for '", projectName, "', removing it");
@@ -320,10 +319,10 @@ void CheckAlreadyRunning(const std::string& projectName)
     }
 
     if(DaemonRegistry::IsAlive(existing.pid)) {
-        logger.Fatal(
-            "[WFX-Master]: Project '", projectName, "' is already running (pid=", existing.pid, "). "
-            "Use 'wfx control stop ", projectName, "' to stop it or Ctrl+C if running in terminal"
-        );
+        logger.Fatal("[WFX-Master]: Project '", projectName, "' is already running (pid=", existing.pid,
+                     "). "
+                     "Use 'wfx control stop ",
+                     projectName, "' to stop it or Ctrl+C if running in terminal");
     }
 
     // Process is dead but PID file exists, clean it up

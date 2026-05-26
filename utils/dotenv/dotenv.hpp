@@ -11,11 +11,11 @@ namespace WFX::Utils {
 using StringMap = std::unordered_map<std::string, std::string>;
 
 enum class EnvFlags : std::uint64_t {
-    OVERWRITE_EXISTING  = 1ull << 0,
-    REQUIRE_OWNER_UID   = 1ull << 1,
-    REQUIRE_PERMS_600   = 1ull << 2,
-    UNLINK_AFTER_LOAD   = 1ull << 3,
-    MLOCK_BUFFER        = 1ull << 4,
+    OVERWRITE_EXISTING = 1ull << 0,
+    REQUIRE_OWNER_UID = 1ull << 1,
+    REQUIRE_PERMS_600 = 1ull << 2,
+    UNLINK_AFTER_LOAD = 1ull << 3,
+    MLOCK_BUFFER = 1ull << 4,
 };
 
 struct EnvConfig {

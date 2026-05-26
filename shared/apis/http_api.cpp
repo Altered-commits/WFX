@@ -17,15 +17,25 @@ using namespace WFX::Http; // For 'Router', 'Middleware', ...
 static HttpAPIDataExt1 __GlobalHttpDataExt1;
 
 // vvv Helper functions vvv
-static HttpRequest*       ToReq(void* backend) { return static_cast<HttpRequest*>(backend); }
-static const HttpRequest* ToReq(const void* backend) { return static_cast<const HttpRequest*>(backend); }
-static HttpResponse*      ToRes(void* backend) { return static_cast<HttpResponse*>(backend); }
+static HttpRequest* ToReq(void* backend)
+{
+    return static_cast<HttpRequest*>(backend);
+}
+static const HttpRequest* ToReq(const void* backend)
+{
+    return static_cast<const HttpRequest*>(backend);
+}
+static HttpResponse* ToRes(void* backend)
+{
+    return static_cast<HttpResponse*>(backend);
+}
 
 // vvv Main Stuff vvv
 const HTTP_API_EXT1* GetHttpAPIExt1()
 {
+    // clang-format off
     static HTTP_API_EXT1 __GlobalHttpAPIExt1 = {
-        // Routing
+        // vvv Routing vvv
         [](HttpMethod method, StringView path, RouteCallback cb) {  // RegisterRoute
             if(!__GlobalHttpDataExt1.router)
                 Utils::GetLogger().Fatal("[HttpAPI]: Router was nullptr for 'RegisterRoute'");
@@ -67,7 +77,7 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             __GlobalHttpDataExt1.router->PopRouteGroup();
         },
 
-        // Middleware
+        // vvv Middleware vvv
         [](StringView name, MwCallback cb) { // RegisterMiddleware
             if(!__GlobalHttpDataExt1.middleware)
                 Utils::GetLogger().Fatal("[HttpAPI]: Middleware was nullptr for 'RegisterMiddleware'");
@@ -77,7 +87,7 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             );
         },
 
-        // Request Handling
+        // vvv Request Handling vvv
         [](const void* request) { // GetMethodFn
             return ToReq(request)->method;
         },
@@ -153,8 +163,7 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             }
         },
 
-        // Response handling
-        // Response Control
+        // vvv Response handling vvv
         [](void* backend, HttpStatus code) { // SetStatusFn
             ToRes(backend)->WriteStatus(code);
         },
@@ -180,7 +189,7 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             ToRes(backend)->Commit();
         },
 
-        // Endpoint API
+        // vvv Endpoint API vvv
         [](StringView urlView, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig) -> std::uint16_t {
             /*
              * NOTE: 'url' allowed only till port number (route and optional parameters are not allowed)
@@ -331,7 +340,7 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             );
         },
 
-        // Data API
+        // vvv Data API vvv
         [](void* data) { // SetGlobalPtrData
             __GlobalHttpDataExt1.data = data;
         },
@@ -339,6 +348,7 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             return __GlobalHttpDataExt1.data;
         }
     };
+    // clang-format on
 
     return &__GlobalHttpAPIExt1;
 }
@@ -346,8 +356,8 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
 void InitHttpAPIExt1(HttpConnectionHandler* connHandler, Router* extRouter, HttpMiddleware* extMiddleware)
 {
     __GlobalHttpDataExt1.connHandler = connHandler;
-    __GlobalHttpDataExt1.router      = extRouter;
-    __GlobalHttpDataExt1.middleware  = extMiddleware;
+    __GlobalHttpDataExt1.router = extRouter;
+    __GlobalHttpDataExt1.middleware = extMiddleware;
 }
 
 } // namespace WFX::Shared

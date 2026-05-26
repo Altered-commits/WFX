@@ -18,30 +18,30 @@ struct ProjectConfig {
 };
 
 struct BuildConfig {
-    std::string buildDir       = "build";          // Will be converted to dir in master process
+    std::string buildDir = "build"; // Will be converted to dir in master process
     std::string buildGenerator = "Unix Makefiles";
-    std::string buildType      = "Debug";
+    std::string buildType = "Debug";
 };
 
 struct NetworkConfig {
-    std::uint32_t maxSendBufferSize  = 16 * 1024;
-    std::uint32_t maxReadBufferSize  = 16 * 1024;
-    std::uint32_t readBufferIncSize  = 4 * 1024;
-    std::uint32_t sendBufferIncSize  = 4 * 1024;
+    std::uint32_t maxSendBufferSize = 16 * 1024;
+    std::uint32_t maxReadBufferSize = 16 * 1024;
+    std::uint32_t readBufferIncSize = 4 * 1024;
+    std::uint32_t sendBufferIncSize = 4 * 1024;
 
-    std::uint32_t maxHeaderTotalSize    = 8 * 1024;
-    std::uint32_t maxBodyTotalSize      = 8 * 1024;
-    std::uint16_t maxHeaderTotalCount   = 64;
+    std::uint32_t maxHeaderTotalSize = 8 * 1024;
+    std::uint32_t maxBodyTotalSize = 8 * 1024;
+    std::uint16_t maxHeaderTotalCount = 64;
     std::uint16_t headerReserveHintSize = 512;
 
     std::uint16_t headerTimeout = 15;
-    std::uint16_t bodyTimeout   = 20;
-    std::uint16_t idleTimeout   = 60;
+    std::uint16_t bodyTimeout = 20;
+    std::uint16_t idleTimeout = 60;
 
-    std::uint32_t maxConnections      = 2000;
+    std::uint32_t maxConnections = 2000;
     std::uint32_t maxConnectionsPerIp = 20;
     std::uint32_t maxRequestBurstSize = 10;
-    std::uint32_t maxTokensPerSecond  = 5;
+    std::uint32_t maxTokensPerSecond = 5;
 };
 
 struct ENVConfig {
@@ -52,57 +52,55 @@ struct SSLConfig {
     std::string certPath;
     std::string keyPath;
 
-    std::string tls13Ciphers = 
-        "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
+    std::string tls13Ciphers = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
 
-    std::string tls12Ciphers = 
-        "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
-        "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:"
-        "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384";
+    std::string tls12Ciphers = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
+                               "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:"
+                               "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384";
 
     std::string curves = "X25519:P-256"; // Elliptic curves preference
 
-    bool         enableSessionCache = true;
-    bool         enableKTLS         = false;
-    std::uint8_t minProtoVersion    = 2;        // 1-> TLSv1.1; 2-> TLSv1.2; 3 -> TLSv1.3
-    int          securityLevel      = 2;        // OpenSSL security level (0-5)
-    std::size_t  sessionCacheSize   = 32 * 1024;
+    bool enableSessionCache = true;
+    bool enableKTLS = false;
+    std::uint8_t minProtoVersion = 2; // 1-> TLSv1.1; 2-> TLSv1.2; 3 -> TLSv1.3
+    int securityLevel = 2;            // OpenSSL security level (0-5)
+    std::size_t sessionCacheSize = 32 * 1024;
 };
 
 struct OSSpecificConfig {
 #ifdef _WIN32
-    std::uint32_t maxAcceptSlots      = 1024;
-    std::uint16_t workerThreadCount   = 2;
+    std::uint32_t maxAcceptSlots = 1024;
+    std::uint16_t workerThreadCount = 2;
     std::uint16_t callbackThreadCount = 4;
 #else
-    std::uint32_t workerProcesses       = 4;
-    std::uint32_t backlog               = 1024;
+    std::uint32_t workerProcesses = 4;
+    std::uint32_t backlog = 1024;
     std::uint16_t workerShutdownTimeout = 5; // 5 seconds
-    
-    #ifdef WFX_LINUX_USE_IO_URING
-        std::uint16_t batchSize       = 64;
-        std::uint16_t acceptSlots     = 64;
-        std::uint32_t queueDepth      = 4096;
-        std::uint32_t fileChunkSize   = 64 * 1024;
-    #else
-        std::uint16_t maxEvents       = 1 * 1024;
-    #endif // WFX_LINUX_USE_IO_URING
+
+#ifdef WFX_LINUX_USE_IO_URING
+    std::uint16_t batchSize = 64;
+    std::uint16_t acceptSlots = 64;
+    std::uint32_t queueDepth = 4096;
+    std::uint32_t fileChunkSize = 64 * 1024;
+#else
+    std::uint16_t maxEvents = 1 * 1024;
+#endif // WFX_LINUX_USE_IO_URING
 #endif // _WIN32
 };
 
 struct LoggingConfig {
-    std::uint8_t  minLevel         = 2;     // 0=trace 1=debug 2=info 3=warn 4=error 5=fatal
-    bool          enableStdout     = true;
-    bool          enableColors     = true;
-    bool          enableTimestamps = true;
-    bool          enableFile       = false;
-    std::uint16_t maxRotations     = 2;
-    std::uint32_t maxFileSize      = 16 * 1024 * 1024;
+    std::uint8_t minLevel = 2; // 0=trace 1=debug 2=info 3=warn 4=error 5=fatal
+    bool enableStdout = true;
+    bool enableColors = true;
+    bool enableTimestamps = true;
+    bool enableFile = false;
+    std::uint16_t maxRotations = 2;
+    std::uint32_t maxFileSize = 16 * 1024 * 1024;
 };
 
 struct MiscConfig {
-    std::uint16_t fileCacheSize     = 20;
-    std::uint16_t cacheChunkSize    = 2 * 1024;
+    std::uint16_t fileCacheSize = 20;
+    std::uint16_t cacheChunkSize = 2 * 1024;
     std::uint32_t templateChunkSize = 16 * 1024;
 };
 
@@ -114,14 +112,14 @@ public: // Load from TOML
     void LoadFinalSettings(const std::string& projectDir);
 
 public: // Main storage space for configurations
-    ProjectConfig    projectConfig;
-    BuildConfig      buildConfig;
-    NetworkConfig    networkConfig;
-    ENVConfig        envConfig;
-    SSLConfig        sslConfig;
+    ProjectConfig projectConfig;
+    BuildConfig buildConfig;
+    NetworkConfig networkConfig;
+    ENVConfig envConfig;
+    SSLConfig sslConfig;
     OSSpecificConfig osSpecificConfig;
-    LoggingConfig    loggingConfig;
-    MiscConfig       miscConfig;
+    LoggingConfig loggingConfig;
+    MiscConfig miscConfig;
 };
 
 // Free function declaration (defined in 'config.cpp')
@@ -129,4 +127,4 @@ Config& GetConfig() noexcept;
 
 } // namespace WFX::Core
 
-#endif  // WFX_CONFIG_HPP
+#endif // WFX_CONFIG_HPP

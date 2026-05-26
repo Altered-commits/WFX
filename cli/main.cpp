@@ -16,9 +16,11 @@ namespace WFX {
 // For argument parser
 using namespace WFX::Utils;
 
-int WFXEntryPoint(int argc, char* argv[]) {
+int BeginAwesomeness(int argc, char* argv[])
+{
     ArgumentParser parser;
 
+    // clang-format off
     // --- Command: new ---
     parser.AddCommand("new", "Create a new WFX project",
         [](const std::unordered_map<std::string, std::string>&,
@@ -103,15 +105,17 @@ int WFXEntryPoint(int argc, char* argv[]) {
 
             return CLI::ControlCommand(subcommand, project);
         });
+    // clang-format on
 
     return parser.Parse(argc, argv);
 }
 
-}  // namespace WFX
+} // namespace WFX
 
 // Entrypoint for the entire thing
-int main(int argc, char* argv[]) {
-    return WFX::WFXEntryPoint(argc, argv);
+int main(int argc, char* argv[])
+{
+    return WFX::BeginAwesomeness(argc, argv);
 }
 
-#endif  // WFX_CLI_MAIN_HPP
+#endif // WFX_CLI_MAIN_HPP

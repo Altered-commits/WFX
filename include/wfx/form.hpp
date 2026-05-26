@@ -52,10 +52,10 @@ using WFX::Form::Field;
 //   WFX::Form::Malformed      : body structure is broken / wrong field order
 //   WFX::Form::CleanFailed    : a field failed validation or sanitization
 // -----------------------------------------------------------------------
-inline constexpr auto Ok             = FormError::NONE;
+inline constexpr auto Ok = FormError::NONE;
 inline constexpr auto BadContentType = FormError::UNSUPPORTED_CONTENT_TYPE;
-inline constexpr auto Malformed      = FormError::MALFORMED;
-inline constexpr auto CleanFailed    = FormError::CLEAN_FAILED;
+inline constexpr auto Malformed = FormError::MALFORMED;
+inline constexpr auto CleanFailed = FormError::CLEAN_FAILED;
 
 // -----------------------------------------------------------------------
 // Schema builder
@@ -65,8 +65,7 @@ inline constexpr auto CleanFailed    = FormError::CLEAN_FAILED;
 //       WFX::Form::Field("age",   WFX::Form::UInt{ .min = 0, .max = 120 })
 //   );
 // -----------------------------------------------------------------------
-template<std::size_t N, typename... Fields>
-constexpr auto Schema(const char (&name)[N], Fields&&... fields)
+template <std::size_t N, typename... Fields> constexpr auto Schema(const char (&name)[N], Fields&&... fields)
 {
     return FormSchema<Fields...>(name, std::forward<Fields>(fields)...);
 }

@@ -7,16 +7,15 @@
 
 namespace WFX::Http {
 
-using namespace WFX::Core;  // For 'Config'
+using namespace WFX::Core; // For 'Config'
 using namespace std::chrono;
 
-IpLimiter::IpLimiter(Utils::BufferPool& poolRef)
-    : ipLimits_(poolRef)
+IpLimiter::IpLimiter(Utils::BufferPool& poolRef) : ipLimits_(poolRef)
 {
     ipLimits_.Init(512);
 }
 
-bool IpLimiter::AllowConnection(const WFXIpAddress &ip)
+bool IpLimiter::AllowConnection(const WFXIpAddress& ip)
 {
     auto* entry = ipLimits_.GetOrInsert(NormalizeIp(ip), {});
     if(entry) {
@@ -44,19 +43,16 @@ bool IpLimiter::AllowRequest(const WFXIpAddress& ip)
 
         TokenBucket& bucket = entry->bucket;
 
-        const std::int64_t elapsedMs  = std::max<std::int64_t>(
-            0, std::chrono::duration_cast<std::chrono::milliseconds>(now - bucket.lastRefill).count()
-        );
+        const std::int64_t elapsedMs =
+            std::max<std::int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(now - bucket.lastRefill)
+                                          .count());
         const std::uint32_t refillRate = cfg.maxTokensPerSecond;
-        const std::uint32_t burstCap   = cfg.maxRequestBurstSize;
+        const std::uint32_t burstCap = cfg.maxRequestBurstSize;
 
         const std::uint64_t refill = (elapsedMs * refillRate) / 1000ULL;
 
         if(refill > 0) {
-            bucket.tokens = std::min<std::uint32_t>(
-                burstCap,
-                bucket.tokens + static_cast<std::uint32_t>(refill)
-            );
+            bucket.tokens = std::min<std::uint32_t>(burstCap, bucket.tokens + static_cast<std::uint32_t>(refill));
             bucket.lastRefill = now;
         }
 
@@ -71,10 +67,10 @@ bool IpLimiter::AllowRequest(const WFXIpAddress& ip)
 
 void IpLimiter::ReleaseConnection(const WFXIpAddress& ip)
 {
-    WFXIpAddress key         = NormalizeIp(ip);
-    bool         shouldErase = false;
-    auto*        entry       = ipLimits_.Get(key);
-    
+    WFXIpAddress key = NormalizeIp(ip);
+    bool shouldErase = false;
+    auto* entry = ipLimits_.Get(key);
+
     if(entry)
         shouldErase = --(entry->connectionCount) <= 0;
 

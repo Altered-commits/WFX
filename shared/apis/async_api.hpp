@@ -4,7 +4,9 @@
 #include "shared/abis/types.hpp"
 
 // Fwd declare stuff
-namespace WFX::Http { class HttpConnectionHandler; }
+namespace WFX::Http {
+class HttpConnectionHandler;
+}
 
 namespace WFX::Shared {
 
@@ -14,7 +16,7 @@ struct AsyncAPIDataExt1 {
 };
 
 // vvv All aliases for clarity vvv
-using RegisterAsyncTimerFn = bool(*)(void* ctx, std::uint32_t delayMs, AsyncData asyncData);
+using RegisterAsyncTimerFn = bool (*)(void* ctx, std::uint32_t delayMs, AsyncData asyncData);
 
 // vvv API declarations vvv
 struct ASYNC_API_EXT1 {
@@ -24,7 +26,7 @@ static_assert(std::is_standard_layout<ASYNC_API_EXT1>::value, "'ASYNC_API_EXT1' 
 
 // vvv Getter & Initializers vvv
 const ASYNC_API_EXT1* GetAsyncAPIExt1();
-void                  InitAsyncAPIExt1(Http::HttpConnectionHandler*);
+void InitAsyncAPIExt1(Http::HttpConnectionHandler*);
 
 } // namespace WFX::Shared
 

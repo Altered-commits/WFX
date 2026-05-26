@@ -1,7 +1,7 @@
 #if defined(_WIN32)
-    #include "windows/filemanip.hpp"
+#include "windows/filemanip.hpp"
 #else
-    #include "linux/filemanip.hpp"
+#include "linux/filemanip.hpp"
 #include "filesystem.hpp"
 #endif
 
@@ -9,7 +9,7 @@ namespace WFX::Utils {
 
 namespace FileSystem {
 
-bool CreateFile(const char *path)
+bool CreateFile(const char* path)
 {
 #ifdef _WIN32
     ...
@@ -35,7 +35,7 @@ bool FileExists(const char* path)
     DWORD attrib = GetFileAttributesA(path.data());
     return (attrib != INVALID_FILE_ATTRIBUTES) && !(attrib & FILE_ATTRIBUTE_DIRECTORY);
 #else
-    struct stat st{};
+    struct stat st {};
     return (stat(path, &st) == 0) && S_ISREG(st.st_mode);
 #endif
 }
@@ -73,11 +73,11 @@ std::size_t GetFileSize(const char* path)
 
     LARGE_INTEGER size;
     size.HighPart = fileInfo.nFileSizeHigh;
-    size.LowPart  = fileInfo.nFileSizeLow;
-    
+    size.LowPart = fileInfo.nFileSizeLow;
+
     return static_cast<std::size_t>(size.QuadPart);
 #else
-    struct stat st{};
+    struct stat st {};
     if(stat(path, &st) == 0 && S_ISREG(st.st_mode))
         return static_cast<std::size_t>(st.st_size);
 
@@ -90,22 +90,21 @@ bool GetFileStats(const char* path, FileStats& out)
 #ifdef _WIN32
     ...
 #else
-    struct stat st{};
+    struct stat st {};
     if(stat(path, &st) != 0)
         return false;
 
     out.size = st.st_size;
 
 #if defined(__APPLE__)
-    auto sec  = st.st_mtimespec.tv_sec;
+    auto sec = st.st_mtimespec.tv_sec;
     auto nsec = st.st_mtimespec.tv_nsec;
 #else
-    auto sec  = st.st_mtim.tv_sec;
+    auto sec = st.st_mtim.tv_sec;
     auto nsec = st.st_mtim.tv_nsec;
 #endif
 
-    out.modifiedNs = static_cast<std::int64_t>(sec) * 1'000'000'000LL +
-                     static_cast<std::int64_t>(nsec);
+    out.modifiedNs = static_cast<std::int64_t>(sec) * 1'000'000'000LL + static_cast<std::int64_t>(nsec);
 
     if S_ISREG(st.st_mode)
         out.type = FileType::REG;
@@ -196,7 +195,7 @@ bool DirectoryExists(const char* path)
     DWORD attrib = GetFileAttributesA(path.data());
     return (attrib != INVALID_FILE_ATTRIBUTES) && (attrib & FILE_ATTRIBUTE_DIRECTORY);
 #else
-    struct stat st{};
+    struct stat st {};
     return (stat(path, &st) == 0) && S_ISDIR(st.st_mode);
 #endif
 }
@@ -221,7 +220,7 @@ bool CreateDirectory(std::string path, bool recurseParentDir)
 
     bool ok = true;
     const char* data = path.c_str();
-    std::size_t len  = path.size();
+    std::size_t len = path.size();
 
     // Reusable buffer
     std::string tmp;
@@ -275,9 +274,7 @@ void ListDirectoryImpl(std::string& path, bool shouldRecurse, const FileCallback
 DirectoryList ListDirectory(std::string path, bool shouldRecurse)
 {
     DirectoryList result;
-    ListDirectoryImpl(path, shouldRecurse, [&](std::string p) {
-        result.emplace_back(std::move(p));
-    });
+    ListDirectoryImpl(path, shouldRecurse, [&](std::string p) { result.emplace_back(std::move(p)); });
     return result;
 }
 
@@ -306,8 +303,8 @@ void ListDirectoryImpl(std::string& path, bool shouldRecurse, const FileCallback
         callback(fullPath);
 
         bool isDir = false;
-        struct stat st{};
-        
+        struct stat st {};
+
         if(lstat(fullPath.c_str(), &st) == 0)
             isDir = S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode);
 
@@ -339,6 +336,6 @@ std::string GetCurrentPath()
 #endif
 }
 
-} // namespace Filesystem
+} // namespace FileSystem
 
 } // namespace WFX::Utils

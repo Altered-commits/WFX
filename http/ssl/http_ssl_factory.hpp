@@ -6,9 +6,9 @@
 #include <memory>
 
 #ifdef WFX_HTTP_USE_OPENSSL
-    #include "openssl/http_openssl.hpp"
+#include "openssl/http_openssl.hpp"
 #else
-    #error "WFX_HTTP_USE_OPENSSL macro not found. Only OpenSSL is supported for now"
+#error "WFX_HTTP_USE_OPENSSL macro not found. Only OpenSSL is supported for now"
 #endif
 
 namespace WFX::Http {

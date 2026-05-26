@@ -18,10 +18,22 @@ Logger::Logger()
 }
 
 // vvv Main Functions vvv
-void Logger::SetLevelMask(LevelMask mask) noexcept { levelMask_  = mask; }
-void Logger::SetMinLevel(Level lvl)       noexcept { levelMask_  = ALL_MASK << static_cast<std::uint8_t>(lvl); }
-void Logger::EnableTimestamps(bool v)     noexcept { timestamps_ = v; }
-void Logger::EnableStdout(bool v)         noexcept { stdout_     = v; }
+void Logger::SetLevelMask(LevelMask mask) noexcept
+{
+    levelMask_ = mask;
+}
+void Logger::SetMinLevel(Level lvl) noexcept
+{
+    levelMask_ = ALL_MASK << static_cast<std::uint8_t>(lvl);
+}
+void Logger::EnableTimestamps(bool v) noexcept
+{
+    timestamps_ = v;
+}
+void Logger::EnableStdout(bool v) noexcept
+{
+    stdout_ = v;
+}
 
 void Logger::EnableColors(bool v) noexcept
 {
@@ -42,7 +54,7 @@ void Logger::WriteRetry(int fd, const char* data, std::size_t len) noexcept
         const ssize_t n = ::write(fd, data, len);
         if(n >= 0) {
             data += n;
-            len  -= static_cast<std::size_t>(n);
+            len -= static_cast<std::size_t>(n);
         }
         else if(errno != EINTR)
             break;
@@ -56,21 +68,19 @@ void TimestampCache::Sync(std::chrono::steady_clock::time_point now) noexcept
     using namespace std::chrono;
 
     syncPoint_ = now;
-    synced_    = true;
+    synced_ = true;
 
     const auto wall = system_clock::now();
-    const auto tt   = system_clock::to_time_t(wall);
+    const auto tt = system_clock::to_time_t(wall);
 
-    epochMs_ = static_cast<int>(
-        duration_cast<milliseconds>(wall.time_since_epoch()).count() % 1000
-    );
+    epochMs_ = static_cast<int>(duration_cast<milliseconds>(wall.time_since_epoch()).count() % 1000);
 
     std::tm tm{};
     WFX_LOCALTIME(&tm, &tt);
 
     cachedHour_ = tm.tm_hour;
-    cachedMin_  = tm.tm_min;
-    cachedSec_  = tm.tm_sec;
+    cachedMin_ = tm.tm_min;
+    cachedSec_ = tm.tm_sec;
 }
 
 //  CircularFileSink
@@ -88,7 +98,7 @@ void CircularFileSink::CloseInternal() noexcept
 
 bool CircularFileSink::Open(const char* path, std::size_t maxBytes, int keepFiles) noexcept
 {
-    maxBytes_  = maxBytes;
+    maxBytes_ = maxBytes;
     keepFiles_ = (keepFiles > 0 && keepFiles <= kMaxKeep) ? keepFiles : kDefaultKeepFiles;
 
     std::strncpy(path_, path, sizeof(path_) - 1);
@@ -99,8 +109,10 @@ bool CircularFileSink::Open(const char* path, std::size_t maxBytes, int keepFile
 
 void CircularFileSink::Write(const char* data, std::size_t len) noexcept
 {
-    if(!IsOpen()) return;
-    if(file_->Size() + len >= maxBytes_) Rotate();
+    if(!IsOpen())
+        return;
+    if(file_->Size() + len >= maxBytes_)
+        Rotate();
     file_->Write(data, len);
 }
 

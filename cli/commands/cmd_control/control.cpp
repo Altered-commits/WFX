@@ -29,30 +29,26 @@ int ControlCommand(const std::string& subcommand, const std::string& project)
     if(subcommand == "stop")
         return CmdStop(project);
 
-    logger.Error(
-        "[WFX]: Unknown control subcommand '", subcommand, "'. "
-        "Available: list, folder, stop <project>"
-    );
+    logger.Error("[WFX]: Unknown control subcommand '", subcommand,
+                 "'. "
+                 "Available: list, folder, stop <project>");
     return 1;
 }
 
 // vvv Helpers vvv
 std::string FormatUptime(std::int64_t started)
 {
-    std::int64_t now     = static_cast<std::int64_t>(std::time(nullptr));
+    std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
     std::int64_t elapsed = now - started;
 
     if(elapsed < 0)
         elapsed = 0;
 
-    std::int64_t hours   = elapsed / 3600;
+    std::int64_t hours = elapsed / 3600;
     std::int64_t minutes = (elapsed % 3600) / 60;
 
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "%lldh %02lldm",
-        static_cast<long long>(hours),
-        static_cast<long long>(minutes)
-    );
+    std::snprintf(buf, sizeof(buf), "%lldh %02lldm", static_cast<long long>(hours), static_cast<long long>(minutes));
 
     return std::string(buf);
 }
@@ -77,11 +73,9 @@ int CmdList()
         return 0;
     }
 
-    logger.Print(
-        "\n"
-        " PROJECT              PID       HOST                PORT    HTTPS   WORKERS UPTIME\n"
-        " -------              ---       ----                ----    -----   ------- ------"
-    );
+    logger.Print("\n"
+                 " PROJECT              PID       HOST                PORT    HTTPS   WORKERS UPTIME\n"
+                 " -------              ---       ----                ----    -----   ------- ------");
 
     std::vector<const DaemonInfo*> truncated;
 
@@ -91,16 +85,9 @@ int CmdList()
             truncated.push_back(&d);
 
         char row[256];
-        std::snprintf(row, sizeof(row),
-            " %-20s %-9d %-19s %-7d %-7s %-7d %s",
-            displayName.c_str(),
-            static_cast<int>(d.pid),
-            d.host.c_str(),
-            static_cast<int>(d.port),
-            d.https ? "yes" : "no",
-            d.workers,
-            FormatUptime(d.started).c_str()
-        );
+        std::snprintf(row, sizeof(row), " %-20s %-9d %-19s %-7d %-7s %-7d %s", displayName.c_str(),
+                      static_cast<int>(d.pid), d.host.c_str(), static_cast<int>(d.port), d.https ? "yes" : "no",
+                      d.workers, FormatUptime(d.started).c_str());
 
         logger.Print(row);
     }
@@ -118,7 +105,7 @@ int CmdList()
 int CmdFolder()
 {
     auto& logger = GetLogger();
-    auto  dir    = DaemonRegistry::DaemonsDir();
+    auto dir = DaemonRegistry::DaemonsDir();
 
     if(dir.empty()) {
         logger.Error("[WFX]: Could not determine WFX directories");

@@ -8,7 +8,7 @@ namespace WFX::Http {
 
 class Router {
 public:
-    Router()  = default;
+    Router() = default;
     ~Router() = default;
 
 public:
@@ -23,10 +23,10 @@ private:
     RouteTrie postRoutes_;
 
     // No need for copy and move constructors
-    Router(const Router&)            = delete;
+    Router(const Router&) = delete;
     Router& operator=(const Router&) = delete;
-    Router(Router&&)                 = delete;
-    Router& operator=(Router&&)      = delete;
+    Router(Router&&) = delete;
+    Router& operator=(Router&&) = delete;
 };
 
 } // namespace WFX::Http

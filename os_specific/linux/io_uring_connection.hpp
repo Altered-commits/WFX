@@ -19,8 +19,8 @@ using namespace WFX::Utils; // For 'Logger', 'RWBuffer', ...
 using namespace WFX::Core;  // For 'Config'
 
 struct AcceptSlot : public ConnectionTag {
-    socklen_t        addrLen = 0;
-    sockaddr_storage addr    = { 0 };
+    socklen_t addrLen = 0;
+    sockaddr_storage addr = {0};
 };
 
 class IoUringConnectionHandler : public HttpConnectionHandler {
@@ -30,64 +30,64 @@ public:
 
 public: // Initializing
     void Initialize(const std::string& host, int port) override;
-    void SetReceiveCallback(ReceiveCallback onData)    override;
-    
+    void SetReceiveCallback(ReceiveCallback onData) override;
+
 public: // I/O Operations
-    void ResumeReceive(ConnectionContext* ctx)                       override;
+    void ResumeReceive(ConnectionContext* ctx) override;
     void Write(ConnectionContext* ctx, std::string_view buffer = {}) override;
-    void WriteFile(ConnectionContext* ctx, std::string path)         override;
-    void Close(ConnectionContext* ctx)                               override;
-    
+    void WriteFile(ConnectionContext* ctx, std::string path) override;
+    void Close(ConnectionContext* ctx) override;
+
 public: // Main Functions
-    void Run()                                                               override;
+    void Run() override;
     void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) override;
-    void Stop()                                                              override;
+    void Stop() override;
 
 private: // Helper Functions
-    int                AllocSlot(std::uint64_t* bitmap, int numWords, int maxSlots);
-    void               FreeSlot(std::uint64_t* bitmap, int idx);
-    
+    int AllocSlot(std::uint64_t* bitmap, int numWords, int maxSlots);
+    void FreeSlot(std::uint64_t* bitmap, int idx);
+
     ConnectionContext* GetConnection();
-    void               ReleaseConnection(ConnectionContext* ctx);
-    AcceptSlot*        GetAccept();
-    void               ReleaseAccept(AcceptSlot* slot);
+    void ReleaseConnection(ConnectionContext* ctx);
+    AcceptSlot* GetAccept();
+    void ReleaseAccept(AcceptSlot* slot);
 
-    void               SetNonBlocking(int fd);
-    bool               EnsureFileReady(ConnectionContext* ctx, std::string path);
-    int                ResolveHostToIpv4(const char* host, in_addr* outAddr);
+    void SetNonBlocking(int fd);
+    bool EnsureFileReady(ConnectionContext* ctx, std::string path);
+    int ResolveHostToIpv4(const char* host, in_addr* outAddr);
 
-    void               AddAccept();
-    void               AddRecv(ConnectionContext* ctx);
-    void               AddSend(ConnectionContext* ctx, std::string_view msg);
-    void               AddFile(ConnectionContext* ctx);
-    void               SubmitBatch();
+    void AddAccept();
+    void AddRecv(ConnectionContext* ctx);
+    void AddSend(ConnectionContext* ctx, std::string_view msg);
+    void AddFile(ConnectionContext* ctx);
+    void SubmitBatch();
 
 private:
     // Misc
-    IpLimiter&        ipLimiter_  = IpLimiter::GetInstance();
-    Config&           config_     = Config::GetInstance();
-    Logger&           logger_     = GetLogger();
-    std::atomic<bool> running_    = true;
-    ReceiveCallback   onReceive_;
-    BufferPool        pool_{1, 1024 * 1024, [](std::size_t currSize){ return currSize * 2; }};
-    FileCache*        fileCache_  = GetMasterState().fileCache;
+    IpLimiter& ipLimiter_ = IpLimiter::GetInstance();
+    Config& config_ = Config::GetInstance();
+    Logger& logger_ = GetLogger();
+    std::atomic<bool> running_ = true;
+    ReceiveCallback onReceive_;
+    BufferPool pool_{1, 1024 * 1024, [](std::size_t currSize) { return currSize * 2; }};
+    FileCache* fileCache_ = GetMasterState().fileCache;
 
 private:
     // IoUring
-    int      listenFd_ = -1;
-    int      sqeBatch_ = 0;
-    io_uring ring_     = { 0 };
+    int listenFd_ = -1;
+    int sqeBatch_ = 0;
+    io_uring ring_ = {0};
 
 private:
     // Connection Context
     std::unique_ptr<ConnectionContext[]> connections_;
-    std::unique_ptr<std::uint64_t[]>     connBitmap_;
+    std::unique_ptr<std::uint64_t[]> connBitmap_;
     // Connection Accept
-    std::unique_ptr<AcceptSlot[]>        acceptSlots_;
-    std::unique_ptr<std::uint64_t[]>     acceptBitmap_;
+    std::unique_ptr<AcceptSlot[]> acceptSlots_;
+    std::unique_ptr<std::uint64_t[]> acceptBitmap_;
     // Derived size
-    std::uint32_t connWords_      = 0;
-    std::uint32_t acceptWords_    = 0;
+    std::uint32_t connWords_ = 0;
+    std::uint32_t acceptWords_ = 0;
 };
 
 } // namespace WFX::OSSpecific
