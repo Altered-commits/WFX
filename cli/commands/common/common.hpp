@@ -21,7 +21,7 @@ void HandleUserCxxCompilation(CxxCompilationOption = CxxCompilationOption::ALL);
 #else
 void HandleMasterSignal(int);
 void HandleWorkerSignal(int);
-void PinWorkerToCPU(int workerIndex);
+void PinWorkerToCPU(int);
 #endif
 
 } // namespace WFX::CLI

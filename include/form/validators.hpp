@@ -3,6 +3,7 @@
 
 #include "fields.hpp"
 #include <cstdlib>
+#include <cctype>
 
 namespace WFX::Form {
 

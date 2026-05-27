@@ -4,6 +4,7 @@
 #include "fields.hpp"
 #include <cstdint>
 #include <string_view>
+#include <charconv>
 
 namespace WFX::Form {
 
@@ -33,8 +34,8 @@ static inline bool DefaultSanitizeInt(std::string_view sv, const void* fieldPtr,
 {
     const Int& r = *static_cast<const Int*>(fieldPtr);
 
-    // All necessary checks are done in 'StrToInt64'
-    if(!Utils::StrToInt64(sv, out))
+    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), out);
+    if(ec != std::errc{} || ptr != sv.data() + sv.size())
         return false;
 
     return (out >= r.min && out <= r.max);
@@ -45,8 +46,8 @@ static inline bool DefaultSanitizeUInt(std::string_view sv, const void* fieldPtr
 {
     const UInt& r = *static_cast<const UInt*>(fieldPtr);
 
-    // All necessary checks are done in 'StrToUInt64'
-    if(!Utils::StrToUInt64(sv, out))
+    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), out);
+    if(ec != std::errc{} || ptr != sv.data() + sv.size())
         return false;
 
     return (out >= r.min && out <= r.max);
@@ -56,15 +57,13 @@ static inline bool DefaultSanitizeUInt(std::string_view sv, const void* fieldPtr
 static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPtr, FloatOutputType& out)
 {
     const Float& r = *static_cast<const Float*>(fieldPtr);
-    if(sv.empty())
+
+    double v{};
+    auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), v);
+    if(ec != std::errc{} || ptr != sv.data() + sv.size())
         return false;
 
-    char* end = nullptr;
-    errno = 0;
-
-    double v = std::strtod(sv.data(), &end);
-
-    if(errno != 0 || end != sv.data() + sv.size() || v < r.min || v > r.max)
+    if(v < r.min || v > r.max)
         return false;
 
     out = v;

@@ -157,6 +157,7 @@ struct LogMetrics {
 static_assert(sizeof(LogMetrics) == 48, "'LogMetrics' must be exactly 48 bytes");
 static_assert(std::is_standard_layout_v<LogMetrics>, "'LogMetrics' must be standard layout");
 
+// Updated per request-response cycle
 struct NetworkMetrics {
     std::uint64_t accepts = 0;
     std::uint64_t reads = 0;
@@ -177,12 +178,27 @@ struct NetworkMetrics {
 static_assert(sizeof(NetworkMetrics) == 120, "'NetworkMetrics' must be exactly 120 bytes");
 static_assert(std::is_standard_layout_v<NetworkMetrics>, "'NetworkMetrics' must be standard layout");
 
+// Written by master process, reflects live state of each worker slot
+struct SelfMetrics {
+    std::uint64_t rssBytes = 0;        // Resident set size in bytes
+    std::uint64_t vmBytes = 0;         // Virtual memory size in bytes
+    std::uint32_t restarts = 0;        // How many times this slot has been restarted
+    std::uint32_t crashes = 0;         // How many times this slot died unexpectedly (signal or non-zero exit)
+    std::uint32_t backoffAttempts = 0; // Current backoff attempt count (resets on successful start)
+    std::int32_t pid = -1;             // OS agnostic pid
+    std::int64_t startedAt = 0;        // Unix timestamp of last worker start
+    std::int64_t nextRetryAt = 0;      // Unix timestamp of next allowed restart attempt
+};
+static_assert(sizeof(SelfMetrics) == 48, "'SelfMetrics' must be exactly 48 bytes");
+static_assert(std::is_standard_layout_v<SelfMetrics>, "'SelfMetrics' must be standard layout");
+
 // One slot per worker in shared mmap
 // Embeds user-facing metric structs directly (add fields there, not here)
 // alignas(64) prevents false sharing between adjacent worker slots
 struct alignas(64) WorkerMetrics {
     LogMetrics log = {};
     NetworkMetrics network = {};
+    SelfMetrics self = {};
 };
 static_assert(sizeof(WorkerMetrics) % 64 == 0, "'WorkerMetrics' must be a multiple of 64 bytes");
 static_assert(std::is_standard_layout_v<WorkerMetrics>, "'WorkerMetrics' must be standard layout");

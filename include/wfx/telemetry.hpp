@@ -206,6 +206,15 @@ inline Shared::NetworkMetrics GetNetworkMetrics() noexcept
     return api->GetNetMetricsWorker();
 }
 
+inline Shared::SelfMetrics GetProcessMetrics() noexcept
+{
+    const auto* api = Core::UtilsApiExt1();
+    if(!api)
+        return {};
+
+    return api->GetSelfMetricsWorker();
+}
+
 inline Shared::LogMetrics GetLogMetricsAll() noexcept
 {
     const auto* api = Core::UtilsApiExt1();
@@ -222,6 +231,15 @@ inline Shared::NetworkMetrics GetNetworkMetricsAll() noexcept
         return {};
 
     return api->GetNetMetricsAggregate();
+}
+
+inline Shared::SelfMetrics GetProcessMetricsAll() noexcept
+{
+    const auto* api = Core::UtilsApiExt1();
+    if(!api)
+        return {};
+
+    return api->GetSelfMetricsAggregate();
 }
 
 } // namespace WFX

@@ -118,6 +118,7 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Misc", "file_cache_size", miscConfig.fileCacheSize);
         ExtractValue(tbl, "Misc", "cache_chunk_size", miscConfig.cacheChunkSize);
         ExtractValue(tbl, "Misc", "template_chunk_size", miscConfig.templateChunkSize);
+        ExtractValue(tbl, "Misc", "metrics_poll_interval", miscConfig.metricsPollInterval);
     }
     catch(const toml::parse_error& err) {
         logger.Fatal("[Config]: File -> 'wfx.toml', Error -> ", err.what());

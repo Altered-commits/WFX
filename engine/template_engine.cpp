@@ -98,7 +98,6 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                 // Basic check, did file modified time change? if not, then no need to compile this file
                 if(diskStats.modifiedNs == cacheStats->modifiedTime) {
                     std::size_t offset{0};
-
                     templates_.emplace(std::move(relPath),
                                        TemplateMeta{cacheStats->Pop<TemplateType>(offset),
                                                     cacheStats->Pop<std::size_t>(offset), std::move(outPath)});

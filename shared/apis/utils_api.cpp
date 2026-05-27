@@ -26,8 +26,13 @@ const UTILS_API_EXT1* GetUtilsAPIExt1()
             auto* m = Utils::MetricTracer::Current();
             return m ? m->network : NetworkMetrics{};
         },
+        []() -> SelfMetrics {
+            auto* m = Utils::MetricTracer::Current();
+            return m ? m->self : SelfMetrics{};
+        },
         []() -> LogMetrics     { return Utils::MetricTracer::AggregateLog(); },
-        []() -> NetworkMetrics { return Utils::MetricTracer::AggregateNetwork(); }
+        []() -> NetworkMetrics { return Utils::MetricTracer::AggregateNetwork(); },
+        []() -> SelfMetrics    { return Utils::MetricTracer::AggregateSelf(); }
     };
     // clang-format on
 
