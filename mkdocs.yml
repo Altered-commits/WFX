@@ -19,7 +19,6 @@ theme:
 
 extra_css:
   - css/index.css
-  - css/code_format.css
   - css/scrollbar_format.css
 
 markdown_extensions:

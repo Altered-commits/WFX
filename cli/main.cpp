@@ -46,9 +46,8 @@ int BeginAwesomeness(int argc, char* argv[])
                     "[WFX]: Build type is required. Usage: wfx build <project-folder-name> [templates|source]"
                 );
 
-            return CLI::BuildProject(positionalArgs[0], positionalArgs[1], options.count("--debug") > 0);
+            return CLI::BuildProject(positionalArgs[0], positionalArgs[1]);
         });
-    parser.AddOption("build", "--debug", "Build in debug mode", true, "", false);
 
     // --- Command: run ---
     parser.AddCommand("run", "Start WFX server",
@@ -78,7 +77,6 @@ int BeginAwesomeness(int argc, char* argv[])
             if(options.count("--pin-to-cpu") > 0)          cfg.SetFlag(CLI::ServerFlags::PIN_TO_CPU);
             if(options.count("--use-https") > 0)           cfg.SetFlag(CLI::ServerFlags::USE_HTTPS);
             if(options.count("--https-port-override") > 0) cfg.SetFlag(CLI::ServerFlags::OVERRIDE_HTTPS_PORT);
-            if(options.count("--debug") > 0)               cfg.SetFlag(CLI::ServerFlags::USE_DEBUG);
             if(options.count("--detach") > 0)              cfg.SetFlag(CLI::ServerFlags::USE_DAEMON);
 
             return CLI::RunServer(positionalArgs[0], cfg);
@@ -89,7 +87,6 @@ int BeginAwesomeness(int argc, char* argv[])
     parser.AddOption("run", "--use-https",           "Use HTTPS connection",        true,  "",          false);
     parser.AddOption("run", "--https-port-override", "Override default HTTPS port", true,  "",          false);
     parser.AddOption("run", "--detach",              "Run server as daemon",        true,  "",          false);
-    parser.AddOption("run", "--debug",               "For runtime debugging",       true,  "",          false);
 
     // --- Command: control ---
     parser.AddCommand("control", "Manage running WFX servers",

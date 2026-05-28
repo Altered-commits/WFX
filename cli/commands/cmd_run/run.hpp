@@ -11,8 +11,7 @@ enum class ServerFlags : std::uint64_t {
     PIN_TO_CPU = 1ull << 1,
     USE_HTTPS = 1ull << 2,
     OVERRIDE_HTTPS_PORT = 1ull << 3,
-    USE_DEBUG = 1ull << 4,
-    USE_DAEMON = 1ull << 5,
+    USE_DAEMON = 1ull << 4,
 };
 
 struct ServerConfig {

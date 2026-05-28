@@ -31,4 +31,5 @@ To Fix:
 1. Add write budget for backend (epoll/io_uring/iocp/kqueue), don't let one connection hoard writing
 2. Timer wheel shouldn't expire connections inline, or for larger count it will stall backend pipeline (negligible but still)
 3. ADD PROPER ERROR CHECKING FOR ASYNC TIMER OPERATIONS (none but still)
-3. When server reaches connection limit, drop random connections :)
+4. When server reaches connection limit, drop random connections :)
+5. Template engine caching logic is still not good, need to make it more good

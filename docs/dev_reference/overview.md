@@ -41,35 +41,9 @@ When user code calls `WFX::LogInfo(...)` or registers a route, it calls through 
 
 ---
 
-## Current state
-
-What exists today:
-
-- HTTP/1.1 server with keep-alive
-- Routing, middleware, async handlers via coroutines
-- HTTPS via OpenSSL
-- Form handling and parsing
-- Template engine with static and dynamic template compilation
-- JSON (immediate mode and retained mode)
-- Per-worker TLSF buffer pool
-- Structured logging with file rotation
-- Shared metrics via mmap, queryable from user code
-- Crash tracer with stack trace dumps
-- CLI for project scaffolding
-
-What does not exist yet:
-
-- HTTP/2
-- MacOS support (in progress)
-- Windows support
-- Database drivers or ORM
-- Inter-worker communication
-
----
-
 ## Where to go next
 
-- **Architecture** -> detailed breakdown of each subsystem
+- **Architecture** -> startup flow, request lifecycle, and subsystem relationships
 - **Codebase Structure** -> folder layout and where to find things
 - **Globals and Singletons** -> the `Get...()` functions, their lifetimes and ownership
 - **ABI Layer** -> how to read and extend the API structs
