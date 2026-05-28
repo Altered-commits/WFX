@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "http_middleware.hpp"
 #include "engine/core_engine.hpp"
 #include "http/request.hpp"  // |

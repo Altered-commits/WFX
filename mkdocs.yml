@@ -1,5 +1,6 @@
 site_name: WFX Documentation
 site_description: Explicit, low-level C++ web framework
+copyright: Copyright &copy; 2025-2026 Altered-commits
 
 theme:
   name: material

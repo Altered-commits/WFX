@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifdef WFX_LINUX_USE_IO_URING
 
 #include "io_uring_connection.hpp"

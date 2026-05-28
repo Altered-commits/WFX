@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 /*
  * Copied this shit from my old project :)
  * Absolute garbage of a code and i'm not even going to change it. Its perfect
