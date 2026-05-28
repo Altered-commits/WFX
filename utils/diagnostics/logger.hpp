@@ -317,6 +317,8 @@ private:
         // IMPORTANT: This works assuming every metric is in the order:
         //   -> trace, debug, info, warn, error, fatal
         // Order is decided in 'shared/abis/types.hpp' -> 'LogMetrics'
+        // And we always use an if condition because we have no idea where this can be used
+        // Unlike us hardcoding pointer in, say, epoll backend (because its used in worker context)
         if(auto* metrics = MetricTracer::Current()) {
             std::uint64_t* lines = &metrics->log.trace;
             lines[static_cast<std::uint8_t>(lvl)]++;

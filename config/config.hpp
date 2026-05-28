@@ -75,7 +75,7 @@ struct OSSpecificConfig {
 #else
     std::uint32_t workerProcesses = 4;
     std::uint32_t backlog = 1024;
-    std::uint16_t workerShutdownTimeout = 5; // 5 seconds
+    std::uint16_t workerShutdownTimeout = 5; // In seconds
 
 #ifdef WFX_LINUX_USE_IO_URING
     std::uint16_t batchSize = 64;
@@ -102,7 +102,10 @@ struct MiscConfig {
     std::uint16_t fileCacheSize = 20;
     std::uint16_t cacheChunkSize = 2 * 1024;
     std::uint32_t templateChunkSize = 16 * 1024;
-    std::uint16_t metricsPollInterval = 2; // In seconds
+    std::uint16_t masterPollInterval = 2; // In seconds
+    std::uint16_t maxWorkerRestarts = 5;
+    std::uint16_t workerBackoffBase = 1; // In seconds
+    std::uint16_t workerBackoffMax = 16; // In seconds
 };
 
 // Main Config loader

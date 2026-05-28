@@ -241,10 +241,13 @@ max_file_size     = 16777216   # Max log file size before rotation (in bytes) [i
 max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
 
 [Misc]
-file_cache_size       = 20      # Number of files cached for efficiency (LFU)
-template_chunk_size   = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size      = 2048    # Max chunk size to read / write from template cache file (in bytes)
-metrics_poll_interval = 2       # Seconds to wait before polling process metrics
+file_cache_size      = 20      # Number of files cached for efficiency (LFU)
+template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
+cache_chunk_size     = 2048    # Max chunk size to read / write from template cache file (in bytes)
+master_poll_interval = 2       # Master wake interval in seconds: worker restart detection and metrics polling
+max_worker_restarts  = 5       # Max restart attempts before slot is permanently dead
+worker_backoff_base  = 1       # Base backoff in seconds (doubles each attempt)
+worker_backoff_max   = 16      # Max backoff cap in seconds
 )");
 
     // 3. Bridge between engine and user code

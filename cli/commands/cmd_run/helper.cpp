@@ -27,6 +27,199 @@ using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 #ifdef _WIN32
 // Windows: future work
 #else
+
+// vvv Constants vvv
+// Slot state encoding via workerPids:
+//   >= 0  -> live worker PID
+//   -1    -> marked for revival (backoff window not yet expired)
+//   -2    -> permanently dead (max restart attempts exceeded)
+static constexpr pid_t SLOT_PENDING = -1;
+static constexpr pid_t SLOT_DEAD = -2;
+
+// vvv Helper Functions vvv
+static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::string& logsDir,
+                        const std::string& crashLogsDir, bool useHttps, bool pinToCpu, const std::string& host,
+                        std::uint16_t port)
+{
+    auto& globalState = GetMasterState();
+    auto& logger = GetLogger();
+    auto& config = GetConfig();
+    auto& loggingConfig = config.loggingConfig;
+
+    pid_t pid = fork();
+
+    // --- Child Worker ---
+    if(pid == 0) {
+        // First worker becomes group leader, rest join its group
+        if(globalState.workerPGID == 0)
+            setpgid(0, 0);
+        else
+            setpgid(0, globalState.workerPGID);
+
+        // Every process will have its own metric tracer
+        MetricTracer::InitWorker(slotIndex);
+
+        // AND A CRASH tracer for good luck
+        char workerName[32];
+        std::snprintf(workerName, sizeof(workerName), "worker-%d", slotIndex);
+        CrashTracer::SetWorkerName(workerName);
+        CrashTracer::Install(crashLogsDir.c_str());
+
+        // AND ITS OWN LOGGING IF ENABLED
+        if(loggingConfig.enableFile)
+            logger.OpenFile((logsDir + workerName + ".log").c_str(), loggingConfig.maxFileSize,
+                            loggingConfig.maxRotations);
+
+        // AAAAAAAAAAAAND ITS OWNNNNNNNNNNNNN BufferPool and FileCache
+        GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
+        GetFileCache().Init(config.miscConfig.fileCacheSize);
+
+        Core::CoreEngine engine{dllDir.c_str(), useHttps};
+        globalState.enginePtr = &engine;
+
+        signal(SIGTERM, HandleWorkerSignal);
+        signal(SIGINT, SIG_IGN);  // SigTerm will kill it, SigInt handled by master
+        signal(SIGPIPE, SIG_IGN); // We will handle it internally
+        signal(SIGHUP, SIG_IGN);  // Terminals should not kill workers
+
+        if(pinToCpu)
+            PinWorkerToCPU(slotIndex);
+
+        engine.Listen(host, port);
+        std::exit(0);
+    }
+
+    // --- Failure ---
+    else if(pid < 0) {
+        logger.Error("[WFX-Master]: Failed to fork worker ", slotIndex);
+        return false;
+    }
+
+    // --- Master ---
+    // First worker spawned becomes group leader
+    if(globalState.workerPGID == 0)
+        globalState.workerPGID = pid;
+
+    setpgid(pid, globalState.workerPGID);
+    globalState.workerPids[slotIndex] = pid;
+
+    // Update slot self metrics
+    auto* slot = MetricTracer::Slot(slotIndex);
+    if(slot) {
+        slot->self.pid = static_cast<std::int32_t>(pid);
+        slot->self.startedAt = static_cast<std::int64_t>(std::time(nullptr));
+    }
+
+    return true;
+}
+
+// Step 1: Reap dead workers and mark slots for revival or permanently dead
+static void ReapDeadWorkers()
+{
+    auto& globalState = GetMasterState();
+    auto& logger = GetLogger();
+    auto& miscConfig = GetConfig().miscConfig;
+
+    int status;
+    pid_t dead;
+
+    // Drain all dead children, SIGCHLD can be coalesced so we loop until nothing is left
+    while((dead = waitpid(-1, &status, WNOHANG)) > 0) {
+        // Find which slot this PID belongs to
+        int slotIndex = -1;
+        for(int i = 0; i < static_cast<int>(globalState.workerPids.size()); i++) {
+            if(globalState.workerPids[i] == dead) {
+                slotIndex = i;
+                break;
+            }
+        }
+
+        if(slotIndex < 0) {
+            logger.Warn("[WFX-Master]: Unknown child died (pid=", dead, "), ignoring");
+            continue;
+        }
+
+        auto* slot = MetricTracer::Slot(slotIndex);
+        if(!slot) {
+            logger.Warn("[WFX-Master]: Corrupted slot while reaping (pid=", dead, "), ignoring");
+            continue;
+        }
+
+        // Every dead worker is a CRASH, there is no normal exit in the loop
+        slot->self.crashes++;
+
+        if(WIFSIGNALED(status))
+            logger.Warn("[WFX-Master]: Worker ", slotIndex, " crashed on signal ", WTERMSIG(status), " (pid=", dead,
+                        ")");
+        else
+            logger.Warn("[WFX-Master]: Worker ", slotIndex, " died with exit code ", WEXITSTATUS(status),
+                        " (pid=", dead, ")");
+
+        // -------------------- BACKOFF CHECK --------------------
+        std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+        std::uint32_t attempts = slot->self.backoffAttempts;
+
+        if(attempts >= miscConfig.maxWorkerRestarts) {
+            logger.Error("[WFX-Master]: Worker ", slotIndex, " exceeded max restart attempts (",
+                         miscConfig.maxWorkerRestarts, "). Slot remains dead until server restart");
+            globalState.workerPids[slotIndex] = SLOT_DEAD;
+            continue;
+        }
+
+        // Compute backoff window and mark as pending revival
+        std::uint32_t base = miscConfig.workerBackoffBase;
+        std::uint32_t backoffSecs =
+            (attempts >= 32) ? static_cast<std::uint32_t>(miscConfig.workerBackoffMax)
+                             : std::min(base << attempts, static_cast<std::uint32_t>(miscConfig.workerBackoffMax));
+
+        slot->self.nextRetryAt = now + backoffSecs;
+
+        globalState.workerPids[slotIndex] = SLOT_PENDING;
+
+        logger.Info("[WFX-Master]: Worker ", slotIndex, " marked for revival in ", backoffSecs, "s (attempt ",
+                    slot->self.backoffAttempts + 1, "/", miscConfig.maxWorkerRestarts, ")");
+    }
+}
+
+// Step 2: Revive slots whose backoff window has expired
+static void RevivePendingWorkers(const std::string& dllDir, const std::string& logsDir, const std::string& crashLogsDir,
+                                 bool useHttps, bool pinToCpu, const std::string& host, std::uint16_t port)
+{
+    auto& globalState = GetMasterState();
+    auto& logger = GetLogger();
+    auto& miscConfig = GetConfig().miscConfig;
+
+    std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+
+    for(int i = 0; i < static_cast<int>(globalState.workerPids.size()); i++) {
+        if(globalState.workerPids[i] != SLOT_PENDING)
+            continue;
+
+        auto* slot = MetricTracer::Slot(i);
+        if(!slot) {
+            logger.Warn("[WFX-Master]: Corrupted slot while reviving worker ", i, ", ignoring");
+            continue;
+        }
+
+        // Backoff window not yet expired
+        if(slot->self.nextRetryAt > now)
+            continue;
+
+        logger.Info("[WFX-Master]: Reviving worker ", i, " (attempt ", slot->self.backoffAttempts + 1, "/",
+                    miscConfig.maxWorkerRestarts, ")");
+
+        if(SpawnWorker(i, dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, host, port)) {
+            slot->self.restarts++;
+            slot->self.backoffAttempts++;
+        }
+        else {
+            logger.Error("[WFX-Master]: Failed to revive worker ", i);
+            globalState.workerPids[i] = SLOT_DEAD;
+        }
+    }
+}
+
+// Step 3: Poll /proc/<pid>/status for each live worker
 void PollWorkerMetrics()
 {
     auto& globalState = GetMasterState();
@@ -64,6 +257,7 @@ void PollWorkerMetrics()
 
         std::uint64_t rssKb = 0;
         std::uint64_t vmKb = 0;
+
         int found = 0;
 
         while(ptr < end && found < 2) {
@@ -74,22 +268,25 @@ void PollWorkerMetrics()
 
             std::size_t lineLen = static_cast<std::size_t>(lineEnd - ptr);
 
-            // VmRSS and VmSize are both 6 chars + ':'
+            // VmRSS and VmSize are 6 - 7 chars + ':'
             if(lineLen > 7) {
                 std::uint64_t* target = nullptr;
+                std::size_t keySize = 0;
 
                 if(std::memcmp(ptr, "VmRSS:", 6) == 0) {
                     target = &rssKb;
+                    keySize = 6;
                     ++found;
                 }
                 else if(std::memcmp(ptr, "VmSize:", 7) == 0) {
                     target = &vmKb;
+                    keySize = 7;
                     ++found;
                 }
 
                 if(target) {
                     // Skip past the key and whitespace
-                    const char* valPtr = ptr + (target == &rssKb ? 6 : 7);
+                    const char* valPtr = ptr + keySize;
                     while(valPtr < lineEnd && (*valPtr == ' ' || *valPtr == '\t'))
                         ++valPtr;
 
@@ -123,7 +320,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     // -------------------- INITIALIZING PHASE --------------------
     signal(SIGINT, HandleMasterSignal);
     signal(SIGTERM, HandleMasterSignal);
-    signal(SIGCHLD, [](int) {}); // Used to wake master up from 'pause()'
+    signal(SIGCHLD, [](int) {}); // Used to wake master up from 'nanosleep'
 
     if(!GetRandomPool().GenerateSSLKey())
         logger.Fatal("[WFX-Master]: Failed to generate SSL key");
@@ -207,64 +404,17 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     logger.EnableColors(loggingConfig.enableColors);
     logger.EnableTimestamps(loggingConfig.enableTimestamps);
 
+    // Master will have it's own logging file, why discriminate yeah?
+    if(loggingConfig.enableFile)
+        logger.OpenFile((logsDir + "master.log").c_str(), loggingConfig.maxFileSize, loggingConfig.maxRotations);
+
     // -------------------- WORKERS SPAWNING PHASE --------------------
     const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
+
+    globalState.workerPids.resize(osConfig.workerProcesses, -1);
+
     for(int i = 0; i < osConfig.workerProcesses; i++) {
-        pid_t pid = fork();
-
-        // --- Child Worker ---
-        if(pid == 0) {
-            if(i == 0)
-                setpgid(0, 0); // First worker becomes group leader
-            else
-                setpgid(0, globalState.workerPGID); // Join first worker's group
-
-            // Every process will have its own metric tracer
-            MetricTracer::InitWorker(i);
-
-            // AND A CRASH tracer for good luck
-            char workerName[32];
-            std::snprintf(workerName, sizeof(workerName), "worker-%d", i);
-            CrashTracer::SetWorkerName(workerName);
-            CrashTracer::Install(crashLogsDir.c_str());
-
-            // AND ITS OWN LOGGING IF ENABLED
-            if(loggingConfig.enableFile)
-                logger.OpenFile((logsDir + workerName + ".log").c_str(), loggingConfig.maxFileSize,
-                                loggingConfig.maxRotations);
-
-            // AAAAAAAAAAAAND ITS OWNNNNNNNNNNNNN BufferPool and FileCache
-            GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
-            GetFileCache().Init(config.miscConfig.fileCacheSize);
-
-            Core::CoreEngine engine{dllDir.c_str(), useHttps};
-            globalState.enginePtr = &engine;
-
-            signal(SIGTERM, HandleWorkerSignal);
-            signal(SIGINT, SIG_IGN);  // SigTerm will kill it, SigInt handled by master
-            signal(SIGPIPE, SIG_IGN); // We will handle it internally
-            signal(SIGHUP, SIG_IGN);  // Terminals should not kill workers
-
-            if(pinToCpu)
-                PinWorkerToCPU(i);
-
-            engine.Listen(cfg.host, port);
-            return 0;
-        }
-
-        // --- Master ---
-        else if(pid > 0) {
-            globalState.workerPids.push_back(pid);
-            if(i == 0)
-                globalState.workerPGID = pid; // Store PGID for process group
-
-            setpgid(pid, globalState.workerPGID);
-        }
-
-        // --- Failure ---
-        else {
-            logger.Error("[WFX-Master]: Failed to fork worker ", i);
-
+        if(!SpawnWorker(i, dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, cfg.host, port)) {
             // Clean up before bailing
             MetricTracer::Destroy();
             if(!DaemonRegistry::Delete(projectName))
@@ -278,7 +428,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     while(!globalState.shouldStop) {
         // Sleep for poll interval, wake early on any signal
         struct timespec ts {
-            config.miscConfig.metricsPollInterval, 0
+            config.miscConfig.masterPollInterval, 0
         };
         nanosleep(&ts, nullptr);
 
@@ -286,20 +436,26 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         if(globalState.shouldStop)
             break;
 
+        // 1. Reap dead workers and mark slots
+        ReapDeadWorkers();
+
+        // 2. Revive slots whose backoff window has expired
+        RevivePendingWorkers(dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, cfg.host, port);
+
+        // 3. Poll metrics for all live workers
         PollWorkerMetrics();
     }
-
-    // Before shutting down, reset all the logging capabilities
-    // Also i will only be enabling stdout (IF NOT ALREADY ENABLED, don't care about other stuff)
-    // Cuz WHY NOT
-    logger.EnableStdout(true);
-    logger.SetMinLevel(Logger::Level::INFO);
 
     logger.Info("[WFX-Master]: Signal received (INT / TERM), waiting for workers to shutdown...");
 
     // -------------------- SHUTDOWN PHASE --------------------
-    for(std::uint32_t i = 0; i < osConfig.workerProcesses; i++) {
+    for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(osConfig.workerProcesses); i++) {
         pid_t pid = globalState.workerPids[i];
+
+        // Slot may be dead from backoff exhaustion or failed restart
+        if(pid <= 0)
+            continue;
+
         bool exited = false;
 
         for(std::uint32_t t = 0; t < config.osSpecificConfig.workerShutdownTimeout * 10; t++) {
