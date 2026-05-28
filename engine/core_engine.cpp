@@ -5,16 +5,16 @@
 #include "http/request/http_request.hpp"
 #include "http/connection/http_connection.hpp"
 #include "http/common/http_error_msgs.hpp"
-#include "http/common/http_global_state.hpp"
+#include "http/common/http_master_state.hpp"
 #include "http/parser/http_parser.hpp"
 #include "shared/apis/master_api.hpp"
-#include "utils/backport/string.hpp"
+#include "utils/string/string.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
-#include "utils/crash_tracer/crash_tracer.hpp"
+#include "utils/diagnostics/crash_tracer.hpp"
 
 #if defined(__linux__)
-    #include <dlfcn.h>
+#include <dlfcn.h>
 #endif
 
 namespace WFX::Core {
@@ -24,11 +24,11 @@ using namespace WFX::Shared;
 using namespace WFX::Utils;
 
 enum ConnectionHeader : std::uint8_t {
-    NONE       = 0,
-    CLOSE      = 1 << 0,
+    NONE = 0,
+    CLOSE = 1 << 0,
     KEEP_ALIVE = 1 << 1,
-    UPGRADE    = 1 << 2,
-    ERROR      = 1 << 3,
+    UPGRADE = 1 << 2,
+    ERROR = 1 << 3,
 };
 
 // vvv Main Functions vvv
@@ -39,8 +39,8 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 
     // Initialize API backend before anything else
-    Shared::InitHttpAPIV1(connHandler_.get(), &router_, &middleware_);
-    Shared::InitAsyncAPIV1(connHandler_.get());
+    Shared::InitHttpAPIExt1(connHandler_.get(), &router_, &middleware_);
+    Shared::InitAsyncAPIExt1(connHandler_.get());
 
     // We set it on our end because each compiled binary has its own copy of '__WFXApi'
     // If we want it to work on our end, we gotta set it here as well
@@ -57,11 +57,7 @@ void CoreEngine::Listen(const std::string& host, std::uint16_t port)
 {
     connHandler_->Initialize(host, port);
 
-    connHandler_->SetEngineCallback(
-        [this](ConnectionContext* ctx) {
-            this->HandleRequest(ctx);
-        }
-    );
+    connHandler_->SetEngineCallback([this](ConnectionContext* ctx) { this->HandleRequest(ctx); });
     connHandler_->Run();
 }
 
@@ -92,8 +88,8 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
         case HttpParseState::PARSE_INCOMPLETE_BODY:
             ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
             connHandler_->RefreshExpiry(ctx, state == HttpParseState::PARSE_INCOMPLETE_HEADERS
-                                            ? networkConfig.headerTimeout
-                                            : networkConfig.bodyTimeout);
+                                                 ? networkConfig.headerTimeout
+                                                 : networkConfig.bodyTimeout);
             connHandler_->ResumeReceive(ctx);
             return;
 
@@ -108,16 +104,17 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             connHandler_->Write(ctx, "HTTP/1.1 417 Expectation Failed\r\n\r\n");
             return;
 
-        case HttpParseState::PARSE_SUCCESS:
-        {
+        case HttpParseState::PARSE_SUCCESS: {
+            metrics_->network.requests++;
+
             // After parsing, ctx->trackBytes becomes the compact state register used by-
             // -'HandleSuccess' for async resumption IF needed that is
             // For now reset ctx->trackBytes so ctx->trackAsync becomes zeroed out 'HandleSuccess'
             ctx->trackBytes = 0;
 
-            auto& reqInfo    = *ctx->requestInfo;
-            auto  connHeader = reqInfo.headers.GetHeader("Connection");
-            auto  connMask   = HandleConnectionHeader(connHeader);
+            auto& reqInfo = *ctx->requestInfo;
+            auto connHeader = reqInfo.headers.GetHeader("Connection");
+            auto connMask = HandleConnectionHeader(connHeader);
 
             // RFC violation, close connection
             if(connMask & ConnectionHeader::ERROR) {
@@ -130,20 +127,15 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             // HTTP/1.0: Defaults to close
             // HTTP/1.1: Defaults to keep-alive
             bool shouldClose = (connMask == ConnectionHeader::NONE)
-                                ? (reqInfo.version == HttpVersion::HTTP_1_0)
-                                : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
+                                   ? (reqInfo.version == HttpVersion::HTTP_1_0)
+                                   : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
 
-            ctx->SetConnectionState(
-                shouldClose
-                ? ConnectionState::CONNECTION_CLOSE
-                : ConnectionState::CONNECTION_ALIVE
-            );
+            ctx->SetConnectionState(shouldClose ? ConnectionState::CONNECTION_CLOSE
+                                                : ConnectionState::CONNECTION_ALIVE);
 
             // Wire rwBuffer + version into response before any writes
             // Write buffer allocated once, reused across requests on same connection
-            if(!ctx->rwBuffer.IsWriteInitialized() &&
-               !ctx->rwBuffer.InitWriteBuffer(networkConfig.maxSendBufferSize))
-            {
+            if(!ctx->rwBuffer.IsWriteInitialized() && !ctx->rwBuffer.InitWriteBuffer(networkConfig.maxSendBufferSize)) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
                 connHandler_->Write(ctx, HttpError::internalError);
                 return;
@@ -155,7 +147,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             res.SetShouldClose(shouldClose);
 
             // Public file shortcut
-            if(StartsWith(reqInfo.path, "/public/")) {
+            if(reqInfo.path.starts_with("/public/")) {
                 std::string_view relativePath = reqInfo.path.substr(7);
                 std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
@@ -204,6 +196,14 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     if(!res.IsCommitted())
         res.Commit();
 
+    // Metrics
+    auto code = static_cast<std::uint16_t>(res.GetStatus());
+    metrics_->network.response1xx += (code >= 100 && code < 200);
+    metrics_->network.response2xx += (code >= 200 && code < 300);
+    metrics_->network.response3xx += (code >= 300 && code < 400);
+    metrics_->network.response4xx += (code >= 400 && code < 500);
+    metrics_->network.response5xx += (code >= 500 && code < 600);
+
     if(res.IsFile()) {
         connHandler_->WriteFile(ctx, res.TakeFilePath());
         return;
@@ -222,13 +222,13 @@ void CoreEngine::HandleSuccess(ConnectionContext* ctx)
 {
     WFX_TRACE();
 
-    auto* httpApi = Shared::GetHttpAPIV1();
-    auto& req     = *ctx->requestInfo;
-    auto& res     = *ctx->responseInfo;
-    auto* node    = static_cast<const TrieNode*>(req.routeNode_);
+    auto* httpApi = Shared::GetHttpAPIExt1();
+    auto& req = *ctx->requestInfo;
+    auto& res = *ctx->responseInfo;
+    auto* node = static_cast<const TrieNode*>(req.routeNode_);
 
     Response userRes{&res};
-    Request  userReq{&req};
+    Request userReq{&req};
 
     ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
 
@@ -290,8 +290,8 @@ __HandleResponse:
 // vvv Helper Functions vvv
 void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
 {
-    auto* ctx    = static_cast<ConnectionContext*>(ud);
-    auto* engine = GetGlobalState().enginePtr;
+    auto* ctx = static_cast<ConnectionContext*>(ud);
+    auto* engine = GetMasterState().enginePtr;
 
     if(result.status != AsyncStatus::COMPLETED) {
         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
@@ -329,9 +329,9 @@ void CoreEngine::HandleError(ConnectionContext* ctx, Shared::HttpStatus code, st
 
 std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
 {
-    std::uint8_t mask  = ConnectionHeader::NONE;
-    std::size_t  start = 0;
-    std::size_t  size  = header.size();
+    std::uint8_t mask = ConnectionHeader::NONE;
+    std::size_t start = 0;
+    std::size_t size = header.size();
 
     while(start < size) {
         // Find comma
@@ -340,10 +340,10 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
             end = size;
 
         // Extract token substring trimming leading and trailing spaces / tabs
-        std::string_view token = TrimView(header.substr(start, end - start));
+        std::string_view token = StringUtils::TrimView(header.substr(start, end - start));
 
         // CLOSE
-        if(StringCanonical::InsensitiveStringCompare(token, "close")) {
+        if(StringUtils::InsensitiveStringCompare(token, "close")) {
             if(mask & ConnectionHeader::KEEP_ALIVE)
                 return ConnectionHeader::ERROR; // Mutually exclusive
 
@@ -351,7 +351,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
         }
 
         // KEEP-ALIVE
-        else if(StringCanonical::InsensitiveStringCompare(token, "keep-alive")) {
+        else if(StringUtils::InsensitiveStringCompare(token, "keep-alive")) {
             if(mask & ConnectionHeader::CLOSE)
                 return ConnectionHeader::ERROR; // Mutually exclusive
 
@@ -359,7 +359,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
         }
 
         // UPGRADE
-        else if(StringCanonical::InsensitiveStringCompare(token, "upgrade"))
+        else if(StringUtils::InsensitiveStringCompare(token, "upgrade"))
             mask |= ConnectionHeader::UPGRADE;
 
         // UNKNOWN

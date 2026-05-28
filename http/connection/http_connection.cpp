@@ -18,7 +18,7 @@ WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
         case AF_INET:
             memcpy(&ip.v4, &other.ip.v4, sizeof(in_addr));
             break;
-        
+
         case AF_INET6:
             memcpy(&ip.v6, &other.ip.v6, sizeof(in6_addr));
             break;
@@ -34,10 +34,7 @@ WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
 bool WFXIpAddress::operator==(const WFXIpAddress& other) const
 {
     std::size_t len = (type == AF_INET) ? 4 : 16;
-
-    return port == other.port
-            && type == other.type
-            && memcmp(ip.raw, other.ip.raw, len) == 0;
+    return port == other.port && type == other.type && memcmp(ip.raw, other.ip.raw, len) == 0;
 }
 
 // Helper functions
@@ -46,9 +43,7 @@ std::string_view WFXIpAddress::GetIpStr() const
     // Use thread-local static buffer to avoid heap allocation
     thread_local char ipStrBuf[INET6_ADDRSTRLEN] = {};
 
-    const void* addr = (type == AF_INET)
-        ? static_cast<const void*>(&ip.v4)
-        : static_cast<const void*>(&ip.v6);
+    const void* addr = (type == AF_INET) ? static_cast<const void*>(&ip.v4) : static_cast<const void*>(&ip.v6);
 
     // Convert to printable form
     if(inet_ntop(type, addr, ipStrBuf, sizeof(ipStrBuf)))
@@ -65,23 +60,21 @@ const char* WFXIpAddress::GetIpType() const
 bool WFXIpAddress::ToSockAddr(sockaddr_storage& out, socklen_t& len) const
 {
     switch(type) {
-        case AF_INET:
-        {
+        case AF_INET: {
             auto* addr = reinterpret_cast<sockaddr_in*>(&out);
             addr->sin_family = AF_INET;
-            addr->sin_port   = htons(port);
-            addr->sin_addr   = ip.v4;
+            addr->sin_port = htons(port);
+            addr->sin_addr = ip.v4;
 
             len = sizeof(sockaddr_in);
 
             return true;
         }
-        case AF_INET6:
-        {
+        case AF_INET6: {
             auto* addr = reinterpret_cast<sockaddr_in6*>(&out);
             addr->sin6_family = AF_INET6;
-            addr->sin6_port   = htons(port);
-            addr->sin6_addr   = ip.v6;
+            addr->sin6_port = htons(port);
+            addr->sin6_addr = ip.v6;
 
             len = sizeof(sockaddr_in6);
 
@@ -96,9 +89,15 @@ bool WFXIpAddress::ToSockAddr(sockaddr_storage& out, socklen_t& len) const
 void ConnectionContext::ResetContext()
 {
     rwBuffer.ResetBuffer();
-    
-    if(requestInfo)  { delete requestInfo;  requestInfo  = nullptr; }
-    if(responseInfo) { delete responseInfo; responseInfo = nullptr; }
+
+    if(requestInfo) {
+        delete requestInfo;
+        requestInfo = nullptr;
+    }
+    if(responseInfo) {
+        delete responseInfo;
+        responseInfo = nullptr;
+    }
 
     CleanupStreamGenerator();
 
@@ -109,36 +108,38 @@ void ConnectionContext::ResetContext()
 
     // Rest of the stuff
     expectedBodyLength = 0;
-    eventType          = EventType::EVENT_ACCEPT;
-    parseState         = 0;
-    trackBytes         = 0;
-    socket             = WFX_INVALID_SOCKET;
-    fileInfo           = FileInfo{};
-    connInfo           = WFXIpAddress{};
-    asyncData          = AsyncData{};
-    clientContext      = nullptr;
-    endpointContext    = nullptr;
+    eventType = EventType::EVENT_ACCEPT;
+    parseState = 0;
+    trackBytes = 0;
+    socket = WFX_INVALID_SOCKET;
+    fileInfo = FileInfo{};
+    connInfo = WFXIpAddress{};
+    asyncData = AsyncData{};
+    clientContext = nullptr;
+    endpointContext = nullptr;
 }
 
 void ConnectionContext::ClearContext()
 {
     rwBuffer.ClearBuffer();
 
-    if(requestInfo)  requestInfo->ClearInfo();
-    if(responseInfo) responseInfo->Reset();
+    if(requestInfo)
+        requestInfo->ClearInfo();
+    if(responseInfo)
+        responseInfo->Reset();
 
     CleanupStreamGenerator();
 
-    isFileOperation       = 0;
-    isStreamOperation     = 0;
+    isFileOperation = 0;
+    isStreamOperation = 0;
     isAsyncTimerOperation = 0;
-    streamChunked         = 0;
-    expectedBodyLength    = 0;
-    trackBytes            = 0;
-    fileInfo              = FileInfo{};
-    asyncData             = AsyncData{};
-    clientContext         = nullptr;
-    endpointContext       = nullptr;
+    streamChunked = 0;
+    expectedBodyLength = 0;
+    trackBytes = 0;
+    fileInfo = FileInfo{};
+    asyncData = AsyncData{};
+    clientContext = nullptr;
+    endpointContext = nullptr;
 }
 
 void ConnectionContext::CleanupStreamGenerator()
@@ -146,8 +147,8 @@ void ConnectionContext::CleanupStreamGenerator()
     if(streamGenerator.ctx && streamGenerator.Destroy)
         streamGenerator.Destroy(streamGenerator.ctx);
 
-    streamGenerator.ctx     = nullptr;
-    streamGenerator.Next    = nullptr;
+    streamGenerator.ctx = nullptr;
+    streamGenerator.Next = nullptr;
     streamGenerator.Destroy = nullptr;
 }
 

@@ -1,81 +1,111 @@
-# WFX
-
-!!! warning "Note"
-    The documentation and APIs are under active development. They may change frequently, so do not expect this documentation to remain fully accurate over time.
-
+---
+hide:
+  - navigation
+  - toc
 ---
 
-**Explicit, low-level C++ web engine and a framework** for people who want **control** and **performance** without hiding behavior behind too many abstractions.
+<div class="wfx-hero">
+<div class="wfx-badge">v0.x - active development</div>
+<h1 class="wfx-title">WFX</h1>
+<p class="wfx-sub">An explicit, low-level C++ web engine for people who want control and performance without behavior being hidden behind abstractions.</p>
+<div class="wfx-buttons">
+<a href="getting_started/installation/" class="md-button md-button--primary">Get started</a>
+<a href="api_reference/overview/" class="md-button">API reference</a>
+</div>
+</div>
 
-It provides:
+!!! warning "Active development"
+    Documentation and APIs change frequently. Do not treat anything here as stable until stated otherwise.
 
-- A full HTTP(S) server engine
-- A deterministic request-response lifecycle
-- Global and per-route middleware
-- Streaming (outbound for now)
-- Connection timeouts, rate limiting and security primitives
-- A server-side rendering (SSR) engine with templating
-- Custom asynchronous execution model
-- Built-in form parsing, validation, sanitization and field rendering
-- TOML based configuration
+<p class="wfx-section-label">What it includes</p>
 
-Its design principles are:
+<div class="wfx-grid">
+<div class="wfx-card">
+<p class="wfx-card-title">HTTP(S) engine</p>
+<p class="wfx-card-body">Full server with TLS support and a deterministic request-response lifecycle.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Middleware</p>
+<p class="wfx-card-body">Global and per-route middleware with strict ordered execution.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Streaming</p>
+<p class="wfx-card-body">Outbound streaming responses with backend-controlled buffer sizing.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">SSR engine</p>
+<p class="wfx-card-body">Server-side rendering with a full templating system.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Async model</p>
+<p class="wfx-card-body">Custom coroutine execution with explicit suspension and resumption.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Security primitives</p>
+<p class="wfx-card-body">Connection timeouts, rate limiting, and request-level controls.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Form handling</p>
+<p class="wfx-card-body">Built-in parsing, validation, sanitization, and field rendering.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">TOML configuration</p>
+<p class="wfx-card-body">File-based engine configuration with full runtime control.</p>
+</div>
+<div class="wfx-card wfx-card--more">
+<p class="wfx-card-title">And much more</p>
+<p class="wfx-card-body">Explore the full API reference for everything else.</p>
+</div>
+</div>
 
-- **Engine-as-source, not a black box**  
-  WFX is not a closed runtime. The framework headers and engine code
-  are part of your build, not an opaque dependency.
+<p class="wfx-section-label">How it is designed</p>
 
-- **Minimal magic by default**  
-  Behavior is explicit unless you opt into helper macros
-  (for example, coroutine helpers instead of manual state machines).
+<div class="wfx-principles">
+<div class="wfx-principle">
+<p class="wfx-principle-title">Engine-as-source, not a black box</p>
+<p class="wfx-principle-body">WFX headers and engine code are part of your build. There is no opaque runtime sitting between your code and what actually runs.</p>
+</div>
+<div class="wfx-principle">
+<p class="wfx-principle-title">Minimal magic by default</p>
+<p class="wfx-principle-body">Behavior is explicit. Helper macros and coroutine utilities exist, but nothing happens unless you reach for it.</p>
+</div>
+<div class="wfx-principle">
+<p class="wfx-principle-title">Deterministic execution</p>
+<p class="wfx-principle-body">Request handling, middleware order, and ownership semantics are predictable. You can reason about what runs, when, and in what order.</p>
+</div>
+<div class="wfx-principle">
+<p class="wfx-principle-title">Clear separation of responsibilities</p>
+<p class="wfx-principle-body">The engine, framework features, and your code are distinct layers even though they compile together.</p>
+</div>
+</div>
 
-- **Deterministic execution**  
-  Request handling, middleware order, and ownership semantics
-  are predictable and controllable.
+<p class="wfx-section-label">Who this is for</p>
 
-- **Clear separation of responsibilities**  
-  The engine, framework features, and user code are distinct layers,
-  even though they are compiled together.
+<div class="wfx-fit">
+<div class="wfx-fit-col">
+<p class="wfx-fit-header wfx-fit-header--good">Good fit</p>
+<ul class="wfx-fit-list">
+<li>Comfortable with C++ and ownership semantics</li>
+<li>Care about performance and memory behavior</li>
+<li>Want full visibility into what the engine does</li>
+<li>Prefer reading code over reading magic</li>
+</ul>
+</div>
+<div class="wfx-fit-col">
+<p class="wfx-fit-header wfx-fit-header--bad">Not for you</p>
+<ul class="wfx-fit-list">
+<li>Need hot reload or scripting-language iteration</li>
+<li>Want to serve static files without server logic</li>
+<li>Uncomfortable with pointers or ownership</li>
+<li>Hate C++</li>
+</ul>
+</div>
+</div>
 
----
+<p class="wfx-section-label">A note from the developer</p>
 
-## Who this is for
-
-WFX is a good fit if you:
-
-- Are comfortable with C++
-- Care about performance and memory behavior without sacrificing built-in features
-- Want full control over engine and framework behavior
-- Prefer transparent behavior over hidden abstractions
-
-WFX is **not** for you if you:
-
-- Expect instant hot reload or scripting-language iteration speeds (compiling engine + user code takes time)
-- Just want to serve simple static pages or single-page apps without managing server-side logic
-- Are uncomfortable with pointers or ownership semantics
-- Hate C++
-
----
-
-## Documentation structure
-
-If you are new, start here:
-
--> Continue to **[Installation](getting_started/installation.md)**
-
-If you already know what you are doing:
-
--> Continue to **[API documentation](api_reference/overview.md)**
-
----
-
-## Developer note
-
-Well if you are considering to use my framework - first of all, Thank You!  
-Right now, i wouldn't recommend you use it for real software, as i will be making a lot of breaking change (and fixing a lot of bugs).  
-You can use it to help contribute to the framework ofc.  
-Other than that, best of luck. You need it :)
-
----
-
-Continue to **[Getting Started](getting_started/installation.md)**
+<div class="wfx-devnote">
+<p>If you are considering using WFX, thank you genuinely.</p>
+<p>That said, i would not recommend it for production software right now. There will be breaking changes, there will be bugs, and things will move fast. If you want to contribute or experiment, go ahead. Just do not build anything you cannot afford to break yet.</p>
+<p>Other than that, best of luck. You will need it :)</p>
+</div>

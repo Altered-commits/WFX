@@ -11,29 +11,30 @@ namespace WFX::Http {
 /* User side implementation of 'Request'. 'CoreEngine' passes the API */
 class Request {
 public:
-    Request(void* backend) : backend_(backend) {}
+    Request(void* backend) : backend_(backend)
+    {}
 
 public:
     Shared::HttpMethod Method() const
     {
-        return Core::HttpApi()->GetMethod(backend_);
+        return Core::HttpApiExt1()->GetMethod(backend_);
     }
 
     Shared::HttpVersion Version() const
     {
-        return Core::HttpApi()->GetVersion(backend_);
+        return Core::HttpApiExt1()->GetVersion(backend_);
     }
 
     std::string_view Path() const
     {
-        auto sv = Core::HttpApi()->GetPath(backend_);
-        return { sv.data, static_cast<std::size_t>(sv.length) };
+        auto sv = Core::HttpApiExt1()->GetPath(backend_);
+        return {sv.data, static_cast<std::size_t>(sv.length)};
     }
 
     std::string_view Body() const
     {
-        auto sv = Core::HttpApi()->GetBody(backend_);
-        return { sv.data, static_cast<std::size_t>(sv.length) };
+        auto sv = Core::HttpApiExt1()->GetBody(backend_);
+        return {sv.data, static_cast<std::size_t>(sv.length)};
     }
 
 public:
@@ -42,28 +43,27 @@ public:
         Shared::StringView k = ToSV(key);
         Shared::StringView val{};
 
-        bool ok = Core::HttpApi()->GetHeader(backend_, k, &val);
+        bool ok = Core::HttpApiExt1()->GetHeader(backend_, k, &val);
         if(!ok)
             return false;
 
-        out = { val.data, static_cast<std::size_t>(val.length) };
+        out = {val.data, static_cast<std::size_t>(val.length)};
         return true;
     }
 
 public:
     std::uint64_t SegmentCount() const
     {
-        return Core::HttpApi()->GetSegmentCount(backend_);
+        return Core::HttpApiExt1()->GetSegmentCount(backend_);
     }
 
     Shared::SegmentVariant GetSegment(std::uint64_t index) const
     {
-        return Core::HttpApi()->GetSegment(backend_, index);
+        return Core::HttpApiExt1()->GetSegment(backend_, index);
     }
 
 public:
-    template<typename T>
-    bool SetContext(std::string_view key, T&& value)
+    template <typename T> bool SetContext(std::string_view key, T&& value)
     {
         using U = std::decay_t<T>;
 
@@ -72,36 +72,31 @@ public:
         Shared::Any any{};
         any.typeID = Shared::Any::TypeIDOf<U>();
 
-        if constexpr (
-            sizeof(U) <= sizeof(void*)
-            && alignof(U) <= alignof(void*)
-            && std::is_trivially_copyable_v<U>
-            && std::is_trivially_destructible_v<U>
-        ) {
+        if constexpr(sizeof(U) <= sizeof(void*) && alignof(U) <= alignof(void*) && std::is_trivially_copyable_v<U> &&
+                     std::is_trivially_destructible_v<U>) {
             U tmp = std::forward<T>(value);
             std::memcpy(&any.data, &tmp, sizeof(U));
             any.destructor = nullptr;
         }
         else {
-            void* mem = Core::MemoryApi()->Alloc(sizeof(U));
+            void* mem = Core::MemoryApiExt1()->Alloc(sizeof(U));
             if(!mem)
                 return false;
 
-            U* obj = new(mem) U(std::forward<T>(value));
+            U* obj = new (mem) U(std::forward<T>(value));
             any.data = obj;
 
             any.destructor = [](void* p) {
                 static_cast<U*>(p)->~U();
-                Core::MemoryApi()->Free(p);
+                Core::MemoryApiExt1()->Free(p);
             };
         }
 
-        Core::HttpApi()->SetContext(backend_, k, any);
+        Core::HttpApiExt1()->SetContext(backend_, k, any);
         return true;
     }
 
-    template<typename T>
-    auto GetContext(std::string_view key) const
+    template <typename T> auto GetContext(std::string_view key) const
     {
         using U = std::decay_t<T>;
 
@@ -109,16 +104,9 @@ public:
         Shared::Any any{};
 
         // For trivial types, return val + bool
-        if constexpr (
-            sizeof(U) <= sizeof(void*)
-            && alignof(U) <= alignof(void*)
-            && std::is_trivially_copyable_v<U>
-            && std::is_trivially_destructible_v<U>
-        ) {
-            if(
-                !Core::HttpApi()->GetContext(backend_, k, &any)
-                || any.typeID != Shared::Any::TypeIDOf<U>()
-            )
+        if constexpr(sizeof(U) <= sizeof(void*) && alignof(U) <= alignof(void*) && std::is_trivially_copyable_v<U> &&
+                     std::is_trivially_destructible_v<U>) {
+            if(!Core::HttpApiExt1()->GetContext(backend_, k, &any) || any.typeID != Shared::Any::TypeIDOf<U>())
                 return std::pair<U, bool>{{}, false};
 
             U out{};
@@ -128,7 +116,7 @@ public:
         }
         // For non-trivial types, we return ptr + bool
         else {
-            if(!Core::HttpApi()->GetContext(backend_, k, &any))
+            if(!Core::HttpApiExt1()->GetContext(backend_, k, &any))
                 return std::pair<U*, bool>{nullptr, false};
 
             return std::pair<U*, bool>{any.As<U>(), true};
@@ -138,13 +126,13 @@ public:
     void EraseContext(std::string_view key)
     {
         auto k = ToSV(key);
-        Core::HttpApi()->EraseContext(backend_, k);
+        Core::HttpApiExt1()->EraseContext(backend_, k);
     }
 
 private:
     static Shared::StringView ToSV(std::string_view s)
     {
-        return { s.data(), static_cast<std::uint64_t>(s.size()) };
+        return {s.data(), static_cast<std::uint64_t>(s.size())};
     }
 
 private:

@@ -40,7 +40,7 @@ namespace WFX {
 //   -> WFX::Coro     for route handlers
 //   -> WFX::MwCoro   for middleware
 // -----------------------------------------------------------------------
-using Coro   = WFX::Async::Task<void>;
+using Coro = WFX::Async::Task<void>;
 using MwCoro = WFX::Async::Task<Shared::MiddlewareAction>;
 
 // -----------------------------------------------------------------------

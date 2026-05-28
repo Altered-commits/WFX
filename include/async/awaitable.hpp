@@ -9,15 +9,14 @@ namespace WFX::Async {
 using WFX::Shared::AsyncResult;
 using WFX::Shared::AsyncStatus;
 
-template<typename Derived>
-struct AwaitableBase {
-    AsyncResult result_ = { nullptr, 0, Shared::MiddlewareAction::CONTINUE, AsyncStatus::NONE };
+template <typename Derived> struct AwaitableBase {
+    AsyncResult result_ = {nullptr, 0, Shared::MiddlewareAction::CONTINUE, AsyncStatus::NONE};
     std::coroutine_handle<> handle_;
 
 public: // 'AsyncAPI' Callback
     static void OnComplete(void* ud, AsyncResult result) noexcept
     {
-        auto* self    = static_cast<Derived*>(ud);
+        auto* self = static_cast<Derived*>(ud);
         self->result_ = result;
         self->handle_.resume();
     }
@@ -29,7 +28,10 @@ public: // 'AsyncAPI' Callback
     }
 
 public: // Always suspend
-    bool await_ready() const noexcept { return false; }
+    bool await_ready() const noexcept
+    {
+        return false;
+    }
 };
 
 } // namespace WFX::Async

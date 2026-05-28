@@ -9,16 +9,34 @@ namespace WFX::Shared {
 
 struct StringView {
 public:
-    const char*   data;
+    const char* data;
     std::uint64_t length;
 
 public: // vvv Basic methods vvv
-    bool          Empty()                 const noexcept { return length == 0; }
-    std::uint64_t Size()                  const noexcept { return length; }
-    const char*   Data()                  const noexcept { return data; }
-    const char*   Begin()                 const noexcept { return data; }
-    const char*   End()                   const noexcept { return data + length; }
-    char          At(std::uint64_t index) const noexcept { return data[index]; }
+    bool Empty() const noexcept
+    {
+        return length == 0;
+    }
+    std::uint64_t Size() const noexcept
+    {
+        return length;
+    }
+    const char* Data() const noexcept
+    {
+        return data;
+    }
+    const char* Begin() const noexcept
+    {
+        return data;
+    }
+    const char* End() const noexcept
+    {
+        return data + length;
+    }
+    char At(std::uint64_t index) const noexcept
+    {
+        return data[index];
+    }
 
 public: // vvv Comparison vvv
     bool Equals(const StringView& other) const noexcept
@@ -39,7 +57,7 @@ public: // vvv Comparison vvv
 
         for(std::uint64_t i = 0; i < minLen; ++i)
             if(data[i] != other.data[i])
-                return(data[i] < other.data[i]) ? -1 : 1;
+                return (data[i] < other.data[i]) ? -1 : 1;
 
         if(length == other.length)
             return 0;
@@ -59,7 +77,7 @@ public: // vvv Factory vvv
         }
 
         std::uint64_t len = 0;
-        while (str[len] != '\0')
+        while(str[len] != '\0')
             ++len;
 
         sv.length = len;
@@ -67,10 +85,10 @@ public: // vvv Factory vvv
     }
 };
 
-static_assert(sizeof(StringView) == 16,                      "WFX_StringView ABI size mismatch");
-static_assert(alignof(StringView) == alignof(void*),         "WFX_StringView alignment mismatch");
-static_assert(std::is_standard_layout<StringView>::value,    "WFX_StringView must be standard layout");
-static_assert(std::is_trivially_copyable<StringView>::value, "WFX_StringView must be trivially copyable");
+static_assert(sizeof(StringView) == 16, "'WFX_StringView' ABI size mismatch");
+static_assert(alignof(StringView) == alignof(void*), "'WFX_StringView' alignment mismatch");
+static_assert(std::is_standard_layout<StringView>::value, "'WFX_StringView' must be standard layout");
+static_assert(std::is_trivially_copyable<StringView>::value, "'WFX_StringView' must be trivially copyable");
 
 } // namespace WFX::Shared
 

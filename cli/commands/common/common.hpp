@@ -1,15 +1,11 @@
 #ifndef WFX_CLI_COMMANDS_COMMON_HPP
 #define WFX_CLI_COMMANDS_COMMON_HPP
 
-#ifdef _WIN32
-    #include <Windows.h>
-#endif
-
 #include <cstdint>
 
 namespace WFX::CLI {
 
-enum class CxxCompilationOption: std::uint8_t {
+enum class CxxCompilationOption : std::uint8_t {
     SOURCE_ONLY,
     TEMPLATES_ONLY,
     ALL,
@@ -21,12 +17,11 @@ void HandleUserCxxCompilation(CxxCompilationOption = CxxCompilationOption::ALL);
 
 // vvv OS Specific Stuff vvv
 #ifdef _WIN32
-BOOL WINAPI ConsoleHandler(DWORD signal);
-LONG WINAPI ExceptionFilter(EXCEPTION_POINTERS* ep);
+// Windows: future work
 #else
 void HandleMasterSignal(int);
 void HandleWorkerSignal(int);
-void PinWorkerToCPU(int workerIndex);
+void PinWorkerToCPU(int);
 #endif
 
 } // namespace WFX::CLI

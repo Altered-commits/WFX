@@ -25,22 +25,23 @@ private: // Internal Functions
     void HandleSuccess(Http::ConnectionContext* ctx);
 
 private: // Helper Functions
-    void         FinishRequest(Http::ConnectionContext* ctx);
-    void         HandleError(Http::ConnectionContext* ctx, Shared::HttpStatus code, std::string_view message);
+    void FinishRequest(Http::ConnectionContext* ctx);
+    void HandleError(Http::ConnectionContext* ctx, Shared::HttpStatus code, std::string_view message);
     std::uint8_t HandleConnectionHeader(std::string_view header);
-    void         HandleUserDLLInjection(const char* dllDir);
-    void         HandleMiddlewareLoading();
+    void HandleUserDLLInjection(const char* dllDir);
+    void HandleMiddlewareLoading();
 
 private:
-    Config&        config_ = Config::GetInstance();
-    Utils::Logger& logger_ = Utils::Logger::GetInstance();
-    
+    Config& config_ = GetConfig();
+    Utils::Logger& logger_ = Utils::GetLogger();
+    Shared::WorkerMetrics* metrics_ = Utils::MetricTracer::Current();
+
     Http::HttpMiddleware middleware_;
-    Http::Router         router_;
+    Http::Router router_;
 
     std::unique_ptr<Http::HttpConnectionHandler> connHandler_;
 };
 
-} // namespace WFX
+} // namespace WFX::Core
 
 #endif // WFX_CORE_ENGINE_HPP

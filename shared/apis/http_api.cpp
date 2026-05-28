@@ -6,40 +6,48 @@
 #include "http/routing/router.hpp"
 #include "http/middleware/http_middleware.hpp"
 #include "http/common/http_detector.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 namespace WFX::Shared {
 
-using namespace WFX::Http; // For 'Router', 'Middleware'
+using namespace WFX::Http; // For 'Router', 'Middleware', ...
 
-using WFX::Utils::Logger;
-
-// '__GlobalHttpDataV1.data' Can be set via the http api, the reason why this is safe to set even-
+// '__GlobalHttpDataExt1.data' Can be set via the http api, the reason why this is safe to set even-
 // -with multiple connections is our entire flow of data is single threaded and will remain that way
-static HttpAPIDataV1 __GlobalHttpDataV1;
+static HttpAPIDataExt1 __GlobalHttpDataExt1;
 
 // vvv Helper functions vvv
-static HttpRequest*       ToReq(void* backend) { return static_cast<HttpRequest*>(backend); }
-static const HttpRequest* ToReq(const void* backend) { return static_cast<const HttpRequest*>(backend); }
-static HttpResponse*      ToRes(void* backend) { return static_cast<HttpResponse*>(backend); }
+static HttpRequest* ToReq(void* backend)
+{
+    return static_cast<HttpRequest*>(backend);
+}
+static const HttpRequest* ToReq(const void* backend)
+{
+    return static_cast<const HttpRequest*>(backend);
+}
+static HttpResponse* ToRes(void* backend)
+{
+    return static_cast<HttpResponse*>(backend);
+}
 
 // vvv Main Stuff vvv
-const HTTP_API_TABLE* GetHttpAPIV1()
+const HTTP_API_EXT1* GetHttpAPIExt1()
 {
-    static HTTP_API_TABLE __GlobalHttpAPIV1 = {
-        // Routing
+    // clang-format off
+    static HTTP_API_EXT1 __GlobalHttpAPIExt1 = {
+        // vvv Routing vvv
         [](HttpMethod method, StringView path, RouteCallback cb) {  // RegisterRoute
-            if(!__GlobalHttpDataV1.router)
-                Logger::GetInstance().Fatal("[HttpAPI]: Router was nullptr for 'RegisterRoute'");
+            if(!__GlobalHttpDataExt1.router)
+                Utils::GetLogger().Fatal("[HttpAPI]: Router was nullptr for 'RegisterRoute'");
 
-            (void)__GlobalHttpDataV1.router->RegisterRoute(
+            (void)__GlobalHttpDataExt1.router->RegisterRoute(
                 method, std::string_view{path.Data(), path.Size()}, std::move(cb)
             );
         },
         [](HttpMethod method, StringView path, const MwCallback* mwStack, std::size_t mwStackSize, RouteCallback cb) { // RegisterRouteEx
-            auto& logger = Logger::GetInstance();
+            auto& logger = Utils::GetLogger();
 
-            if(!__GlobalHttpDataV1.router || !__GlobalHttpDataV1.middleware)
+            if(!__GlobalHttpDataExt1.router || !__GlobalHttpDataExt1.middleware)
                 logger.Fatal("[HttpAPI]: Router or Middleware was nullptr for 'RegisterRouteEx'");
 
             if(mwStackSize == 0)
@@ -50,36 +58,36 @@ const HTTP_API_TABLE* GetHttpAPIV1()
             for(std::size_t i = 0; i < mwStackSize; i++)
                 mwVector.push_back(mwStack[i]);
 
-            auto* node = __GlobalHttpDataV1.router->RegisterRoute(
+            auto* node = __GlobalHttpDataExt1.router->RegisterRoute(
                 method, std::string_view{path.Data(), path.Size()}, cb
             );
 
-            __GlobalHttpDataV1.middleware->RegisterPerRouteMiddleware(node, std::move(mwVector));
+            __GlobalHttpDataExt1.middleware->RegisterPerRouteMiddleware(node, std::move(mwVector));
         },
         [](StringView prefix) {  // PushRoutePrefix
-            if(!__GlobalHttpDataV1.router)
-                Logger::GetInstance().Fatal("[HttpAPI]: Router was nullptr for 'PushRoutePrefix'");
+            if(!__GlobalHttpDataExt1.router)
+                Utils::GetLogger().Fatal("[HttpAPI]: Router was nullptr for 'PushRoutePrefix'");
 
-            __GlobalHttpDataV1.router->PushRouteGroup(std::string_view{prefix.Data(), prefix.Size()});
+            __GlobalHttpDataExt1.router->PushRouteGroup(std::string_view{prefix.Data(), prefix.Size()});
         },
         [] {  // PopRoutePrefix
-            if(!__GlobalHttpDataV1.router)
-                Logger::GetInstance().Fatal("[HttpAPI]: Router was nullptr for 'PopRoutePrefix'");
+            if(!__GlobalHttpDataExt1.router)
+                Utils::GetLogger().Fatal("[HttpAPI]: Router was nullptr for 'PopRoutePrefix'");
 
-            __GlobalHttpDataV1.router->PopRouteGroup();
+            __GlobalHttpDataExt1.router->PopRouteGroup();
         },
 
-        // Middleware
+        // vvv Middleware vvv
         [](StringView name, MwCallback cb) { // RegisterMiddleware
-            if(!__GlobalHttpDataV1.middleware)
-                Logger::GetInstance().Fatal("[HttpAPI]: Middleware was nullptr for 'RegisterMiddleware'");
+            if(!__GlobalHttpDataExt1.middleware)
+                Utils::GetLogger().Fatal("[HttpAPI]: Middleware was nullptr for 'RegisterMiddleware'");
 
-            __GlobalHttpDataV1.middleware->RegisterMiddleware(
+            __GlobalHttpDataExt1.middleware->RegisterMiddleware(
                 std::string_view{name.Data(), name.Size()}, cb
             );
         },
 
-        // Request Handling
+        // vvv Request Handling vvv
         [](const void* request) { // GetMethodFn
             return ToReq(request)->method;
         },
@@ -114,7 +122,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
             auto& segments = ToReq(request)->pathSegments;
 
             if(index >= segments.size())
-                Logger::GetInstance().Fatal(
+                Utils::GetLogger().Fatal(
                     "[HttpAPI]: Index out of bounds for 'GetSegment'. Expected less than ",
                     segments.size(), ", got", index
                 );
@@ -155,8 +163,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
             }
         },
 
-        // Response handling
-        // Response Control
+        // vvv Response handling vvv
         [](void* backend, HttpStatus code) { // SetStatusFn
             ToRes(backend)->WriteStatus(code);
         },
@@ -182,7 +189,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
             ToRes(backend)->Commit();
         },
 
-        // Endpoint API
+        // vvv Endpoint API vvv
         [](StringView urlView, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig) -> std::uint16_t {
             /*
              * NOTE: 'url' allowed only till port number (route and optional parameters are not allowed)
@@ -193,7 +200,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
              *      https://api.xyz.com/v1 is not allowed (/v1 not allowed)
              *      example.com            is not allowed (no protocol defined)
              */
-            auto& logger = Logger::GetInstance();
+            auto& logger = Utils::GetLogger();
             if(urlView.Empty())
                 logger.Fatal("[HttpAPI]: Endpoint got empty URL");
 
@@ -285,7 +292,7 @@ const HTTP_API_TABLE* GetHttpAPIV1()
 
         __DirectResolve:
             // Sanity checks
-            if(!__GlobalHttpDataV1.connHandler)
+            if(!__GlobalHttpDataExt1.connHandler)
                 logger.Fatal("[HttpAPI]: Connection handler was nullptr for endpoint");
 
             bool useTLS = false;
@@ -319,40 +326,38 @@ const HTTP_API_TABLE* GetHttpAPIV1()
                     break;
             }
 
-            return __GlobalHttpDataV1.connHandler->AllocateEndpoint(host, port, cLimit, ifLimit, useTLS);
+            return __GlobalHttpDataExt1.connHandler->AllocateEndpoint(host, port, cLimit, ifLimit, useTLS);
         },
         // WriteEndpointFn
         [](void* ctx, std::uint16_t endpointIndex, const std::byte* ptr, std::uint32_t size) -> EndpointStatus {
             if(!ctx) {
-                Logger::GetInstance().Error("[HttpAPI]: 'WriteEndpoint' received null context");
+                Utils::GetLogger().Error("[HttpAPI]: 'WriteEndpoint' received null context");
                 return EndpointStatus::INTERNAL_ERROR;
             }
 
-            return __GlobalHttpDataV1.connHandler->WriteEndpoint(
+            return __GlobalHttpDataExt1.connHandler->WriteEndpoint(
                 reinterpret_cast<ConnectionContext*>(ctx), endpointIndex, ptr, size
             );
         },
 
-        // Data API
+        // vvv Data API vvv
         [](void* data) { // SetGlobalPtrData
-            __GlobalHttpDataV1.data = data;
+            __GlobalHttpDataExt1.data = data;
         },
         []() { // GetGlobalPtrData
-            return __GlobalHttpDataV1.data;
-        },
-
-        // Version
-        HttpAPIVersion::V1
+            return __GlobalHttpDataExt1.data;
+        }
     };
+    // clang-format on
 
-    return &__GlobalHttpAPIV1;
+    return &__GlobalHttpAPIExt1;
 }
 
-void InitHttpAPIV1(HttpConnectionHandler* connHandler, Router* extRouter, HttpMiddleware* extMiddleware)
+void InitHttpAPIExt1(HttpConnectionHandler* connHandler, Router* extRouter, HttpMiddleware* extMiddleware)
 {
-    __GlobalHttpDataV1.connHandler = connHandler;
-    __GlobalHttpDataV1.router      = extRouter;
-    __GlobalHttpDataV1.middleware  = extMiddleware;
+    __GlobalHttpDataExt1.connHandler = connHandler;
+    __GlobalHttpDataExt1.router = extRouter;
+    __GlobalHttpDataExt1.middleware = extMiddleware;
 }
 
 } // namespace WFX::Shared

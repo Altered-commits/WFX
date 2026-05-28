@@ -1,6 +1,6 @@
 #include "new.hpp"
 
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -16,15 +16,15 @@ static void CreateFile(const fs::path& path, const std::string& content)
 {
     std::ofstream outFile(path);
     if(!outFile)
-        Logger::GetInstance().Fatal("[WFX]: Failed to create file: ", path);
+        GetLogger().Fatal("[WFX]: Failed to create file: ", path);
 
     outFile << content;
-    Logger::GetInstance().Info("[WFX]: Created: ", path.c_str());
+    GetLogger().Info("[WFX]: Created: ", path.c_str());
 }
 
 static void ScaffoldProject(const std::string& projectName)
 {
-    const fs::path base     = fs::current_path();
+    const fs::path base = fs::current_path();
     const fs::path projBase = base / projectName;
 
     // 1. Create core project folders
@@ -47,10 +47,16 @@ set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
 # Compile configuration
 # --------------------------------------------------
 function(configure_compile target)
+    if(WIN32)
+        set(WFX_HOME "$ENV{USERPROFILE}/.wfx/src")
+    else()
+        set(WFX_HOME "$ENV{HOME}/.wfx/src")
+    endif()
+
     target_include_directories(${target} PRIVATE
         "${CMAKE_SOURCE_DIR}"
-        "${CMAKE_SOURCE_DIR}/../WFX/include"
-        "${CMAKE_SOURCE_DIR}/../WFX"
+        "${WFX_HOME}/include"
+        "${WFX_HOME}"
     )
 
     if(MSVC)
@@ -158,6 +164,9 @@ message(STATUS "===========================================================")
     CreateFile(projBase / ".gitignore", R"(# Build artifacts
 build/
 intermediate/
+
+# Log artifacts
+logs/
 )");
 
     // 2. Create essential config
@@ -222,11 +231,23 @@ file_chunk_size  = 65536  # How big of a file chunk to send at once
 [Linux.Epoll]
 max_events       = 1024   # How many events should epoll handle at a time
 
+[Logging]
+min_level         = 2          # Minimum level to emit (0->trace, 1->debug, 2->info, 3->warn, 4->error, 5->fatal)
+enable_stdout     = true       # Write to stdout
+enable_colors     = true       # ANSI colors on stdout (auto-disabled if not a tty)
+enable_timestamps = true       # Prepend [HH:MM:SS.mmm] to each line
+enable_file       = false      # Write to log files
+max_file_size     = 16777216   # Max log file size before rotation (in bytes) [if enable_file = true]
+max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
+
 [Misc]
-file_cache_size     = 20      # Number of files cached for efficiency (LFU)
-template_chunk_size = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size    = 2048    # Max chunk size to read / write from template cache file (in bytes)
-crash_log_dir       = "logs"  # Relative to project directory e.g. <project>/logs
+file_cache_size      = 20      # Number of files cached for efficiency (LFU)
+template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
+cache_chunk_size     = 2048    # Max chunk size to read / write from template cache file (in bytes)
+master_poll_interval = 2       # Master wake interval in seconds: worker restart detection and metrics polling
+max_worker_restarts  = 5       # Max restart attempts before slot is permanently dead
+worker_backoff_base  = 1       # Base backoff in seconds (doubles each attempt)
+worker_backoff_max   = 16      # Max backoff cap in seconds
 )");
 
     // 3. Bridge between engine and user code
@@ -276,11 +297,13 @@ WFX_GET("/template", [](WFX::Request req, WFX::Response res) {
 )cxx");
 
     // 5. Create example template and static asset
-    CreateFile(projBase / "templates/index.html", R"(<html><head><link rel="stylesheet" href="/public/style.css"></head><body><h1>Hello from WFX Template</h1><script src="/public/script.js"></script></body></html>)");
+    CreateFile(
+        projBase / "templates/index.html",
+        R"(<html><head><link rel="stylesheet" href="/public/style.css"></head><body><h1>Hello from WFX Template</h1><script src="/public/script.js"></script></body></html>)");
     CreateFile(projBase / "public/style.css", "body { font-family: sans-serif; }");
     CreateFile(projBase / "public/script.js", "console.log(\"WFX? Weird ain't it...\")");
 
-    Logger::GetInstance().Info("[WFX]: Project '", projectName, "' created successfully!");
+    GetLogger().Info("[WFX]: Project '", projectName, "' created successfully!");
 }
 
 int CreateProject(const std::string& projectName)
@@ -288,10 +311,10 @@ int CreateProject(const std::string& projectName)
     const std::filesystem::path projectPath = std::filesystem::current_path() / projectName;
 
     if(fs::exists(projectPath))
-        Logger::GetInstance().Fatal("[WFX]: Project already exists: ", projectPath.c_str());
+        GetLogger().Fatal("[WFX]: Project already exists: ", projectPath.c_str());
 
     ScaffoldProject(projectName);
     return 0;
 }
 
-}  // namespace WFX::New
+} // namespace WFX::CLI

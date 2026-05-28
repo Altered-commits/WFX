@@ -2,8 +2,8 @@
 
 #include "http_openssl.hpp"
 #include "config/config.hpp"
-#include "http/common/http_global_state.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/hash/hash.hpp"
+#include "utils/diagnostics/logger.hpp"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/x509v3.h>
@@ -17,8 +17,8 @@ using namespace WFX::Core;  // For 'Config'
 // vvv Constructors and Destructors vvv
 HttpOpenSSL::HttpOpenSSL()
 {
-    auto& logger    = Logger::GetInstance();
-    auto& sslConfig = Config::GetInstance().sslConfig;
+    auto& logger = GetLogger();
+    auto& sslConfig = GetConfig().sslConfig;
 
     // Start of pain and suffering :(
     GlobalOpenSSLInit();
@@ -40,10 +40,17 @@ HttpOpenSSL::HttpOpenSSL()
     // Set the minimum protocol version
     int protoVersion = TLS1_2_VERSION;
     switch(sslConfig.minProtoVersion) {
-        case 1:  protoVersion = TLS1_VERSION;   break;
-        case 2:  protoVersion = TLS1_2_VERSION; break;
-        case 3:  protoVersion = TLS1_3_VERSION; break;
-        default: protoVersion = TLS1_2_VERSION;
+        case 1:
+            protoVersion = TLS1_VERSION;
+            break;
+        case 2:
+            protoVersion = TLS1_2_VERSION;
+            break;
+        case 3:
+            protoVersion = TLS1_3_VERSION;
+            break;
+        default:
+            protoVersion = TLS1_2_VERSION;
     }
     if(SSL_CTX_set_min_proto_version(ctx, protoVersion) != 1)
         LogOpenSSLError("Failed to set minimum TLS protocol version");
@@ -51,10 +58,10 @@ HttpOpenSSL::HttpOpenSSL()
     // Load certificate and private key
     if(SSL_CTX_use_certificate_chain_file(ctx, sslConfig.certPath.c_str()) <= 0)
         LogOpenSSLError("Failed to load certificate chain file");
-    
+
     if(SSL_CTX_use_PrivateKey_file(ctx, sslConfig.keyPath.c_str(), SSL_FILETYPE_PEM) <= 0)
         LogOpenSSLError("Failed to load private key");
-    
+
     if(!SSL_CTX_check_private_key(ctx))
         LogOpenSSLError("Private key does not match certificate");
 
@@ -64,10 +71,10 @@ HttpOpenSSL::HttpOpenSSL()
         SSL_CTX_sess_set_cache_size(ctx, sslConfig.sessionCacheSize);
     }
 
-    auto& ticketKey = GetGlobalState().sslKey;
+    auto& ticketKey = GetRandomPool().GetSSLKey();
     if(SSL_CTX_set_tlsext_ticket_keys(ctx, ticketKey.data(), ticketKey.size()) != 1)
         LogOpenSSLError("Failed to set session ticket keys");
-    
+
     // Set modern cipher preferences
     if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(ctx, sslConfig.tls13Ciphers.c_str()) != 1)
         LogOpenSSLError("Failed to set TLSv1.3 ciphersuites");
@@ -83,10 +90,7 @@ HttpOpenSSL::HttpOpenSSL()
     SSL_CTX_set_read_ahead(ctx, 0);
 
     SSL_CTX_set_mode(ctx,
-        SSL_MODE_RELEASE_BUFFERS |
-        SSL_MODE_ENABLE_PARTIAL_WRITE |
-        SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER
-    );
+                     SSL_MODE_RELEASE_BUFFERS | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
     std::uint64_t options = SSL_OP_NO_COMPRESSION | SSL_OP_CIPHER_SERVER_PREFERENCE;
 
@@ -120,7 +124,7 @@ HttpOpenSSL::~HttpOpenSSL()
         ctx = nullptr;
     }
 
-    Logger::GetInstance().Info("[HttpOpenSSL]: Successfully cleaned up SSL context");
+    GetLogger().Info("[HttpOpenSSL]: Successfully cleaned up SSL context");
 }
 
 // vvv Main Functions vvv
@@ -183,7 +187,7 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host)
     if(X509_VERIFY_PARAM_set1_ip_asc(param, host) == 1) {
         // Target is an IP Address:
         // Do NOT send SNI. Verification is strictly checked against the IP
-    } 
+    }
     else {
         // Target is a Domain Name:
         // Set Server Name Indication (SNI)
@@ -192,7 +196,7 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host)
             return nullptr;
         }
 
-        // X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS prevents attackers from using 
+        // X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS prevents attackers from using
         // wildcard certs (e.g., *.*.com) to impersonate your target.
         X509_VERIFY_PARAM_set_hostflags(param, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
 
@@ -205,10 +209,10 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host)
 
     // ALPN (Application-Layer Protocol Negotiation)
     // For now, because we only support HTTP/1.1, force connections to use HTTP/1.1
-    const unsigned char alpn[] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
+    const unsigned char alpn[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
     if(SSL_set_alpn_protos(ssl, alpn, sizeof(alpn)) != 0) {
         SSL_free(ssl);
-        return nullptr; 
+        return nullptr;
     }
 
     return ssl;
@@ -217,7 +221,7 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host)
 SSLReturn HttpOpenSSL::Handshake(void* conn)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int  ret = SSL_do_handshake(ssl);
+    int ret = SSL_do_handshake(ssl);
 
     // Handshake complete
     if(ret == 1)
@@ -225,47 +229,62 @@ SSLReturn HttpOpenSSL::Handshake(void* conn)
 
     int err = SSL_get_error(ssl, ret);
     switch(err) {
-        case SSL_ERROR_WANT_READ:   return SSLReturn::WANT_READ;
-        case SSL_ERROR_WANT_WRITE:  return SSLReturn::WANT_WRITE;
-        case SSL_ERROR_ZERO_RETURN: return SSLReturn::CLOSED;
-        case SSL_ERROR_SYSCALL:     return SSLReturn::SYSCALL;
-        default:                    return SSLReturn::FATAL;
+        case SSL_ERROR_WANT_READ:
+            return SSLReturn::WANT_READ;
+        case SSL_ERROR_WANT_WRITE:
+            return SSLReturn::WANT_WRITE;
+        case SSL_ERROR_ZERO_RETURN:
+            return SSLReturn::CLOSED;
+        case SSL_ERROR_SYSCALL:
+            return SSLReturn::SYSCALL;
+        default:
+            return SSLReturn::FATAL;
     }
 }
 
 SSLResult HttpOpenSSL::Read(void* conn, char* buf, int len)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int  ret = SSL_read(ssl, buf, len);
+    int ret = SSL_read(ssl, buf, len);
 
     if(ret > 0)
-        return { SSLReturn::SUCCESS, ret };
+        return {SSLReturn::SUCCESS, ret};
 
     int err = SSL_get_error(ssl, ret);
     switch(err) {
-        case SSL_ERROR_WANT_READ:   return { SSLReturn::WANT_READ,  0 };
-        case SSL_ERROR_WANT_WRITE:  return { SSLReturn::WANT_WRITE, 0 };
-        case SSL_ERROR_ZERO_RETURN: return { SSLReturn::CLOSED,     0 };
-        case SSL_ERROR_SYSCALL:     return { SSLReturn::SYSCALL,    0 };
-        default:                    return { SSLReturn::FATAL,      0 };
+        case SSL_ERROR_WANT_READ:
+            return {SSLReturn::WANT_READ, 0};
+        case SSL_ERROR_WANT_WRITE:
+            return {SSLReturn::WANT_WRITE, 0};
+        case SSL_ERROR_ZERO_RETURN:
+            return {SSLReturn::CLOSED, 0};
+        case SSL_ERROR_SYSCALL:
+            return {SSLReturn::SYSCALL, 0};
+        default:
+            return {SSLReturn::FATAL, 0};
     }
 }
 
 SSLResult HttpOpenSSL::Write(void* conn, const char* buf, int len)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int  ret = SSL_write(ssl, buf, len);
+    int ret = SSL_write(ssl, buf, len);
 
     if(ret > 0)
-        return { SSLReturn::SUCCESS, ret };
+        return {SSLReturn::SUCCESS, ret};
 
     int err = SSL_get_error(ssl, ret);
     switch(err) {
-        case SSL_ERROR_WANT_READ:   return { SSLReturn::WANT_READ,  0 };
-        case SSL_ERROR_WANT_WRITE:  return { SSLReturn::WANT_WRITE, 0 };
-        case SSL_ERROR_ZERO_RETURN: return { SSLReturn::CLOSED,     0 };
-        case SSL_ERROR_SYSCALL:     return { SSLReturn::SYSCALL,    0 };
-        default:                    return { SSLReturn::FATAL,      0 };
+        case SSL_ERROR_WANT_READ:
+            return {SSLReturn::WANT_READ, 0};
+        case SSL_ERROR_WANT_WRITE:
+            return {SSLReturn::WANT_WRITE, 0};
+        case SSL_ERROR_ZERO_RETURN:
+            return {SSLReturn::CLOSED, 0};
+        case SSL_ERROR_SYSCALL:
+            return {SSLReturn::SYSCALL, 0};
+        default:
+            return {SSLReturn::FATAL, 0};
     }
 }
 
@@ -273,26 +292,31 @@ SSLResult HttpOpenSSL::WriteFile(void* conn, SSLSocket fd, FileOffset offset, st
 {
     // Windows version does not contain SSL_sendfile, we need to use Write to send files
 #ifdef _WIN32
-    return { SSLReturn::NO_IMPL, 0 };
+    return {SSLReturn::NO_IMPL, 0};
 #else
     // SSL_sendfile can only be used with ktls enabled
     // Return 'NO_IMPL' to tell backend to switch to using Write
     if(!useKtls)
-        return { SSLReturn::NO_IMPL, 0 };
+        return {SSLReturn::NO_IMPL, 0};
 
-    SSL*    ssl = static_cast<SSL*>(conn);
+    SSL* ssl = static_cast<SSL*>(conn);
     ssize_t ret = SSL_sendfile(ssl, fd, offset, count, 0);
 
     if(ret > 0)
-        return { SSLReturn::SUCCESS, ret };
+        return {SSLReturn::SUCCESS, ret};
 
     int err = SSL_get_error(ssl, static_cast<int>(ret));
     switch(err) {
-        case SSL_ERROR_WANT_READ:   return { SSLReturn::WANT_READ,  0 };
-        case SSL_ERROR_WANT_WRITE:  return { SSLReturn::WANT_WRITE, 0 };
-        case SSL_ERROR_ZERO_RETURN: return { SSLReturn::CLOSED,     0 };
-        case SSL_ERROR_SYSCALL:     return { SSLReturn::SYSCALL,    0 };
-        default:                    return { SSLReturn::FATAL,      0 };
+        case SSL_ERROR_WANT_READ:
+            return {SSLReturn::WANT_READ, 0};
+        case SSL_ERROR_WANT_WRITE:
+            return {SSLReturn::WANT_WRITE, 0};
+        case SSL_ERROR_ZERO_RETURN:
+            return {SSLReturn::CLOSED, 0};
+        case SSL_ERROR_SYSCALL:
+            return {SSLReturn::SYSCALL, 0};
+        default:
+            return {SSLReturn::FATAL, 0};
     }
 #endif
 }
@@ -328,7 +352,7 @@ SSLReturn HttpOpenSSL::Shutdown(void* conn)
     return SSLReturn::FATAL;
 }
 
-SSLReturn HttpOpenSSL::ForceShutdown(void *conn)
+SSLReturn HttpOpenSSL::ForceShutdown(void* conn)
 {
     SSL* ssl = static_cast<SSL*>(conn);
     if(!ssl)
@@ -350,7 +374,7 @@ void HttpOpenSSL::GlobalOpenSSLInit()
         return;
 
     if(OPENSSL_init_ssl(OPENSSL_INIT_LOAD_CONFIG, nullptr) != 1)
-        Logger::GetInstance().Fatal("[HttpOpenSSL]: Initialization failed");
+        GetLogger().Fatal("[HttpOpenSSL]: Initialization failed");
 
     initialized = true;
 }
@@ -368,14 +392,13 @@ void HttpOpenSSL::LogOpenSSLError(const char* message, bool fatal)
         allErrors.append(errBuf);
     }
 
-    std::string fullMessage = allErrors.empty()
-        ? std::string(message) + ". No specific OpenSSL error code available"
-        : std::string(message) + ". OpenSSL Reason(s): " + allErrors;
+    std::string fullMessage = allErrors.empty() ? std::string(message) + ". No specific OpenSSL error code available"
+                                                : std::string(message) + ". OpenSSL Reason(s): " + allErrors;
 
     if(fatal)
-        Logger::GetInstance().Fatal("[HttpOpenSSL]: ", fullMessage);
+        GetLogger().Fatal("[HttpOpenSSL]: ", fullMessage);
     else
-        Logger::GetInstance().Error("[HttpOpenSSL]: ", fullMessage);
+        GetLogger().Error("[HttpOpenSSL]: ", fullMessage);
 }
 
 } // namespace WFX::Http

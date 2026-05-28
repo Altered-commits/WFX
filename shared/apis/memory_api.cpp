@@ -3,27 +3,23 @@
 
 namespace WFX::Shared {
 
-using WFX::Utils::Logger;
-using WFX::Utils::BufferPool;
-
-const MEMORY_API_TABLE* GetMemoryAPIV1()
+const MEMORY_API_EXT1* GetMemoryAPIExt1()
 {
-    static MEMORY_API_TABLE __GlobalAsyncAPIV1 = {
+    // clang-format off
+    static MEMORY_API_EXT1 __GlobalAsyncAPIExt1 = {
         [](std::uint64_t size) { // AllocFn
-            return BufferPool::GetInstance().Alloc(size);
+            return Utils::GetBufferPool().Alloc(size);
         },
         [](void* ptr, std::uint64_t newSize) { // ReallocFn
-            return BufferPool::GetInstance().Realloc(ptr, newSize);
+            return Utils::GetBufferPool().Realloc(ptr, newSize);
         },
         [](void* ptr) { // FreeFn
-            BufferPool::GetInstance().Free(ptr);
-        },
-
-        // Version
-        MemoryAPIVersion::V1
+            Utils::GetBufferPool().Free(ptr);
+        }
     };
+    // clang-format on
 
-    return &__GlobalAsyncAPIV1;
+    return &__GlobalAsyncAPIExt1;
 }
 
 } // namespace WFX::Shared

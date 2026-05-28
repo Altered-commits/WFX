@@ -9,7 +9,9 @@
 #include <string>
 
 // Forward declare engine to access cool internal stuff
-namespace WFX::Core { class CoreEngine; }
+namespace WFX::Core {
+class CoreEngine;
+}
 
 // Just defines the structure of request
 namespace WFX::Http {
@@ -18,16 +20,16 @@ namespace WFX::Http {
 using ContextMap = std::unordered_map<std::string, Shared::Any>;
 
 struct HttpRequest {
-    Shared::HttpMethod  method;
+    Shared::HttpMethod method;
     Shared::HttpVersion version;
-    std::string_view    path;
-    std::string_view    body;
-    RequestHeaders      headers;
-    ContextMap          context;
-    PathSegments        pathSegments;
+    std::string_view path;
+    std::string_view body;
+    RequestHeaders headers;
+    ContextMap context;
+    PathSegments pathSegments;
 
 public: // Copying is strictly not allowed
-    HttpRequest(const HttpRequest&)            = delete;
+    HttpRequest(const HttpRequest&) = delete;
     HttpRequest& operator=(const HttpRequest&) = delete;
 
     HttpRequest() = default;
@@ -40,7 +42,7 @@ public: // Helper functions
 
         routeNode_ = nullptr;
         headers.Clear();
-        pathSegments.clear(); 
+        pathSegments.clear();
         context.clear();
     }
 
@@ -52,4 +54,4 @@ private:
 
 } // namespace WFX::Http
 
-#endif //WFX_HTTP_REQUEST_HPP
+#endif // WFX_HTTP_REQUEST_HPP

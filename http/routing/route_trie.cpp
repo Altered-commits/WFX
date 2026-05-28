@@ -1,9 +1,10 @@
 #include "route_trie.hpp"
-#include "utils/backport/string.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/string/string.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 namespace WFX::Http {
 
+using namespace WFX::Utils;  // For 'Logger', 'StringUtils'
 using namespace WFX::Shared; // For every single abi type
 
 const TrieNode* RouteTrie::Insert(std::string_view fullRoute, RouteCallback handler)
@@ -19,14 +20,10 @@ const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& out
     requestPath = StripRoute(requestPath);
 
     while(!requestPath.empty()) {
-        std::size_t      slashPos = requestPath.find('/');
-        std::string_view segment  = (slashPos == std::string_view::npos)
-                                    ? requestPath
-                                    : requestPath.substr(0, slashPos);
+        std::size_t slashPos = requestPath.find('/');
+        std::string_view segment = (slashPos == std::string_view::npos) ? requestPath : requestPath.substr(0, slashPos);
 
-        requestPath = (slashPos == std::string_view::npos)
-                        ? std::string_view{}
-                        : requestPath.substr(slashPos + 1);
+        requestPath = (slashPos == std::string_view::npos) ? std::string_view{} : requestPath.substr(slashPos + 1);
 
         const TrieNode* next = nullptr;
 
@@ -39,9 +36,7 @@ const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& out
                     if(!requestPath.empty())
                         len += 1 + requestPath.size(); // include '/' and rest of path
 
-                    outParams.emplace_back(
-                        SegmentVariant::FromString(StringView{ segment.data(), len })
-                    );
+                    outParams.emplace_back(SegmentVariant::FromString(StringView{segment.data(), len}));
 
                     // Signal that wildcard consumed all the remaining path
                     requestPath = std::string_view{};
@@ -57,33 +52,27 @@ const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& out
             }
             else if(child.IsParam()) {
                 switch(child.GetParamType()) {
-                    case ParamType::UINT:
-                    {
+                    case ParamType::UINT: {
                         std::uint64_t val;
-                        if(!Utils::StrToUInt64(segment, val))
+                        if(!StringUtils::StrToUInt64(segment, val))
                             continue;
 
                         outParams.emplace_back(SegmentVariant::FromU64(val));
                         break;
                     }
 
-                    case ParamType::INT:
-                    {
+                    case ParamType::INT: {
                         std::int64_t val;
-                        if(!Utils::StrToInt64(segment, val))
+                        if(!StringUtils::StrToInt64(segment, val))
                             continue;
 
                         outParams.emplace_back(SegmentVariant::FromI64(val));
                         break;
                     }
 
-                    case ParamType::UUID:
-                    {
+                    case ParamType::UUID: {
                         Shared::UUID uuid;
-                        if(!Shared::UUID::FromString(
-                            Shared::StringView{segment.data(), segment.size()},
-                            uuid
-                        ))
+                        if(!Shared::UUID::FromString(Shared::StringView{segment.data(), segment.size()}, uuid))
                             continue;
 
                         outParams.emplace_back(SegmentVariant::FromUUID(uuid));
@@ -91,9 +80,7 @@ const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& out
                     }
 
                     case ParamType::STRING:
-                        outParams.emplace_back(
-                            SegmentVariant::FromString(StringView{segment.data(), segment.size()})
-                        );
+                        outParams.emplace_back(SegmentVariant::FromString(StringView{segment.data(), segment.size()}));
                         break;
 
                     // Unknown or unsupported ParamType, this should not happen silently
@@ -128,7 +115,7 @@ void RouteTrie::PushGroup(std::string_view prefix)
 void RouteTrie::PopGroup()
 {
     if(cursorStack_.empty())
-        Utils::Logger::GetInstance().Fatal("[RouteTrie]: PopGroup called without corresponding PushGroup.");
+        GetLogger().Fatal("[RouteTrie]: PopGroup called without corresponding PushGroup.");
 
     insertCursor_ = cursorStack_.back();
     cursorStack_.pop_back();
@@ -137,31 +124,25 @@ void RouteTrie::PopGroup()
 // vvv Helper Functions vvv
 TrieNode* RouteTrie::InsertRoute(std::string_view route)
 {
-    auto& logger = Utils::Logger::GetInstance();
+    auto& logger = GetLogger();
 
     TrieNode* current = insertCursor_;
     route = StripRoute(route);
 
     while(!route.empty()) {
-        std::size_t      slashPos = route.find('/');
-        std::string_view segment  = (slashPos == std::string_view::npos)
-                                    ? route
-                                    : route.substr(0, slashPos);
+        std::size_t slashPos = route.find('/');
+        std::string_view segment = (slashPos == std::string_view::npos) ? route : route.substr(0, slashPos);
 
-        route = (slashPos == std::string_view::npos)
-                    ? std::string_view{}
-                    : route.substr(slashPos + 1);
+        route = (slashPos == std::string_view::npos) ? std::string_view{} : route.substr(slashPos + 1);
 
         TrieNode* next = nullptr;
 
         // Dynamic segment
         if(!segment.empty() && segment.front() == '<' && segment.back() == '>') {
             if(segment.size() <= 2)
-                logger.Fatal(
-                    "[Route-Formatter]: Empty parameter segment: ", segment, ". Example: <id:int> or <int>"
-                );
+                logger.Fatal("[Route-Formatter]: Empty parameter segment: ", segment, ". Example: <id:int> or <int>");
 
-            auto        inner = segment.substr(1, segment.size() - 2);
+            auto inner = segment.substr(1, segment.size() - 2);
             std::size_t colon = inner.find(':');
 
             std::string_view type;
@@ -170,22 +151,24 @@ TrieNode* RouteTrie::InsertRoute(std::string_view route)
                 type = inner;
             else {
                 if(colon == 0 || colon == inner.size() - 1)
-                    logger.Fatal(
-                        "[Route-Formatter]: Malformed dynamic segment: ", segment, ". Example: <id:int> or <int>"
-                    );
+                    logger.Fatal("[Route-Formatter]: Malformed dynamic segment: ", segment,
+                                 ". Example: <id:int> or <int>");
 
                 type = inner.substr(colon + 1);
             }
 
             SegmentVariant dynSeg;
-            if     (type == "uint")   dynSeg = SegmentVariant::FromU64(0);
-            else if(type == "int")    dynSeg = SegmentVariant::FromI64(0);
-            else if(type == "uuid")   dynSeg = SegmentVariant::FromUUID(UUID{});
-            else if(type == "string") dynSeg = SegmentVariant::FromString(StringView{});
+            if(type == "uint")
+                dynSeg = SegmentVariant::FromU64(0);
+            else if(type == "int")
+                dynSeg = SegmentVariant::FromI64(0);
+            else if(type == "uuid")
+                dynSeg = SegmentVariant::FromUUID(UUID{});
+            else if(type == "string")
+                dynSeg = SegmentVariant::FromString(StringView{});
             else
-                logger.Fatal(
-                    "[Route-Formatter]: Unknown parameter type: '", type, "'. Valid types -> uint, int, uuid and string."
-                );
+                logger.Fatal("[Route-Formatter]: Unknown parameter type: '", type,
+                             "'. Valid types -> uint, int, uuid and string.");
 
             auto nextNode = std::make_unique<TrieNode>();
             next = nextNode.get();
@@ -196,7 +179,7 @@ TrieNode* RouteTrie::InsertRoute(std::string_view route)
             bool found = false;
             for(auto& child : current->children) {
                 if(child.IsStatic() && child.MatchesStatic(segment)) {
-                    next  = child.GetChild();
+                    next = child.GetChild();
                     found = true;
                     break;
                 }
@@ -212,9 +195,7 @@ TrieNode* RouteTrie::InsertRoute(std::string_view route)
                 // It will be the last thing in the route. Any other stuff following it will lead to an error
                 if(segment == "*") {
                     if(!route.empty())
-                        logger.Fatal(
-                            "[Route-Formatter]: Wildcard '*' must be the last segment in a route."
-                        );
+                        logger.Fatal("[Route-Formatter]: Wildcard '*' must be the last segment in a route.");
 
                     current = next;
                     break;

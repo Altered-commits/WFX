@@ -1,14 +1,13 @@
 #include "filemeta.hpp"
 
 #include "utils/fileops/filesystem.hpp"
-#include "utils/backport/string.hpp"
+#include "utils/string/string.hpp"
 #include <charconv>
 
 namespace WFX::Utils {
 
 // vvv Constructor vvv
-FileMeta::FileMeta(std::string filePath)
-    : filePath_(std::move(filePath))
+FileMeta::FileMeta(std::string filePath) : filePath_(std::move(filePath))
 {}
 
 // vvv Main Functions vvv
@@ -42,7 +41,7 @@ FileMetaStatus FileMeta::Load()
     // Format (STRICT, one line per record):
     // <file><sep><mtime><sep><hash><sep><ud_size><sep><ud_bytes>\n
     // ^^^ ...
-    std::size_t i       = 0;
+    std::size_t i = 0;
     std::size_t entries = 0;
     while(i < fileSize) {
         const std::size_t midx = FindSeparator(buffer, i);
@@ -56,24 +55,24 @@ FileMetaStatus FileMeta::Load()
         std::string file(&buffer[i], midx - i);
 
         std::int64_t modifiedTime = 0;
-        if(!StrToInt64({&buffer[midx + 1], hidx - midx - 1}, modifiedTime))
+        if(!StringUtils::StrToInt64({&buffer[midx + 1], hidx - midx - 1}, modifiedTime))
             return FileMetaStatus::CORRUPTED;
 
         std::string hash(&buffer[hidx + 1], sidx - hidx - 1);
 
         std::uint64_t udSize = 0;
-        if(!StrToUInt64({&buffer[sidx + 1], didx - sidx - 1}, udSize))
+        if(!StringUtils::StrToUInt64({&buffer[sidx + 1], didx - sidx - 1}, udSize))
             return FileMetaStatus::CORRUPTED;
 
         std::size_t dataStart = didx + 1;
-        std::size_t dataEnd   = dataStart + udSize;
+        std::size_t dataEnd = dataStart + udSize;
 
         if(dataEnd >= fileSize || buffer[dataEnd] != '\n')
             return FileMetaStatus::CORRUPTED;
 
         FileMetadata meta;
         meta.modifiedTime = modifiedTime;
-        meta.hash         = std::move(hash);
+        meta.hash = std::move(hash);
         meta.userData.assign(&buffer[dataStart], &buffer[dataEnd]);
 
         meta_.emplace(std::move(file), std::move(meta));
@@ -95,7 +94,7 @@ FileMetaStatus FileMeta::Save() const
         return FileMetaStatus::IO_ERROR;
 
     std::vector<char> buffer;
-    buffer.reserve(LINE_SIZE* meta_.size()); // Rough estimate, LINE_SIZE bytes per entry
+    buffer.reserve(LINE_SIZE * meta_.size()); // Rough estimate, LINE_SIZE bytes per entry
 
     // Reusable buffer enough for std::uint64_t
     char numBuf[32];

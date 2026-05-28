@@ -4,12 +4,12 @@
 #include <cstring>
 
 #if defined(_WIN32)
-    #include <malloc.h>
+#include <malloc.h>
 #endif
 
 #include <tlsf.h>
 
-/* 
+/*
  * [02-11-2025]: i'm making buffer pool single sharded, no need for multiple shards, we won't be-
  *               -using threads and stuff
  */
@@ -19,10 +19,12 @@ namespace WFX::Utils {
 static constexpr std::size_t MAX_EXPANSION_ATTEMPTS = 4;
 
 // vvv Main stuff vvv
-BufferPool& BufferPool::GetInstance()
+// Global pool instance
+static BufferPool __GlobalBufferPool;
+
+BufferPool& GetBufferPool() noexcept
 {
-    static BufferPool pool;
-    return pool;
+    return __GlobalBufferPool;
 }
 
 BufferPool::~BufferPool()
@@ -33,14 +35,13 @@ BufferPool::~BufferPool()
     for(void* segment : shard_.memorySegments)
         AlignedFree(segment);
 
-    logger_.Info(
-        "[BufferPool]: Shutdown successfully. Metrics: ",
-        "allocs=",     stats_.totalAllocations,   ", ",
-        "frees=",      stats_.totalFrees,         ", ",
-        "reallocs=",   stats_.totalReallocs,      ", ",
-        "expansions=", stats_.poolExpansions,     ", ",
-        "failures=",   stats_.allocationFailures
-    );
+    // Need to do this because now every singleton in this system initializes itself-
+    // -asap as its all global statics. Meaning it would exist in master process as well
+    // And it will print garbage metrics unecessarily
+    if(IsInitialized())
+        logger_.Info("[BufferPool]: Shutdown successfully. Metrics: ", "allocs=", stats_.totalAllocations, ", ",
+                     "frees=", stats_.totalFrees, ", ", "reallocs=", stats_.totalReallocs, ", ",
+                     "expansions=", stats_.poolExpansions, ", ", "failures=", stats_.allocationFailures);
 }
 
 void BufferPool::Init(std::size_t initialSize, ResizeCallback resizeCb, OOMCallback oomCb)
@@ -48,11 +49,13 @@ void BufferPool::Init(std::size_t initialSize, ResizeCallback resizeCb, OOMCallb
     if(IsInitialized())
         logger_.Fatal("[BufferPool]: Init() called twice");
 
-    if(resizeCb) resizeCallback_ = std::move(resizeCb);
-    if(oomCb)    oomCallback_    = std::move(oomCb);
+    if(resizeCb)
+        resizeCallback_ = std::move(resizeCb);
+    if(oomCb)
+        oomCallback_ = std::move(oomCb);
 
     const std::size_t tlsfOverhead = tlsf_size() + tlsf_pool_overhead();
-    const std::size_t rawSize      = initialSize + tlsfOverhead;
+    const std::size_t rawSize = initialSize + tlsfOverhead;
 
     void* memory = AlignedMalloc(rawSize, tlsf_align_size());
     if(!memory)
@@ -64,10 +67,10 @@ void BufferPool::Init(std::size_t initialSize, ResizeCallback resizeCb, OOMCallb
         logger_.Fatal("[BufferPool]: 'tlsf_create_with_pool()' rejected the initial segment");
     }
 
-    shard_.poolSize   = rawSize;
+    shard_.poolSize = rawSize;
     shard_.usableSize = initialSize;
     shard_.memorySegments.push_back(memory);
- 
+
     logger_.Info("[BufferPool]: Ready, usable=", initialSize, " raw=", rawSize, " (both in bytes)");
 }
 
@@ -157,11 +160,9 @@ void* BufferPool::AllocateFromShard(std::size_t size)
 void* BufferPool::ExpandAndAllocate(std::size_t requestedSize)
 {
     const std::size_t segmentOverhead = tlsf_pool_overhead() + tlsf_block_size_min();
-    const std::size_t minSegment      = requestedSize + segmentOverhead;
+    const std::size_t minSegment = requestedSize + segmentOverhead;
 
-    std::size_t idealSize = resizeCallback_
-                                ? resizeCallback_(shard_.poolSize)
-                                : shard_.poolSize * 2;
+    std::size_t idealSize = resizeCallback_ ? resizeCallback_(shard_.poolSize) : shard_.poolSize * 2;
 
     if(idealSize < minSegment)
         idealSize = minSegment;
@@ -188,7 +189,7 @@ void* BufferPool::ExpandAndAllocate(std::size_t requestedSize)
             continue;
         }
 
-        shard_.poolSize   += trySize;
+        shard_.poolSize += trySize;
         shard_.usableSize += (trySize - segmentOverhead);
         shard_.memorySegments.push_back(newMemory);
         ++stats_.poolExpansions;
@@ -206,12 +207,10 @@ void* BufferPool::ExpandAndAllocate(std::size_t requestedSize)
     if(oomCallback_)
         oomCallback_(requestedSize, shard_.poolSize, stats_);
     else
-        logger_.Fatal(
-            "[BufferPool]: OOM killer, all ", MAX_EXPANSION_ATTEMPTS, " expansion attempts failed. ",
-            "The pool could not grow to serve ", requestedSize, " bytes. ",
-            "Current pool size is ", shard_.poolSize, " bytes across ", shard_.memorySegments.size(), " segment(s). ",
-            "Set an 'OOMCallback' to handle this gracefully instead of crashing"
-        );
+        logger_.Fatal("[BufferPool]: OOM killer, all ", MAX_EXPANSION_ATTEMPTS, " expansion attempts failed. ",
+                      "The pool could not grow to serve ", requestedSize, " bytes. ", "Current pool size is ",
+                      shard_.poolSize, " bytes across ", shard_.memorySegments.size(), " segment(s). ",
+                      "Set an 'OOMCallback' to handle this gracefully instead of crashing");
 
     return nullptr;
 }

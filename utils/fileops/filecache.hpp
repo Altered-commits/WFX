@@ -10,29 +10,22 @@
 namespace WFX::Utils {
 
 struct CacheEntry {
-    int           fd;                            // Actual file descriptor
+    int fd;                                      // Actual file descriptor
     std::uint64_t freq;                          // Access frequency
-    off_t         fileSize;                      // File size in bytes
+    off_t fileSize;                              // File size in bytes
     std::list<std::string>::iterator bucketIter; // Position in the frequency bucket list
 };
 
 class FileCache final {
 public:
-    static FileCache& GetInstance();
+    FileCache() = default;
+    ~FileCache();
+
+public:
     void Init(std::size_t capacity);
 
 public:
     std::pair<WFXFileDescriptor, WFXFileSize> GetFileDesc(const std::string& path);
-
-private:
-    FileCache() = default;
-    ~FileCache();
-
-    // No need for copy / move semantics
-    FileCache(const FileCache&)            = delete;
-    FileCache(FileCache&&)                 = delete;
-    FileCache& operator=(const FileCache&) = delete;
-    FileCache& operator=(FileCache&&)      = delete;
 
 private: // Helper Functions
     void Touch(const std::string& key);
@@ -40,7 +33,7 @@ private: // Helper Functions
     void Evict();
 
 private:
-    std::size_t   capacity_;
+    std::size_t capacity_;
     std::uint64_t minFreq_;
 
     // Key -> CacheEntry
@@ -49,6 +42,9 @@ private:
     // Frequency -> list of keys (for LFU eviction)
     std::unordered_map<std::uint64_t, std::list<std::string>> freqBuckets_;
 };
+
+// Free function declaration (definition in 'filecache.cpp')
+FileCache& GetFileCache() noexcept;
 
 } // namespace WFX::Utils
 

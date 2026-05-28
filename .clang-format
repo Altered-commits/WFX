@@ -1,0 +1,99 @@
+BasedOnStyle: LLVM
+
+# ---------------------------------------------------------------
+# Indentation
+# ---------------------------------------------------------------
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+IndentCaseLabels: true
+IndentCaseBlocks: false
+
+# ---------------------------------------------------------------
+# General formatting
+# ---------------------------------------------------------------
+ColumnLimit: 120
+SpacesInAngles: Never
+SpacesInParentheses: false
+SpaceAfterCStyleCast: false
+
+# ---------------------------------------------------------------
+# Parentheses spacing
+# ---------------------------------------------------------------
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+    AfterControlStatements: false
+    AfterFunctionDefinitionName: false
+    AfterFunctionDeclarationName: false
+    AfterForeachMacros: false
+    AfterIfMacros: false
+    AfterOverloadedOperator: false
+    BeforeNonEmptyParentheses: false
+
+# ---------------------------------------------------------------
+# Brace style
+# ---------------------------------------------------------------
+BreakBeforeBraces: Custom
+BraceWrapping:
+    AfterFunction: true
+    AfterClass: false
+    AfterStruct: false
+    AfterEnum: false
+    AfterNamespace: false
+    AfterControlStatement: false
+    AfterCaseLabel: false
+    BeforeCatch: true
+    BeforeElse: true
+    SplitEmptyFunction: false
+    SplitEmptyRecord: false
+    SplitEmptyNamespace: false
+
+# ---------------------------------------------------------------
+# Single-line rules
+# ---------------------------------------------------------------
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: Never
+
+# ---------------------------------------------------------------
+# Do not remove braces
+# ---------------------------------------------------------------
+RemoveBracesLLVM: false
+
+# ---------------------------------------------------------------
+# Alignment: disabled, use clang-format off/on for manual alignment
+# ---------------------------------------------------------------
+AlignConsecutiveAssignments:
+    Enabled: false
+
+AlignConsecutiveDeclarations:
+    Enabled: false
+
+# ---------------------------------------------------------------
+# Pointer/reference style
+# ---------------------------------------------------------------
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# ---------------------------------------------------------------
+# Namespace formatting
+# ---------------------------------------------------------------
+NamespaceIndentation: None
+
+# ---------------------------------------------------------------
+# Include handling
+# ---------------------------------------------------------------
+SortIncludes: false
+
+# ---------------------------------------------------------------
+# Access modifiers
+# ---------------------------------------------------------------
+AccessModifierOffset: -4
+
+# ---------------------------------------------------------------
+# Penalties
+# ---------------------------------------------------------------
+PenaltyReturnTypeOnItsOwnLine: 10000
+PenaltyBreakBeforeFirstCallParameter: 10000

@@ -1,4 +1,4 @@
-name: WFX Linux Build
+name: WFX Compile Check
 
 on:
   push:

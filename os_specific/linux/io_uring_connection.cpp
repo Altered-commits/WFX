@@ -28,23 +28,23 @@ IoUringConnectionHandler::~IoUringConnectionHandler()
 }
 
 // vvv Initializing Functions vvv
-void IoUringConnectionHandler::Initialize(const std::string &host, int port)
+void IoUringConnectionHandler::Initialize(const std::string& host, int port)
 {
     // vvv Initialize our pre-fixed array of connections and accept handlers vvv
-    auto& osConfig      = config_.osSpecificConfig;
+    auto& osConfig = config_.osSpecificConfig;
     auto& networkConfig = config_.networkConfig;
 
-    connWords_   = (networkConfig.maxConnections + 63) / 64;
+    connWords_ = (networkConfig.maxConnections + 63) / 64;
     acceptWords_ = (osConfig.acceptSlots + 63) / 64;
 
-    connections_  = std::make_unique<ConnectionContext[]>(networkConfig.maxConnections);
-    connBitmap_   = std::make_unique<std::uint64_t[]>(connWords_);
+    connections_ = std::make_unique<ConnectionContext[]>(networkConfig.maxConnections);
+    connBitmap_ = std::make_unique<std::uint64_t[]>(connWords_);
 
-    acceptSlots_  = std::make_unique<AcceptSlot[]>(osConfig.acceptSlots);
+    acceptSlots_ = std::make_unique<AcceptSlot[]>(osConfig.acceptSlots);
     acceptBitmap_ = std::make_unique<std::uint64_t[]>(acceptWords_);
 
-    std::fill_n(connBitmap_.get(), (networkConfig.maxConnections + 63)/64, 0);
-    std::fill_n(acceptBitmap_.get(), (osConfig.acceptSlots + 63)/64, 0);
+    std::fill_n(connBitmap_.get(), (networkConfig.maxConnections + 63) / 64, 0);
+    std::fill_n(acceptBitmap_.get(), (osConfig.acceptSlots + 63) / 64, 0);
 
     // vvv Initialize our sockets vvv
     listenFd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -57,7 +57,7 @@ void IoUringConnectionHandler::Initialize(const std::string &host, int port)
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port   = htons(port);
+    addr.sin_port = htons(port);
 
     if(ResolveHostToIpv4(host.c_str(), &addr.sin_addr) != 0)
         logger_.Fatal("[IoUring]: Failed to resolve host address");
@@ -80,10 +80,19 @@ void IoUringConnectionHandler::SetReceiveCallback(ReceiveCallback onData)
 }
 
 // vvv I/O Operations vvv
-void IoUringConnectionHandler::ResumeReceive(ConnectionContext* ctx)                    { AddRecv(ctx); }
-void IoUringConnectionHandler::Write(ConnectionContext* ctx, std::string_view buffer)   { AddSend(ctx, buffer); }
-void IoUringConnectionHandler::Close(ConnectionContext* ctx)                            { ReleaseConnection(ctx); }
-void IoUringConnectionHandler::WriteFile(ConnectionContext *ctx, std::string path)
+void IoUringConnectionHandler::ResumeReceive(ConnectionContext* ctx)
+{
+    AddRecv(ctx);
+}
+void IoUringConnectionHandler::Write(ConnectionContext* ctx, std::string_view buffer)
+{
+    AddSend(ctx, buffer);
+}
+void IoUringConnectionHandler::Close(ConnectionContext* ctx)
+{
+    ReleaseConnection(ctx);
+}
+void IoUringConnectionHandler::WriteFile(ConnectionContext* ctx, std::string path)
 {
     // Ensure that the file exists and our context is ready for sending file
     // If not we 404 error
@@ -130,18 +139,17 @@ void IoUringConnectionHandler::Run()
         }
 
         auto* ptr = static_cast<void*>(io_uring_cqe_get_data(cqe));
-        if(!ptr) { 
-            io_uring_cqe_seen(&ring_, cqe); 
-            continue; 
+        if(!ptr) {
+            io_uring_cqe_seen(&ring_, cqe);
+            continue;
         }
-        
+
         int res = cqe->res;
         // Safely cast to the base Tag to read the type
         ConnectionTag* baseTag = static_cast<ConnectionTag*>(ptr);
 
         switch(baseTag->eventType) {
-            case EventType::EVENT_ACCEPT:
-            {
+            case EventType::EVENT_ACCEPT: {
                 AcceptSlot* acceptSlot = static_cast<AcceptSlot*>(baseTag);
 
                 if(res >= 0) {
@@ -155,11 +163,11 @@ void IoUringConnectionHandler::Run()
                     WFXIpAddress tmpIp;
                     sockaddr* sa = reinterpret_cast<sockaddr*>(&acceptSlot->addr);
                     if(sa->sa_family == AF_INET) {
-                        tmpIp.ip.v4  = reinterpret_cast<sockaddr_in*>(sa)->sin_addr;
+                        tmpIp.ip.v4 = reinterpret_cast<sockaddr_in*>(sa)->sin_addr;
                         tmpIp.ipType = AF_INET;
                     }
                     else if(sa->sa_family == AF_INET6) {
-                        tmpIp.ip.v6  = reinterpret_cast<sockaddr_in6*>(sa)->sin6_addr;
+                        tmpIp.ip.v6 = reinterpret_cast<sockaddr_in6*>(sa)->sin6_addr;
                         tmpIp.ipType = AF_INET6;
                     }
                     else
@@ -180,9 +188,9 @@ void IoUringConnectionHandler::Run()
                         break;
                     }
 
-                    ctx->socket    = clientFd;
+                    ctx->socket = clientFd;
                     ctx->eventType = EventType::EVENT_RECV;
-                    ctx->connInfo  = tmpIp;
+                    ctx->connInfo = tmpIp;
 
                     // Start receiving immediately
                     AddRecv(ctx);
@@ -209,13 +217,13 @@ void IoUringConnectionHandler::Run()
                 // }
 
                 auto& rwBuffer = ctx->rwBuffer;
-                
+
                 // Update buffer state
                 rwBuffer.AdvanceReadLength(res);
 
                 // Add null terminator safely
                 ReadMetadata* readMeta = rwBuffer.GetReadMeta();
-                char*         dataPtr  = rwBuffer.GetReadData();
+                char* dataPtr = rwBuffer.GetReadData();
                 dataPtr[readMeta->dataLength] = '\0';
 
                 onReceive_(ctx);
@@ -235,8 +243,8 @@ void IoUringConnectionHandler::Run()
                     ReleaseConnection(ctx);
                     break;
                 }
-                
-                auto& rwBuffer  = ctx->rwBuffer;
+
+                auto& rwBuffer = ctx->rwBuffer;
                 auto* writeMeta = rwBuffer.GetWriteMeta();
 
                 if(writeMeta && writeMeta->dataLength > 0) {
@@ -292,7 +300,7 @@ void IoUringConnectionHandler::Run()
                 fileInfo->offset += res;
 
                 off_t remaining = fileInfo->fileSize - fileInfo->offset;
-                
+
                 // More to send -> re-arm another sendfile SQE
                 if(remaining > 0) {
                     AddFile(ctx);
@@ -349,7 +357,7 @@ int IoUringConnectionHandler::AllocSlot(std::uint64_t* bitmap, int numWords, int
 
 void IoUringConnectionHandler::FreeSlot(std::uint64_t* bitmap, int idx)
 {
-    int w   = idx >> 6;
+    int w = idx >> 6;
     int bit = idx & 63;
     bitmap[w] &= ~(1ULL << bit);
 }
@@ -389,12 +397,12 @@ AcceptSlot* IoUringConnectionHandler::GetAccept()
     return &acceptSlots_[idx];
 }
 
-void IoUringConnectionHandler::ReleaseAccept(AcceptSlot *slot)
+void IoUringConnectionHandler::ReleaseAccept(AcceptSlot* slot)
 {
     // Sanity checks
     if(!slot)
         return;
-    
+
     // Slot index is [current pointer] - [base pointer]
     FreeSlot(acceptBitmap_.get(), slot - (&acceptSlots_[0]));
 }
@@ -415,24 +423,24 @@ bool IoUringConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::stri
 
     if(!ctx->fileInfo)
         ctx->fileInfo = new FileInfo{};
-    
+
     auto* fileInfo = ctx->fileInfo;
-    fileInfo->fd       = fd;
-    fileInfo->offset   = 0;
+    fileInfo->fd = fd;
+    fileInfo->offset = 0;
     fileInfo->fileSize = size;
 
     return true;
 }
 
-int IoUringConnectionHandler::ResolveHostToIpv4(const char *host, in_addr *outAddr)
+int IoUringConnectionHandler::ResolveHostToIpv4(const char* host, in_addr* outAddr)
 {
-    addrinfo hints = { 0 };
+    addrinfo hints = {0};
     addrinfo *res = nullptr, *rp = nullptr;
     int ret = -1;
 
-    hints.ai_family   = AF_INET;       // Force IPv4
-    hints.ai_socktype = SOCK_STREAM;   // TCP style (doesn't really matter here)
-    hints.ai_flags    = AI_ADDRCONFIG; // Use only configured addr families
+    hints.ai_family = AF_INET;       // Force IPv4
+    hints.ai_socktype = SOCK_STREAM; // TCP style (doesn't really matter here)
+    hints.ai_flags = AI_ADDRCONFIG;  // Use only configured addr families
 
     ret = getaddrinfo(host, NULL, &hints, &res);
     if(ret != 0)
@@ -459,15 +467,14 @@ void IoUringConnectionHandler::AddAccept()
     io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
     if(!sqe)
         return;
-    
+
     AcceptSlot* slot = GetAccept();
     if(!slot)
         return;
 
     slot->addrLen = sizeof(slot->addr);
 
-    io_uring_prep_accept(sqe, listenFd_, reinterpret_cast<sockaddr*>(&slot->addr),
-                            &slot->addrLen, 0);
+    io_uring_prep_accept(sqe, listenFd_, reinterpret_cast<sockaddr*>(&slot->addr), &slot->addrLen, 0);
     io_uring_sqe_set_data(sqe, slot);
 
     if(++sqeBatch_ >= config_.osSpecificConfig.batchSize)
@@ -484,9 +491,7 @@ void IoUringConnectionHandler::AddRecv(ConnectionContext* ctx)
     auto& networkConfig = config_.networkConfig;
 
     // Ensure read buffer exists
-    if(!ctx->rwBuffer.IsReadInitialized() && 
-        !ctx->rwBuffer.InitReadBuffer(pool_, networkConfig.bufferIncrSize))
-    {
+    if(!ctx->rwBuffer.IsReadInitialized() && !ctx->rwBuffer.InitReadBuffer(pool_, networkConfig.bufferIncrSize)) {
         logger_.Error("[IoUring]: Failed to init read buffer");
         return;
     }
@@ -524,8 +529,7 @@ void IoUringConnectionHandler::AddSend(ConnectionContext* ctx, std::string_view 
     // Direct send (static string, no buffering involved)
     // NOTE: MSG IS PURELY USED FOR STATIC ERROR CODES, IT SHOULD NOT BE USED AS NORMAL PATH
     if(!msg.empty())
-        io_uring_prep_send(sqe, ctx->socket, msg.data(),
-                           static_cast<unsigned int>(msg.size()), MSG_NOSIGNAL);
+        io_uring_prep_send(sqe, ctx->socket, msg.data(), static_cast<unsigned int>(msg.size()), MSG_NOSIGNAL);
     // Send from buffer
     else {
         auto* writeMeta = ctx->rwBuffer.GetWriteMeta();
@@ -539,14 +543,14 @@ void IoUringConnectionHandler::AddSend(ConnectionContext* ctx, std::string_view 
     }
 
     io_uring_sqe_set_data(sqe, ctx);
-    
+
     ctx->eventType = EventType::EVENT_SEND;
 
     if(++sqeBatch_ >= config_.osSpecificConfig.batchSize)
         SubmitBatch();
 }
 
-void IoUringConnectionHandler::AddFile(ConnectionContext *ctx)
+void IoUringConnectionHandler::AddFile(ConnectionContext* ctx)
 {
     // AddSend after sending header, people expecting file im sending text
     // Dawg im cooked
@@ -557,9 +561,9 @@ void IoUringConnectionHandler::AddFile(ConnectionContext *ctx)
     }
 
     auto* fileInfo = ctx->fileInfo;
-    off_t offset   = fileInfo->offset;
-    off_t size     = fileInfo->fileSize;
-    off_t remain   = size - offset;
+    off_t offset = fileInfo->offset;
+    off_t size = fileInfo->fileSize;
+    off_t remain = size - offset;
 
     if(remain <= 0)
         return;
@@ -573,14 +577,13 @@ void IoUringConnectionHandler::AddFile(ConnectionContext *ctx)
     off_t chunk = std::min<off_t>(remain, config_.osSpecificConfig.fileChunkSize);
 
     // Fully async file sending
-    io_uring_prep_splice(
-        sqe,
-        fileInfo->fd,       // input fd
-        fileInfo->offset,   // input offset
-        ctx->socket,        // output fd (socket)
-        -1,                 // offset ignored for sockets
-        chunk,
-        0                   // flags (0 for default)
+    io_uring_prep_splice(sqe,
+                         fileInfo->fd,     // input fd
+                         fileInfo->offset, // input offset
+                         ctx->socket,      // output fd (socket)
+                         -1,               // offset ignored for sockets
+                         chunk,
+                         0 // flags (0 for default)
     );
 
     io_uring_sqe_set_data(sqe, ctx);

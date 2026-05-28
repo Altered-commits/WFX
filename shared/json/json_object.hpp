@@ -13,13 +13,22 @@
 
 namespace WFX::Shared {
 
-static constexpr std::uint32_t JSON_NIL      = 0xFFFFFFFF;
-static constexpr std::uint32_t JSON_TOMB     = 0xFFFFFFFE;
+static constexpr std::uint32_t JSON_NIL = 0xFFFFFFFF;
+static constexpr std::uint32_t JSON_TOMB = 0xFFFFFFFE;
 static constexpr std::uint32_t JSON_INIT_CAP = 8;
 
-inline void* Alloc(std::size_t n)            noexcept { return WFX::Core::MemoryApi()->Alloc(n); }
-inline void  Free(void* ptr)                 noexcept { WFX::Core::MemoryApi()->Free(ptr); }
-inline void* Realloc(void* p, std::size_t n) noexcept { return WFX::Core::MemoryApi()->Realloc(p, n); }
+inline void* Alloc(std::size_t n) noexcept
+{
+    return WFX::Core::MemoryApiExt1()->Alloc(n);
+}
+inline void Free(void* ptr) noexcept
+{
+    WFX::Core::MemoryApiExt1()->Free(ptr);
+}
+inline void* Realloc(void* p, std::size_t n) noexcept
+{
+    return WFX::Core::MemoryApiExt1()->Realloc(p, n);
+}
 
 // vvv JsonTag vvv
 //
@@ -47,66 +56,100 @@ inline void* Realloc(void* p, std::size_t n) noexcept { return WFX::Core::Memory
 //            htCap is stored at buf[0] so we can read it without a separate field.
 //            kvList  : JsonKV indices in insertion order
 //            htSlots : open-addressing HT, JSON_NIL=empty, JSON_TOMB=deleted, else=JsonKV index
-//
 enum class JsonTag : std::uint8_t {
-    EMPTY    = 0,
-    BOOL     = 1,
-    INT64    = 2,
-    UINT64   = 3,
-    DOUBLE   = 4,
+    EMPTY = 0,
+    BOOL = 1,
+    INT64 = 2,
+    UINT64 = 3,
+    DOUBLE = 4,
     STR_VIEW = 5,
-    STR_OWN  = 6,
-    ARRAY    = 7,
-    OBJECT   = 8,
+    STR_OWN = 6,
+    ARRAY = 7,
+    OBJECT = 8,
 };
 
 // vvv JsonNode (24 bytes, standard layout, trivially copyable) vvv
 struct JsonNode {
-    JsonTag      tag     = JsonTag::EMPTY;
+    JsonTag tag = JsonTag::EMPTY;
     std::uint8_t _Pad[7] = {};
-    std::uint64_t u64a   = 0;
-    std::uint64_t u64b   = 0;
+    std::uint64_t u64a = 0;
+    std::uint64_t u64b = 0;
 
 public: // vvv uint32 aliases into u64a and u64b vvv
-    std::uint32_t& u32a() noexcept { return reinterpret_cast<std::uint32_t*>(&u64a)[0]; }
-    std::uint32_t& u32b() noexcept { return reinterpret_cast<std::uint32_t*>(&u64a)[1]; }
-    std::uint32_t& u32c() noexcept { return reinterpret_cast<std::uint32_t*>(&u64b)[0]; }
-    std::uint32_t& u32d() noexcept { return reinterpret_cast<std::uint32_t*>(&u64b)[1]; }
+    std::uint32_t& u32a() noexcept
+    {
+        return reinterpret_cast<std::uint32_t*>(&u64a)[0];
+    }
+    std::uint32_t& u32b() noexcept
+    {
+        return reinterpret_cast<std::uint32_t*>(&u64a)[1];
+    }
+    std::uint32_t& u32c() noexcept
+    {
+        return reinterpret_cast<std::uint32_t*>(&u64b)[0];
+    }
+    std::uint32_t& u32d() noexcept
+    {
+        return reinterpret_cast<std::uint32_t*>(&u64b)[1];
+    }
 
-    std::uint32_t u32a() const noexcept { return reinterpret_cast<const std::uint32_t*>(&u64a)[0]; }
-    std::uint32_t u32b() const noexcept { return reinterpret_cast<const std::uint32_t*>(&u64a)[1]; }
-    std::uint32_t u32c() const noexcept { return reinterpret_cast<const std::uint32_t*>(&u64b)[0]; }
-    std::uint32_t u32d() const noexcept { return reinterpret_cast<const std::uint32_t*>(&u64b)[1]; }
+    std::uint32_t u32a() const noexcept
+    {
+        return reinterpret_cast<const std::uint32_t*>(&u64a)[0];
+    }
+    std::uint32_t u32b() const noexcept
+    {
+        return reinterpret_cast<const std::uint32_t*>(&u64a)[1];
+    }
+    std::uint32_t u32c() const noexcept
+    {
+        return reinterpret_cast<const std::uint32_t*>(&u64b)[0];
+    }
+    std::uint32_t u32d() const noexcept
+    {
+        return reinterpret_cast<const std::uint32_t*>(&u64b)[1];
+    }
 
     // Buffer pointer helpers (ARRAY and OBJECT)
     // Raw pointer stored in u64b via memcpy to avoid strict-aliasing UB
-    template<typename T> T*       BufAs()       noexcept { T* p; std::memcpy(&p, &u64b, 8); return p; }
-    template<typename T> const T* BufAs() const noexcept { const T* p; std::memcpy(&p, &u64b, 8); return p; }
-    template<typename T> void     BufSet(T* p)  noexcept { std::memcpy(&u64b, &p, 8); }
+    template <typename T> T* BufAs() noexcept
+    {
+        T* p;
+        std::memcpy(&p, &u64b, 8);
+        return p;
+    }
+    template <typename T> const T* BufAs() const noexcept
+    {
+        const T* p;
+        std::memcpy(&p, &u64b, 8);
+        return p;
+    }
+    template <typename T> void BufSet(T* p) noexcept
+    {
+        std::memcpy(&u64b, &p, 8);
+    }
 };
 
-static_assert(sizeof(JsonNode) == 24,                 "'JsonNode' must be exactly 24 bytes");
-static_assert(std::is_standard_layout_v<JsonNode>,    "'JsonNode' must be standard layout");
+static_assert(sizeof(JsonNode) == 24, "'JsonNode' must be exactly 24 bytes");
+static_assert(std::is_standard_layout_v<JsonNode>, "'JsonNode' must be standard layout");
 static_assert(std::is_trivially_copyable_v<JsonNode>, "'JsonNode' must be trivially copyable");
-static_assert(offsetof(JsonNode, tag)  == 0,          "JsonNode::tag offset changed");
-static_assert(offsetof(JsonNode, u64a) == 8,          "JsonNode::u64a offset changed");
-static_assert(offsetof(JsonNode, u64b) == 16,         "JsonNode::u64b offset changed");
+static_assert(offsetof(JsonNode, tag) == 0, "JsonNode::tag offset changed");
+static_assert(offsetof(JsonNode, u64a) == 8, "JsonNode::u64a offset changed");
+static_assert(offsetof(JsonNode, u64b) == 16, "JsonNode::u64b offset changed");
 
-//
 // vvv JsonKV  (16 bytes, standard layout, trivially copyable) vvv
 // Keys always copied into JsonStore::strs
 // valIdx = JSON_NIL means erased (on free-list)
 // _Pad reused as free-list next pointer when valIdx == JSON_NIL
-//
 struct JsonKV {
     std::uint32_t keyOff = JSON_NIL;
     std::uint32_t keyLen = 0;
     std::uint32_t valIdx = JSON_NIL;
-    std::uint32_t _Pad   = 0;
+    std::uint32_t _Pad = 0;
 };
 
-static_assert(sizeof(JsonKV) == 16,                 "'JsonKV' must be exactly 16 bytes");
-static_assert(std::is_standard_layout_v<JsonKV>,    "'JsonKV' must be standard layout");
+static_assert(sizeof(JsonKV) == 16, "'JsonKV' must be exactly 16 bytes");
+static_assert(std::is_standard_layout_v<JsonKV>, "'JsonKV' must be standard layout");
 static_assert(std::is_trivially_copyable_v<JsonKV>, "'JsonKV' must be trivially copyable");
 
 // vvv Object buffer layout helpers vvv
@@ -117,30 +160,47 @@ static_assert(std::is_trivially_copyable_v<JsonKV>, "'JsonKV' must be trivially 
 //   buf[2+kvCap..2+kvCap+htCap-1] = htSlots (open-addressing HT)
 //
 // Accessed via free functions so JsonNode methods stay thin
-//
-inline std::uint32_t        ObjHtCap (const std::uint32_t* buf)                      noexcept { return buf[0]; }
-inline std::uint32_t*       ObjKVList(std::uint32_t* buf)                            noexcept { return buf + 2; }
-inline std::uint32_t*       ObjHTSlot(std::uint32_t* buf, std::uint32_t kvCap)       noexcept { return buf + 2 + kvCap; }
-inline const std::uint32_t* ObjKVList(const std::uint32_t* buf)                      noexcept { return buf + 2; }
-inline const std::uint32_t* ObjHTSlot(const std::uint32_t* buf, std::uint32_t kvCap) noexcept { return buf + 2 + kvCap; }
+inline std::uint32_t ObjHtCap(const std::uint32_t* buf) noexcept
+{
+    return buf[0];
+}
+inline std::uint32_t* ObjKVList(std::uint32_t* buf) noexcept
+{
+    return buf + 2;
+}
+inline std::uint32_t* ObjHTSlot(std::uint32_t* buf, std::uint32_t kvCap) noexcept
+{
+    return buf + 2 + kvCap;
+}
+inline const std::uint32_t* ObjKVList(const std::uint32_t* buf) noexcept
+{
+    return buf + 2;
+}
+inline const std::uint32_t* ObjHTSlot(const std::uint32_t* buf, std::uint32_t kvCap) noexcept
+{
+    return buf + 2 + kvCap;
+}
 
 // Total uint32 slots needed for an object buffer
-inline std::uint32_t ObjBufSize(std::uint32_t kvCap, std::uint32_t htCap) noexcept { return 2 + kvCap + htCap; }
+inline std::uint32_t ObjBufSize(std::uint32_t kvCap, std::uint32_t htCap) noexcept
+{
+    return 2 + kvCap + htCap;
+}
 
 // vvv Main storage unit vvv
 struct JsonStore {
-    JsonNode*         nodes   = nullptr;
+    JsonNode* nodes = nullptr;
     std::uint32_t nodeCap = 0;
     std::uint32_t nodeLen = 0;
 
-    JsonKV*           kvs     = nullptr;
-    std::uint32_t kvCap   = 0;
-    std::uint32_t kvLen   = 0;
-    std::uint32_t kvFree  = JSON_NIL; // free-list head (next via JsonKV::_Pad)
+    JsonKV* kvs = nullptr;
+    std::uint32_t kvCap = 0;
+    std::uint32_t kvLen = 0;
+    std::uint32_t kvFree = JSON_NIL; // free-list head (next via JsonKV::_Pad)
 
-    char*         strs    = nullptr;
-    std::uint32_t strCap  = 0;
-    std::uint32_t strLen  = 0;
+    char* strs = nullptr;
+    std::uint32_t strCap = 0;
+    std::uint32_t strLen = 0;
 
 public:
     bool Reserve(std::uint32_t nodeHint, std::uint32_t kvHint, std::uint32_t strHint) noexcept
@@ -150,7 +210,7 @@ public:
             if(!np)
                 return false;
 
-            nodes   = np;
+            nodes = np;
             nodeCap = nodeHint;
         }
 
@@ -159,7 +219,7 @@ public:
             if(!np)
                 return false;
 
-            kvs   = np;
+            kvs = np;
             kvCap = kvHint;
         }
 
@@ -168,7 +228,7 @@ public:
             if(!np)
                 return false;
 
-            strs   = np;
+            strs = np;
             strCap = strHint;
         }
 
@@ -179,16 +239,18 @@ public:
     {
         if(nodeLen == nodeCap) {
             std::uint32_t nc = nodeCap ? nodeCap * 2 : JSON_INIT_CAP;
-            auto* np = static_cast<JsonNode*>(nodes ? Realloc(nodes, nc * sizeof(JsonNode)) : Alloc(nc * sizeof(JsonNode)));
+            auto* np =
+                static_cast<JsonNode*>(nodes ? Realloc(nodes, nc * sizeof(JsonNode)) : Alloc(nc * sizeof(JsonNode)));
+
             if(!np)
                 return JSON_NIL;
 
-            nodes   = np;
+            nodes = np;
             nodeCap = nc;
         }
 
         std::uint32_t idx = nodeLen++;
-        new(&nodes[idx]) JsonNode();
+        new (&nodes[idx]) JsonNode();
         return idx;
     }
 
@@ -197,7 +259,7 @@ public:
         if(kvFree != JSON_NIL) {
             std::uint32_t idx = kvFree;
             kvFree = kvs[idx]._Pad;
-            new(&kvs[idx]) JsonKV();
+            new (&kvs[idx]) JsonKV();
             return idx;
         }
 
@@ -207,19 +269,19 @@ public:
             if(!np)
                 return JSON_NIL;
 
-            kvs   = np;
+            kvs = np;
             kvCap = kc;
         }
 
         std::uint32_t idx = kvLen++;
-        new(&kvs[idx]) JsonKV();
+        new (&kvs[idx]) JsonKV();
         return idx;
     }
 
     void FreeKV(std::uint32_t idx) noexcept
     {
         kvs[idx].valIdx = JSON_NIL;
-        kvs[idx]._Pad   = kvFree;
+        kvs[idx]._Pad = kvFree;
         kvFree = idx;
     }
 
@@ -235,7 +297,7 @@ public:
             if(!np)
                 return JSON_NIL;
 
-            strs   = np;
+            strs = np;
             strCap = sc;
         }
 
@@ -266,56 +328,98 @@ public:
     }
 };
 
-static_assert(std::is_standard_layout_v<JsonStore>,  "'JsonStore' must be standard layout");
-static_assert(sizeof(JsonStore) == 56,               "'JsonStore' must be 56 bytes");
-static_assert(offsetof(JsonStore, nodes)   == 0,     "JsonStore::nodes offset changed");
-static_assert(offsetof(JsonStore, nodeCap) == 8,     "JsonStore::nodeCap offset changed");
-static_assert(offsetof(JsonStore, nodeLen) == 12,    "JsonStore::nodeLen offset changed");
-static_assert(offsetof(JsonStore, kvs)     == 16,    "JsonStore::kvs offset changed");
-static_assert(offsetof(JsonStore, kvCap)   == 24,    "JsonStore::kvCap offset changed");
-static_assert(offsetof(JsonStore, kvLen)   == 28,    "JsonStore::kvLen offset changed");
-static_assert(offsetof(JsonStore, kvFree)  == 32,    "JsonStore::kvFree offset changed");
-static_assert(offsetof(JsonStore, strs)    == 40,    "JsonStore::strs offset changed");
+static_assert(std::is_standard_layout_v<JsonStore>, "'JsonStore' must be standard layout");
+static_assert(sizeof(JsonStore) == 56, "'JsonStore' must be 56 bytes");
+static_assert(offsetof(JsonStore, nodes) == 0, "JsonStore::nodes offset changed");
+static_assert(offsetof(JsonStore, nodeCap) == 8, "JsonStore::nodeCap offset changed");
+static_assert(offsetof(JsonStore, nodeLen) == 12, "JsonStore::nodeLen offset changed");
+static_assert(offsetof(JsonStore, kvs) == 16, "JsonStore::kvs offset changed");
+static_assert(offsetof(JsonStore, kvCap) == 24, "JsonStore::kvCap offset changed");
+static_assert(offsetof(JsonStore, kvLen) == 28, "JsonStore::kvLen offset changed");
+static_assert(offsetof(JsonStore, kvFree) == 32, "JsonStore::kvFree offset changed");
+static_assert(offsetof(JsonStore, strs) == 40, "JsonStore::strs offset changed");
 
 // vvv JsonRef (stack only proxy into a JsonStore, never crosses ABI boundaries) vvv
-//
 class JsonObject;
 class JsonParser;
 
 class JsonRef {
 public:
-    JsonRef(JsonStore* s, std::uint32_t idx) noexcept : s_(s), idx_(idx) {}
+    JsonRef(JsonStore* s, std::uint32_t idx) noexcept : s_(s), idx_(idx)
+    {}
 
 public:
-    bool Valid()    const noexcept { return s_ && idx_ != JSON_NIL; }
-    bool IsNull()   const noexcept { return !Valid() || N().tag == JsonTag::EMPTY; }
-    bool IsBool()   const noexcept { return Valid() && N().tag == JsonTag::BOOL; }
-    bool IsInt()    const noexcept { return Valid() && N().tag == JsonTag::INT64; }
-    bool IsUInt()   const noexcept { return Valid() && N().tag == JsonTag::UINT64; }
-    bool IsDouble() const noexcept { return Valid() && N().tag == JsonTag::DOUBLE; }
-    bool IsString() const noexcept { return Valid() && (N().tag == JsonTag::STR_VIEW || N().tag == JsonTag::STR_OWN); }
-    bool IsArray()  const noexcept { return Valid() && N().tag == JsonTag::ARRAY; }
-    bool IsObject() const noexcept { return Valid() && N().tag == JsonTag::OBJECT; }
+    bool Valid() const noexcept
+    {
+        return s_ && idx_ != JSON_NIL;
+    }
+    bool IsNull() const noexcept
+    {
+        return !Valid() || N().tag == JsonTag::EMPTY;
+    }
+    bool IsBool() const noexcept
+    {
+        return Valid() && N().tag == JsonTag::BOOL;
+    }
+    bool IsInt() const noexcept
+    {
+        return Valid() && N().tag == JsonTag::INT64;
+    }
+    bool IsUInt() const noexcept
+    {
+        return Valid() && N().tag == JsonTag::UINT64;
+    }
+    bool IsDouble() const noexcept
+    {
+        return Valid() && N().tag == JsonTag::DOUBLE;
+    }
+    bool IsString() const noexcept
+    {
+        return Valid() && (N().tag == JsonTag::STR_VIEW || N().tag == JsonTag::STR_OWN);
+    }
+    bool IsArray() const noexcept
+    {
+        return Valid() && N().tag == JsonTag::ARRAY;
+    }
+    bool IsObject() const noexcept
+    {
+        return Valid() && N().tag == JsonTag::OBJECT;
+    }
 
 public:
-    bool AsBool() const noexcept { return Valid() && N().u64a != 0; }
+    bool AsBool() const noexcept
+    {
+        return Valid() && N().u64a != 0;
+    }
 
     std::int64_t AsInt() const noexcept
     {
-        if(!Valid()) return 0;
-        std::int64_t v; std::memcpy(&v, &N().u64a, 8); return v;
+        if(!Valid())
+            return 0;
+
+        std::int64_t v;
+        std::memcpy(&v, &N().u64a, 8);
+        return v;
     }
 
     std::uint64_t AsUInt() const noexcept
     {
-        if(!Valid()) return 0;
-        std::uint64_t v; std::memcpy(&v, &N().u64a, 8); return v;
+        if(!Valid())
+            return 0;
+
+        std::uint64_t v;
+        std::memcpy(&v, &N().u64a, 8);
+        return v;
     }
 
     double AsDouble() const noexcept
     {
-        if(!Valid()) return 0.0;
-        double v; std::memcpy(&v, &N().u64a, 8); return v;
+        if(!Valid())
+            return 0.0;
+
+        double v;
+        std::memcpy(&v, &N().u64a, 8);
+        return v;
     }
 
     std::string_view AsString() const noexcept
@@ -325,7 +429,8 @@ public:
 
         const auto& n = N();
         if(n.tag == JsonTag::STR_VIEW) {
-            const char* ptr; std::memcpy(&ptr, &n.u64a, 8);
+            const char* ptr;
+            std::memcpy(&ptr, &n.u64a, 8);
             return {ptr, n.u32c()};
         }
 
@@ -338,7 +443,9 @@ public:
     // For ARRAY: element count, For OBJECT: key count
     std::uint32_t Length() const noexcept
     {
-        if(!Valid()) return 0;
+        if(!Valid())
+            return 0;
+
         return N().u32a(); // both ARRAY and OBJECT store live count in u32a
     }
 
@@ -370,22 +477,99 @@ public:
 
 public:
     // Set with owned key (key copied)
-    JsonRef Set(std::string_view key, std::string_view v)    noexcept { auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size())); if(r.Valid()) r = v;       return r; }
-    JsonRef Set(std::string_view key, const char* v)         noexcept { auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size())); if(r.Valid()) r = v;       return r; }
-    JsonRef Set(std::string_view key, std::int64_t v)        noexcept { auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size())); if(r.Valid()) r = v;       return r; }
-    JsonRef Set(std::string_view key, std::uint64_t v)       noexcept { auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size())); if(r.Valid()) r = v;       return r; }
-    JsonRef Set(std::string_view key, double v)              noexcept { auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size())); if(r.Valid()) r = v;       return r; }
-    JsonRef Set(std::string_view key, bool v)                noexcept { auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size())); if(r.Valid()) r = v;       return r; }
-    JsonRef Set(std::string_view key, std::nullptr_t)        noexcept { auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size())); if(r.Valid()) r = nullptr; return r; }
-    JsonRef Set(std::string_view key, const Shared::UUID& v) noexcept { auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size())); if(r.Valid()) r = v;       return r; }
+    JsonRef Set(std::string_view key, std::string_view v) noexcept
+    {
+        auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+        if(r.Valid())
+            r = v;
 
-    JsonRef Set(std::string_view key, std::int32_t v)  noexcept { return Set(key, static_cast<std::int64_t>(v));  }
-    JsonRef Set(std::string_view key, std::uint32_t v) noexcept { return Set(key, static_cast<std::uint64_t>(v)); }
-    JsonRef Set(std::string_view key, std::int16_t v)  noexcept { return Set(key, static_cast<std::int64_t>(v));  }
-    JsonRef Set(std::string_view key, std::uint16_t v) noexcept { return Set(key, static_cast<std::uint64_t>(v)); }
-    JsonRef Set(std::string_view key, std::int8_t v)   noexcept { return Set(key, static_cast<std::int64_t>(v));  }
-    JsonRef Set(std::string_view key, std::uint8_t v)  noexcept { return Set(key, static_cast<std::uint64_t>(v)); }
-    JsonRef Set(std::string_view key, float v)         noexcept { return Set(key, static_cast<double>(v));        }
+        return r;
+    }
+    JsonRef Set(std::string_view key, const char* v) noexcept
+    {
+        auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+        if(r.Valid())
+            r = v;
+
+        return r;
+    }
+    JsonRef Set(std::string_view key, std::int64_t v) noexcept
+    {
+        auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+        if(r.Valid())
+            r = v;
+
+        return r;
+    }
+    JsonRef Set(std::string_view key, std::uint64_t v) noexcept
+    {
+        auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+        if(r.Valid())
+            r = v;
+
+        return r;
+    }
+    JsonRef Set(std::string_view key, double v) noexcept
+    {
+        auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+        if(r.Valid())
+            r = v;
+
+        return r;
+    }
+    JsonRef Set(std::string_view key, bool v) noexcept
+    {
+        auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+        if(r.Valid())
+            r = v;
+
+        return r;
+    }
+    JsonRef Set(std::string_view key, std::nullptr_t) noexcept
+    {
+        auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+        if(r.Valid())
+            r = nullptr;
+
+        return r;
+    }
+    JsonRef Set(std::string_view key, const Shared::UUID& v) noexcept
+    {
+        auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+        if(r.Valid())
+            r = v;
+
+        return r;
+    }
+
+    JsonRef Set(std::string_view key, std::int32_t v) noexcept
+    {
+        return Set(key, static_cast<std::int64_t>(v));
+    }
+    JsonRef Set(std::string_view key, std::uint32_t v) noexcept
+    {
+        return Set(key, static_cast<std::uint64_t>(v));
+    }
+    JsonRef Set(std::string_view key, std::int16_t v) noexcept
+    {
+        return Set(key, static_cast<std::int64_t>(v));
+    }
+    JsonRef Set(std::string_view key, std::uint16_t v) noexcept
+    {
+        return Set(key, static_cast<std::uint64_t>(v));
+    }
+    JsonRef Set(std::string_view key, std::int8_t v) noexcept
+    {
+        return Set(key, static_cast<std::int64_t>(v));
+    }
+    JsonRef Set(std::string_view key, std::uint8_t v) noexcept
+    {
+        return Set(key, static_cast<std::uint64_t>(v));
+    }
+    JsonRef Set(std::string_view key, float v) noexcept
+    {
+        return Set(key, static_cast<double>(v));
+    }
 
     // Set with JsonRef value, aliases by node index, no node copy, no new allocation
     JsonRef Set(std::string_view key, JsonRef v) noexcept
@@ -393,12 +577,17 @@ public:
         if(!Valid() || !v.Valid())
             return Dead();
 
-        const char*   kptr = key.data();
+        const char* kptr = key.data();
         std::uint32_t klen = static_cast<std::uint32_t>(key.size());
 
         auto& n = NMut();
-        if(n.tag == JsonTag::EMPTY) { n.tag = JsonTag::OBJECT; n.u64a = 0; n.u64b = 0; }
-        if(n.tag != JsonTag::OBJECT) return Dead();
+        if(n.tag == JsonTag::EMPTY) {
+            n.tag = JsonTag::OBJECT;
+            n.u64a = 0;
+            n.u64b = 0;
+        }
+        if(n.tag != JsonTag::OBJECT)
+            return Dead();
 
         // Key exists, redirect valIdx
         std::uint32_t existing = HTFind(kptr, klen);
@@ -409,14 +598,16 @@ public:
 
         // New key, allocate JsonKV + copy key string, then insert
         std::uint32_t keyOff = s_->AllocStr(kptr, klen);
-        if(keyOff == JSON_NIL) return Dead();
+        if(keyOff == JSON_NIL)
+            return Dead();
 
         std::uint32_t kvIdx = s_->AllocKV();
-        if(kvIdx == JSON_NIL) return Dead();
+        if(kvIdx == JSON_NIL)
+            return Dead();
 
         // Re fetch node after potential reallocs from AllocStr / AllocKV
         auto& n2 = NMut();
-        JsonKV& kv    = s_->kvs[kvIdx];
+        JsonKV& kv = s_->kvs[kvIdx];
         kv.keyOff = keyOff;
         kv.keyLen = klen;
         kv.valIdx = v.idx_;
@@ -430,13 +621,17 @@ public:
 public:
     bool Erase(std::string_view key) noexcept
     {
-        if(!Valid() || N().tag != JsonTag::OBJECT) return false;
+        if(!Valid() || N().tag != JsonTag::OBJECT)
+            return false;
+
         return EraseKey(key.data(), static_cast<std::uint32_t>(key.size()));
     }
 
     bool Erase(std::uint32_t i) noexcept
     {
-        if(!Valid() || N().tag != JsonTag::ARRAY) return false;
+        if(!Valid() || N().tag != JsonTag::ARRAY)
+            return false;
+
         return EraseIndex(i);
     }
 
@@ -448,8 +643,13 @@ public:
             return Dead();
 
         auto& n = NMut();
-        if(n.tag == JsonTag::EMPTY) { n.tag = JsonTag::ARRAY; n.u64a = 0; n.u64b = 0; }
-        if(n.tag != JsonTag::ARRAY) return Dead();
+        if(n.tag == JsonTag::EMPTY) {
+            n.tag = JsonTag::ARRAY;
+            n.u64a = 0;
+            n.u64b = 0;
+        }
+        if(n.tag != JsonTag::ARRAY)
+            return Dead();
 
         std::uint32_t valIdx = s_->AllocNode();
         if(valIdx == JSON_NIL)
@@ -462,50 +662,117 @@ public:
         return JsonRef{s_, valIdx};
     }
 
-    void PushBack(std::nullptr_t v)      noexcept { auto r = PushBack(); if(r.Valid()) r = v; }
-    void PushBack(bool v)                noexcept { auto r = PushBack(); if(r.Valid()) r = v; }
-    void PushBack(std::int64_t v)        noexcept { auto r = PushBack(); if(r.Valid()) r = v; }
-    void PushBack(std::uint64_t v)       noexcept { auto r = PushBack(); if(r.Valid()) r = v; }
-    void PushBack(double v)              noexcept { auto r = PushBack(); if(r.Valid()) r = v; }
-    void PushBack(const char* v)         noexcept { auto r = PushBack(); if(r.Valid()) r = v; }
-    void PushBack(std::string_view v)    noexcept { auto r = PushBack(); if(r.Valid()) r = v; }
-    void PushBack(const Shared::UUID& v) noexcept { auto r = PushBack(); if(r.Valid()) r = v; }
-    void PushBack(std::int32_t v)        noexcept { PushBack(static_cast<std::int64_t>(v)); }
-    void PushBack(std::uint32_t v)       noexcept { PushBack(static_cast<std::uint64_t>(v)); }
-    void PushBack(float v)               noexcept { PushBack(static_cast<double>(v)); }
+    void PushBack(std::nullptr_t v) noexcept
+    {
+        auto r = PushBack();
+        if(r.Valid())
+            r = v;
+    }
+    void PushBack(bool v) noexcept
+    {
+        auto r = PushBack();
+        if(r.Valid())
+            r = v;
+    }
+    void PushBack(std::int64_t v) noexcept
+    {
+        auto r = PushBack();
+        if(r.Valid())
+            r = v;
+    }
+    void PushBack(std::uint64_t v) noexcept
+    {
+        auto r = PushBack();
+        if(r.Valid())
+            r = v;
+    }
+    void PushBack(double v) noexcept
+    {
+        auto r = PushBack();
+        if(r.Valid())
+            r = v;
+    }
+    void PushBack(const char* v) noexcept
+    {
+        auto r = PushBack();
+        if(r.Valid())
+            r = v;
+    }
+    void PushBack(std::string_view v) noexcept
+    {
+        auto r = PushBack();
+        if(r.Valid())
+            r = v;
+    }
+    void PushBack(const Shared::UUID& v) noexcept
+    {
+        auto r = PushBack();
+        if(r.Valid())
+            r = v;
+    }
+    void PushBack(std::int32_t v) noexcept
+    {
+        PushBack(static_cast<std::int64_t>(v));
+    }
+    void PushBack(std::uint32_t v) noexcept
+    {
+        PushBack(static_cast<std::uint64_t>(v));
+    }
+    void PushBack(float v) noexcept
+    {
+        PushBack(static_cast<double>(v));
+    }
 
 public:
     JsonRef& operator=(std::nullptr_t) noexcept
     {
-        if(Valid()) NMut().tag = JsonTag::EMPTY;
+        if(Valid())
+            NMut().tag = JsonTag::EMPTY;
+
         return *this;
     }
 
     JsonRef& operator=(bool v) noexcept
     {
-        if(!Valid()) return *this;
-        auto& n = NMut(); n.tag = JsonTag::BOOL; n.u64a = v ? 1u : 0u;
+        if(!Valid())
+            return *this;
+
+        auto& n = NMut();
+        n.tag = JsonTag::BOOL;
+        n.u64a = v ? 1u : 0u;
         return *this;
     }
 
     JsonRef& operator=(std::int64_t v) noexcept
     {
-        if(!Valid()) return *this;
-        auto& n = NMut(); n.tag = JsonTag::INT64; std::memcpy(&n.u64a, &v, 8);
+        if(!Valid())
+            return *this;
+
+        auto& n = NMut();
+        n.tag = JsonTag::INT64;
+        std::memcpy(&n.u64a, &v, 8);
         return *this;
     }
 
     JsonRef& operator=(std::uint64_t v) noexcept
     {
-        if(!Valid()) return *this;
-        auto& n = NMut(); n.tag = JsonTag::UINT64; std::memcpy(&n.u64a, &v, 8);
+        if(!Valid())
+            return *this;
+
+        auto& n = NMut();
+        n.tag = JsonTag::UINT64;
+        std::memcpy(&n.u64a, &v, 8);
         return *this;
     }
 
     JsonRef& operator=(double v) noexcept
     {
-        if(!Valid()) return *this;
-        auto& n = NMut(); n.tag = JsonTag::DOUBLE; std::memcpy(&n.u64a, &v, 8);
+        if(!Valid())
+            return *this;
+
+        auto& n = NMut();
+        n.tag = JsonTag::DOUBLE;
+        std::memcpy(&n.u64a, &v, 8);
         return *this;
     }
 
@@ -516,8 +783,8 @@ public:
             return *this;
 
         auto& n = NMut();
-        n.tag   = JsonTag::STR_VIEW;
-        n.u64b  = 0;
+        n.tag = JsonTag::STR_VIEW;
+        n.u64b = 0;
 
         std::memcpy(&n.u64a, &v, 8);
         n.u32c() = static_cast<std::uint32_t>(std::strlen(v));
@@ -535,8 +802,8 @@ public:
             return *this;
 
         auto& n = NMut();
-        n.tag   = JsonTag::STR_OWN;
-        n.u64b  = 0;
+        n.tag = JsonTag::STR_OWN;
+        n.u64b = 0;
 
         n.u32a() = off;
         n.u32c() = static_cast<std::uint32_t>(v.size());
@@ -549,20 +816,53 @@ public:
         return *this = std::string_view{s.data, 36};
     }
 
-    JsonRef& operator=(std::int32_t v)  noexcept { return *this = static_cast<std::int64_t>(v); }
-    JsonRef& operator=(std::uint32_t v) noexcept { return *this = static_cast<std::uint64_t>(v); }
-    JsonRef& operator=(std::int16_t v)  noexcept { return *this = static_cast<std::int64_t>(v); }
-    JsonRef& operator=(std::uint16_t v) noexcept { return *this = static_cast<std::uint64_t>(v); }
-    JsonRef& operator=(std::int8_t v)   noexcept { return *this = static_cast<std::int64_t>(v); }
-    JsonRef& operator=(std::uint8_t v)  noexcept { return *this = static_cast<std::uint64_t>(v); }
-    JsonRef& operator=(float v)         noexcept { return *this = static_cast<double>(v); }
+    JsonRef& operator=(std::int32_t v) noexcept
+    {
+        return *this = static_cast<std::int64_t>(v);
+    }
+    JsonRef& operator=(std::uint32_t v) noexcept
+    {
+        return *this = static_cast<std::uint64_t>(v);
+    }
+    JsonRef& operator=(std::int16_t v) noexcept
+    {
+        return *this = static_cast<std::int64_t>(v);
+    }
+    JsonRef& operator=(std::uint16_t v) noexcept
+    {
+        return *this = static_cast<std::uint64_t>(v);
+    }
+    JsonRef& operator=(std::int8_t v) noexcept
+    {
+        return *this = static_cast<std::int64_t>(v);
+    }
+    JsonRef& operator=(std::uint8_t v) noexcept
+    {
+        return *this = static_cast<std::uint64_t>(v);
+    }
+    JsonRef& operator=(float v) noexcept
+    {
+        return *this = static_cast<double>(v);
+    }
 
-    JsonNode&         NMut()          noexcept { return s_->nodes[idx_]; }
-    std::uint32_t NodeIdx() const noexcept { return idx_; }
+    JsonNode& NMut() noexcept
+    {
+        return s_->nodes[idx_];
+    }
+    std::uint32_t NodeIdx() const noexcept
+    {
+        return idx_;
+    }
 
 private:
-    JsonRef         Dead() const noexcept { return JsonRef{nullptr, JSON_NIL}; }
-    const JsonNode& N()    const noexcept { return s_->nodes[idx_]; }
+    JsonRef Dead() const noexcept
+    {
+        return JsonRef{nullptr, JSON_NIL};
+    }
+    const JsonNode& N() const noexcept
+    {
+        return s_->nodes[idx_];
+    }
 
     // HT lookup, returns JsonKV index or JSON_NIL
     std::uint32_t HTFind(const char* key, std::uint32_t klen) const noexcept
@@ -601,9 +901,9 @@ private:
     // JsonNode's u64b is updated on success
     std::uint32_t* RebuildHT(JsonNode& n, std::uint32_t newHtCap) noexcept
     {
-        std::uint32_t  kvCap  = n.u32b();
-        std::uint32_t  count  = n.u32a();
-        auto*          oldBuf = n.BufAs<std::uint32_t>();
+        std::uint32_t kvCap = n.u32b();
+        std::uint32_t count = n.u32a();
+        auto* oldBuf = n.BufAs<std::uint32_t>();
 
         // Safe-copy kvList before any realloc
         std::uint32_t* tmp = nullptr;
@@ -616,9 +916,8 @@ private:
         }
 
         std::uint32_t total = ObjBufSize(kvCap, newHtCap);
-        auto* newBuf = static_cast<std::uint32_t*>(
-            oldBuf ? Realloc(oldBuf, total * sizeof(std::uint32_t)) : Alloc(total * sizeof(std::uint32_t))
-        );
+        auto* newBuf = static_cast<std::uint32_t*>(oldBuf ? Realloc(oldBuf, total * sizeof(std::uint32_t))
+                                                          : Alloc(total * sizeof(std::uint32_t)));
 
         if(!newBuf) {
             if(tmp)
@@ -643,10 +942,10 @@ private:
 
         // Re-insert all live KVs
         for(std::uint32_t i = 0; i < count; ++i) {
-            std::uint32_t ki  = ObjKVList(newBuf)[i];
-            const JsonKV&     kv  = s_->kvs[ki];
-            const char*   key = s_->strs + kv.keyOff;
-            std::uint32_t h   = static_cast<std::uint32_t>(Shared::Hasher::WyHash(key, kv.keyLen)) & (newHtCap - 1);
+            std::uint32_t ki = ObjKVList(newBuf)[i];
+            const JsonKV& kv = s_->kvs[ki];
+            const char* key = s_->strs + kv.keyOff;
+            std::uint32_t h = static_cast<std::uint32_t>(Shared::Hasher::WyHash(key, kv.keyLen)) & (newHtCap - 1);
 
             while(slots[h] != JSON_NIL && slots[h] != JSON_TOMB)
                 h = (h + 1) & (newHtCap - 1);
@@ -662,32 +961,27 @@ private:
     // Returns new buf pointer or null on OOM. Updates node
     std::uint32_t* GrowKVCap(JsonNode& n) noexcept
     {
-        std::uint32_t  kvCap    = n.u32b();
-        std::uint32_t  newKvCap = kvCap ? kvCap * 2 : JSON_INIT_CAP;
-        auto*          oldBuf   = n.BufAs<std::uint32_t>();
-        std::uint32_t  htCap    = oldBuf ? ObjHtCap(oldBuf) : 0;
-        std::uint32_t  count    = n.u32a();
+        std::uint32_t kvCap = n.u32b();
+        std::uint32_t newKvCap = kvCap ? kvCap * 2 : JSON_INIT_CAP;
+        auto* oldBuf = n.BufAs<std::uint32_t>();
+        std::uint32_t htCap = oldBuf ? ObjHtCap(oldBuf) : 0;
+        std::uint32_t count = n.u32a();
 
         std::uint32_t total = ObjBufSize(newKvCap, htCap);
-        auto* newBuf = static_cast<std::uint32_t*>(
-            oldBuf ? Realloc(oldBuf, total * sizeof(std::uint32_t)) : Alloc(total * sizeof(std::uint32_t))
-        );
+        auto* newBuf = static_cast<std::uint32_t*>(oldBuf ? Realloc(oldBuf, total * sizeof(std::uint32_t))
+                                                          : Alloc(total * sizeof(std::uint32_t)));
 
         if(!newBuf)
             return nullptr;
 
         // Slide HT region right to make room for bigger kvList
         if(htCap && newKvCap != kvCap)
-            std::memmove(
-                ObjHTSlot(newBuf, newKvCap),
-                ObjHTSlot(newBuf, kvCap),
-                htCap * sizeof(std::uint32_t)
-            );
+            std::memmove(ObjHTSlot(newBuf, newKvCap), ObjHTSlot(newBuf, kvCap), htCap * sizeof(std::uint32_t));
 
         newBuf[0] = htCap;
         newBuf[1] = 0;
 
-        n.u32b()  = newKvCap;
+        n.u32b() = newKvCap;
         n.BufSet(newBuf);
         (void)count;
 
@@ -711,8 +1005,8 @@ private:
         }
 
         // Direct insert into existing HT
-        const JsonKV&     kv    = s_->kvs[kvIdx];
-        const char*   key   = s_->strs + kv.keyOff;
+        const JsonKV& kv = s_->kvs[kvIdx];
+        const char* key = s_->strs + kv.keyOff;
         std::uint32_t kvCap = n.u32b();
         std::uint32_t* slots = ObjHTSlot(buf, kvCap);
         std::uint32_t h = static_cast<std::uint32_t>(Shared::Hasher::WyHash(key, klen)) & (htCap - 1);
@@ -734,7 +1028,8 @@ private:
 
         if(count >= kvCap) {
             buf = GrowKVCap(n);
-            if(!buf) return false;
+            if(!buf)
+                return false;
             // n.u32b() updated inside GrowKVCap
         }
 
@@ -747,14 +1042,13 @@ private:
     bool ArrAppend(JsonNode& n, std::uint32_t elemIdx) noexcept
     {
         std::uint32_t count = n.u32a();
-        std::uint32_t cap   = n.u32b();
-        auto*         buf   = n.BufAs<std::uint32_t>();
+        std::uint32_t cap = n.u32b();
+        auto* buf = n.BufAs<std::uint32_t>();
 
         if(count >= cap) {
             std::uint32_t nc = cap ? cap * 2 : JSON_INIT_CAP;
-            auto* newBuf = static_cast<std::uint32_t*>(
-                buf ? Realloc(buf, nc * sizeof(std::uint32_t)) : Alloc(nc * sizeof(std::uint32_t))
-            );
+            auto* newBuf = static_cast<std::uint32_t*>(buf ? Realloc(buf, nc * sizeof(std::uint32_t))
+                                                           : Alloc(nc * sizeof(std::uint32_t)));
 
             if(!newBuf)
                 return false;
@@ -775,8 +1069,13 @@ private:
             return Dead();
 
         auto& n = NMut();
-        if(n.tag == JsonTag::EMPTY) { n.tag = JsonTag::OBJECT; n.u64a = 0; n.u64b = 0; }
-        if(n.tag != JsonTag::OBJECT) return Dead();
+        if(n.tag == JsonTag::EMPTY) {
+            n.tag = JsonTag::OBJECT;
+            n.u64a = 0;
+            n.u64b = 0;
+        }
+        if(n.tag != JsonTag::OBJECT)
+            return Dead();
 
         // Check existing key first
         std::uint32_t existing = HTFind(key, klen);
@@ -797,8 +1096,8 @@ private:
             return Dead();
 
         // Re-fetch node after potential reallocs
-        auto& n2  = NMut();
-        JsonKV&   kv  = s_->kvs[kvIdx];
+        auto& n2 = NMut();
+        JsonKV& kv = s_->kvs[kvIdx];
         kv.keyOff = keyOff;
         kv.keyLen = klen;
         kv.valIdx = valIdx;
@@ -823,7 +1122,7 @@ private:
 
     bool EraseKey(const char* key, std::uint32_t klen) noexcept
     {
-        auto& n   = NMut();
+        auto& n = NMut();
         auto* buf = n.BufAs<std::uint32_t>();
         if(!buf)
             return false;
@@ -832,19 +1131,19 @@ private:
         if(htCap == 0)
             return false;
 
-        std::uint32_t  kvCap = n.u32b();
+        std::uint32_t kvCap = n.u32b();
         std::uint32_t* slots = ObjHTSlot(buf, kvCap);
-        std::uint32_t  h     = static_cast<std::uint32_t>(Shared::Hasher::WyHash(key, klen)) & (htCap - 1);
+        std::uint32_t h = static_cast<std::uint32_t>(Shared::Hasher::WyHash(key, klen)) & (htCap - 1);
 
         std::uint32_t htSlot = JSON_NIL;
-        std::uint32_t kvIdx  = JSON_NIL;
+        std::uint32_t kvIdx = JSON_NIL;
 
         while(slots[h] != JSON_NIL) {
             if(slots[h] != JSON_TOMB) {
                 const JsonKV& kv = s_->kvs[slots[h]];
                 if(kv.keyLen == klen && std::memcmp(s_->strs + kv.keyOff, key, klen) == 0) {
                     htSlot = h;
-                    kvIdx  = slots[h];
+                    kvIdx = slots[h];
                     break;
                 }
             }
@@ -859,8 +1158,8 @@ private:
         slots[htSlot] = JSON_TOMB;
 
         // Remove from kvList (shift left)
-        std::uint32_t* list  = ObjKVList(buf);
-        std::uint32_t  count = n.u32a();
+        std::uint32_t* list = ObjKVList(buf);
+        std::uint32_t count = n.u32a();
         for(std::uint32_t i = 0; i < count; ++i) {
             if(list[i] == kvIdx) {
                 std::memmove(list + i, list + i + 1, (count - i - 1) * sizeof(std::uint32_t));
@@ -903,21 +1202,27 @@ private:
     friend class JsonObject;
     friend class JsonParser;
 
-    JsonStore*        s_;
+    JsonStore* s_;
     std::uint32_t idx_;
 };
 
-static_assert(sizeof(JsonRef) == 16,                 "JsonRef must be 16 bytes");
+static_assert(sizeof(JsonRef) == 16, "JsonRef must be 16 bytes");
 static_assert(std::is_trivially_copyable_v<JsonRef>, "JsonRef must be trivially copyable");
 
 // vvv JsonObject (owns the JsonStore, crosses module boundaries safely) vvv
-//
 class JsonObject {
 public:
-    ~JsonObject() noexcept { Destroy(); }
+    ~JsonObject() noexcept
+    {
+        Destroy();
+    }
 
     JsonObject() = default;
-    JsonObject(JsonObject&& o) noexcept : s_(o.s_) { o.s_ = nullptr; }
+    JsonObject(JsonObject&& o) noexcept : s_(o.s_)
+    {
+        o.s_ = nullptr;
+    }
+
     JsonObject& operator=(JsonObject&& o) noexcept
     {
         if(this != &o) {
@@ -929,7 +1234,7 @@ public:
         return *this;
     }
 
-    JsonObject(const JsonObject&)            = delete;
+    JsonObject(const JsonObject&) = delete;
     JsonObject& operator=(const JsonObject&) = delete;
 
 public:
@@ -939,7 +1244,7 @@ public:
         if(!s)
             return {};
 
-        new(s) JsonStore();
+        new (s) JsonStore();
 
         if(s->AllocNode() == JSON_NIL) {
             Free(s);
@@ -947,7 +1252,7 @@ public:
         }
 
         JsonNode& root = s->nodes[0];
-        root.tag  = JsonTag::OBJECT;
+        root.tag = JsonTag::OBJECT;
         root.u64a = 0;
         root.u64b = 0;
 
@@ -967,30 +1272,40 @@ public:
     }
 
 public:
-    bool Valid() const noexcept { return s_ != nullptr; }
+    bool Valid() const noexcept
+    {
+        return s_ != nullptr;
+    }
 
     JsonRef operator[](std::string_view key) noexcept
     {
-        if(!s_) return JsonRef{nullptr, JSON_NIL};
+        if(!s_)
+            return JsonRef{nullptr, JSON_NIL};
+
         return JsonRef{s_, 0}[key];
     }
 
     JsonRef Get(std::string_view key) const noexcept
     {
-        if(!s_) return JsonRef{nullptr, JSON_NIL};
+        if(!s_)
+            return JsonRef{nullptr, JSON_NIL};
+
         return JsonRef{const_cast<JsonStore*>(s_), 0}.Get(key);
     }
 
-    template<typename T>
-    JsonRef Set(std::string_view key, T&& val) noexcept
+    template <typename T> JsonRef Set(std::string_view key, T&& val) noexcept
     {
-        if(!s_) return JsonRef{nullptr, JSON_NIL};
+        if(!s_)
+            return JsonRef{nullptr, JSON_NIL};
+
         return JsonRef{s_, 0}.Set(key, std::forward<T>(val));
     }
 
     bool Erase(std::string_view key) noexcept
     {
-        if(!s_) return false;
+        if(!s_)
+            return false;
+
         return JsonRef{s_, 0}.Erase(key);
     }
 
@@ -1009,11 +1324,11 @@ public:
             return;
 
         const std::uint32_t* list = ObjKVList(buf);
-        const JsonKV*            kvs  = other.s_->kvs;
-        const char*          strs = other.s_->strs;
+        const JsonKV* kvs = other.s_->kvs;
+        const char* strs = other.s_->strs;
 
         for(std::uint32_t i = 0; i < root.u32a(); ++i) {
-            const JsonKV&   kv  = kvs[list[i]];
+            const JsonKV& kv = kvs[list[i]];
             const char* key = strs + kv.keyOff;
 
             JsonRef dst = JsonRef{s_, 0}.GetOrCreate(key, kv.keyLen);
@@ -1024,17 +1339,26 @@ public:
 
     void Write(Http::Response& res) noexcept
     {
-        if(!s_) return;
+        if(!s_)
+            return;
+
         res.Header("Content-Type", "application/json");
         Serialize(res, 0);
         res.Commit();
     }
 
-    JsonStore*       GetStore()       noexcept { return s_; }
-    const JsonStore* GetStore() const noexcept { return s_; }
+    JsonStore* GetStore() noexcept
+    {
+        return s_;
+    }
+    const JsonStore* GetStore() const noexcept
+    {
+        return s_;
+    }
 
 private:
-    explicit JsonObject(JsonStore* s) noexcept : s_(s) {}
+    explicit JsonObject(JsonStore* s) noexcept : s_(s)
+    {}
 
     void Destroy() noexcept
     {
@@ -1050,22 +1374,48 @@ private:
         s_ = nullptr;
     }
 
-    static void Raw(Http::Response& res, const char* d, std::size_t l) noexcept { res.Write({d, l}); }
+    static void Raw(Http::Response& res, const char* d, std::size_t l) noexcept
+    {
+        res.Write({d, l});
+    }
 
     static void Escaped(Http::Response& res, const char* p, std::uint32_t len) noexcept
     {
-        const char* e = p + len, *start = p;
+        const char *e = p + len, *start = p;
         while(p != e) {
-            const char* esc = nullptr; std::size_t el = 0;
+            const char* esc = nullptr;
+            std::size_t el = 0;
             switch(*p) {
-                case '"':  esc = "\\\""; el = 2; break;
-                case '\\': esc = "\\\\"; el = 2; break;
-                case '\n': esc = "\\n";  el = 2; break;
-                case '\r': esc = "\\r";  el = 2; break;
-                case '\t': esc = "\\t";  el = 2; break;
-                case '\b': esc = "\\b";  el = 2; break;
-                case '\f': esc = "\\f";  el = 2; break;
-                default: break;
+                case '"':
+                    esc = "\\\"";
+                    el = 2;
+                    break;
+                case '\\':
+                    esc = "\\\\";
+                    el = 2;
+                    break;
+                case '\n':
+                    esc = "\\n";
+                    el = 2;
+                    break;
+                case '\r':
+                    esc = "\\r";
+                    el = 2;
+                    break;
+                case '\t':
+                    esc = "\\t";
+                    el = 2;
+                    break;
+                case '\b':
+                    esc = "\\b";
+                    el = 2;
+                    break;
+                case '\f':
+                    esc = "\\f";
+                    el = 2;
+                    break;
+                default:
+                    break;
             }
 
             if(esc) {
@@ -1085,30 +1435,60 @@ private:
 
     void Serialize(Http::Response& res, std::uint32_t idx) const noexcept
     {
-        const JsonNode& n    = s_->nodes[idx];
+        const JsonNode& n = s_->nodes[idx];
         const char* strs = s_->strs;
 
         switch(n.tag) {
-            case JsonTag::EMPTY:  Raw(res, "null", 4);  break;
-            case JsonTag::BOOL:   n.u64a ? Raw(res, "true", 4) : Raw(res, "false", 5); break;
+            case JsonTag::EMPTY:
+                Raw(res, "null", 4);
+                break;
+            case JsonTag::BOOL:
+                n.u64a ? Raw(res, "true", 4) : Raw(res, "false", 5);
+                break;
 
-            case JsonTag::INT64:  { std::int64_t  v; std::memcpy(&v, &n.u64a, 8); char b[20]; auto [e,_] = std::to_chars(b, b+20, v); Raw(res, b, e-b); break; }
-            case JsonTag::UINT64: { std::uint64_t v; std::memcpy(&v, &n.u64a, 8); char b[20]; auto [e,_] = std::to_chars(b, b+20, v); Raw(res, b, e-b); break; }
-            case JsonTag::DOUBLE: { double        v; std::memcpy(&v, &n.u64a, 8); char b[32]; auto [e,_] = std::to_chars(b, b+32, v); Raw(res, b, e-b); break; }
+            case JsonTag::INT64: {
+                std::int64_t v;
+                std::memcpy(&v, &n.u64a, 8);
+                char b[20];
+                auto [e, _] = std::to_chars(b, b + 20, v);
+                Raw(res, b, e - b);
+                break;
+            }
+            case JsonTag::UINT64: {
+                std::uint64_t v;
+                std::memcpy(&v, &n.u64a, 8);
+                char b[20];
+                auto [e, _] = std::to_chars(b, b + 20, v);
+                Raw(res, b, e - b);
+                break;
+            }
+            case JsonTag::DOUBLE: {
+                double v;
+                std::memcpy(&v, &n.u64a, 8);
+                char b[32];
+                auto [e, _] = std::to_chars(b, b + 32, v);
+                Raw(res, b, e - b);
+                break;
+            }
 
             case JsonTag::STR_VIEW: {
-                const char* ptr; std::memcpy(&ptr, &n.u64a, 8);
-                Raw(res, "\"", 1); Escaped(res, ptr, n.u32c()); Raw(res, "\"", 1);
+                const char* ptr;
+                std::memcpy(&ptr, &n.u64a, 8);
+                Raw(res, "\"", 1);
+                Escaped(res, ptr, n.u32c());
+                Raw(res, "\"", 1);
                 break;
             }
 
             case JsonTag::STR_OWN:
-                Raw(res, "\"", 1); Escaped(res, strs + n.u32a(), n.u32c()); Raw(res, "\"", 1);
+                Raw(res, "\"", 1);
+                Escaped(res, strs + n.u32a(), n.u32c());
+                Raw(res, "\"", 1);
                 break;
 
             case JsonTag::ARRAY: {
                 Raw(res, "[", 1);
-                const auto* buf   = n.BufAs<std::uint32_t>();
+                const auto* buf = n.BufAs<std::uint32_t>();
                 std::uint32_t cnt = n.u32a();
 
                 for(std::uint32_t i = 0; i < cnt; ++i) {
@@ -1124,10 +1504,11 @@ private:
 
             case JsonTag::OBJECT: {
                 Raw(res, "{", 1);
-                const auto*          buf  = n.BufAs<std::uint32_t>();
+
+                const auto* buf = n.BufAs<std::uint32_t>();
                 const std::uint32_t* list = buf ? ObjKVList(buf) : nullptr;
-                std::uint32_t        cnt  = n.u32a();
-                const JsonKV*            kvs  = s_->kvs;
+                std::uint32_t cnt = n.u32a();
+                const JsonKV* kvs = s_->kvs;
 
                 for(std::uint32_t i = 0; i < cnt; ++i) {
                     if(i)
@@ -1151,7 +1532,7 @@ private:
     JsonStore* s_ = nullptr;
 };
 
-static_assert(sizeof(JsonObject) == 8,               "JsonObject must be 8 bytes");
+static_assert(sizeof(JsonObject) == 8, "JsonObject must be 8 bytes");
 static_assert(std::is_standard_layout_v<JsonObject>, "JsonObject must be standard layout");
 
 } // namespace WFX::Shared

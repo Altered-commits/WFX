@@ -3,10 +3,9 @@
 #include "epoll_connection.hpp"
 
 #include "http/common/http_error_msgs.hpp"
-#include "http/common/http_global_state.hpp"
 #include "http/ssl/http_ssl_factory.hpp"
 #include "shared/apis/http_api.hpp"
-#include "utils/crash_tracer/crash_tracer.hpp"
+#include "utils/diagnostics/crash_tracer.hpp"
 #include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
@@ -20,8 +19,7 @@
 namespace WFX::OSSpecific {
 
 // vvv Constructor & Destructor vvv
-EpollConnectionHandler::EpollConnectionHandler(bool useHttps)
-    : useHttps_(useHttps)
+EpollConnectionHandler::EpollConnectionHandler(bool useHttps) : useHttps_(useHttps)
 {
     if(useHttps)
         sslHandler_ = CreateSSLHandler();
@@ -29,10 +27,22 @@ EpollConnectionHandler::EpollConnectionHandler(bool useHttps)
 
 EpollConnectionHandler::~EpollConnectionHandler()
 {
-    if(listenFd_ > 0)       { close(listenFd_);       listenFd_ = -1;       }
-    if(timeoutTimerFd_ > 0) { close(timeoutTimerFd_); timeoutTimerFd_ = -1; }
-    if(asyncTimerFd_ > 0)   { close(asyncTimerFd_);   asyncTimerFd_ = -1;   }
-    if(epollFd_ > 0)        { close(epollFd_);        epollFd_ = -1;        }
+    if(listenFd_ > 0) {
+        close(listenFd_);
+        listenFd_ = -1;
+    }
+    if(timeoutTimerFd_ > 0) {
+        close(timeoutTimerFd_);
+        timeoutTimerFd_ = -1;
+    }
+    if(asyncTimerFd_ > 0) {
+        close(asyncTimerFd_);
+        asyncTimerFd_ = -1;
+    }
+    if(epollFd_ > 0) {
+        close(epollFd_);
+        epollFd_ = -1;
+    }
 
     logger_.Info("[Epoll]: Cleaned up resources successfully");
 }
@@ -42,7 +52,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
 {
     WFX_TRACE();
 
-    auto& osConfig      = config_.osSpecificConfig;
+    auto& osConfig = config_.osSpecificConfig;
     auto& networkConfig = config_.networkConfig;
 
     // Initialize memory for epoll events
@@ -72,7 +82,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
     // -it to accept connections from both IPv4 and IPv6 clients.
     if(addr.ss_family == AF_INET6) {
         int no = 0;
-        if(setsockopt(listenFd_, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&no, sizeof(no)) < 0)
+        if(setsockopt(listenFd_, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no)) < 0)
             logger_.Fatal("[Epoll]: Failed to disable IPV6_V6ONLY: ", strerror(errno));
     }
 
@@ -99,57 +109,52 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
         logger_.Fatal("[Epoll]: Failed to create epoll: ", strerror(errno));
 
     epoll_event ev{};
-    ev.events  = EPOLLIN | EPOLLET;
+    ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = listenFd_;
     if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, listenFd_, &ev) < 0)
         logger_.Fatal("[Epoll]: Failed to add listening socket to epoll: ", strerror(errno));
 
     // vvv Initialize timeout handler vvv
-    timerWheel_.Init(
-        connections_.GetSlots(),
-        4096, 1, TimeUnit::SECONDS,
-        [this](std::uint32_t connId, std::uint32_t extra) {
-            // 'extra' for now just contains a 16 bit value. If value
-            //     >= CLIENT_CONNECTION_TAG, then its a client connection
-            //     <  CLIENT_CONNECTION_TAG, then its an endpoint connection
-            // It is going to be a 16 bit value, but for correctness sake-
-            // -we do '>=' instead of '=='
-            // NOTE: extra will be used as endpoint index, set inside of 'RefreshExpiry'
-            ConnectionContext* ctx = nullptr;
+    timerWheel_.Init(connections_.GetSlots(), 4096, 1, TimeUnit::SECONDS,
+                     [this](std::uint32_t connId, std::uint32_t extra) {
+                         // 'extra' for now just contains a 16 bit value. If value
+                         //     >= CLIENT_CONNECTION_TAG, then its a client connection
+                         //     <  CLIENT_CONNECTION_TAG, then its an endpoint connection
+                         // It is going to be a 16 bit value, but for correctness sake-
+                         // -we do '>=' instead of '=='
+                         // NOTE: extra will be used as endpoint index, set inside of 'RefreshExpiry'
+                         ConnectionContext* ctx = nullptr;
 
-            if(extra >= CLIENT_CONNECTION_TAG)
-                ctx = connections_.GetPtr(connId);
-            else
-                ctx = endpoints_[extra].second.GetPtr(connId);
+                         if(extra >= CLIENT_CONNECTION_TAG)
+                             ctx = connections_.GetPtr(connId);
+                         else
+                             ctx = endpoints_[extra].second.GetPtr(connId);
 
-            // So the logic behind the if condition is, in normal sync path, if a connection is marked-
-            // -'close', it will trigger cleanup after it sent data so no need to clash with it
-            // But on the other hand, in the async / endpoint path, if a connections is marked 'close' and-
-            // -the callback, for some odd reason, just hung up and isn't responding, we shouldn't care-
-            // -about connection atp. WE CLOSE IT OURSELVES
-            if(
-                ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE
-                || (ctx->IsEndpoint() || ctx->IsAsyncOperation())
-            )
-                Close(ctx, true);
-        }
-    );
+                         // So the logic behind the if condition is, in normal sync path, if a connection is marked-
+                         // -'close', it will trigger cleanup after it sent data so no need to clash with it
+                         // But on the other hand, in the async / endpoint path, if a connections is marked 'close' and-
+                         // -the callback, for some odd reason, just hung up and isn't responding, we shouldn't care-
+                         // -about connection atp. WE CLOSE IT OURSELVES
+                         if(ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE ||
+                            (ctx->IsEndpoint() || ctx->IsAsyncOperation()))
+                             Close(ctx, true);
+                     });
 
     timeoutTimerFd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if(timeoutTimerFd_ < 0)
         logger_.Fatal("[Epoll]: Failed to create timeout timer: ", strerror(errno));
 
     itimerspec ts{};
-    ts.it_interval.tv_sec  = INVOKE_TIMEOUT_COOLDOWN;
+    ts.it_interval.tv_sec = INVOKE_TIMEOUT_COOLDOWN;
     ts.it_interval.tv_nsec = 0;
-    ts.it_value.tv_sec     = INVOKE_TIMEOUT_DELAY;
-    ts.it_value.tv_nsec    = 0;
+    ts.it_value.tv_sec = INVOKE_TIMEOUT_DELAY;
+    ts.it_value.tv_nsec = 0;
 
     if(timerfd_settime(timeoutTimerFd_, 0, &ts, nullptr) < 0)
         logger_.Fatal("[Epoll]: Failed to set timeout timer: ", strerror(errno));
 
     epoll_event tev{};
-    tev.events  = EPOLLIN;
+    tev.events = EPOLLIN;
     tev.data.u64 = static_cast<std::uint64_t>(timeoutTimerFd_) & 0xFFFFFFFFULL; // Lower 32 bits = fd, upper 32 = 0
     if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, timeoutTimerFd_, &tev) < 0)
         logger_.Fatal("[Epoll]: Failed to add timeout timer to epoll: ", strerror(errno));
@@ -160,7 +165,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
         logger_.Fatal("[Epoll]: Failed to create async timer: ", strerror(errno));
 
     epoll_event aev{};
-    aev.events  = EPOLLIN;
+    aev.events = EPOLLIN;
     aev.data.u64 = static_cast<std::uint64_t>(asyncTimerFd_) & 0xFFFFFFFFULL; // Lower 32 bits = fd, upper 32 = 0
     if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, asyncTimerFd_, &aev) < 0)
         logger_.Fatal("[Epoll]: Failed to add async timer to epoll: ", strerror(errno));
@@ -171,9 +176,9 @@ void EpollConnectionHandler::SetEngineCallback(ReceiveCallback onData)
     onReceive_ = std::move(onData);
 }
 
-std::uint16_t EpollConnectionHandler::AllocateEndpoint(
-    std::string_view host, std::string_view port, std::uint32_t cLimit, std::uint32_t ifLimit, bool useTLS
-) {
+std::uint16_t EpollConnectionHandler::AllocateEndpoint(std::string_view host, std::string_view port,
+                                                       std::uint32_t cLimit, std::uint32_t ifLimit, bool useTLS)
+{
     /*
      * IMPORTANT:
      *  - 'host' and 'port' must strictly be null terminated (or gg)
@@ -187,17 +192,16 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(
     if(endpoints_.size() > MAX_DISTINCT_ENDPOINTS)
         logger_.Fatal("[Epoll]: Too many distinct domain endpoints registered");
 
-    auto& endpointSlot = endpoints_.emplace_back(
-                            std::piecewise_construct,
-                            std::forward_as_tuple(),      // EndpointContext{}
-                            std::forward_as_tuple(cLimit) // BitmapPool{cLimit}
-                        );
+    auto& endpointSlot = endpoints_.emplace_back(std::piecewise_construct,
+                                                 std::forward_as_tuple(),      // EndpointContext{}
+                                                 std::forward_as_tuple(cLimit) // BitmapPool{cLimit}
+    );
 
     auto& endpointInfo = endpointSlot.first;
     auto& endpointPool = endpointSlot.second;
 
     std::uint16_t endpointIdx = endpoints_.size() - 1;
-    
+
     // Initialize pool values
     for(std::uint32_t j = 0; j < endpointPool.GetSlots(); j++) {
         auto* ctx = endpointPool.GetPtr(j);
@@ -205,11 +209,7 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(
         // Initialize with default values
         ctx->endpointIdx = endpointIdx;
         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-        ctx->SetEndpointState(
-            useTLS
-                ? EndpointState::ENDPOINT_SECURE
-                : EndpointState::ENDPOINT_INSECURE
-        );
+        ctx->SetEndpointState(useTLS ? EndpointState::ENDPOINT_SECURE : EndpointState::ENDPOINT_INSECURE);
     }
 
     // Create std::string for safer use, its temporary so no issue (except host)
@@ -247,7 +247,7 @@ void EpollConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg)
         // We ignore result intentionally. If state says close -> close, else -> resume receive
         goto __CleanupOrRearm;
     }
-    
+
     // Case 2: Send from buffer
     else {
         auto* writeMeta = ctx->rwBuffer.GetWriteMeta();
@@ -289,7 +289,7 @@ __CleanupOrRearm:
     }
 
     if(ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE) {
-__CloseConnection:
+    __CloseConnection:
         Close(ctx);
     }
     else {
@@ -313,9 +313,9 @@ void EpollConnectionHandler::WriteFile(ConnectionContext* ctx, std::string path)
     Write(ctx, {});
 }
 
-EndpointStatus EpollConnectionHandler::WriteEndpoint(
-    ConnectionContext* ctx, std::uint32_t endpointIndex, const std::byte* ptr, std::uint32_t size
-) {
+EndpointStatus EpollConnectionHandler::WriteEndpoint(ConnectionContext* ctx, std::uint32_t endpointIndex,
+                                                     const std::byte* ptr, std::uint32_t size)
+{
     /*
      * A bit of explanation on how we will proceed with writing to an endpoint:
      *  - Copy the entire data (ptr) of size (size: u32) into endpoint write buffer (if it can fit)
@@ -331,24 +331,17 @@ EndpointStatus EpollConnectionHandler::WriteEndpoint(
     if(!allocatedCtx)
         return EndpointStatus::POOL_EXHAUSTED;
 
-    numConnectionsAlive_++; // TODO: For debugging, remove later
-
     // Initialize write buffer if it hasn't
     auto& endpointRWBuffer = allocatedCtx->rwBuffer;
-    if(
-        !endpointRWBuffer.IsWriteInitialized()
-        && !endpointRWBuffer.InitWriteBuffer(config_.networkConfig.maxSendBufferSize)
-    ) {
+    if(!endpointRWBuffer.IsWriteInitialized() &&
+       !endpointRWBuffer.InitWriteBuffer(config_.networkConfig.maxSendBufferSize)) {
         ReleaseConnection(allocatedCtx, true);
         return EndpointStatus::BUFFER_ERROR;
     }
 
-    if(!endpointRWBuffer.AppendWriteData(
-        reinterpret_cast<const char*>(ptr),
-        size,
-        config_.networkConfig.sendBufferIncSize,
-        config_.networkConfig.maxSendBufferSize
-    )) {
+    if(!endpointRWBuffer.AppendWriteData(reinterpret_cast<const char*>(ptr), size,
+                                         config_.networkConfig.sendBufferIncSize,
+                                         config_.networkConfig.maxSendBufferSize)) {
         ReleaseConnection(allocatedCtx, true);
         return EndpointStatus::INSUFFICIENT_BUFFER;
     }
@@ -364,16 +357,14 @@ EndpointStatus EpollConnectionHandler::WriteEndpoint(
     else {
         // Rearm endpoint so 'EPOLLOUT' fires and event loop calls 'Write'
         allocatedCtx->eventType = EventType::EVENT_SEND;
-        result = RegisterEpoll(allocatedCtx, EPOLL_CTL_MOD)
-            ? EndpointStatus::PENDING
-            : EndpointStatus::INTERNAL_ERROR;
+        result = RegisterEpoll(allocatedCtx, EPOLL_CTL_MOD) ? EndpointStatus::PENDING : EndpointStatus::INTERNAL_ERROR;
     }
 
     // Failure Case: 'Unlink' before 'Close' so it doesn't fire 'HandleAsyncResume'-
     // -on a coroutine that hasn't suspended yet
     if(result != EndpointStatus::PENDING) {
         allocatedCtx->clientContext = nullptr;
-        ctx->endpointContext        = nullptr;
+        ctx->endpointContext = nullptr;
         Close(allocatedCtx, true);
     }
 
@@ -396,7 +387,7 @@ void EpollConnectionHandler::Stream(ConnectionContext* ctx, StreamGenerator gene
     // -and mark it as stream operation, so when 'Write' completes, it should-
     // -start the streaming process
     ctx->isStreamOperation = 1;
-    ctx->streamChunked     = streamChunked;
+    ctx->streamChunked = streamChunked;
     Write(ctx, {});
 }
 
@@ -413,7 +404,7 @@ void EpollConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
         return;
 
     ctx->isShuttingDown = 1;
-    
+
     if(ctx->sslConn) {
         // Skip clean shutdown, nuke it immediately
         if(forceClose) {
@@ -448,8 +439,7 @@ void EpollConnectionHandler::Run()
     // Just a simple sanity check before we do anything
     if(!onReceive_)
         logger_.Fatal(
-            "[Epoll]: Member 'onReceive_' was not initialized. Call 'SetEngineCallback' before calling 'Run'"
-        );
+            "[Epoll]: Member 'onReceive_' was not initialized. Call 'SetEngineCallback' before calling 'Run'");
 
     // Used for special fds like timers, accepts, etc
     int sfd = 0;
@@ -465,9 +455,9 @@ void EpollConnectionHandler::Run()
 
         // Handle nfds events which epoll gave us
         for(std::uint32_t i = 0; i < nfds; i++) {
-            std::uint32_t ev   = events_[i].events;
+            std::uint32_t ev = events_[i].events;
             std::uint64_t meta = events_[i].data.u64;
-            std::uint16_t gen  = (meta >> 32) & 0xFFFF; // First half's lower 16 bits
+            std::uint16_t gen = (meta >> 32) & 0xFFFF; // First half's lower 16 bits
 
             // Existing connection, handle it
             if(gen > 0)
@@ -492,7 +482,7 @@ void EpollConnectionHandler::Run()
                 while(true) {
                     sockaddr_storage addr{};
                     socklen_t len = sizeof(addr);
-                    
+
                     int clientFd = accept4(listenFd_, (sockaddr*)&addr, &len, SOCK_NONBLOCK);
                     if(clientFd < 0) {
                         if(errno == EAGAIN || errno == EWOULDBLOCK)
@@ -516,10 +506,9 @@ void EpollConnectionHandler::Run()
                     }
 
                     // Set connection info
-                    ctx->socket   = clientFd;
+                    ctx->socket = clientFd;
                     ctx->connInfo = tmpIp;
-                    
-                    numConnectionsAlive_++;
+
                     WrapAccept(ctx);
                 }
                 continue;
@@ -530,8 +519,8 @@ void EpollConnectionHandler::Run()
             // Also if you are confused with the below hardcoded numbers, check 'PackEpollData'-
             // -function, you can see how data is packed in event.u64 member field
             std::uint16_t endpointIdx = meta >> 48;
-            std::uint32_t poolIdx     = meta & 0xFFFFFFFF;
-            
+            std::uint32_t poolIdx = meta & 0xFFFFFFFF;
+
             ConnectionContext* ctx = nullptr;
 
             // Client connection
@@ -551,7 +540,7 @@ void EpollConnectionHandler::Run()
                 HandleHandshake(ctx, ev);
                 continue;
             }
-            
+
             // SSL shutdown is in progress
             if(ctx->eventType == EventType::EVENT_SHUTDOWN) {
                 auto res = sslHandler_->Shutdown(ctx->sslConn);
@@ -591,7 +580,7 @@ void EpollConnectionHandler::Run()
                 }
                 Receive(ctx);
             }
-            
+
             if(ev & EPOLLOUT)
                 HandleWriteReady(ctx, ev);
         }
@@ -600,12 +589,12 @@ void EpollConnectionHandler::Run()
 
 void EpollConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)
 {
-    ConnectionPool* pool  = nullptr;
-    std::uint32_t   extra = CLIENT_CONNECTION_TAG;
+    ConnectionPool* pool = nullptr;
+    std::uint32_t extra = CLIENT_CONNECTION_TAG;
 
     if(ctx->IsEndpoint()) {
         extra = ctx->endpointIdx;
-        pool  = &endpoints_[extra].second;
+        pool = &endpoints_[extra].second;
     }
     else
         pool = &connections_;
@@ -614,10 +603,9 @@ void EpollConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t
     timerWheel_.Schedule(idx, extra, timeoutSeconds);
 }
 
-bool EpollConnectionHandler::RefreshAsyncTimer(
-    ConnectionContext* ctx, std::uint32_t delayMs, AsyncData asyncData
-) {
-    std::uint32_t idx    = connections_.GetIndex(ctx);
+bool EpollConnectionHandler::RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMs, AsyncData asyncData)
+{
+    std::uint32_t idx = connections_.GetIndex(ctx);
     std::uint64_t expire = NowMs() + delayMs;
 
     // Timers are coalesced if they fall within +-10ms of each other
@@ -627,7 +615,7 @@ bool EpollConnectionHandler::RefreshAsyncTimer(
     }
 
     ctx->isAsyncTimerOperation = 1;
-    ctx->asyncData             = asyncData;
+    ctx->asyncData = asyncData;
 
     UpdateAsyncTimer();
 
@@ -658,6 +646,7 @@ ConnectionContext* EpollConnectionHandler::GetConnection(std::uint16_t endpointI
         return nullptr;
 
     ctx->generationId++;
+    metrics_->network.activeConns++;
 
     // If it wraps to 0, bump it to 1 cuz 0 is reserved for identifying fds such as Listen/Timer
     if(ctx->generationId == 0)
@@ -673,13 +662,10 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx, bool free
     if(!ctx)
         return;
 
-    // For debugging purposes
-    numConnectionsAlive_--;
+    metrics_->network.activeConns--;
 
     // Pick the correct pool
-    auto& pool = ctx->IsEndpoint()
-                    ? endpoints_[ctx->endpointIdx].second
-                    : connections_;
+    auto& pool = ctx->IsEndpoint() ? endpoints_[ctx->endpointIdx].second : connections_;
 
     // Determine index
     std::uint32_t idx = pool.GetIndex(ctx);
@@ -697,7 +683,8 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx, bool free
     // Only applicable for client operations
     if(!ctx->IsEndpoint()) {
         if(ctx->isAsyncTimerOperation) {
-            if(timerHeap_.Remove(idx)) UpdateAsyncTimer();
+            if(timerHeap_.Remove(idx))
+                UpdateAsyncTimer();
         }
 
         // Destroy orphaned coroutine frame if connection is dying-
@@ -718,11 +705,8 @@ void EpollConnectionHandler::ReleaseConnection(ConnectionContext* ctx, bool free
     // -but it somehow closed, in this case, just notify the client (as client is suspended-
     // -due to co_await)
     else if(ctx->clientContext)
-        HandleAsyncCallback(ctx->clientContext, {
-            nullptr, 0,
-            MiddlewareAction::CONTINUE,
-            AsyncStatus::IO_FAILURE
-        }, false);
+        HandleAsyncCallback(ctx->clientContext, {nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::IO_FAILURE},
+                            false);
 
     if(ctx->socket > 0)
         close(ctx->socket);
@@ -735,9 +719,7 @@ __FreeContext:
 //  --- MISC Handlers ---
 std::uint64_t EpollConnectionHandler::NowMs()
 {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        SteadyClock::now() - startTime_
-    ).count();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - startTime_).count();
 }
 
 bool EpollConnectionHandler::SetNonBlocking(int fd)
@@ -745,7 +727,7 @@ bool EpollConnectionHandler::SetNonBlocking(int fd)
     int flags = fcntl(fd, F_GETFL, 0);
     if(flags < 0)
         return false;
-    
+
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
@@ -755,8 +737,8 @@ bool EpollConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string
     if(fd < 0)
         return false;
 
-    ctx->fileInfo.fd       = fd;
-    ctx->fileInfo.offset   = 0;
+    ctx->fileInfo.fd = fd;
+    ctx->fileInfo.offset = 0;
     ctx->fileInfo.fileSize = size;
 
     return true;
@@ -765,7 +747,7 @@ bool EpollConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string
 bool EpollConnectionHandler::EnsureReadReady(ConnectionContext* ctx)
 {
     auto& rwBuffer = ctx->rwBuffer;
-    auto& netCfg   = config_.networkConfig;
+    auto& netCfg = config_.networkConfig;
 
     if(rwBuffer.IsReadInitialized())
         return true;
@@ -778,15 +760,15 @@ bool EpollConnectionHandler::EnsureReadReady(ConnectionContext* ctx)
     return true;
 }
 
-bool EpollConnectionHandler::ResolveHost(
-    const char* host, const char* port, sockaddr_storage* outAddr, socklen_t* outLen
-) {
-    addrinfo  hints = {0};
-    addrinfo* res   = nullptr;
+bool EpollConnectionHandler::ResolveHost(const char* host, const char* port, sockaddr_storage* outAddr,
+                                         socklen_t* outLen)
+{
+    addrinfo hints = {0};
+    addrinfo* res = nullptr;
 
-    hints.ai_family   = AF_UNSPEC;     // Allow both IPv4 and IPv6
-    hints.ai_socktype = SOCK_STREAM;   // TCP
-    hints.ai_flags    = AI_ADDRCONFIG; // Only return addresses compatible with local interfaces
+    hints.ai_family = AF_UNSPEC;     // Allow both IPv4 and IPv6
+    hints.ai_socktype = SOCK_STREAM; // TCP
+    hints.ai_flags = AI_ADDRCONFIG;  // Only return addresses compatible with local interfaces
 
     int ret = getaddrinfo(host, port, &hints, &res);
     if(ret != 0)
@@ -813,18 +795,16 @@ bool EpollConnectionHandler::ResolveIP(const sockaddr_storage& addr, WFXIpAddres
     const sockaddr* sa = reinterpret_cast<const sockaddr*>(&addr);
 
     switch(sa->sa_family) {
-        case AF_INET:
-        {
+        case AF_INET: {
             const auto* v4 = reinterpret_cast<const sockaddr_in*>(sa);
             out.ip.v4 = v4->sin_addr;
-            out.type  = AF_INET;
+            out.type = AF_INET;
             return true;
         }
-        case AF_INET6:
-        {
+        case AF_INET6: {
             const auto* v6 = reinterpret_cast<const sockaddr_in6*>(sa);
             out.ip.v6 = v6->sin6_addr;
-            out.type  = AF_INET6;
+            out.type = AF_INET6;
             return true;
         }
         default:
@@ -839,9 +819,9 @@ void EpollConnectionHandler::Receive(ConnectionContext* ctx)
     // Ensure buffer is ready
     if(!EnsureReadReady(ctx))
         return;
-    
+
     auto& rwBuffer = ctx->rwBuffer;
-    bool  gotData  = false;
+    bool gotData = false;
 
     // Drain loop (ET mode: must read until EAGAIN)
     while(true) {
@@ -874,7 +854,7 @@ void EpollConnectionHandler::Receive(ConnectionContext* ctx)
                 ctx->eventType = EventType::EVENT_RECV;
                 break;
             }
-            
+
             // Fatal error
             Close(ctx);
             return;
@@ -900,7 +880,7 @@ void EpollConnectionHandler::SendFile(ConnectionContext* ctx)
     }
 
     auto& fileInfo = ctx->fileInfo;
-    int   fd       = fileInfo.fd;
+    int fd = fileInfo.fd;
 
     while(fileInfo.offset < fileInfo.fileSize) {
         ssize_t n = WrapFile(ctx, fd, &fileInfo.offset, fileInfo.fileSize - fileInfo.offset);
@@ -961,7 +941,7 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
         return;
     }
 
-    writeMeta->dataLength    = 0;
+    writeMeta->dataLength = 0;
     writeMeta->writtenLength = 0;
 
     // Call stream generator function, passing in the write buffer of rwBuffer
@@ -974,7 +954,7 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     // The format for chunk is (if framing is true):
     // <Chunk Size in Hex> \r\n [3 - 10 bytes]
     // <Chunk> \r\n             [2 bytes]
-    char*       chunkPtr = !ctx->streamChunked ? writeRegion.ptr : writeRegion.ptr + chunkHeaderReserve;
+    char* chunkPtr = !ctx->streamChunked ? writeRegion.ptr : writeRegion.ptr + chunkHeaderReserve;
     std::size_t chunkCap = !ctx->streamChunked ? writeRegion.len : writeRegion.len - chunkHeaderReserve - 2;
 
     auto streamResult = ctx->streamGenerator.Next(ctx->streamGenerator.ctx, {chunkPtr, chunkCap});
@@ -983,8 +963,7 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 
     switch(streamResult.action) {
-        case StreamAction::CONTINUE:
-        {
+        case StreamAction::CONTINUE: {
             // The actual rwbuffer allows chunks only upto uint32 max only, if its 0 or > uint32 max-
             // -its an invalid / corrupted output, 'Close' connection
             if(streamResult.writtenBytes == 0 || streamResult.writtenBytes > UINT32_MAX) {
@@ -1000,10 +979,8 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
             }
 
             // Write chunk header to an intermediate buffer first
-            char chunkHeader[chunkHeaderReserve + 1] = { 0 };
-            int headerLen = snprintf(
-                chunkHeader, chunkHeaderReserve, "%zX\r\n", streamResult.writtenBytes
-            );
+            char chunkHeader[chunkHeaderReserve + 1] = {0};
+            int headerLen = snprintf(chunkHeader, chunkHeaderReserve, "%zX\r\n", streamResult.writtenBytes);
             if(headerLen <= 0 || headerLen >= chunkHeaderReserve) {
                 Close(ctx);
                 return;
@@ -1051,17 +1028,13 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
     // Only STOP_AND_... states can reach here
     rwBuffer.ClearWriteBuffer();
     ctx->isStreamOperation = 0;
-    ctx->streamChunked     = 0;
-    ctx->streamGenerator   = {0};
+    ctx->streamChunked = 0;
+    ctx->streamGenerator = {0};
 
     // Write final chunk or finalize stream
     if(wasChunked)
-        rwBuffer.AppendWriteData(
-            CHUNK_END,
-            sizeof(CHUNK_END) - 1,
-            config_.networkConfig.sendBufferIncSize,
-            config_.networkConfig.maxSendBufferSize
-        )
+        rwBuffer.AppendWriteData(CHUNK_END, sizeof(CHUNK_END) - 1, config_.networkConfig.sendBufferIncSize,
+                                 config_.networkConfig.maxSendBufferSize)
             ? Write(ctx)
             : Close(ctx);
 
@@ -1070,7 +1043,8 @@ void EpollConnectionHandler::ResumeStream(ConnectionContext* ctx)
         ResumeReceive(ctx);
     }
 
-    else Close(ctx);
+    else
+        Close(ctx);
 }
 
 void EpollConnectionHandler::HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res, bool destroy)
@@ -1084,26 +1058,28 @@ void EpollConnectionHandler::HandleAsyncCallback(ConnectionContext* ctx, AsyncRe
         return;
 
     auto complete = async.AsyncComplete;
-    auto kill     = async.AsyncDestroy;
-    auto ud       = async.userData;
+    auto kill = async.AsyncDestroy;
+    auto ud = async.userData;
 
     async.AsyncComplete = nullptr;
-    async.AsyncDestroy  = nullptr;
-    async.userData      = nullptr;
+    async.AsyncDestroy = nullptr;
+    async.userData = nullptr;
 
     // Like all coroutines, this one would also require us to set type-erased 'ctx' at-
     // -http API
-    Shared::GetHttpAPIV1()->SetGlobalPtrData(ctx);
+    Shared::GetHttpAPIExt1()->SetGlobalPtrData(ctx);
 
     if(destroy) {
-        if(kill) kill(ud);
+        if(kill)
+            kill(ud);
     }
     else {
-        if(complete) complete(ud, res);
+        if(complete)
+            complete(ud, res);
     }
 
     // And at the end, erase it
-    Shared::GetHttpAPIV1()->SetGlobalPtrData(nullptr);
+    Shared::GetHttpAPIExt1()->SetGlobalPtrData(nullptr);
 }
 
 void EpollConnectionHandler::HandleTimeoutTimer(int sfd)
@@ -1116,8 +1092,6 @@ void EpollConnectionHandler::HandleTimeoutTimer(int sfd)
     std::uint64_t nowSec = NowMs() / 1000;
 
     timerWheel_.Tick(nowSec);
-
-    logger_.Info("<TimeoutTimer>: ", numConnectionsAlive_, ' ', nowSec);
 }
 
 void EpollConnectionHandler::HandleAsyncTimer(int sfd)
@@ -1126,24 +1100,18 @@ void EpollConnectionHandler::HandleAsyncTimer(int sfd)
     (void)read(sfd, &expirations, sizeof(expirations));
 
     std::uint64_t newTick = NowMs();
-    std::uint64_t connId  = 0;
+    std::uint64_t connId = 0;
 
     while(timerHeap_.PopExpired(newTick, connId)) {
         ConnectionContext* ctx = connections_.GetPtr(connId);
         ctx->isAsyncTimerOperation = 0;
 
-        HandleAsyncCallback(ctx, {
-            nullptr, 0,
-            MiddlewareAction::CONTINUE,
-            AsyncStatus::COMPLETED
-        }, false);
+        HandleAsyncCallback(ctx, {nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::COMPLETED}, false);
     }
 
     // Because the async timer is one shot, update it just in case there exists more async-
     // -registered timers
     UpdateAsyncTimer();
-
-    logger_.Info("<AsyncTimer>: ", numConnectionsAlive_, ' ', newTick);
 }
 
 void EpollConnectionHandler::HandleHandshake(ConnectionContext* ctx, std::uint32_t ev)
@@ -1186,8 +1154,7 @@ void EpollConnectionHandler::HandleWriteReady(ConnectionContext* ctx, std::uint3
             SendFile(ctx);
             break;
 
-        case EventType::EVENT_CONNECT:
-        {
+        case EventType::EVENT_CONNECT: {
             int err = 0;
             socklen_t len = sizeof(err);
 
@@ -1198,10 +1165,7 @@ void EpollConnectionHandler::HandleWriteReady(ConnectionContext* ctx, std::uint3
 
             // Finally its connected, now for SSL endpoints, we do SSL handshake
             if(ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE) {
-                ctx->sslConn = sslHandler_->WrapClient(
-                    ctx->socket,
-                    endpoints_[ctx->endpointIdx].first.host.c_str()
-                );
+                ctx->sslConn = sslHandler_->WrapClient(ctx->socket, endpoints_[ctx->endpointIdx].first.host.c_str());
 
                 if(!ctx->sslConn) {
                     Close(ctx);
@@ -1214,8 +1178,7 @@ void EpollConnectionHandler::HandleWriteReady(ConnectionContext* ctx, std::uint3
 
             // Plain endpoints proceed directly to write
             Write(ctx, {});
-        }
-        break;
+        } break;
     }
 }
 
@@ -1230,14 +1193,14 @@ void EpollConnectionHandler::UpdateAsyncTimer()
         return;
     }
 
-    std::uint64_t now     = NowMs();
-    std::uint64_t expire  = min->delay;
-    std::uint64_t remain  = (expire <= now) ? 1 : (expire - now);
+    std::uint64_t now = NowMs();
+    std::uint64_t expire = min->delay;
+    std::uint64_t remain = (expire <= now) ? 1 : (expire - now);
 
     itimerspec ts{};
-    ts.it_value.tv_sec  = remain / 1000;               // |
-    ts.it_value.tv_nsec = (remain % 1000) * 1'000'000; // |-> Hopefully compiler can optimize '/' and '%' without me doing '(remain * 0x4189375A) >> 42'
-    ts.it_interval      = {0, 0}; // Timer is one shot
+    ts.it_value.tv_sec = remain / 1000;
+    ts.it_value.tv_nsec = (remain % 1000) * 1'000'000;
+    ts.it_interval = {0, 0}; // Timer is one shot
 
     while(timerfd_settime(asyncTimerFd_, 0, &ts, nullptr) < 0) {
         if(errno == EINTR)
@@ -1252,15 +1215,14 @@ std::uint64_t EpollConnectionHandler::PackEpollData(ConnectionContext* ctx)
     bool isEndpoint = ctx->IsEndpoint();
 
     // For a client connection, 'EndpointIdx' will always be 'CLIENT_CONNECTION_TAG'
-    std::uint16_t tag  = isEndpoint ? ctx->endpointIdx : CLIENT_CONNECTION_TAG;
-    auto&         pool = isEndpoint ? endpoints_[ctx->endpointIdx].second : connections_;
+    std::uint16_t tag = isEndpoint ? ctx->endpointIdx : CLIENT_CONNECTION_TAG;
+    auto& pool = isEndpoint ? endpoints_[ctx->endpointIdx].second : connections_;
 
     std::uint32_t idx = pool.GetIndex(ctx);
 
     // Pack => [( EndpointIdx (16) | GenerationID (16) ) and PoolIdx (Low 32)]
-    return (static_cast<std::uint64_t>(tag)               << 48)
-         | (static_cast<std::uint64_t>(ctx->generationId) << 32)
-         | static_cast<std::uint64_t>(idx);
+    return (static_cast<std::uint64_t>(tag) << 48) | (static_cast<std::uint64_t>(ctx->generationId) << 32) |
+           static_cast<std::uint64_t>(idx);
 }
 
 bool EpollConnectionHandler::RegisterEpoll(ConnectionContext* ctx, int op)
@@ -1273,7 +1235,7 @@ bool EpollConnectionHandler::RegisterEpoll(ConnectionContext* ctx, int op)
     epoll_event* evPtr = nullptr;
 
     if(op != EPOLL_CTL_DEL) {
-        ev.events   = EPOLLIN | EPOLLOUT | EPOLLET;
+        ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
         ev.data.u64 = PackEpollData(ctx);
         evPtr = &ev;
     }
@@ -1364,18 +1326,20 @@ void EpollConnectionHandler::WrapAccept(ConnectionContext* ctx)
         return;
     }
 
+    metrics_->network.accepts++;
+
     // Set an initial timeout for the new connection so they don't connect-
     // -and stay idle forever
-    RefreshExpiry(ctx, config_.networkConfig.idleTimeout); 
+    RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
-EndpointStatus EpollConnectionHandler::WrapConnect(ConnectionContext* ctx, EndpointContainer& ecnt) 
+EndpointStatus EpollConnectionHandler::WrapConnect(ConnectionContext* ctx, EndpointContainer& ecnt)
 {
     WFX_TRACE();
 
     // IMP: This won't release any pools or sockets (Never calls 'Close()'), it expects-
     // -caller function to do so. IT IS MANDATORY THAT ERROR HANDLING IS DONE BY CALLER OR EVENT LOOP
-    auto& endpointCtx  = ecnt.first;
+    auto& endpointCtx = ecnt.first;
     auto& endpointPool = ecnt.second;
 
     if(!CreateAndConnect(ctx, endpointCtx))
@@ -1383,9 +1347,7 @@ EndpointStatus EpollConnectionHandler::WrapConnect(ConnectionContext* ctx, Endpo
 
     // If we immediately connected ('eventType' is not EVENT_CONNECT) then try to SSL connect-
     // -if needed.
-    if(ctx->eventType != EventType::EVENT_CONNECT
-        && ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE)
-    {
+    if(ctx->eventType != EventType::EVENT_CONNECT && ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE) {
         ctx->sslConn = sslHandler_->WrapClient(ctx->socket, endpointCtx.host.c_str());
         if(!ctx->sslConn)
             return EndpointStatus::SSL_FAILURE;
@@ -1401,8 +1363,7 @@ EndpointStatus EpollConnectionHandler::WrapConnect(ConnectionContext* ctx, Endpo
     // -means socket is usable now. 'MOD' re-evaluates fd state in ET mode so the edge fires immediately-
     // -in the event loop, which then calls 'Write()' or continues handshake
     // 'EVENT_CONNECT' skips this as 'EPOLLOUT' fires naturally when OS completes it in event loop
-    if((ctx->eventType != EventType::EVENT_CONNECT)
-        && !RegisterEpoll(ctx, EPOLL_CTL_MOD))
+    if((ctx->eventType != EventType::EVENT_CONNECT) && !RegisterEpoll(ctx, EPOLL_CTL_MOD))
         return EndpointStatus::INTERNAL_ERROR;
 
     RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
@@ -1411,14 +1372,26 @@ EndpointStatus EpollConnectionHandler::WrapConnect(ConnectionContext* ctx, Endpo
 
 ssize_t EpollConnectionHandler::WrapRead(ConnectionContext* ctx, char* buf, std::size_t len)
 {
-    if(!ctx->sslConn)
-        return ::recv(ctx->socket, buf, len, 0);
+    if(!ctx->sslConn) {
+        ssize_t n = ::recv(ctx->socket, buf, len, 0);
+
+        const ssize_t ok = (n > 0);
+
+        // Count only successful reads
+        metrics_->network.reads += ok;
+        metrics_->network.bytesRead += ok ? static_cast<std::uint64_t>(n) : 0;
+
+        return n;
+    }
 
     SSLResult result = sslHandler_->Read(ctx->sslConn, buf, static_cast<int>(len));
 
     switch(result.error) {
-        case SSLReturn::SUCCESS:
+        case SSLReturn::SUCCESS: {
+            metrics_->network.reads++;
+            metrics_->network.bytesRead += static_cast<std::uint64_t>(result.res);
             return result.res;
+        }
         case SSLReturn::WANT_READ:
         case SSLReturn::WANT_WRITE:
             errno = EAGAIN;
@@ -1436,14 +1409,26 @@ ssize_t EpollConnectionHandler::WrapRead(ConnectionContext* ctx, char* buf, std:
 
 ssize_t EpollConnectionHandler::WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len)
 {
-    if(!ctx->sslConn)
-        return ::send(ctx->socket, buf, len, MSG_NOSIGNAL);
+    if(!ctx->sslConn) {
+        ssize_t n = ::send(ctx->socket, buf, len, MSG_NOSIGNAL);
+
+        const ssize_t ok = (n > 0);
+
+        // Count only successful writes
+        metrics_->network.writes += ok;
+        metrics_->network.bytesWritten += ok ? static_cast<std::uint64_t>(n) : 0;
+
+        return n;
+    }
 
     SSLResult result = sslHandler_->Write(ctx->sslConn, buf, static_cast<int>(len));
 
     switch(result.error) {
-        case SSLReturn::SUCCESS:
+        case SSLReturn::SUCCESS: {
+            metrics_->network.writes++;
+            metrics_->network.bytesWritten += static_cast<std::uint64_t>(result.res);
             return result.res;
+        }
         case SSLReturn::WANT_READ:
         case SSLReturn::WANT_WRITE:
             errno = EAGAIN;
@@ -1461,8 +1446,16 @@ ssize_t EpollConnectionHandler::WrapWrite(ConnectionContext* ctx, const char* bu
 
 ssize_t EpollConnectionHandler::WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count)
 {
-    if(!ctx->sslConn)
-        return ::sendfile(ctx->socket, fd, offset, count);
+    if(!ctx->sslConn) {
+        ssize_t n = ::sendfile(ctx->socket, fd, offset, count);
+
+        const bool ok = (n > 0);
+
+        metrics_->network.fileCalls += ok;
+        metrics_->network.fileBytesWritten += ok ? static_cast<std::uint64_t>(n) : 0;
+
+        return n;
+    }
 
     SSLResult result = sslHandler_->WriteFile(ctx->sslConn, fd, offset ? *offset : 0, count);
 
@@ -1470,49 +1463,48 @@ ssize_t EpollConnectionHandler::WrapFile(ConnectionContext* ctx, int fd, off_t* 
         // Switch to streaming mode with Write instead
         // Stream will uses a non chunked mode of transferring files (cuz we already sent the header)
         // And we have access to FileInfo struct anyways (its guaranteed initialized so yeah)
-        case SSLReturn::NO_IMPL:
-            ctx->isFileOperation   = 0;
+        case SSLReturn::NO_IMPL: {
+            metrics_->network.fileFallbacks++;
+
+            ctx->isFileOperation = 0;
             ctx->isStreamOperation = 1;
-            ctx->streamChunked     = 0;
-            ctx->streamGenerator = {
-                // ctx
-                &ctx->fileInfo,
+            ctx->streamChunked = 0;
+            ctx->streamGenerator = {// ctx
+                                    &ctx->fileInfo,
 
-                // Next
-                [](void* c, StreamBuffer buffer) -> StreamResult {
-                    auto* fileInfo = static_cast<FileInfo*>(c);
+                                    // Next
+                                    [](void* c, StreamBuffer buffer) -> StreamResult {
+                                        auto* fileInfo = static_cast<FileInfo*>(c);
 
-                    ssize_t res = pread(fileInfo->fd, buffer.buffer, buffer.size, fileInfo->offset);
+                                        ssize_t res = pread(fileInfo->fd, buffer.buffer, buffer.size, fileInfo->offset);
 
-                    // Error or EOF
-                    if(res <= 0) {
-                        return StreamResult{
-                            0, res == 0
-                                ? StreamAction::STOP_AND_ALIVE_CONN
-                                : StreamAction::STOP_AND_CLOSE_CONN
-                        };
-                    }
+                                        // Error or EOF
+                                        if(res <= 0) {
+                                            return StreamResult{0, res == 0 ? StreamAction::STOP_AND_ALIVE_CONN
+                                                                            : StreamAction::STOP_AND_CLOSE_CONN};
+                                        }
 
-                    // Success
-                    fileInfo->offset += res;
+                                        // Success
+                                        fileInfo->offset += res;
 
-                    return StreamResult{
-                        static_cast<std::size_t>(res),
-                        StreamAction::CONTINUE
-                    };
-                },
+                                        return StreamResult{static_cast<std::size_t>(res), StreamAction::CONTINUE};
+                                    },
 
-                // Destroy (not needed)
-                nullptr
-            };
+                                    // Destroy (not needed)
+                                    nullptr};
 
             // Signal to caller that streaming mode is engaged
             return SWITCH_FILE_TO_STREAM;
+        }
+        case SSLReturn::SUCCESS: {
+            metrics_->network.fileCalls++;
+            metrics_->network.fileBytesWritten += static_cast<std::uint64_t>(result.res);
 
-        case SSLReturn::SUCCESS:
             if(offset)
                 *offset += result.res; // Manually track progress
+
             return result.res;
+        }
         case SSLReturn::WANT_READ:
         case SSLReturn::WANT_WRITE:
             errno = EAGAIN;

@@ -6,8 +6,8 @@
 #include "utils/pool/buffer_pool.hpp"
 #include "utils/fileops/filecache.hpp"
 #include "utils/fileops/filesystem.hpp"
-#include "utils/logger/logger.hpp"
-#include "utils/crypt/string.hpp"
+#include "utils/diagnostics/logger.hpp"
+#include "utils/string/string.hpp"
 
 #include <cstring>
 
@@ -18,12 +18,12 @@ using namespace WFX::Shared;
 using namespace WFX::Utils;
 
 // vvv Constants vvv
-static constexpr std::uint32_t CL_FIELD_WIDTH       = 10;
-static constexpr const char*   CL_HEADER_PREFIX     = "Content-Length: ";
+static constexpr std::uint32_t CL_FIELD_WIDTH = 10;
+static constexpr const char* CL_HEADER_PREFIX = "Content-Length: ";
 static constexpr std::uint32_t CL_HEADER_PREFIX_LEN = 16;
-static constexpr const char*   CL_PLACEHOLDER       = "0000000000";  // 10 digits
-static constexpr const char*   CL_ZERO              = "Content-Length: 0\r\n";
-static constexpr std::uint32_t CL_ZERO_LEN          = 19;
+static constexpr const char* CL_PLACEHOLDER = "0000000000"; // 10 digits
+static constexpr const char* CL_ZERO = "Content-Length: 0\r\n";
+static constexpr std::uint32_t CL_ZERO_LEN = 19;
 
 // vvv Static helpers vvv
 static void FormatFixed10(std::uint32_t value, char out[CL_FIELD_WIDTH])
@@ -72,12 +72,12 @@ void HttpResponse::Reset()
         stream_ = {};
     }
 
-    phase_           = ResponsePhase::FRESH;
-    bodyKind_        = BodyKind::NONE;
-    status_          = HttpStatus::OK;
-    clOffset_        = 0;
+    phase_ = ResponsePhase::FRESH;
+    bodyKind_ = BodyKind::NONE;
+    status_ = HttpStatus::OK;
+    clOffset_ = 0;
     bodyStartOffset_ = 0;
-    clNeeded_        = false;
+    clNeeded_ = false;
 
     if(rwBuffer_)
         rwBuffer_->ClearWriteBuffer();
@@ -95,7 +95,7 @@ void HttpResponse::AbortWithError(HttpStatus status, std::string_view message)
 void HttpResponse::FatalIfCommitted(const char* caller)
 {
     if(phase_ == ResponsePhase::COMMITTED)
-        Logger::GetInstance().Fatal("[HttpResponse]: '", caller, "()' called after Commit()");
+        GetLogger().Fatal("[HttpResponse]: '", caller, "()' called after Commit()");
 }
 
 void HttpResponse::EnsureStatusWritten()
@@ -140,17 +140,15 @@ void HttpResponse::EnsureBodyOpen()
         return;
 
     if(StatusForbidsBody(status_))
-        Logger::GetInstance().Fatal(
-            "[HttpResponse]: Body not allowed for this status code [1xx, 204 and 304]"
-        );
+        GetLogger().Fatal("[HttpResponse]: Body not allowed for this status code [1xx, 204 and 304]");
 
     InjectContentLength();
     Append("\r\n", 2);
 
     // Record where body bytes start
     bodyStartOffset_ = rwBuffer_->GetWriteMeta()->dataLength;
-    bodyKind_        = BodyKind::BUFFERED;
-    phase_           = ResponsePhase::BODY;
+    bodyKind_ = BodyKind::BUFFERED;
+    phase_ = ResponsePhase::BODY;
 }
 
 // vvv Public write API vvv
@@ -159,7 +157,7 @@ void HttpResponse::WriteStatus(HttpStatus code)
     FatalIfCommitted("WriteStatus");
 
     if(phase_ != ResponsePhase::FRESH)
-        Logger::GetInstance().Fatal("[HttpResponse]: 'WriteStatus()' called after headers already written");
+        GetLogger().Fatal("[HttpResponse]: 'WriteStatus()' called after headers already written");
 
     status_ = code;
 
@@ -185,14 +183,14 @@ void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
 {
     FatalIfCommitted("WriteHeader");
 
-    auto& logger = Logger::GetInstance();
+    auto& logger = GetLogger();
 
     if(phase_ == ResponsePhase::BODY)
         logger.Fatal("[HttpResponse]: 'WriteHeader()' called after body already started");
 
     // Engine-owned header, user must not set this
     // TODO: Think if we should also block Content-Length and Transfer-Encoding key as well
-    if(Utils::StringCanonical::InsensitiveStringCompare(key, "connection"))
+    if(Utils::StringUtils::InsensitiveStringCompare(key, "connection"))
         logger.Fatal("[HttpResponse]: 'Connection' header is engine-owned, do not set it manually");
 
     EnsureHeadersOpen();
@@ -220,7 +218,7 @@ void HttpResponse::WriteFile(std::string_view path, bool autoHandle404)
 {
     FatalIfCommitted("WriteFile");
 
-    auto& logger = Logger::GetInstance();
+    auto& logger = GetLogger();
 
     if(phase_ == ResponsePhase::BODY)
         logger.Fatal("[HttpResponse]: 'WriteFile()' called after body already started");
@@ -238,10 +236,10 @@ void HttpResponse::WriteFile(std::string_view path, bool autoHandle404)
 
     EnsureHeadersOpen();
 
-    std::uint64_t    fileSize = FileSystem::GetFileSize(path.data());
-    std::string_view mime     = MimeDetector::DetectMimeFromExt({path.data(), path.size()});
+    std::uint64_t fileSize = FileSystem::GetFileSize(path.data());
+    std::string_view mime = MimeDetector::DetectMimeFromExt({path.data(), path.size()});
 
-    char          clVal[20];
+    char clVal[20];
     std::uint32_t clLen = FormatUInt64(fileSize, clVal);
 
     Append("Content-Length: ", 16);
@@ -258,14 +256,14 @@ void HttpResponse::WriteFile(std::string_view path, bool autoHandle404)
     filePath_.assign(path.data(), path.size());
 
     bodyKind_ = BodyKind::FILE;
-    phase_    = ResponsePhase::COMMITTED;
+    phase_ = ResponsePhase::COMMITTED;
 }
 
 void HttpResponse::WriteStream(StreamGenerator gen, bool chunked)
 {
     FatalIfCommitted("WriteStream");
 
-    auto& logger = Logger::GetInstance();
+    auto& logger = GetLogger();
 
     if(bodyKind_ != BodyKind::NONE)
         logger.Fatal("[HttpResponse]: 'WriteStream()' called after body kind already set");
@@ -284,9 +282,9 @@ void HttpResponse::WriteStream(StreamGenerator gen, bool chunked)
     if(stream_.ctx && stream_.Destroy)
         stream_.Destroy(stream_.ctx);
 
-    stream_   = gen;
+    stream_ = gen;
     bodyKind_ = BodyKind::STREAM;
-    phase_    = ResponsePhase::COMMITTED;
+    phase_ = ResponsePhase::COMMITTED;
 }
 
 void HttpResponse::Commit()
@@ -303,14 +301,14 @@ void HttpResponse::Commit()
         Append("\r\n", 2);
 
         bodyKind_ = BodyKind::BUFFERED;
-        phase_    = ResponsePhase::COMMITTED;
+        phase_ = ResponsePhase::COMMITTED;
         return;
     }
 
     // Patch Content-Length value in place using only 'GetWriteData()' + memcpy
     if(clNeeded_) {
         std::size_t bodySize = rwBuffer_->GetWriteMeta()->dataLength - bodyStartOffset_;
-        char        tmp[CL_FIELD_WIDTH];
+        char tmp[CL_FIELD_WIDTH];
         FormatFixed10(bodySize, tmp);
 
         // PatchAt via existing API: 'GetWriteData()' gives base, clOffset_ is the byte offset
@@ -344,34 +342,32 @@ void HttpResponse::SendStream(StreamGenerator gen, bool chunked)
 }
 
 // vvv Putting 'WriteTemplate' here because it was tooo messy :) vvv
-static bool DrainCarry(
-    const std::string& carry, char* bufBase, std::uint64_t bufSize,
-    std::uint64_t& bufferOffset, std::uint64_t& currentOffset, std::uint64_t maxSize
-) {
+static bool DrainCarry(const std::string& carry, char* bufBase, std::uint64_t bufSize, std::uint64_t& bufferOffset,
+                       std::uint64_t& currentOffset, std::uint64_t maxSize)
+{
     std::uint64_t remaining = maxSize - currentOffset;
-    std::uint64_t toRead    = std::min(remaining, bufSize - bufferOffset);
+    std::uint64_t toRead = std::min(remaining, bufSize - bufferOffset);
 
     std::memcpy(bufBase + bufferOffset, carry.c_str() + currentOffset, toRead);
 
     currentOffset += toRead;
-    bufferOffset  += toRead;
+    bufferOffset += toRead;
 
     return currentOffset >= maxSize;
 }
 
-static int DrainFile(
-    BaseFilePtr& inFile, char* bufBase, std::uint64_t bufSize,
-    std::uint64_t& bufferOffset, std::uint64_t& currentOffset, std::uint64_t maxSize
-) {
-    std::uint64_t remaining    = maxSize - currentOffset;
-    std::uint64_t toRead       = std::min(remaining, bufSize - bufferOffset);
-    std::int64_t  writtenBytes = inFile->ReadAt(bufBase + bufferOffset, toRead, currentOffset);
+static int DrainFile(BaseFilePtr& inFile, char* bufBase, std::uint64_t bufSize, std::uint64_t& bufferOffset,
+                     std::uint64_t& currentOffset, std::uint64_t maxSize)
+{
+    std::uint64_t remaining = maxSize - currentOffset;
+    std::uint64_t toRead = std::min(remaining, bufSize - bufferOffset);
+    std::int64_t writtenBytes = inFile->ReadAt(bufBase + bufferOffset, toRead, currentOffset);
 
     if(writtenBytes < 0)
         return -1;
 
     currentOffset += writtenBytes;
-    bufferOffset  += writtenBytes;
+    bufferOffset += writtenBytes;
 
     return currentOffset >= maxSize ? 1 : 0;
 }
@@ -422,7 +418,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
 {
     FatalIfCommitted("SendTemplate");
 
-    auto meta = TemplateEngine::GetInstance().GetTemplate(std::move(path));
+    auto meta = GetTemplateEngine().GetTemplate(std::move(path));
     if(!meta) {
         AbortWithError(HttpStatus::NOT_FOUND, "Template not found :(");
         return;
@@ -441,7 +437,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
         return;
     }
 
-    auto [fd, size] = FileCache::GetInstance().GetFileDesc(meta->filePath);
+    auto [fd, size] = GetFileCache().GetFileDesc(meta->filePath);
     if(fd == WFX_INVALID_FILE) {
         AbortWithError(HttpStatus::INTERNAL_SERVER_ERROR, "Template file descriptor failed");
         return;
@@ -457,129 +453,132 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
     WriteHeader("Content-Type", "text/html");
 
     using State = struct {
-        BaseFilePtr               inFile;
-        Shared::JsonObject          ctx;
+        BaseFilePtr inFile;
+        Shared::JsonObject ctx;
         decltype(meta->gen.get()) gen;
-        TemplateChunkType         currentType;
-        std::uint32_t             currentState;
-        std::uint64_t             currentOffset;
-        std::uint64_t             maxSize;
-        std::string               carry;
+        TemplateChunkType currentType;
+        std::uint32_t currentState;
+        std::uint64_t currentOffset;
+        std::uint64_t maxSize;
+        std::string carry;
     };
 
-    auto* s = BufferPool::GetInstance().Alloc(sizeof(State));
+    auto* s = GetBufferPool().Alloc(sizeof(State));
     if(!s) {
         AbortWithError(HttpStatus::INTERNAL_SERVER_ERROR, "Template allocation failed");
         return;
     }
 
     // Construct object inplace
-    new(s) State{
-        std::move(inFile), std::move(ctx), meta->gen.get(),
-        TemplateChunkType::MONOSTATE, 0, 0, 0, {}
-    };
+    new (s) State{std::move(inFile), std::move(ctx), meta->gen.get(), TemplateChunkType::MONOSTATE, 0, 0, 0, {}};
 
-    WriteStream(StreamGenerator{
-        s,
+    WriteStream(StreamGenerator{s,
 
-        // Next
-        [](void* c, StreamBuffer buffer) -> StreamResult {
-            auto& [
-                inFile, ctx, gen, currentType, currentState,
-                currentOffset, maxSize, carry
-            ] = *static_cast<State*>(c);
+                                // Next
+                                [](void* c, StreamBuffer buffer) -> StreamResult {
+                                    auto& [inFile, ctx, gen, currentType, currentState, currentOffset, maxSize, carry] =
+                                        *static_cast<State*>(c);
 
-            // So the way we will implement this is simple
-            // We will infinite loop and keep calling 'GetState', we will only break out if-
-            // -we reached end of state (checked by 'GetState' returning std::monostate) or-
-            // -buffer is full, we need to continue it in next loop
+                                    // So the way we will implement this is simple
+                                    // We will infinite loop and keep calling 'GetState', we will only break out if-
+                                    // -we reached end of state (checked by 'GetState' returning std::monostate) or-
+                                    // -buffer is full, we need to continue it in next loop
 
-            std::uint64_t bufferOffset = 0;
-            char*         bufBase      = buffer.buffer;
-            std::uint64_t bufSize      = buffer.size;
+                                    std::uint64_t bufferOffset = 0;
+                                    char* bufBase = buffer.buffer;
+                                    std::uint64_t bufSize = buffer.size;
 
-            // But before we do all the shit i said above, check if we have data remaining from-
-            // -previous call, if yes, complete it before moving to the actual 'GetState' stuff
-            if(currentType != TemplateChunkType::MONOSTATE) {
-                if(currentType == TemplateChunkType::FILE) {
-                    int r = DrainFile(inFile, bufBase, bufSize, bufferOffset, currentOffset, maxSize);
+                                    // But before we do all the shit i said above, check if we have data remaining from-
+                                    // -previous call, if yes, complete it before moving to the actual 'GetState' stuff
+                                    if(currentType != TemplateChunkType::MONOSTATE) {
+                                        if(currentType == TemplateChunkType::FILE) {
+                                            int r = DrainFile(inFile, bufBase, bufSize, bufferOffset, currentOffset,
+                                                              maxSize);
 
-                    if(r < 0)  return {0, StreamAction::STOP_AND_CLOSE_CONN};
-                    if(r == 0) return {bufferOffset, StreamAction::CONTINUE}; // chunk unfinished
-                }
-                else {
-                    bool done = DrainCarry(carry, bufBase, bufSize, bufferOffset, currentOffset, maxSize);
-                    if(!done)
-                        return {bufferOffset, StreamAction::CONTINUE};  // chunk unfinished
-                }
+                                            if(r < 0)
+                                                return {0, StreamAction::STOP_AND_CLOSE_CONN};
+                                            if(r == 0)
+                                                return {bufferOffset, StreamAction::CONTINUE}; // chunk unfinished
+                                        }
+                                        else {
+                                            bool done = DrainCarry(carry, bufBase, bufSize, bufferOffset, currentOffset,
+                                                                   maxSize);
+                                            if(!done)
+                                                return {bufferOffset, StreamAction::CONTINUE}; // chunk unfinished
+                                        }
 
-                currentType = TemplateChunkType::MONOSTATE;
+                                        currentType = TemplateChunkType::MONOSTATE;
 
-                // Buffer full, yield before processing new states
-                if(bufferOffset >= bufSize)
-                    return {bufferOffset, StreamAction::CONTINUE};
-            }
+                                        // Buffer full, yield before processing new states
+                                        if(bufferOffset >= bufSize)
+                                            return {bufferOffset, StreamAction::CONTINUE};
+                                    }
 
-            // Process new states
-            while(true) {
-                auto  stateResult = gen->GetState(currentState, ctx);
-                auto& chunk       = stateResult.chunk;
-                currentState      = stateResult.newState;
+                                    // Process new states
+                                    while(true) {
+                                        auto stateResult = gen->GetState(currentState, ctx);
+                                        auto& chunk = stateResult.chunk;
+                                        currentState = stateResult.newState;
 
-                // Monostate, we reached the end of template, exit and keep-alive the connection
-                if(std::holds_alternative<std::monostate>(chunk)) {
-                    // But before we exit, check if we have any data remaining to send
-                    // If we do, send it and in the next call, we will close
-                    if(bufferOffset > 0)
-                        return {bufferOffset, StreamAction::CONTINUE};
+                                        // Monostate, we reached the end of template, exit and keep-alive the connection
+                                        if(std::holds_alternative<std::monostate>(chunk)) {
+                                            // But before we exit, check if we have any data remaining to send
+                                            // If we do, send it and in the next call, we will close
+                                            if(bufferOffset > 0)
+                                                return {bufferOffset, StreamAction::CONTINUE};
 
-                    return {0, StreamAction::STOP_AND_ALIVE_CONN};
-                }
+                                            return {0, StreamAction::STOP_AND_ALIVE_CONN};
+                                        }
 
-                // File chunk, read file to buffer
-                if(auto* fc = std::get_if<FileChunk>(&chunk)) {
-                    currentType   = TemplateChunkType::FILE;
-                    currentOffset = fc->offset;
-                    maxSize       = fc->offset + fc->length;
+                                        // File chunk, read file to buffer
+                                        if(auto* fc = std::get_if<FileChunk>(&chunk)) {
+                                            currentType = TemplateChunkType::FILE;
+                                            currentOffset = fc->offset;
+                                            maxSize = fc->offset + fc->length;
 
-                    int r = DrainFile(inFile, bufBase, bufSize, bufferOffset, currentOffset, maxSize);
+                                            int r = DrainFile(inFile, bufBase, bufSize, bufferOffset, currentOffset,
+                                                              maxSize);
 
-                    if(r < 0)  return {0, StreamAction::STOP_AND_CLOSE_CONN};
-                    if(r == 0) return {bufferOffset, StreamAction::CONTINUE};
+                                            if(r < 0)
+                                                return {0, StreamAction::STOP_AND_CLOSE_CONN};
+                                            if(r == 0)
+                                                return {bufferOffset, StreamAction::CONTINUE};
 
-                    currentType = TemplateChunkType::MONOSTATE;
-                    continue;
-                }
+                                            currentType = TemplateChunkType::MONOSTATE;
+                                            continue;
+                                        }
 
-                if(auto* vc = std::get_if<VariableChunk>(&chunk)) {
-                    if(!SerializeVal(vc->value, carry)) {
-                        currentType = TemplateChunkType::MONOSTATE;
-                        continue;
-                    }
+                                        if(auto* vc = std::get_if<VariableChunk>(&chunk)) {
+                                            if(!SerializeVal(vc->value, carry)) {
+                                                currentType = TemplateChunkType::MONOSTATE;
+                                                continue;
+                                            }
 
-                    currentType   = TemplateChunkType::VARIABLE;
-                    currentOffset = 0;
-                    maxSize       = carry.size();
+                                            currentType = TemplateChunkType::VARIABLE;
+                                            currentOffset = 0;
+                                            maxSize = carry.size();
 
-                    bool done = DrainCarry(carry, bufBase, bufSize, bufferOffset, currentOffset, maxSize);
-                    if(!done)
-                        return {bufferOffset, StreamAction::CONTINUE};
+                                            bool done = DrainCarry(carry, bufBase, bufSize, bufferOffset, currentOffset,
+                                                                   maxSize);
+                                            if(!done)
+                                                return {bufferOffset, StreamAction::CONTINUE};
 
-                    currentType = TemplateChunkType::MONOSTATE;
-                    continue;
-                }
+                                            currentType = TemplateChunkType::MONOSTATE;
+                                            continue;
+                                        }
 
-                return {0, StreamAction::STOP_AND_CLOSE_CONN};
-            }
-        },
+                                        return {0, StreamAction::STOP_AND_CLOSE_CONN};
+                                    }
+                                },
 
-        // Destroy
-        [](void* c) {
-            static_cast<State*>(c)->~State();
-            BufferPool::GetInstance().Free(c);
-        }
+                                // Destroy
+                                [](void* c) {
+                                    static_cast<State*>(c)->~State();
+                                    GetBufferPool().Free(c);
+                                }
 
-    }, true);
+                },
+                true);
 }
 
 } // namespace WFX::Http

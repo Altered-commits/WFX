@@ -12,24 +12,25 @@ namespace WFX::Http {
 /* User side implementation of 'Response' class. 'CoreEngine' passes the API */
 class Response {
 public:
-    Response(void* backend) : backend_(backend) {}
+    Response(void* backend) : backend_(backend)
+    {}
 
 public: // Status and Headers
     Response& Status(Shared::HttpStatus code)
     {
-        Core::HttpApi()->SetStatus(backend_, code);
+        Core::HttpApiExt1()->SetStatus(backend_, code);
         return *this;
     }
 
     Response& Status(std::uint16_t code)
     {
-        Core::HttpApi()->SetStatus(backend_, static_cast<Shared::HttpStatus>(code));
+        Core::HttpApiExt1()->SetStatus(backend_, static_cast<Shared::HttpStatus>(code));
         return *this;
     }
 
     Response& Header(std::string_view key, std::string_view value)
     {
-        Core::HttpApi()->SetHeader(backend_, ToSV(key), ToSV(value));
+        Core::HttpApiExt1()->SetHeader(backend_, ToSV(key), ToSV(value));
         return *this;
     }
 
@@ -37,7 +38,7 @@ public: // Main flow
     // Char / View types
     Response& Write(std::string_view data)
     {
-        Core::HttpApi()->WriteBody(backend_, ToSV(data));
+        Core::HttpApiExt1()->WriteBody(backend_, ToSV(data));
         return *this;
     }
 
@@ -68,12 +69,30 @@ public: // Main flow
     }
 
     // Common integral promotions so user can pass int, unsigned, etc. naturally
-    Response& Write(std::int32_t  value) { return Write(static_cast<std::int64_t>(value));  }
-    Response& Write(std::uint32_t value) { return Write(static_cast<std::uint64_t>(value)); }
-    Response& Write(std::int16_t  value) { return Write(static_cast<std::int64_t>(value));  }
-    Response& Write(std::uint16_t value) { return Write(static_cast<std::uint64_t>(value)); }
-    Response& Write(std::int8_t   value) { return Write(static_cast<std::int64_t>(value));  }
-    Response& Write(std::uint8_t  value) { return Write(static_cast<std::uint64_t>(value)); }
+    Response& Write(std::int32_t value)
+    {
+        return Write(static_cast<std::int64_t>(value));
+    }
+    Response& Write(std::uint32_t value)
+    {
+        return Write(static_cast<std::uint64_t>(value));
+    }
+    Response& Write(std::int16_t value)
+    {
+        return Write(static_cast<std::int64_t>(value));
+    }
+    Response& Write(std::uint16_t value)
+    {
+        return Write(static_cast<std::uint64_t>(value));
+    }
+    Response& Write(std::int8_t value)
+    {
+        return Write(static_cast<std::int64_t>(value));
+    }
+    Response& Write(std::uint8_t value)
+    {
+        return Write(static_cast<std::uint64_t>(value));
+    }
 
     // Floating point, stack formatted
     Response& Write(double value)
@@ -83,7 +102,10 @@ public: // Main flow
         return Write(std::string_view{buf, static_cast<std::size_t>(end - buf)});
     }
 
-    Response& Write(float value) { return Write(static_cast<double>(value)); }
+    Response& Write(float value)
+    {
+        return Write(static_cast<double>(value));
+    }
 
     // Bool
     Response& Write(bool value)
@@ -95,7 +117,7 @@ public: // Main flow
     // Optional: engine auto-commits if user forgets
     void Commit()
     {
-        Core::HttpApi()->Commit(backend_);
+        Core::HttpApiExt1()->Commit(backend_);
     }
 
 public: // Sugar syntax
@@ -108,48 +130,63 @@ public: // Sugar syntax
     }
 
     // Zero-copy sendfile path
-    void SendFile(std::string_view path, bool autoHandle404 = true) { Core::HttpApi()->WriteFile(backend_, ToSV(path), autoHandle404); }
-    void SendFile(Shared::StringView path, bool autoHandle404 = true) { Core::HttpApi()->WriteFile(backend_, path, autoHandle404); }
+    void SendFile(std::string_view path, bool autoHandle404 = true)
+    {
+        Core::HttpApiExt1()->WriteFile(backend_, ToSV(path), autoHandle404);
+    }
+    void SendFile(Shared::StringView path, bool autoHandle404 = true)
+    {
+        Core::HttpApiExt1()->WriteFile(backend_, path, autoHandle404);
+    }
 
     // HTML Template, sets Content-Type, writes, commits
-    void SendTemplate(std::string_view path, Shared::JsonObject&& ctx)   { Core::HttpApi()->WriteTemplate(backend_, ToSV(path), &ctx); }
-    void SendTemplate(Shared::StringView path, Shared::JsonObject&& ctx) { Core::HttpApi()->WriteTemplate(backend_, path, &ctx); }
+    void SendTemplate(std::string_view path, Shared::JsonObject&& ctx)
+    {
+        Core::HttpApiExt1()->WriteTemplate(backend_, ToSV(path), &ctx);
+    }
+    void SendTemplate(Shared::StringView path, Shared::JsonObject&& ctx)
+    {
+        Core::HttpApiExt1()->WriteTemplate(backend_, path, &ctx);
+    }
 
     // Typed lambda, allocated via engine allocator
-    template<typename Fn>
-    void Stream(Fn&& fn, bool chunked = true)
+    template <typename Fn> void Stream(Fn&& fn, bool chunked = true)
     {
         using FnType = std::decay_t<Fn>;
 
-        void* raw = Core::MemoryApi()->Alloc(sizeof(FnType));
+        void* raw = Core::MemoryApiExt1()->Alloc(sizeof(FnType));
         if(!raw)
             return;
 
-        FnType* f = new(raw) FnType(std::forward<Fn>(fn));
+        FnType* f = new (raw) FnType(std::forward<Fn>(fn));
 
-        Shared::StreamGenerator gen{
-            f,
+        Shared::StreamGenerator gen{f,
 
-            // Next
-            [](void* ctx, Shared::StreamBuffer buffer) -> Shared::StreamResult {
-                return (*static_cast<FnType*>(ctx))(buffer);
-            },
+                                    // Next
+                                    [](void* ctx, Shared::StreamBuffer buffer) -> Shared::StreamResult {
+                                        return (*static_cast<FnType*>(ctx))(buffer);
+                                    },
 
-            // Destroy
-            [](void* ctx) {
-                auto* f = static_cast<FnType*>(ctx);
-                f->~FnType();
-                Core::MemoryApi()->Free(f);
-            }
-        };
+                                    // Destroy
+                                    [](void* ctx) {
+                                        auto* f = static_cast<FnType*>(ctx);
+                                        f->~FnType();
+                                        Core::MemoryApiExt1()->Free(f);
+                                    }};
 
-        Core::HttpApi()->WriteStream(backend_, gen, chunked);
+        Core::HttpApiExt1()->WriteStream(backend_, gen, chunked);
+    }
+
+public: // Internal use
+    void* GetBackend()
+    {
+        return backend_;
     }
 
 private:
     static Shared::StringView ToSV(std::string_view s)
     {
-        return { s.data(), static_cast<std::uint64_t>(s.size()) };
+        return {s.data(), static_cast<std::uint64_t>(s.size())};
     }
 
 private:

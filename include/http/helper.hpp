@@ -9,20 +9,17 @@
 
 namespace WFX::Http {
 
-template<typename T>
-struct AlwaysFalse : std::false_type {};
+template <typename T> struct AlwaysFalse : std::false_type {};
 
-template<typename Lambda>
-Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
+template <typename Lambda> Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
 {
     // Async route: Lambda returns WFX::Coro (Task<void>)
     if constexpr(std::is_invocable_r_v<Async::Task<void>, Lambda, Request, Response>) {
         static auto fn = cb;
 
         Shared::RouteCallback rc;
-        rc.kind  = Shared::CallbackKind::ASYNC;
-        rc.async = [](Request req, Response res, Shared::AsyncCompleteFn onDone, void* onDoneUd)
-        {
+        rc.kind = Shared::CallbackKind::ASYNC;
+        rc.async = [](Request req, Response res, Shared::AsyncCompleteFn onDone, void* onDoneUd) {
             auto task = fn(req, res);
             task.SetCompletion(onDone, onDoneUd);
             task.Resume();
@@ -42,34 +39,27 @@ Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
 
         Shared::RouteCallback rc;
         rc.kind = Shared::CallbackKind::SYNC;
-        rc.sync = [](Request req, Response res) {
-            fn(req, res);
-        };
+        rc.sync = [](Request req, Response res) { fn(req, res); };
 
         return rc;
     }
 
     else {
-        static_assert(
-            AlwaysFalse<Lambda>::value,
-            "[WFX]: Invalid route callback. Expected one of:\n"
-            "  - void(WFX::Request, WFX::Response)\n"
-            "  - WFX::Coro(WFX::Request, WFX::Response)\n"
-        );
+        static_assert(AlwaysFalse<Lambda>::value, "[WFX]: Invalid route callback. Expected one of:\n"
+                                                  "  - void(WFX::Request, WFX::Response)\n"
+                                                  "  - WFX::Coro(WFX::Request, WFX::Response)\n");
     }
 }
 
-template<typename Lambda>
-Shared::MwCallback MakeMwCallback(Lambda&& cb)
+template <typename Lambda> Shared::MwCallback MakeMwCallback(Lambda&& cb)
 {
     // Async middleware: returns WFX::MwCoro (Task<MiddlewareAction>)
     if constexpr(std::is_invocable_r_v<Async::Task<Shared::MiddlewareAction>, Lambda, Request, Response>) {
         static auto fn = cb;
 
         Shared::MwCallback mc;
-        mc.kind  = Shared::CallbackKind::ASYNC;
-        mc.async = [](Request req, Response res, Shared::AsyncCompleteFn onDone, void* onDoneUd)
-        {
+        mc.kind = Shared::CallbackKind::ASYNC;
+        mc.async = [](Request req, Response res, Shared::AsyncCompleteFn onDone, void* onDoneUd) {
             auto task = fn(req, res);
             task.SetCompletion(onDone, onDoneUd);
             task.Resume();
@@ -84,40 +74,39 @@ Shared::MwCallback MakeMwCallback(Lambda&& cb)
 
         Shared::MwCallback mc;
         mc.kind = Shared::CallbackKind::SYNC;
-        mc.sync = [](Request req, Response res) -> Shared::MiddlewareAction {
-            return fn(req, res);
-        };
+        mc.sync = [](Request req, Response res) -> Shared::MiddlewareAction { return fn(req, res); };
 
         return mc;
     }
 
     else {
-        static_assert(
-            AlwaysFalse<Lambda>::value,
-            "[WFX]: Invalid middleware callback. Expected one of:\n"
-            "  - WFX::MiddlewareAction(WFX::Request, WFX::Response)\n"
-            "  - WFX::MwCoro(WFX::Request, WFX::Response)\n"
-        );
+        static_assert(AlwaysFalse<Lambda>::value, "[WFX]: Invalid middleware callback. Expected one of:\n"
+                                                  "  - WFX::MiddlewareAction(WFX::Request, WFX::Response)\n"
+                                                  "  - WFX::MwCoro(WFX::Request, WFX::Response)\n");
     }
 }
 
 // Variadic helper to build a 'MwCallback' array for per-route middleware
-template<typename... Lambdas>
-struct MwCallbackArray {
+template <typename... Lambdas> struct MwCallbackArray {
     Shared::MwCallback entries[sizeof...(Lambdas)];
 
 public:
-    MwCallbackArray(Lambdas&&... mws)
-        : entries{ MakeMwCallback(std::forward<Lambdas>(mws))... }
+    MwCallbackArray(Lambdas&&... mws) : entries{MakeMwCallback(std::forward<Lambdas>(mws))...}
     {}
 
 public:
-    const Shared::MwCallback* Data()  const { return entries; }
-    std::size_t               Count() const { return sizeof...(Lambdas); }
+    const Shared::MwCallback* Data() const
+    {
+        return entries;
+    }
+    std::size_t Count() const
+    {
+        return sizeof...(Lambdas);
+    }
 };
 
-template<typename... Lambdas>
-MwCallbackArray<Lambdas...> MakeMiddleware(Lambdas&&... mws) {
+template <typename... Lambdas> MwCallbackArray<Lambdas...> MakeMiddleware(Lambdas&&... mws)
+{
     return MwCallbackArray<Lambdas...>{std::forward<Lambdas>(mws)...};
 }
 

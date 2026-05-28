@@ -5,7 +5,7 @@
 
 // Common include for both filesystem.cpp and filemanip.cpp
 #include <Windows.h>
-#include <Shlwapi.h>  // For PathFileExistsA
+#include <Shlwapi.h> // For PathFileExistsA
 
 #pragma comment(lib, "Shlwapi.lib")
 

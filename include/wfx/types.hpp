@@ -22,19 +22,19 @@ namespace WFX {
 // -----------------------------------------------------------------------
 // HTTP primitives
 // -----------------------------------------------------------------------
-using HttpStatus  = Shared::HttpStatus;
-using HttpMethod  = Shared::HttpMethod;
+using HttpStatus = Shared::HttpStatus;
+using HttpMethod = Shared::HttpMethod;
 using HttpVersion = Shared::HttpVersion;
 
 // -----------------------------------------------------------------------
 // Data types
 // -----------------------------------------------------------------------
-using StringView     = Shared::StringView;
-using UUID           = Shared::UUID;
-using UUIDString     = Shared::UUIDString;
+using StringView = Shared::StringView;
+using UUID = Shared::UUID;
+using UUIDString = Shared::UUIDString;
 using SegmentVariant = Shared::SegmentVariant;
-using Any            = Shared::Any;
-using JsonObject     = Shared::JsonObject;
+using Any = Shared::Any;
+using JsonObject = Shared::JsonObject;
 
 // -----------------------------------------------------------------------
 // JSON serializers
@@ -69,11 +69,18 @@ using JsonObject     = Shared::JsonObject;
 //       o.Write(res);
 //   })
 // -----------------------------------------------------------------------
-inline Shared::JsonWriter ImJson(Http::Response& res) noexcept { return Shared::JsonWriter{res}; }
-inline Shared::JsonObject RmJson()                    noexcept { return Shared::JsonObject::Init(); }
+inline Shared::JsonWriter ImJson(Http::Response& res) noexcept
+{
+    return Shared::JsonWriter{res};
+}
+inline Shared::JsonObject RmJson() noexcept
+{
+    return Shared::JsonObject::Init();
+}
 
 // Hint overload
-inline Shared::JsonObject RmJson(std::uint32_t nodeHint, std::uint32_t kvHint, std::uint32_t strHint) noexcept {
+inline Shared::JsonObject RmJson(std::uint32_t nodeHint, std::uint32_t kvHint, std::uint32_t strHint) noexcept
+{
     return Shared::JsonObject::Init(nodeHint, kvHint, strHint);
 }
 
@@ -99,11 +106,11 @@ inline Shared::JsonParseResult ParseJson(std::string_view body, bool view = fals
 //   auto seg = req.GetSegment(0);
 //   if (seg.Tag() == WFX::SegStr) { ... }
 // -----------------------------------------------------------------------
-inline constexpr auto SegEmpty  = Shared::SEG_VARIANT_EMPTY;
-inline constexpr auto SegU64    = Shared::SEG_VARIANT_U64;
-inline constexpr auto SegI64    = Shared::SEG_VARIANT_I64;
-inline constexpr auto SegStr    = Shared::SEG_VARIANT_STR;
-inline constexpr auto SegUUID   = Shared::SEG_VARIANT_UUID;
+inline constexpr auto SegEmpty = Shared::SEG_VARIANT_EMPTY;
+inline constexpr auto SegU64 = Shared::SEG_VARIANT_U64;
+inline constexpr auto SegI64 = Shared::SEG_VARIANT_I64;
+inline constexpr auto SegStr = Shared::SEG_VARIANT_STR;
+inline constexpr auto SegUUID = Shared::SEG_VARIANT_UUID;
 inline constexpr auto SegStcStr = Shared::SEG_VARIANT_STC_STR;
 
 // -----------------------------------------------------------------------
@@ -117,7 +124,7 @@ inline constexpr auto SegStcStr = Shared::SEG_VARIANT_STC_STR;
 // -----------------------------------------------------------------------
 inline constexpr auto MwContinue = Shared::MiddlewareAction::CONTINUE;
 inline constexpr auto MwSkipNext = Shared::MiddlewareAction::SKIP_NEXT;
-inline constexpr auto MwBreak    = Shared::MiddlewareAction::BREAK;
+inline constexpr auto MwBreak = Shared::MiddlewareAction::BREAK;
 
 // -----------------------------------------------------------------------
 // Async result codes
@@ -133,11 +140,11 @@ inline constexpr auto MwBreak    = Shared::MiddlewareAction::BREAK;
 //   AsyncInternalFailure : unhandled exception or engine fault
 //   AsyncNone            : not yet run (internal sentinel, rarely seen by users)
 // -----------------------------------------------------------------------
-inline constexpr auto AsyncOk              = Shared::AsyncStatus::COMPLETED;
-inline constexpr auto AsyncTimerFailure    = Shared::AsyncStatus::TIMER_FAILURE;
-inline constexpr auto AsyncIoFailure       = Shared::AsyncStatus::IO_FAILURE;
+inline constexpr auto AsyncOk = Shared::AsyncStatus::COMPLETED;
+inline constexpr auto AsyncTimerFailure = Shared::AsyncStatus::TIMER_FAILURE;
+inline constexpr auto AsyncIoFailure = Shared::AsyncStatus::IO_FAILURE;
 inline constexpr auto AsyncInternalFailure = Shared::AsyncStatus::INTERNAL_FAILURE;
-inline constexpr auto AsyncNone            = Shared::AsyncStatus::NONE;
+inline constexpr auto AsyncNone = Shared::AsyncStatus::NONE;
 
 // -----------------------------------------------------------------------
 // Outbound endpoint result codes
@@ -158,16 +165,16 @@ inline constexpr auto AsyncNone            = Shared::AsyncStatus::NONE;
 //   EpSslFailure          : TLS handshake or certificate error
 //   EpInternalError       : unclassified engine fault
 // -----------------------------------------------------------------------
-inline constexpr auto EpOk                = Shared::EndpointStatus::SUCCESS;
-inline constexpr auto EpPending           = Shared::EndpointStatus::PENDING;
-inline constexpr auto EpBufferError       = Shared::EndpointStatus::BUFFER_ERROR;
+inline constexpr auto EpOk = Shared::EndpointStatus::SUCCESS;
+inline constexpr auto EpPending = Shared::EndpointStatus::PENDING;
+inline constexpr auto EpBufferError = Shared::EndpointStatus::BUFFER_ERROR;
 inline constexpr auto EpInsufficientBuffer = Shared::EndpointStatus::INSUFFICIENT_BUFFER;
-inline constexpr auto EpInvalidKey        = Shared::EndpointStatus::INVALID_KEY;
-inline constexpr auto EpPoolExhausted     = Shared::EndpointStatus::POOL_EXHAUSTED;
-inline constexpr auto EpSocketFailure     = Shared::EndpointStatus::SOCKET_FAILURE;
-inline constexpr auto EpConnectFailure    = Shared::EndpointStatus::CONNECT_FAILURE;
-inline constexpr auto EpSslFailure        = Shared::EndpointStatus::SSL_FAILURE;
-inline constexpr auto EpInternalError     = Shared::EndpointStatus::INTERNAL_ERROR;
+inline constexpr auto EpInvalidKey = Shared::EndpointStatus::INVALID_KEY;
+inline constexpr auto EpPoolExhausted = Shared::EndpointStatus::POOL_EXHAUSTED;
+inline constexpr auto EpSocketFailure = Shared::EndpointStatus::SOCKET_FAILURE;
+inline constexpr auto EpConnectFailure = Shared::EndpointStatus::CONNECT_FAILURE;
+inline constexpr auto EpSslFailure = Shared::EndpointStatus::SSL_FAILURE;
+inline constexpr auto EpInternalError = Shared::EndpointStatus::INTERNAL_ERROR;
 
 // -----------------------------------------------------------------------
 // Stream flow control
@@ -179,8 +186,8 @@ inline constexpr auto EpInternalError     = Shared::EndpointStatus::INTERNAL_ERR
 //   return { bytesWritten, WFX::StreamClose };      // finished, close connection
 // -----------------------------------------------------------------------
 inline constexpr auto StreamContinue = Shared::StreamAction::CONTINUE;
-inline constexpr auto StreamDone     = Shared::StreamAction::STOP_AND_ALIVE_CONN;
-inline constexpr auto StreamClose    = Shared::StreamAction::STOP_AND_CLOSE_CONN;
+inline constexpr auto StreamDone = Shared::StreamAction::STOP_AND_ALIVE_CONN;
+inline constexpr auto StreamClose = Shared::StreamAction::STOP_AND_CLOSE_CONN;
 
 } // namespace WFX
 

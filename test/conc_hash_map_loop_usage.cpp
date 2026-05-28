@@ -8,7 +8,7 @@
 #include <mutex>
 
 #include "utils/hash_map/concurrent_hash_map.hpp"
-#include "utils/logger/logger.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 /*
  * OUTDATED, WON'T COMPILE, BUT U GET THE IDEA :)
@@ -50,7 +50,7 @@ size_t LinearSweepAndErase(ConnMap& map) {
 }
 
 int main() {
-    WFX::Utils::Logger::GetInstance().SetLevelMask(WFX::Utils::WFX_LOG_NONE);
+    WFX::Utils::GetLogger().SetLevelMask(WFX::Utils::WFX_LOG_NONE);
     ConnMap connMap;
     constexpr size_t TOTAL          = 5'000'000;
               int WORKER_THREADS    = std::thread::hardware_concurrency();

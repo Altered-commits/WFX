@@ -20,19 +20,19 @@ public:
     ~LinuxFile() override;
 
 public:
-    std::int64_t Read(void* buffer, std::size_t bytes)        override;
+    std::int64_t Read(void* buffer, std::size_t bytes) override;
     std::int64_t Write(const void* buffer, std::size_t bytes) override;
 
-    std::int64_t ReadAt(void* buffer, std::size_t bytes, std::size_t offset)        override;
+    std::int64_t ReadAt(void* buffer, std::size_t bytes, std::size_t offset) override;
     std::int64_t WriteAt(const void* buffer, std::size_t bytes, std::size_t offset) override;
 
-    bool         Seek(std::size_t offset) override;
+    bool Seek(std::size_t offset) override;
 
-    std::int64_t Tell()             const override;
-    std::size_t  Size()             const override;
+    std::int64_t Tell() const override;
+    std::size_t Size() const override;
 
-    void         Close()                  override;
-    bool         IsOpen()           const override;
+    void Close() override;
+    bool IsOpen() const override;
 
 public: // For internal public use
     bool OpenRead(const char* path);
@@ -40,10 +40,10 @@ public: // For internal public use
     void OpenExisting(int fd, std::size_t size, bool cached);
 
 private:
-    int         fd_       = -1;
-    bool        existing_ = false;
-    bool        cached_   = false;
-    std::size_t size_     = 0;
+    int fd_ = -1;
+    bool existing_ = false;
+    bool cached_ = false;
+    std::size_t size_ = 0;
 };
 
 } // namespace WFX::Utils

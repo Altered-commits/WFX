@@ -12,8 +12,7 @@ using ValidatorFn = bool (*)(std::string_view, const void*);
 
 // Input: Form data, Form field (type erased)
 // Output: of type T via T&
-template<typename T>
-using SanitizerFn = bool (*)(std::string_view, const void*, T&);
+template <typename T> using SanitizerFn = bool (*)(std::string_view, const void*, T&);
 
 // All common / required rules to exist in every rule
 struct BaseRule {
@@ -22,9 +21,9 @@ struct BaseRule {
 
 // vvv Builtin Form Rules vvv
 struct Text : BaseRule {
-    bool          ascii = false;
-    std::uint32_t min   = 0;
-    std::uint32_t max   = 65535;
+    bool ascii = false;
+    std::uint32_t min = 0;
+    std::uint32_t max = 65535;
 };
 
 struct Email : BaseRule {
@@ -47,22 +46,30 @@ struct Float : BaseRule {
 };
 
 // vvv Form Type Traits vvv
-template<typename Rule>
-struct DecayedType;
+template <typename Rule> struct DecayedType;
 
-template<> struct DecayedType<Text>  { using Type = std::string_view; };
-template<> struct DecayedType<Email> { using Type = std::string_view; };
-template<> struct DecayedType<Int>   { using Type = std::int64_t;     };
-template<> struct DecayedType<UInt>  { using Type = std::uint64_t;    };
-template<> struct DecayedType<Float> { using Type = double;           };
+template <> struct DecayedType<Text> {
+    using Type = std::string_view;
+};
+template <> struct DecayedType<Email> {
+    using Type = std::string_view;
+};
+template <> struct DecayedType<Int> {
+    using Type = std::int64_t;
+};
+template <> struct DecayedType<UInt> {
+    using Type = std::uint64_t;
+};
+template <> struct DecayedType<Float> {
+    using Type = double;
+};
 
 // vvv Field Descriptor vvv
-template<typename Rule>
-struct FieldDesc {
+template <typename Rule> struct FieldDesc {
     using RawType = typename DecayedType<Rule>::Type;
 
-    Rule                 rule{};
-    ValidatorFn          validator = nullptr;
+    Rule rule{};
+    ValidatorFn validator = nullptr;
     SanitizerFn<RawType> sanitizer = nullptr;
 };
 

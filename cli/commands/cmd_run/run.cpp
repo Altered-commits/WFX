@@ -1,53 +1,46 @@
 #include "run.hpp"
 
-#include "cli/commands/common/common.hpp"
 #include "config/config.hpp"
-#include "engine/core_engine.hpp"
-#include "engine/template_engine.hpp"
-#include "http/common/http_global_state.hpp"
-#include "utils/dotenv/dotenv.hpp"
-#include "utils/logger/logger.hpp"
 #include "utils/fileops/filesystem.hpp"
-#include "utils/backport/string.hpp"
-#include "utils/crash_tracer/crash_tracer.hpp"
-
-#ifdef _WIN32
-    #include <windows.h>
-#else
-    #include <wait.h>
-    #include <signal.h>
-#endif
-#include <thread>
+#include "utils/dotenv/dotenv.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 namespace WFX::CLI {
 
-using namespace WFX::Http;  // For 'WFXGlobalState', ...
-using namespace WFX::Utils; // For 'Logger', 'BufferPool', 'FileCache', ...
-using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
+using namespace WFX::Utils; // For 'Logger', ...
+using namespace WFX::Core;  // For 'Config'
 
-int RunServer(const std::string& project, const ServerConfig& cfg)
+// Forward declarations [all defined in 'helper.cpp' for clean code ofc *i should NOT be saying this shit*]
+int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std::string& crashLogsDir);
+void CheckAlreadyRunning(const std::string& projectName);
+
+// Entrypoint
+int RunServer(const std::string& projectName, const ServerConfig& cfg)
 {
-    auto& logger      = Logger::GetInstance();
-    auto& config      = Config::GetInstance();
-    auto& globalState = GetGlobalState();
-    auto& osConfig    = config.osSpecificConfig;
-    auto& buildConfig = config.buildConfig;
+    auto& logger = GetLogger();
+    auto& config = GetConfig();
 
-    // Sanity check project directory existence
-    if(!FileSystem::DirectoryExists(project.c_str())) 
-        logger.Fatal("[WFX]: '", project, "' directory does not exist");
+    logger.SetMinLevel(Logger::Level::INFO);
 
-    // Create directory for logs if not exists
-    const std::string crashLogDir = project + "/" + config.miscConfig.crashLogDir;
-    if(!FileSystem::DirectoryExists(crashLogDir.c_str()) && !FileSystem::CreateDirectory(crashLogDir))
-        logger.Fatal("[WFX]: Failed to create '", crashLogDir, "' directory for crash dumps");
+    // -------------------- DUPLICATE CALL CHECK --------------------
+    CheckAlreadyRunning(projectName);
 
-#ifdef _WIN32
-    logger.Fatal("[WFX]: Re-implement 'Run' for 'Windows' properly!");
-#else
+    // -------------------- STARTUP PHASE --------------------
+    if(!FileSystem::DirectoryExists(projectName.c_str()))
+        logger.Fatal("[WFX]: '", projectName, "' directory does not exist");
+
+    const std::string logsDir = projectName + "/logs/default_logs/";
+    const std::string crashLogsDir = projectName + "/logs/crash_logs/";
+
+    if(!FileSystem::DirectoryExists(logsDir.c_str()) && !FileSystem::CreateDirectory(logsDir))
+        logger.Fatal("[WFX]: Failed to create '", logsDir, "' directory for log dumps");
+
+    if(!FileSystem::DirectoryExists(crashLogsDir.c_str()) && !FileSystem::CreateDirectory(crashLogsDir))
+        logger.Fatal("[WFX]: Failed to create '", crashLogsDir, "' directory for crash dumps");
+
     // -------------------- LOADING PHASE --------------------
-    config.LoadCoreSettings(project + "/wfx.toml");
-    config.LoadFinalSettings(project);
+    config.LoadCoreSettings(projectName + "/wfx.toml");
+    config.LoadFinalSettings(projectName);
 
     EnvConfig envConfig;
     envConfig.SetFlag(EnvFlags::REQUIRE_OWNER_UID);
@@ -56,128 +49,7 @@ int RunServer(const std::string& project, const ServerConfig& cfg)
     if(Dotenv::LoadFromFile(config.envConfig.envPath, envConfig))
         logger.Info("[WFX-Master]: Loaded '.env' successfully");
 
-    // -------------------- INITIALIZING PHASE --------------------
-    signal(SIGINT, HandleMasterSignal);
-    signal(SIGTERM, HandleMasterSignal);
-
-    // Handle initialization of SSL key before we do anything else
-    if(!RandomPool::GetInstance().GetBytes(globalState.sslKey.data(), globalState.sslKey.size()))
-        logger.Fatal("[WFX-Master]: Failed to initialize SSL key");
-
-    // -------------------- TEMPLATE / USER CODE COMPILATION PHASE --------------------
-    HandleBuildDirectory();
-
-    auto& templateEngine = TemplateEngine::GetInstance();
-    auto [success, hasDynamic] = templateEngine.PreCompileTemplates();
-
-    // Compile only user source
-    if(!success || !hasDynamic)
-        HandleUserCxxCompilation(CxxCompilationOption::SOURCE_ONLY);
-    // Compile both source + templates
-    else
-        HandleUserCxxCompilation();
-
-    // Load template library if it exists
-    templateEngine.LoadDynamicTemplatesFromLib();
-
-    bool pinToCpu = cfg.GetFlag(ServerFlags::PIN_TO_CPU);
-    bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
-    bool ohp      = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
-
-    // Switch ports if we enable https and we don't want to override https default port
-    std::uint16_t port = useHttps && !ohp ? 443U : cfg.port;
-
-    logger.Info("[WFX-Master]: Dev server running at ", useHttps ? "https://" : "http://", cfg.host, ':', port);
-    logger.Info("[WFX-Master]: Press Ctrl+C to stop");
-    logger.SetLevelMask(WFX_LOG_INFO | WFX_LOG_WARNINGS);
-
-    // -------------------- WORKERS SPAWNING PHASE --------------------
-    const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
-    for(int i = 0; i < osConfig.workerProcesses; i++) {
-        pid_t pid = fork();
-
-        // --- Child Worker ---
-        if(pid == 0) {
-            if(i == 0)
-                setpgid(0, 0);          // First worker becomes group leader
-            else
-                setpgid(0, globalState.workerPGID); // Join first worker's group
-
-            // Same as below, every process will have its own crash tracer
-            char workerName[32];
-            std::snprintf(workerName, sizeof(workerName), "worker-%d", i);
-            CrashTracer::SetWorkerName(workerName);
-            CrashTracer::Install(crashLogDir.c_str());
-
-            // For every process initialize its own BufferPool and FileCache
-            BufferPool::GetInstance().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
-            FileCache::GetInstance().Init(config.miscConfig.fileCacheSize);
-
-            Core::CoreEngine engine{dllDir.c_str(), useHttps};
-            globalState.enginePtr = &engine;
-
-            signal(SIGTERM, HandleWorkerSignal);
-            signal(SIGINT, SIG_IGN);  // SigTerm will kill it, SigInt handled by master
-            signal(SIGPIPE, SIG_IGN); // We will handle it internally
-            signal(SIGHUP, SIG_IGN);  // Terminals should not kill workers
-
-            if(pinToCpu)
-                PinWorkerToCPU(i);
-
-            engine.Listen(cfg.host, port);
-            return 0;
-        }
-
-        // --- Master ---
-        else if(pid > 0) {
-            globalState.workerPids.push_back(pid);
-            if(i == 0)
-                globalState.workerPGID = pid; // Store PGID for process group
-
-            setpgid(pid, globalState.workerPGID);
-        }
-
-        else {
-            logger.Error("[WFX-Master]: Failed to fork worker ", i);
-            return 1;
-        }
-    }
-
-    // --- Master ---
-    while(!globalState.shouldStop)
-        pause();
-
-    logger.Info("[WFX-Master]: Signal received (INT / TERM), waiting for workers to shutdown...");
-
-    // -------------------- SHUTDOWN PHASE --------------------
-    for(std::uint32_t i = 0; i < osConfig.workerProcesses; i++) {
-        pid_t pid    = globalState.workerPids[i];
-        bool  exited = false;
-
-        for(std::uint32_t t = 0; t < config.osSpecificConfig.workerShutdownTimeout * 10; t++) {
-            int status;
-            pid_t ret = waitpid(pid, &status, WNOHANG);
-
-            // Worker exited normally
-            if(ret == pid) {
-                exited = true;
-                break;
-            }
-
-            // Poll every 100ms
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        if(!exited) {
-            // Worker didn't exit in time, force kill
-            kill(pid, SIGKILL);
-            waitpid(pid, nullptr, 0); // Reap zombie
-        }
-    }
-#endif // _WIN32
-
-    logger.Info("[WFX-Master]: Shutdown successfully");
-    return 0;
+    return RunServerImpl(cfg, logsDir, crashLogsDir);
 }
 
-}  // namespace WFX::CLI
+} // namespace WFX::CLI
