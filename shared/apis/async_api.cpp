@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "async_api.hpp"
 #include "utils/diagnostics/logger.hpp"
 #include "http/connection/http_connection.hpp"

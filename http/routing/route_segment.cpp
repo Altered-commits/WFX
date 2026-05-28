@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "route_segment.hpp"
 #include "shared/abis/uuid.hpp"
 

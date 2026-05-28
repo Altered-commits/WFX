@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 namespace WFX::Http {
 
 template <typename T> std::size_t CaseInsensitiveHash::operator()(const T& key) const
