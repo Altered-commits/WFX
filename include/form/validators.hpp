@@ -2,8 +2,8 @@
 #define WFX_INC_FORM_VALIDATORS_HPP
 
 #include "fields.hpp"
-#include "utils/string/string.hpp"
 #include <cstdlib>
+#include <cctype>
 
 namespace WFX::Form {
 
@@ -17,7 +17,8 @@ static inline bool DefaultValidateText(std::string_view sv, const void* fieldPtr
 
     if(r.ascii) {
         for(unsigned char c : sv)
-            if(c > 127) return false;
+            if(c > 127)
+                return false;
     }
 
     return true;
@@ -33,7 +34,8 @@ static inline bool DefaultValidateEmail(std::string_view sv, const void* fieldPt
     // ASCII-only check
     if(r.strict) {
         for(unsigned char c : sv)
-            if(c > 127) return false;
+            if(c > 127)
+                return false;
     }
 
     // Find '@'
@@ -45,7 +47,7 @@ static inline bool DefaultValidateEmail(std::string_view sv, const void* fieldPt
     if(sv.find('@', atPos + 1) != std::string_view::npos)
         return false;
 
-    std::string_view local  = sv.substr(0, atPos);
+    std::string_view local = sv.substr(0, atPos);
     std::string_view domain = sv.substr(atPos + 1);
 
     // Local part checks
@@ -100,11 +102,26 @@ static inline bool DefaultValidateFloat(std::string_view sv, const void* fieldPt
 }
 
 // vvv Dispatchers vvv
-static constexpr ValidatorFn DefaultValidatorFor(const Text&)  { return DefaultValidateText;  }
-static constexpr ValidatorFn DefaultValidatorFor(const Email&) { return DefaultValidateEmail; }
-static constexpr ValidatorFn DefaultValidatorFor(const Int&)   { return DefaultValidateInt;   }
-static constexpr ValidatorFn DefaultValidatorFor(const UInt&)  { return DefaultValidateUInt;  }
-static constexpr ValidatorFn DefaultValidatorFor(const Float&) { return DefaultValidateFloat; }
+static constexpr ValidatorFn DefaultValidatorFor(const Text&)
+{
+    return DefaultValidateText;
+}
+static constexpr ValidatorFn DefaultValidatorFor(const Email&)
+{
+    return DefaultValidateEmail;
+}
+static constexpr ValidatorFn DefaultValidatorFor(const Int&)
+{
+    return DefaultValidateInt;
+}
+static constexpr ValidatorFn DefaultValidatorFor(const UInt&)
+{
+    return DefaultValidateUInt;
+}
+static constexpr ValidatorFn DefaultValidatorFor(const Float&)
+{
+    return DefaultValidateFloat;
+}
 
 } // namespace WFX::Form
 

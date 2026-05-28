@@ -14,24 +14,24 @@ public:
     ~HttpOpenSSL() override;
 
 public: // Main functions
-    void*     Wrap(SSLSocket fd)                                                        override;
-    void*     WrapClient(SSLSocket fd, const char* host)                                override;
-    SSLReturn Handshake(void* conn)                                                     override;
-    
-    SSLResult Read(void* conn, char* buf, int len)                                      override;
-    SSLResult Write(void* conn, const char* buf, int len)                               override;
+    void* Wrap(SSLSocket fd) override;
+    void* WrapClient(SSLSocket fd, const char* host) override;
+    SSLReturn Handshake(void* conn) override;
+
+    SSLResult Read(void* conn, char* buf, int len) override;
+    SSLResult Write(void* conn, const char* buf, int len) override;
     SSLResult WriteFile(void* conn, SSLSocket fd, FileOffset offset, std::size_t count) override;
-    
-    SSLReturn Shutdown(void* conn)                                                      override;
-    SSLReturn ForceShutdown(void* conn)                                                 override;
+
+    SSLReturn Shutdown(void* conn) override;
+    SSLReturn ForceShutdown(void* conn) override;
 
 private: // Helper functions
     void GlobalOpenSSLInit();
     void LogOpenSSLError(const char* message, bool fatal = true);
 
 private:
-    SSL_CTX* ctx     = nullptr;
-    bool     useKtls = false;
+    SSL_CTX* ctx = nullptr;
+    bool useKtls = false;
 };
 
 } // namespace WFX::Http

@@ -13,8 +13,7 @@ class ConcurrentHashMap {
     static_assert((BUCKET_COUNT & (BUCKET_COUNT - 1)) == 0, "BUCKET_COUNT must be a power of 2");
 
 public:
-    explicit ConcurrentHashMap(BufferPool& pool)
-        : bufferPool_(pool)
+    explicit ConcurrentHashMap(BufferPool& pool) : bufferPool_(pool)
     {
         for(std::size_t i = 0; i < SHARD_COUNT; ++i) {
             auto shard = std::make_unique<Shard>(bufferPool_);
@@ -70,7 +69,7 @@ public:
 
         return false;
     }
-    
+
     bool Erase(const K& key)
     {
         auto& shard = GetShard(key);
@@ -79,25 +78,23 @@ public:
     }
 
     // Functions with mixed functionality
-    template<typename Fn>
-    bool GetOrInsertWith(const K& key, Fn&& fn, const V& defaultValue = V{})
+    template <typename Fn> bool GetOrInsertWith(const K& key, Fn&& fn, const V& defaultValue = V{})
     {
         auto& shard = GetShard(key);
         auto lock = shard.UniqueLock();
-        
+
         V* val = shard.GetOrInsert(key, defaultValue);
         if(val)
             return fn(*val);
-        
+
         return false;
     }
 
-    template<typename Fn>
-    bool GetWith(const K& key, Fn&& fn)
+    template <typename Fn> bool GetWith(const K& key, Fn&& fn)
     {
         auto& shard = GetShard(key);
         auto lock = shard.UniqueLock();
-        
+
         V* val = shard.Get(key);
         if(val)
             return fn(*val);
@@ -106,21 +103,21 @@ public:
     }
 
     // Looping
-    template<typename Fn>
-    void ForEach(Fn&& cb) const
+    template <typename Fn> void ForEach(Fn&& cb) const
     {
         for(const auto& shard : shards_) {
-            if(!shard) continue;
+            if(!shard)
+                continue;
             shard->UniqueLock();
             shard->ForEach(std::forward<Fn>(cb));
         }
     }
 
-    template<typename Fn>
-    void ForEachEraseIf(Fn&& cb)
+    template <typename Fn> void ForEachEraseIf(Fn&& cb)
     {
         for(const auto& shard : shards_) {
-            if(!shard) continue;
+            if(!shard)
+                continue;
             shard->UniqueLock();
             shard->ForEachEraseIf(std::forward<Fn>(cb));
         }

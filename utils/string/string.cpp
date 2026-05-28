@@ -26,8 +26,7 @@ bool CTInsensitiveStringCompare(std::string_view lhs, std::string_view rhs) noex
 
     std::uint8_t result = 0;
     for(std::size_t i = 0; i < lhs.size(); ++i)
-        result |= ToLowerAscii(static_cast<std::uint8_t>(lhs[i]))
-                ^ ToLowerAscii(static_cast<std::uint8_t>(rhs[i]));
+        result |= ToLowerAscii(static_cast<std::uint8_t>(lhs[i])) ^ ToLowerAscii(static_cast<std::uint8_t>(rhs[i]));
 
     return result == 0;
 }
@@ -38,8 +37,7 @@ bool InsensitiveStringCompare(std::string_view lhs, std::string_view rhs) noexce
         return false;
 
     for(std::size_t i = 0; i < lhs.size(); ++i) {
-        if(ToLowerAscii(static_cast<std::uint8_t>(lhs[i]))
-        != ToLowerAscii(static_cast<std::uint8_t>(rhs[i])))
+        if(ToLowerAscii(static_cast<std::uint8_t>(lhs[i])) != ToLowerAscii(static_cast<std::uint8_t>(rhs[i])))
             return false;
     }
 
@@ -55,7 +53,7 @@ bool NormalizeURIPathInplace(std::string_view& path) noexcept
     char* buf = const_cast<char*>(path.data());
     std::size_t len = path.size();
     std::size_t out = 0;
-    std::size_t i   = 0;
+    std::size_t i = 0;
 
     while(i < len) {
         // Collapse multiple slashes
@@ -88,7 +86,7 @@ bool NormalizeURIPathInplace(std::string_view& path) noexcept
 
     if(out == 0) {
         buf[0] = '/';
-        out    = 1;
+        out = 1;
     }
 
     path = std::string_view(buf, out);
@@ -116,9 +114,9 @@ bool DecodePercentInplace(std::string_view& buf) noexcept
     if(buf.empty())
         return true;
 
-    char*       data = const_cast<char*>(buf.data());
-    std::size_t len  = buf.size();
-    std::size_t out  = 0;
+    char* data = const_cast<char*>(buf.data());
+    std::size_t len = buf.size();
+    std::size_t out = 0;
 
     for(std::size_t i = 0; i < len; ++i) {
         if(data[i] == '%' && i + 2 < len) {
@@ -189,7 +187,7 @@ void TrimInline(std::string& s) noexcept
 std::string_view TrimView(std::string_view sv) noexcept
 {
     std::size_t start = 0;
-    std::size_t end   = sv.size();
+    std::size_t end = sv.size();
 
     while(start < end && std::isspace(static_cast<unsigned char>(sv[start])))
         ++start;

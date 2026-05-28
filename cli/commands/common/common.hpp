@@ -5,7 +5,7 @@
 
 namespace WFX::CLI {
 
-enum class CxxCompilationOption: std::uint8_t {
+enum class CxxCompilationOption : std::uint8_t {
     SOURCE_ONLY,
     TEMPLATES_ONLY,
     ALL,
@@ -17,11 +17,11 @@ void HandleUserCxxCompilation(CxxCompilationOption = CxxCompilationOption::ALL);
 
 // vvv OS Specific Stuff vvv
 #ifdef _WIN32
-    // Windows: future work
+// Windows: future work
 #else
-    void HandleMasterSignal(int);
-    void HandleWorkerSignal(int);
-    void PinWorkerToCPU(int workerIndex);
+void HandleMasterSignal(int);
+void HandleWorkerSignal(int);
+void PinWorkerToCPU(int);
 #endif
 
 } // namespace WFX::CLI

@@ -10,10 +10,10 @@ namespace WFX::Shared {
 
 // vvv Master table to be injected into user dll vvv
 struct MASTER_API_TABLE {
-    const HTTP_API_EXT1*   (*GetHttpAPIExt1)();
-    const ASYNC_API_EXT1*  (*GetAsyncAPIExt1)();
+    const HTTP_API_EXT1* (*GetHttpAPIExt1)();
+    const ASYNC_API_EXT1* (*GetAsyncAPIExt1)();
     const MEMORY_API_EXT1* (*GetMemoryAPIExt1)();
-    const UTILS_API_EXT1*  (*GetUtilsAPIExt1)();
+    const UTILS_API_EXT1* (*GetUtilsAPIExt1)();
 };
 static_assert(std::is_standard_layout<MASTER_API_TABLE>::value, "'MASTER_API_TABLE' must be standard layout");
 
@@ -25,4 +25,4 @@ const MASTER_API_TABLE* GetMasterAPI();
 
 } // namespace WFX::Shared
 
-#endif // WFX_SHARED_MASTER_API_HPP 
+#endif // WFX_SHARED_MASTER_API_HPP

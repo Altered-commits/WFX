@@ -10,9 +10,9 @@
 namespace WFX::Utils {
 
 struct CacheEntry {
-    int           fd;                            // Actual file descriptor
+    int fd;                                      // Actual file descriptor
     std::uint64_t freq;                          // Access frequency
-    off_t         fileSize;                      // File size in bytes
+    off_t fileSize;                              // File size in bytes
     std::list<std::string>::iterator bucketIter; // Position in the frequency bucket list
 };
 
@@ -33,7 +33,7 @@ private: // Helper Functions
     void Evict();
 
 private:
-    std::size_t   capacity_;
+    std::size_t capacity_;
     std::uint64_t minFreq_;
 
     // Key -> CacheEntry

@@ -2,57 +2,39 @@
 
 namespace WFX::OSSpecific {
 
-AcceptExManager::AcceptExManager(BufferPool& allocator)
-    : allocator_(allocator)
+AcceptExManager::AcceptExManager(BufferPool& allocator) : allocator_(allocator)
 {}
 
 bool AcceptExManager::Initialize(WFXSocket listenSocket, HANDLE iocp)
 {
     listenSocket_ = listenSocket;
-    iocp_         = iocp;
+    iocp_ = iocp;
 
     // Load AcceptEx and GetAcceptExSockaddrs
-    GUID guidAcceptEx             = WSAID_ACCEPTEX;
+    GUID guidAcceptEx = WSAID_ACCEPTEX;
     GUID guidGetAcceptExSockaddrs = WSAID_GETACCEPTEXSOCKADDRS;
-    DWORD bytes                   = 0;
+    DWORD bytes = 0;
 
-    int result = WSAIoctl(
-        listenSocket_,
-        SIO_GET_EXTENSION_FUNCTION_POINTER,
-        &guidAcceptEx,
-        sizeof(guidAcceptEx),
-        &lpfnAcceptEx,
-        sizeof(lpfnAcceptEx),
-        &bytes,
-        nullptr,
-        nullptr
-    );
+    int result = WSAIoctl(listenSocket_, SIO_GET_EXTENSION_FUNCTION_POINTER, &guidAcceptEx, sizeof(guidAcceptEx),
+                          &lpfnAcceptEx, sizeof(lpfnAcceptEx), &bytes, nullptr, nullptr);
 
     if(result == SOCKET_ERROR || !lpfnAcceptEx)
         return logger_.Error("[AcceptExManager]: Failed to load AcceptEx"), false;
 
-    result = WSAIoctl(
-        listenSocket_,
-        SIO_GET_EXTENSION_FUNCTION_POINTER,
-        &guidGetAcceptExSockaddrs,
-        sizeof(guidGetAcceptExSockaddrs),
-        &lpfnGetAcceptExSockaddrs,
-        sizeof(lpfnGetAcceptExSockaddrs),
-        &bytes,
-        nullptr,
-        nullptr
-    );
+    result = WSAIoctl(listenSocket_, SIO_GET_EXTENSION_FUNCTION_POINTER, &guidGetAcceptExSockaddrs,
+                      sizeof(guidGetAcceptExSockaddrs), &lpfnGetAcceptExSockaddrs, sizeof(lpfnGetAcceptExSockaddrs),
+                      &bytes, nullptr, nullptr);
 
     if(result == SOCKET_ERROR || !lpfnGetAcceptExSockaddrs)
         return logger_.Error("[AcceptExManager]: Failed to load GetAcceptExSockaddrs"), false;
 
     // We know exactly how much we using, so reserve it
     std::uint32_t maxAcceptSlots = config_.osSpecificConfig.maxAcceptSlots;
-    activeSlotsWordCount_        = (maxAcceptSlots + 63) / 64;
+    activeSlotsWordCount_ = (maxAcceptSlots + 63) / 64;
 
     if(activeSlotsWordCount_ * 64 < maxAcceptSlots)
-        logger_.Fatal("[AcceptExManager]: activeSlotsBits_ insufficient for maxAcceptSlots (", 
-                    activeSlotsWordCount_ * 64, " bits < ", maxAcceptSlots, " slots)");
+        logger_.Fatal("[AcceptExManager]: activeSlotsBits_ insufficient for maxAcceptSlots (",
+                      activeSlotsWordCount_ * 64, " bits < ", maxAcceptSlots, " slots)");
 
     contexts_.resize(maxAcceptSlots);
 
@@ -77,15 +59,13 @@ void AcceptExManager::DeInitialize()
 {
     std::uint32_t maxAcceptSlots = config_.osSpecificConfig.maxAcceptSlots;
 
-    for(int i = 0; i < maxAcceptSlots; ++i)
-    {
+    for(int i = 0; i < maxAcceptSlots; ++i) {
         if(!IsSlotSet(i))
             continue;
 
         PerIoContext& ctx = contexts_[i];
 
-        if(ctx.socket != WFX_INVALID_SOCKET)
-        {
+        if(ctx.socket != WFX_INVALID_SOCKET) {
             closesocket(ctx.socket);
             ctx.socket = WFX_INVALID_SOCKET;
         }
@@ -98,7 +78,7 @@ void AcceptExManager::DeInitialize()
 
 void AcceptExManager::HandleAcceptCompletion(PerIoContext* ctx)
 {
-    const int slot   = GetSlotFromPointer(ctx);
+    const int slot = GetSlotFromPointer(ctx);
     WFXSocket client = ctx->socket;
 
     if(client == WFX_INVALID_SOCKET) {
@@ -131,42 +111,31 @@ void AcceptExManager::HandleAcceptCompletion(PerIoContext* ctx)
             RepostAcceptAtSlot(slot);
     };
 
-    SOCKADDR* localSockaddr     = nullptr;
-    SOCKADDR* remoteSockaddr    = nullptr;
-    int       localSockaddrLen  = 0;
-    int       remoteSockaddrLen = 0;
+    SOCKADDR* localSockaddr = nullptr;
+    SOCKADDR* remoteSockaddr = nullptr;
+    int localSockaddrLen = 0;
+    int remoteSockaddrLen = 0;
 
     // GetAcceptExSockaddrs MUST be called before setsockopt or using the client socket
-    lpfnGetAcceptExSockaddrs(
-        ctx->buffer,
-        0,
-        sizeof(SOCKADDR_IN) + 16,
-        sizeof(SOCKADDR_IN) + 16,
-        &localSockaddr,
-        &localSockaddrLen,
-        &remoteSockaddr,
-        &remoteSockaddrLen
-    );
+    lpfnGetAcceptExSockaddrs(ctx->buffer, 0, sizeof(SOCKADDR_IN) + 16, sizeof(SOCKADDR_IN) + 16, &localSockaddr,
+                             &localSockaddrLen, &remoteSockaddr, &remoteSockaddrLen);
 
     // Pre-parse IP
     WFXIpAddress tempIpAddr;
     switch(remoteSockaddr->sa_family) {
-        case AF_INET:
-        {
+        case AF_INET: {
             sockaddr_in* ipv4 = reinterpret_cast<sockaddr_in*>(remoteSockaddr);
-            tempIpAddr.ip.v4  = ipv4->sin_addr;
+            tempIpAddr.ip.v4 = ipv4->sin_addr;
             tempIpAddr.ipType = AF_INET;
             break;
         }
-        case AF_INET6:
-        {
+        case AF_INET6: {
             sockaddr_in6* ipv6 = reinterpret_cast<sockaddr_in6*>(remoteSockaddr);
-            tempIpAddr.ip.v6  = ipv6->sin6_addr;
+            tempIpAddr.ip.v6 = ipv6->sin6_addr;
             tempIpAddr.ipType = AF_INET6;
             break;
         }
-        default:
-        {
+        default: {
             std::memset(&tempIpAddr.ip, 0, sizeof(tempIpAddr.ip));
             tempIpAddr.ipType = 0;
             break;
@@ -190,9 +159,9 @@ void AcceptExManager::HandleAcceptCompletion(PerIoContext* ctx)
         return;
     }
 
-    acceptOp->socket         = client;
-    acceptOp->operationType  = PerIoOperationType::ACCEPT_DEFERRED;
-    acceptOp->ipAddr         = tempIpAddr;
+    acceptOp->socket = client;
+    acceptOp->operationType = PerIoOperationType::ACCEPT_DEFERRED;
+    acceptOp->ipAddr = tempIpAddr;
 
     // Socket options
     setsockopt(client, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (char*)&listenSocket_, sizeof(listenSocket_));
@@ -221,30 +190,28 @@ void AcceptExManager::HandleSocketOptions(SOCKET client)
 void AcceptExManager::SetSlot(std::size_t slot)
 {
     std::size_t word = slot >> 6;
-    std::size_t bit  = slot & 63;
+    std::size_t bit = slot & 63;
     activeSlotsBits_[word].fetch_or(1ULL << bit, std::memory_order_relaxed);
 }
 
 void AcceptExManager::ClearSlot(std::size_t slot)
 {
     std::size_t word = slot >> 6;
-    std::size_t bit  = slot & 63;
+    std::size_t bit = slot & 63;
     activeSlotsBits_[word].fetch_and(~(1ULL << bit), std::memory_order_relaxed);
 }
 
 bool AcceptExManager::IsSlotSet(std::size_t slot)
 {
     std::size_t word = slot >> 6;
-    std::size_t bit  = slot & 63;
+    std::size_t bit = slot & 63;
     return (activeSlotsBits_[word].load(std::memory_order_relaxed) & (1ULL << bit)) != 0;
 }
 
 std::size_t AcceptExManager::GetSlotFromPointer(PerIoContext* ctx)
 {
     // Current Address - Base Address gives us the index based on how pointer arithmetic works. Pretty cool
-    return ((reinterpret_cast<uintptr_t>(ctx) - reinterpret_cast<uintptr_t>(&contexts_[0]))
-                /
-            sizeof(PerIoContext));
+    return ((reinterpret_cast<uintptr_t>(ctx) - reinterpret_cast<uintptr_t>(&contexts_[0])) / sizeof(PerIoContext));
 }
 
 bool AcceptExManager::AssociateWithIOCP(WFXSocket sock)
@@ -257,13 +224,15 @@ void AcceptExManager::RepostAcceptAtSlot(std::size_t slot)
     ClearSlot(slot);
 
     // Try original slot — fast path
-    if(PostAcceptAtSlot(slot)) return;
+    if(PostAcceptAtSlot(slot))
+        return;
 
     // Fallback scan across bitset
     std::size_t fallbackSlot = static_cast<std::size_t>(-1);
     for(std::size_t word = 0; word < activeSlotsWordCount_; ++word) {
         uint64_t available = ~activeSlotsBits_[word].load(std::memory_order_relaxed);
-        if(available == 0) continue;
+        if(available == 0)
+            continue;
 
 #if defined(_MSC_VER)
         unsigned long bitIndex;
@@ -281,8 +250,7 @@ void AcceptExManager::RepostAcceptAtSlot(std::size_t slot)
     }
 
     // Only log if fallback also fails
-    bool success = (fallbackSlot != static_cast<std::size_t>(-1)) &&
-                   PostAcceptAtSlot(fallbackSlot);
+    bool success = (fallbackSlot != static_cast<std::size_t>(-1)) && PostAcceptAtSlot(fallbackSlot);
 
     if(!success)
         logger_.Error("AcceptExManager: All AcceptEx slots exhausted — recovery failed.");
@@ -291,7 +259,7 @@ void AcceptExManager::RepostAcceptAtSlot(std::size_t slot)
 bool AcceptExManager::PostAcceptAtSlot(std::size_t slot)
 {
     PerIoContext& ctx = contexts_[slot];
-    ctx.overlapped    = { 0 };
+    ctx.overlapped = {0};
 
     ctx.socket = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
     if(ctx.socket == WFX_INVALID_SOCKET) {
@@ -302,16 +270,8 @@ bool AcceptExManager::PostAcceptAtSlot(std::size_t slot)
     ctx.operationType = PerIoOperationType::ACCEPT;
 
     DWORD bytesReceived = 0;
-    BOOL result = lpfnAcceptEx(
-        listenSocket_,
-        ctx.socket,
-        ctx.buffer,
-        0,
-        sizeof(SOCKADDR_IN) + 16,
-        sizeof(SOCKADDR_IN) + 16,
-        &bytesReceived,
-        &ctx.overlapped
-    );
+    BOOL result = lpfnAcceptEx(listenSocket_, ctx.socket, ctx.buffer, 0, sizeof(SOCKADDR_IN) + 16,
+                               sizeof(SOCKADDR_IN) + 16, &bytesReceived, &ctx.overlapped);
 
     if(!result && WSAGetLastError() != ERROR_IO_PENDING) {
         logger_.Error("[AcceptExManager]: AcceptEx failed at slot ", slot, ", err=", WSAGetLastError());

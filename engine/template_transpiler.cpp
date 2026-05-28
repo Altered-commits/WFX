@@ -34,9 +34,8 @@ std::uint32_t TemplateEngine::GetConstId(TranspilationContext& ctx, const Value&
     return it->second;
 }
 
-TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
-    TranspilationContext& ctx, std::string_view tagView
-) {
+TemplateEngine::TagResult TemplateEngine::ProcessTagIR(TranspilationContext& ctx, std::string_view tagView)
+{
     auto [tagName, tagArgs] = ExtractTag(tagView);
     if(tagName.empty()) {
         logger_.Error("[TemplateEngine].[CodeGen:IR]: Malformed tag (empty name)");
@@ -44,7 +43,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
     }
 
     // For ease of use :)
-    auto& ir           = ctx.ir;
+    auto& ir = ctx.ir;
     auto& offsetPatchStack = ctx.offsetPatchStack;
 
     // Get the tag type we working with
@@ -53,8 +52,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
         goto __Failure;
 
     switch(it->second) {
-        case TagType::IF:
-        {
+        case TagType::IF: {
             // Parse the expression, get its index in the rpnPool
             auto [success, exprIndex] = ParseExpr(ctx, tagArgs);
             if(!success)
@@ -62,21 +60,18 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
 
             // Create a new patch frame for this 'if' block
             offsetPatchStack.emplace_back();
-            
+
             // Push the index of this op (which is the current size) onto the stack
             offsetPatchStack.back().push_back(static_cast<std::uint32_t>(ir.size()));
 
             // Add the IF op, it needs patching
             ir.push_back({
-                OpType::IF,
-                true,
-                ConditionalValue{ 0, exprIndex } // Payload is {jump_state, expr_index}
+                OpType::IF, true, ConditionalValue{0, exprIndex} // Payload is {jump_state, expr_index}
             });
 
             return TagResult::SUCCESS;
         }
-        case TagType::ELIF:
-        {
+        case TagType::ELIF: {
             if(offsetPatchStack.empty()) {
                 logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'elif' without 'if'");
                 return TagResult::FAILURE;
@@ -90,8 +85,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
             // This JUMP also needs patching
             std::uint32_t jumpOpIndex = static_cast<std::uint32_t>(ir.size());
             ir.push_back({
-                OpType::JUMP,
-                true,
+                OpType::JUMP, true,
                 std::uint32_t(0) // Payload is jump_state
             });
             offsetPatchStack.back().push_back(jumpOpIndex);
@@ -118,15 +112,12 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
             // Add the ELIF op, it needs patching
             offsetPatchStack.back().push_back(static_cast<std::uint32_t>(ir.size()));
             ir.push_back({
-                OpType::ELIF,
-                true,
-                ConditionalValue{ 0, exprIndex } // Payload is {jump_state, expr_index}
+                OpType::ELIF, true, ConditionalValue{0, exprIndex} // Payload is {jump_state, expr_index}
             });
 
             return TagResult::SUCCESS;
-        }    
-        case TagType::ELSE:
-        {
+        }
+        case TagType::ELSE: {
             if(offsetPatchStack.empty()) {
                 logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'else' without 'if'");
                 return TagResult::FAILURE;
@@ -139,8 +130,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
             // Add a JUMP op (to jump to endif)
             std::uint32_t jumpOpIndex = static_cast<std::uint32_t>(ir.size());
             ir.push_back({
-                OpType::JUMP,
-                true,
+                OpType::JUMP, true,
                 std::uint32_t(0) // Payload is jump_state
             });
 
@@ -165,15 +155,12 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
 
             // Add the ELSE marker op
             ir.push_back({
-                OpType::ELSE,
-                false,
-                std::monostate{} // No payload
+                OpType::ELSE, false, std::monostate{} // No payload
             });
 
             return TagResult::SUCCESS;
         }
-        case TagType::ENDIF:
-        {
+        case TagType::ENDIF: {
             if(offsetPatchStack.empty()) {
                 logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'endif' without 'if'");
                 return {};
@@ -196,30 +183,25 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
 
             // Add the ENDIF marker op
             ir.push_back({
-                OpType::ENDIF,
-                false,
-                std::monostate{} // No payload
+                OpType::ENDIF, false, std::monostate{} // No payload
             });
 
             return TagResult::SUCCESS;
         }
-        case TagType::VAR:
-        {
+        case TagType::VAR: {
             // Parse the expression, get its index in the rpnPool
             auto [success, exprIndex] = ParseExpr(ctx, tagArgs);
             if(!success)
                 return TagResult::FAILURE;
 
             ir.push_back({
-                OpType::VAR,
-                false,
+                OpType::VAR, false,
                 exprIndex // Payload is std::uint32_t (index to RPNBytecode)
             });
 
             return TagResult::SUCCESS;
         }
-        case TagType::FOR:
-        {
+        case TagType::FOR: {
             // Syntax: for <identifier> in <expr>
             Legacy::Lexer lexer{tagArgs};
             Legacy::Token token = lexer.get_token();
@@ -237,7 +219,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
                 logger_.Error("[TemplateEngine].[CodeGen:IR]: Expected keyword 'in' after loop variable");
                 return TagResult::FAILURE;
             }
-            
+
             // Loop expression, take substring of it till end of string and pass it to 'ParseExpr'
             auto [success, exprIndex] = ParseExpr(ctx, lexer.get_remaining_string());
             if(!success)
@@ -251,15 +233,12 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
             auto varId = GetVarNameId(ctx, loopVar);
 
             ir.push_back({
-                OpType::FOR,
-                true,
-                ForLoopValue{0, exprIndex, varId} // Payload is jump_state, expr_index, var_id
+                OpType::FOR, true, ForLoopValue{0, exprIndex, varId} // Payload is jump_state, expr_index, var_id
             });
 
             return TagResult::SUCCESS;
         }
-        case TagType::ENDFOR:
-        {
+        case TagType::ENDFOR: {
             if(offsetPatchStack.empty()) {
                 logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'endfor' without matching 'for'");
                 return TagResult::FAILURE;
@@ -273,15 +252,14 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
             std::uint32_t endState = static_cast<std::uint32_t>(ir.size());
 
             // Patch the previous for loop to this marker
-            auto& forOp      = ir[forIdx];
+            auto& forOp = ir[forIdx];
             auto& forPayload = std::get<ForLoopValue>(forOp.payload);
-            forOp.patch          = false;
+            forOp.patch = false;
             forPayload.jumpState = endState;
 
             // Range check / finish marker
             ir.push_back({
-                OpType::ENDFOR,
-                false,
+                OpType::ENDFOR, false,
                 forPayload // Payload is jump_state, expr_index, var_id
             });
 
@@ -291,7 +269,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(
         default:
             break;
     }
-    
+
 __Failure:
     // Shouldn't happen btw
     logger_.Error("[TemplateEngine].[CodeGen:IR]: Unknown tag appeared: ", tagName);
@@ -300,9 +278,8 @@ __Failure:
 
 // vvv Transpiler Functions vvv
 //  vvv Parsing Functions vvv
-TemplateEngine::ParseResult TemplateEngine::ParseExpr(
-    TranspilationContext& ctx, std::string_view expression
-) {
+TemplateEngine::ParseResult TemplateEngine::ParseExpr(TranspilationContext& ctx, std::string_view expression)
+{
     RPNBytecode outputQueue;
     std::vector<Legacy::Token> operatorStack;
     Legacy::Lexer lexer{expression}; // My trusty old lexer :)
@@ -312,28 +289,16 @@ TemplateEngine::ParseResult TemplateEngine::ParseExpr(
         switch(token.token_type) {
             // --- Operands (Push directly to output) ---
             case Legacy::TOKEN_ID:
-                outputQueue.push_back({
-                    RPNOpCode::PUSH_VAR, 
-                    GetVarNameId(ctx, token.token_value)
-                });
+                outputQueue.push_back({RPNOpCode::PUSH_VAR, GetVarNameId(ctx, token.token_value)});
                 break;
             case Legacy::TOKEN_INT:
-                outputQueue.push_back({
-                    RPNOpCode::PUSH_CONST, 
-                    GetConstId(ctx, std::stoll(token.token_value))
-                });
+                outputQueue.push_back({RPNOpCode::PUSH_CONST, GetConstId(ctx, std::stoll(token.token_value))});
                 break;
             case Legacy::TOKEN_FLOAT:
-                outputQueue.push_back({
-                    RPNOpCode::PUSH_CONST, 
-                    GetConstId(ctx, std::stod(token.token_value))
-                });
+                outputQueue.push_back({RPNOpCode::PUSH_CONST, GetConstId(ctx, std::stod(token.token_value))});
                 break;
             case Legacy::TOKEN_STRING:
-                outputQueue.push_back({
-                    RPNOpCode::PUSH_CONST, 
-                    GetConstId(ctx, token.token_value)
-                });
+                outputQueue.push_back({RPNOpCode::PUSH_CONST, GetConstId(ctx, token.token_value)});
                 break;
 
             // --- Parentheses ---
@@ -342,40 +307,36 @@ TemplateEngine::ParseResult TemplateEngine::ParseExpr(
                 break;
 
             case Legacy::TOKEN_RPAREN:
-                while(
-                    !operatorStack.empty()
-                    && operatorStack.back().token_type != Legacy::TOKEN_LPAREN
-                )
-                    if(!PopOperator(operatorStack, outputQueue)) return { false, 0 };
+                while(!operatorStack.empty() && operatorStack.back().token_type != Legacy::TOKEN_LPAREN)
+                    if(!PopOperator(operatorStack, outputQueue))
+                        return {false, 0};
 
                 if(operatorStack.empty()) {
                     logger_.Error("[TemplateEngine].[CodeGen:EP]: Mismatched parentheses, '(' missing ')'");
-                    return { false, 0 };
+                    return {false, 0};
                 }
 
                 operatorStack.pop_back(); // Pop the '('
                 break;
-            
+
             // --- Dot Operator ---
             case Legacy::TOKEN_DOT: {
                 // Expect identifier after '.'
                 Legacy::Token attrToken = lexer.peek_next_token();
                 if(attrToken.token_type != Legacy::TOKEN_ID) {
                     logger_.Error("[TemplateEngine].[CodeGen:EP]: Expected identifier after '.'");
-                    return { false, 0 };
+                    return {false, 0};
                 }
 
                 // Dot behaves as a binary operator
-                std::uint32_t prec       = GetOperatorPrecedence(Legacy::TOKEN_DOT);
-                bool          isRightAsc = IsRightAssociative(Legacy::TOKEN_DOT);
+                std::uint32_t prec = GetOperatorPrecedence(Legacy::TOKEN_DOT);
+                bool isRightAsc = IsRightAssociative(Legacy::TOKEN_DOT);
 
-                while(!operatorStack.empty() && 
-                    operatorStack.back().token_type != Legacy::TOKEN_LPAREN)
-                {
+                while(!operatorStack.empty() && operatorStack.back().token_type != Legacy::TOKEN_LPAREN) {
                     std::uint32_t topPrec = GetOperatorPrecedence(operatorStack.back().token_type);
                     if((topPrec > prec || (topPrec == prec && !isRightAsc))) {
                         if(!PopOperator(operatorStack, outputQueue))
-                            return { false, 0 };
+                            return {false, 0};
                     }
                     else
                         break;
@@ -388,22 +349,18 @@ TemplateEngine::ParseResult TemplateEngine::ParseExpr(
             // --- All Other Operators ---
             default:
                 if(!IsOperator(token.token_type)) {
-                    logger_.Error(
-                        "[TemplateEngine].[CodeGen:EP]: Unexpected token in expression: ", token.token_value
-                    );
-                    return { false, 0 };
+                    logger_.Error("[TemplateEngine].[CodeGen:EP]: Unexpected token in expression: ", token.token_value);
+                    return {false, 0};
                 }
 
-                std::uint32_t prec       = GetOperatorPrecedence(token.token_type);
-                bool          isRightAsc = IsRightAssociative(token.token_type);
+                std::uint32_t prec = GetOperatorPrecedence(token.token_type);
+                bool isRightAsc = IsRightAssociative(token.token_type);
 
-                while(!operatorStack.empty() && 
-                       operatorStack.back().token_type != Legacy::TOKEN_LPAREN)
-                {
+                while(!operatorStack.empty() && operatorStack.back().token_type != Legacy::TOKEN_LPAREN) {
                     std::uint32_t topPrec = GetOperatorPrecedence(operatorStack.back().token_type);
                     if((topPrec > prec || (topPrec == prec && !isRightAsc))) {
                         if(!PopOperator(operatorStack, outputQueue))
-                            return { false, 0 };
+                            return {false, 0};
                     }
                     else
                         break;
@@ -417,16 +374,16 @@ TemplateEngine::ParseResult TemplateEngine::ParseExpr(
     while(!operatorStack.empty()) {
         if(operatorStack.back().token_type == Legacy::TOKEN_LPAREN) {
             logger_.Error("[TemplateEngine].[CodeGen:EP]: Mismatched parentheses, extra '('");
-            return { false, 0 };
+            return {false, 0};
         }
 
         if(!PopOperator(operatorStack, outputQueue))
-            return { false, 0 };
+            return {false, 0};
     }
 
     // Now that 'outputQueue' is complete, hash and pool it
     std::size_t hash = HashBytecode(outputQueue);
-    
+
     auto it = ctx.rpnMap.find(hash);
     // We found a potential match, but still check if its the right one or not
     if(it != ctx.rpnMap.end()) {
@@ -434,15 +391,15 @@ TemplateEngine::ParseResult TemplateEngine::ParseExpr(
 
         // Its a perfect match, return the existing index
         if(ctx.rpnPool[idx] == outputQueue)
-            return { true, idx };
+            return {true, idx};
     }
 
     // Not found, add it to the pool
     ctx.rpnPool.push_back(std::move(outputQueue));
     std::uint32_t newIdx = static_cast<std::uint32_t>(ctx.rpnPool.size() - 1);
     ctx.rpnMap[hash] = newIdx;
-    
-    return { true, newIdx };
+
+    return {true, newIdx};
 }
 
 std::uint32_t TemplateEngine::GetOperatorPrecedence(Legacy::TokenType type)
@@ -479,7 +436,7 @@ bool TemplateEngine::PopOperator(std::vector<Legacy::Token>& opStack, RPNBytecod
     }
 
     RPNOpCode op_code = TokenToOpCode(type);
-    outputQueue.push_back({ op_code, 0 });
+    outputQueue.push_back({op_code, 0});
     opStack.pop_back();
     return true;
 }
@@ -512,7 +469,7 @@ bool TemplateEngine::IsRightAssociative(Legacy::TokenType type)
 std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::uint32_t rpnIndex, bool asBool)
 {
     std::vector<std::vector<std::string>> pathStack;
-    std::vector<std::string>              exprStack;
+    std::vector<std::string> exprStack;
 
     // Helper lambda to select and get expr from stack
     auto GetExprFromStack = [&](std::string& out) -> void {
@@ -544,7 +501,7 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
     for(const auto& op : ctx.rpnPool[rpnIndex]) {
         switch(op.code) {
             case RPNOpCode::PUSH_VAR: {
-                pathStack.push_back({ ctx.staticVarNames[op.arg] });
+                pathStack.push_back({ctx.staticVarNames[op.arg]});
                 break;
             }
 
@@ -567,8 +524,10 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
                 if(pathStack.size() < 2)
                     break;
 
-                auto rhs = std::move(pathStack.back()); pathStack.pop_back();
-                auto lhs = std::move(pathStack.back()); pathStack.pop_back();
+                auto rhs = std::move(pathStack.back());
+                pathStack.pop_back();
+                auto lhs = std::move(pathStack.back());
+                pathStack.pop_back();
 
                 lhs.insert(lhs.end(), rhs.begin(), rhs.end());
                 pathStack.push_back(std::move(lhs));
@@ -586,15 +545,32 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
             case RPNOpCode::OP_LTE: {
                 std::string opStr;
                 switch(op.code) {
-                    case RPNOpCode::OP_AND: opStr = "&&"; break;
-                    case RPNOpCode::OP_OR:  opStr = "||"; break;
-                    case RPNOpCode::OP_EQ:  opStr = "=="; break;
-                    case RPNOpCode::OP_NEQ: opStr = "!="; break;
-                    case RPNOpCode::OP_GT:  opStr = ">";  break;
-                    case RPNOpCode::OP_GTE: opStr = ">="; break;
-                    case RPNOpCode::OP_LT:  opStr = "<";  break;
-                    case RPNOpCode::OP_LTE: opStr = "<="; break;
-                    default: break;
+                    case RPNOpCode::OP_AND:
+                        opStr = "&&";
+                        break;
+                    case RPNOpCode::OP_OR:
+                        opStr = "||";
+                        break;
+                    case RPNOpCode::OP_EQ:
+                        opStr = "==";
+                        break;
+                    case RPNOpCode::OP_NEQ:
+                        opStr = "!=";
+                        break;
+                    case RPNOpCode::OP_GT:
+                        opStr = ">";
+                        break;
+                    case RPNOpCode::OP_GTE:
+                        opStr = ">=";
+                        break;
+                    case RPNOpCode::OP_LT:
+                        opStr = "<";
+                        break;
+                    case RPNOpCode::OP_LTE:
+                        opStr = "<=";
+                        break;
+                    default:
+                        break;
                 }
 
                 std::string lhs, rhs;
@@ -624,8 +600,8 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
     if(!pathStack.empty() && !pathStack.back().empty()) {
         const auto& keys = pathStack.back();
         std::string outExpr = "SafeGetJson(ctx, {";
-        
-         for(std::size_t i = 0; i < keys.size(); ++i) {
+
+        for(std::size_t i = 0; i < keys.size(); ++i) {
             if(i)
                 outExpr += ", ";
 
@@ -647,36 +623,28 @@ std::string TemplateEngine::GenerateCxxFromRPN(TranspilationContext& ctx, std::u
 
 bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std::string& staticHtmlPath)
 {
-    auto& frame     = ctx.frame;
-    auto  chunkSize = ctx.chunkSize;
+    auto& frame = ctx.frame;
+    auto chunkSize = ctx.chunkSize;
 
     // For convinience + to properly reference tags across boundaries
-    const char* bufPtr         = nullptr;
-    std::size_t bufLen         = 0;
+    const char* bufPtr = nullptr;
+    std::size_t bufLen = 0;
     std::size_t totalBytesRead = 0;
-    std::string_view bodyView  = {};
-    std::string_view tagView   = {};
+    std::string_view bodyView = {};
+    std::string_view tagView = {};
 
     // Having to define here cuz of (my shitty coding) 'goto __ProcessTag';
-    std::size_t tagStart   = 0;
+    std::size_t tagStart = 0;
     std::size_t literalEnd = 0;
-    std::size_t tagEnd     = 0;
+    std::size_t tagEnd = 0;
 
     // vvv Helper Lambdas vvv
-    auto GetFilePos = [&]() -> std::size_t {
-        return totalBytesRead + frame.readOffset;
-    };
+    auto GetFilePos = [&]() -> std::size_t { return totalBytesRead + frame.readOffset; };
 
     auto FinalizeLiteral = [&]() {
         if(ctx.currentLiteralLength > 0) {
-            ctx.ir.push_back({
-                OpType::LITERAL,
-                false,
-                LiteralValue{
-                    ctx.currentLiteralStartOffset,
-                    ctx.currentLiteralLength
-                }
-            });
+            ctx.ir.push_back(
+                {OpType::LITERAL, false, LiteralValue{ctx.currentLiteralStartOffset, ctx.currentLiteralLength}});
             ctx.currentLiteralLength = 0;
         }
     };
@@ -687,7 +655,7 @@ bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std
             // Finished processing previous chunk, update totalBytesRead
             totalBytesRead += frame.bytesRead;
 
-            frame.bytesRead  = frame.file->Read(frame.readBuf.get(), chunkSize);
+            frame.bytesRead = frame.file->Read(frame.readBuf.get(), chunkSize);
             frame.readOffset = 0;
 
             if(frame.bytesRead < 0) {
@@ -726,7 +694,7 @@ bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std
             // Check if 'frame.carry' ends with '%' and 'bodyView' starts with '}'
             // If so, we can complete tag here and now
             else if(frame.carry.back() == '%' && bodyView[0] == '}') {
-                frame.carry      += '}';
+                frame.carry += '}';
                 frame.readOffset += 1;
 
                 tagView = frame.carry;
@@ -740,8 +708,7 @@ bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std
                 // How did we not find tag end even tho we are literally in second chunk?
                 // Tf dawg, not again
                 logger_.Error(
-                    "[TemplateEngine].[CodeGen:IR]: We are in second chunk yet we couldn't find the tag end? Hell nah"
-                );
+                    "[TemplateEngine].[CodeGen:IR]: We are in second chunk yet we couldn't find the tag end? Hell nah");
                 return false;
             }
 
@@ -764,14 +731,14 @@ bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std
 
             if(tagStart == std::string_view::npos) {
                 // Possibly ends with '{'
-                bool        maybeTag   = bodyView.back() == '{';
+                bool maybeTag = bodyView.back() == '{';
                 std::size_t literalLen = maybeTag ? bodyView.size() - 1 : bodyView.size();
 
                 if(ctx.currentLiteralLength == 0)
                     ctx.currentLiteralStartOffset = GetFilePos();
 
                 ctx.currentLiteralLength += literalLen;
-                frame.readOffset         += literalLen;
+                frame.readOffset += literalLen;
 
                 if(maybeTag) {
                     frame.carry.assign("{");
@@ -787,7 +754,7 @@ bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std
                     ctx.currentLiteralStartOffset = GetFilePos();
 
                 ctx.currentLiteralLength += tagStart;
-                frame.readOffset         += tagStart;
+                frame.readOffset += tagStart;
             }
 
             // Finalize literal before processing tag
@@ -795,7 +762,7 @@ bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std
 
             // Process tag
             bodyView = std::string_view(bufPtr + frame.readOffset, bufLen - frame.readOffset);
-            tagEnd   = bodyView.find("%}");
+            tagEnd = bodyView.find("%}");
 
             if(tagEnd == std::string_view::npos) {
                 frame.carry.assign(bodyView.data(), bodyView.size());
@@ -834,27 +801,26 @@ bool TemplateEngine::GenerateIRFromTemplate(TranspilationContext& ctx, const std
     return true;
 }
 
-bool TemplateEngine::GenerateCxxFromIR(
-    TranspilationContext& ctx,
-    const std::string& outCxxPath,
-    const std::string& funcName
-) {
+bool TemplateEngine::GenerateCxxFromIR(TranspilationContext& ctx, const std::string& outCxxPath,
+                                       const std::string& funcName)
+{
     auto outFile = FileSystem::OpenFileWrite(outCxxPath.c_str());
 
     if(!outFile) {
         logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to open output file: ", outCxxPath);
         return false;
     }
-    
+
     // Yeah man this shits getting out of hand atp
     // Honestly fuck performance here not even going to bother, lets just hope compiler-
     // -optimizes this shit of a code
     IOContext ioCtx{std::move(outFile), ctx.chunkSize};
-    const auto& irCode   = ctx.ir;
+    const auto& irCode = ctx.ir;
     bool needEndingBrace = false;
-    bool writeResult     = true;
+    bool writeResult = true;
 
     // vvv EMIT HEADER vvv
+    // clang-format off
     writeResult = SafeWrite(ioCtx, R"(/*
  * AUTO-GENERATED FILE, DO NOT MODIFY :)
  */
@@ -875,19 +841,26 @@ using WFX::Shared::JsonObject;
 using WFX::Core::BaseTemplateGenerator;
 
 )", 406);
+    // clang-format on
+
     if(!writeResult) {
         logger_.Error("[TemplateEngine].[CodeGen:CXX]: Failed to write cxx header to: ", outCxxPath);
         return false;
     }
 
     // vvv EMIT GENERATOR CLASS vvv
-    std::string generatorClass = 
-        "class CLS" + funcName + " : public BaseTemplateGenerator {\n"
+    std::string generatorClass =
+        "class CLS" + funcName +
+        " : public BaseTemplateGenerator {\n"
         "public:\n"
-        "    CLS" + funcName + "() = default;\n\n"
+        "    CLS" +
+        funcName +
+        "() = default;\n\n"
 
         "    std::size_t GetStateCount() const noexcept override {\n"
-        "        return " + StringUtils::UInt64ToStr(irCode.size()) + ";\n"
+        "        return " +
+        StringUtils::UInt64ToStr(irCode.size()) +
+        ";\n"
         "    }\n\n"
 
         "    StateResult GetState(std::size_t state, JsonObject& ctx) const noexcept override {\n"
@@ -906,7 +879,7 @@ using WFX::Core::BaseTemplateGenerator;
 
         // Reset to default states every iteration
         needEndingBrace = true;
-        writeResult     = true;
+        writeResult = true;
 
         // Initial 'case ...:' line
         std::string line = "                case " + StringUtils::UInt64ToStr(i) + ":";
@@ -920,9 +893,8 @@ using WFX::Core::BaseTemplateGenerator;
                 needEndingBrace = false;
                 auto [off, len] = std::get<LiteralValue>(op.payload);
 
-                line = " return {" + StringUtils::UInt64ToStr(i + 1) +
-                                ", FileChunk{" + StringUtils::UInt64ToStr(off) + ", " +
-                                StringUtils::UInt64ToStr(len) + "}};\n";
+                line = " return {" + StringUtils::UInt64ToStr(i + 1) + ", FileChunk{" + StringUtils::UInt64ToStr(off) +
+                       ", " + StringUtils::UInt64ToStr(len) + "}};\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
                 break;
@@ -932,9 +904,8 @@ using WFX::Core::BaseTemplateGenerator;
                 needEndingBrace = false;
                 std::uint32_t exprIdx = std::get<std::uint32_t>(op.payload);
 
-                line = " return {" + StringUtils::UInt64ToStr(i + 1) +
-                                ", VariableChunk{ " + GenerateCxxFromRPN(ctx, exprIdx, false) +
-                                " }};\n";
+                line = " return {" + StringUtils::UInt64ToStr(i + 1) + ", VariableChunk{ " +
+                       GenerateCxxFromRPN(ctx, exprIdx, false) + " }};\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
                 break;
@@ -945,13 +916,16 @@ using WFX::Core::BaseTemplateGenerator;
                 const auto& [jump, exprIdx] = std::get<ConditionalValue>(op.payload);
                 std::string expr = GenerateCxxFromRPN(ctx, exprIdx, true);
 
-                line =
-                    " {\n"
-                    "                    if(!(" + expr + ")) {\n"
-                    "                        state = " + StringUtils::UInt64ToStr(jump) + ";\n"
-                    "                        continue;\n"
-                    "                    }\n"
-                    "                    [[fallthrough]];\n";
+                line = " {\n"
+                       "                    if(!(" +
+                       expr +
+                       ")) {\n"
+                       "                        state = " +
+                       StringUtils::UInt64ToStr(jump) +
+                       ";\n"
+                       "                        continue;\n"
+                       "                    }\n"
+                       "                    [[fallthrough]];\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
                 break;
@@ -967,10 +941,11 @@ using WFX::Core::BaseTemplateGenerator;
             case OpType::JUMP: {
                 std::uint32_t jump = std::get<std::uint32_t>(op.payload);
 
-                line =
-                    " {\n"
-                    "                    state = " + StringUtils::UInt64ToStr(jump) + ";\n"
-                    "                    continue;\n";
+                line = " {\n"
+                       "                    state = " +
+                       StringUtils::UInt64ToStr(jump) +
+                       ";\n"
+                       "                    continue;\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
                 break;
@@ -978,20 +953,27 @@ using WFX::Core::BaseTemplateGenerator;
 
             case OpType::FOR: { // Initializer
                 const auto& [jump, exprIdx, varId] = std::get<ForLoopValue>(op.payload);
-                std::string expr    = GenerateCxxFromRPN(ctx, exprIdx, false);
+                std::string expr = GenerateCxxFromRPN(ctx, exprIdx, false);
                 std::string loopVar = ctx.staticVarNames[varId];
                 std::string jumpVar = StringUtils::UInt64ToStr(jump);
 
-                line =
-                    " {\n"
-                    "                    auto arr = " + expr + ";\n"
-                    "                    if(!arr.Valid() || !arr.IsArray() || arr.Length() == 0) {\n"
-                    "                        state = " + StringUtils::UInt64ToStr(jump + 1) + ";\n"
-                    "                        continue;\n"
-                    "                    }\n"
-                    "                    ctx.Set(\"" + loopVar + "\", arr[0]);\n"
-                    "                    ctx.Set(\"__linf_" + jumpVar + "\", (std::uint64_t(" + StringUtils::UInt64ToStr(i + 1) + ") << 32) | std::uint64_t(1));\n"
-                    "                    [[fallthrough]];\n";
+                line = " {\n"
+                       "                    auto arr = " +
+                       expr +
+                       ";\n"
+                       "                    if(!arr.Valid() || !arr.IsArray() || arr.Length() == 0) {\n"
+                       "                        state = " +
+                       StringUtils::UInt64ToStr(jump + 1) +
+                       ";\n"
+                       "                        continue;\n"
+                       "                    }\n"
+                       "                    ctx.Set(\"" +
+                       loopVar +
+                       "\", arr[0]);\n"
+                       "                    ctx.Set(\"__linf_" +
+                       jumpVar + "\", (std::uint64_t(" + StringUtils::UInt64ToStr(i + 1) +
+                       ") << 32) | std::uint64_t(1));\n"
+                       "                    [[fallthrough]];\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
                 break;
@@ -999,26 +981,37 @@ using WFX::Core::BaseTemplateGenerator;
 
             case OpType::ENDFOR: { // Checker and Finisher
                 const auto& [jump, exprIdx, varId] = std::get<ForLoopValue>(op.payload);
-                std::string expr    = GenerateCxxFromRPN(ctx, exprIdx, false);
+                std::string expr = GenerateCxxFromRPN(ctx, exprIdx, false);
                 std::string loopVar = ctx.staticVarNames[varId];
                 std::string jumpVar = StringUtils::UInt64ToStr(jump);
 
-                line =
-                    " {\n"
-                    "                    auto arr  = " + expr + ";\n"
-                    "                    auto linf = ctx.Get(\"__linf_" + jumpVar + "\");\n"
-                    "                    std::uint64_t linfVal = linf.AsUInt();\n"
-                    "                    std::uint32_t iid     = linfVal >> 32;\n"
-                    "                    std::uint32_t idx     = linfVal & 0xFFFFFFFFu;\n"
-                    "                    if(idx < arr.Length()) {\n"
-                    "                        ctx.Set(\"" + loopVar + "\", arr[idx]);\n"
-                    "                        ctx.Set(\"__linf_" + jumpVar + "\", (std::uint64_t(iid) << 32) | std::uint64_t(idx + 1));\n"
-                    "                        state = iid;\n"
-                    "                        continue;\n"
-                    "                    }\n"
-                    "                    ctx.Erase(\"" + loopVar + "\");\n"
-                    "                    ctx.Erase(\"__linf_" + jumpVar + "\");\n"
-                    "                    [[fallthrough]];\n";
+                line = " {\n"
+                       "                    auto arr  = " +
+                       expr +
+                       ";\n"
+                       "                    auto linf = ctx.Get(\"__linf_" +
+                       jumpVar +
+                       "\");\n"
+                       "                    std::uint64_t linfVal = linf.AsUInt();\n"
+                       "                    std::uint32_t iid     = linfVal >> 32;\n"
+                       "                    std::uint32_t idx     = linfVal & 0xFFFFFFFFu;\n"
+                       "                    if(idx < arr.Length()) {\n"
+                       "                        ctx.Set(\"" +
+                       loopVar +
+                       "\", arr[idx]);\n"
+                       "                        ctx.Set(\"__linf_" +
+                       jumpVar +
+                       "\", (std::uint64_t(iid) << 32) | std::uint64_t(idx + 1));\n"
+                       "                        state = iid;\n"
+                       "                        continue;\n"
+                       "                    }\n"
+                       "                    ctx.Erase(\"" +
+                       loopVar +
+                       "\");\n"
+                       "                    ctx.Erase(\"__linf_" +
+                       jumpVar +
+                       "\");\n"
+                       "                    [[fallthrough]];\n";
                 writeResult = SafeWrite(ioCtx, line.c_str(), line.size());
 
                 break;
@@ -1042,24 +1035,27 @@ using WFX::Core::BaseTemplateGenerator;
     // ------------------------------------------------------------------------
     // Emit class footer
     // ------------------------------------------------------------------------
-    SafeWrite(ioCtx, 
-R"(                default:
+    SafeWrite(ioCtx,
+              R"(                default:
                     return {state, std::monostate{}};
             }
         }
     }
 };
-)", 112);
+)",
+              112);
 
     // ------------------------------------------------------------------------
     // Emit factory
     // ------------------------------------------------------------------------
-    std::string factory =
-        "\n/*\n * Creates and returns an instance of the template generator\n */"
-        "\nextern \"C\"\nWFX_EXPORT\nstd::unique_ptr<BaseTemplateGenerator> "
-        + funcName + "() {\n"
-        "    return std::make_unique<CLS" + funcName + ">();\n"
-        "}";
+    std::string factory = "\n/*\n * Creates and returns an instance of the template generator\n */"
+                          "\nextern \"C\"\nWFX_EXPORT\nstd::unique_ptr<BaseTemplateGenerator> " +
+                          funcName +
+                          "() {\n"
+                          "    return std::make_unique<CLS" +
+                          funcName +
+                          ">();\n"
+                          "}";
     SafeWrite(ioCtx, factory.c_str(), factory.size());
 
     // Finalize
@@ -1068,12 +1064,12 @@ R"(                default:
     return true;
 }
 
-bool TemplateEngine::GenerateCxxFromTemplate(
-    const std::string& inHtmlPath, const std::string& outCxxPath, const std::string& funcName
-) {
+bool TemplateEngine::GenerateCxxFromTemplate(const std::string& inHtmlPath, const std::string& outCxxPath,
+                                             const std::string& funcName)
+{
     std::uint32_t chunkSize = config_.miscConfig.templateChunkSize;
-    BaseFilePtr   inFile    = FileSystem::OpenFileRead(inHtmlPath.c_str(), true);
-    
+    BaseFilePtr inFile = FileSystem::OpenFileRead(inHtmlPath.c_str(), true);
+
     TranspilationContext ctx{std::move(inFile), chunkSize};
 
     if(!GenerateIRFromTemplate(ctx, inHtmlPath))
@@ -1086,16 +1082,26 @@ bool TemplateEngine::GenerateCxxFromTemplate(
 TemplateEngine::RPNOpCode TemplateEngine::TokenToOpCode(Legacy::TokenType type)
 {
     switch(type) {
-        case Legacy::TOKEN_AND:  return RPNOpCode::OP_AND;
-        case Legacy::TOKEN_OR:   return RPNOpCode::OP_OR;
-        case Legacy::TOKEN_EEQ:  return RPNOpCode::OP_EQ;
-        case Legacy::TOKEN_NEQ:  return RPNOpCode::OP_NEQ;
-        case Legacy::TOKEN_GT:   return RPNOpCode::OP_GT;
-        case Legacy::TOKEN_GTEQ: return RPNOpCode::OP_GTE;
-        case Legacy::TOKEN_LT:   return RPNOpCode::OP_LT;
-        case Legacy::TOKEN_LTEQ: return RPNOpCode::OP_LTE;
-        case Legacy::TOKEN_NOT:  return RPNOpCode::OP_NOT;
-        case Legacy::TOKEN_DOT:  return RPNOpCode::OP_GET_ATTR;
+        case Legacy::TOKEN_AND:
+            return RPNOpCode::OP_AND;
+        case Legacy::TOKEN_OR:
+            return RPNOpCode::OP_OR;
+        case Legacy::TOKEN_EEQ:
+            return RPNOpCode::OP_EQ;
+        case Legacy::TOKEN_NEQ:
+            return RPNOpCode::OP_NEQ;
+        case Legacy::TOKEN_GT:
+            return RPNOpCode::OP_GT;
+        case Legacy::TOKEN_GTEQ:
+            return RPNOpCode::OP_GTE;
+        case Legacy::TOKEN_LT:
+            return RPNOpCode::OP_LT;
+        case Legacy::TOKEN_LTEQ:
+            return RPNOpCode::OP_LTE;
+        case Legacy::TOKEN_NOT:
+            return RPNOpCode::OP_NOT;
+        case Legacy::TOKEN_DOT:
+            return RPNOpCode::OP_GET_ATTR;
         default:
             logger_.Fatal("[TemplateEngine].[CodeGen:EP]: Unknown operator type: ", (int)type);
             WFX_UNREACHABLE;
@@ -1107,11 +1113,11 @@ std::uint64_t TemplateEngine::HashBytecode(const RPNBytecode& rpn)
     std::uint64_t seed = rpn.size();
 
     for(const auto& op : rpn) {
-        seed = std::rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
-                ^ Shared::Hasher::Murmur3Mix64(static_cast<std::uint64_t>(op.code));
+        seed = std::rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3) ^
+               Shared::Hasher::Murmur3Mix64(static_cast<std::uint64_t>(op.code));
 
-        seed = std::rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3)
-                ^ Shared::Hasher::Murmur3Mix64(static_cast<std::uint64_t>(op.arg));
+        seed = std::rotl(seed, std::numeric_limits<std::uint64_t>::digits / 3) ^
+               Shared::Hasher::Murmur3Mix64(static_cast<std::uint64_t>(op.arg));
     }
 
     return seed;

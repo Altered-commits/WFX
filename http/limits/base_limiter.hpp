@@ -24,14 +24,11 @@ struct BaseLimiter {
     std::uint64_t NowEpochSeconds() const
     {
         return static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::steady_clock::now().time_since_epoch()
-            ).count()
-        );
+            std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch())
+                .count());
     }
 };
-    
-} // namespace WFX::Http
 
+} // namespace WFX::Http
 
 #endif // WFX_HTTP_BASE_LIMITER_HPP

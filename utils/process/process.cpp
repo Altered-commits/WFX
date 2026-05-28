@@ -1,12 +1,12 @@
 #include "process.hpp"
 
 #ifdef _WIN32
-    #include <Windows.h>
+#include <Windows.h>
 #else
-    #include <spawn.h>
-    #include <unistd.h>
-    #include <sys/wait.h>
-    #include <cerrno>
+#include <spawn.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <cerrno>
 #endif
 
 namespace WFX::Utils {
@@ -28,17 +28,16 @@ ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory)
     // Working directory (nullptr = Current Directory)
     LPCSTR workDir = workingDirectory.empty() ? nullptr : workingDirectory.c_str();
 
-    BOOL success = CreateProcessA(
-        nullptr,          // lpApplicationName
-        cmd.data(),       // lpCommandLine
-        nullptr,          // lpProcessAttributes
-        nullptr,          // lpThreadAttributes
-        FALSE,            // bInheritHandles
-        0,                // dwCreationFlags
-        nullptr,          // lpEnvironment
-        workDir,          // lpCurrentDirectory
-        &si,              // lpStartupInfo
-        &pi               // lpProcessInformation
+    BOOL success = CreateProcessA(nullptr,    // lpApplicationName
+                                  cmd.data(), // lpCommandLine
+                                  nullptr,    // lpProcessAttributes
+                                  nullptr,    // lpThreadAttributes
+                                  FALSE,      // bInheritHandles
+                                  0,          // dwCreationFlags
+                                  nullptr,    // lpEnvironment
+                                  workDir,    // lpCurrentDirectory
+                                  &si,        // lpStartupInfo
+                                  &pi         // lpProcessInformation
     );
 
     // Let the caller handle the error
@@ -48,7 +47,8 @@ ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory)
     // Helper RAII objects
     struct HandleGuard {
         HANDLE handle_ = nullptr;
-        ~HandleGuard() {
+        ~HandleGuard()
+        {
             if(handle_ && handle_ != INVALID_HANDLE_VALUE)
                 CloseHandle(handle_);
         }
@@ -71,11 +71,9 @@ ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory)
     posix_spawn_file_actions_init(&actions);
 
     // Change working directory if provided
-    if(!workingDirectory.empty())
-    {
+    if(!workingDirectory.empty()) {
         // posix_spawnattr_t doesn’t directly change cwd, so we use file_actions workaround
-        if(chdir(workingDirectory.c_str()) != 0)
-        {
+        if(chdir(workingDirectory.c_str()) != 0) {
             posix_spawn_file_actions_destroy(&actions);
             return ProcessResult{-1, (std::uint32_t)errno};
         }
@@ -99,9 +97,8 @@ ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory)
 #endif
 }
 
-ProcessResult RunProcess(
-    const std::string& executable, const std::string& args, const std::string& workingDirectory
-) {
+ProcessResult RunProcess(const std::string& executable, const std::string& args, const std::string& workingDirectory)
+{
     std::string commandLine = "\"" + executable + "\" " + args;
     return RunProcess(commandLine, workingDirectory);
 }

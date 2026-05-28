@@ -8,6 +8,7 @@
 #include "commands/cmd_new/new.hpp"
 #include "commands/cmd_doctor/doctor.hpp"
 #include "commands/cmd_run/run.hpp"
+#include "commands/cmd_control/control.hpp"
 #include "utils/argument_parser/argument_parser.hpp"
 
 namespace WFX {
@@ -15,9 +16,11 @@ namespace WFX {
 // For argument parser
 using namespace WFX::Utils;
 
-int WFXEntryPoint(int argc, char* argv[]) {
+int BeginAwesomeness(int argc, char* argv[])
+{
     ArgumentParser parser;
 
+    // clang-format off
     // --- Command: new ---
     parser.AddCommand("new", "Create a new WFX project",
         [](const std::unordered_map<std::string, std::string>&,
@@ -43,9 +46,8 @@ int WFXEntryPoint(int argc, char* argv[]) {
                     "[WFX]: Build type is required. Usage: wfx build <project-folder-name> [templates|source]"
                 );
 
-            return CLI::BuildProject(positionalArgs[0], positionalArgs[1], options.count("--debug") > 0);
+            return CLI::BuildProject(positionalArgs[0], positionalArgs[1]);
         });
-    parser.AddOption("build", "--debug", "Build in debug mode", true, "", false);
 
     // --- Command: run ---
     parser.AddCommand("run", "Start WFX server",
@@ -75,7 +77,7 @@ int WFXEntryPoint(int argc, char* argv[]) {
             if(options.count("--pin-to-cpu") > 0)          cfg.SetFlag(CLI::ServerFlags::PIN_TO_CPU);
             if(options.count("--use-https") > 0)           cfg.SetFlag(CLI::ServerFlags::USE_HTTPS);
             if(options.count("--https-port-override") > 0) cfg.SetFlag(CLI::ServerFlags::OVERRIDE_HTTPS_PORT);
-            if(options.count("--debug") > 0)               cfg.SetFlag(CLI::ServerFlags::USE_DEBUG);
+            if(options.count("--detach") > 0)              cfg.SetFlag(CLI::ServerFlags::USE_DAEMON);
 
             return CLI::RunServer(positionalArgs[0], cfg);
         });
@@ -84,16 +86,33 @@ int WFXEntryPoint(int argc, char* argv[]) {
     parser.AddOption("run", "--pin-to-cpu",          "Pin worker to CPU core",      true,  "",          false);
     parser.AddOption("run", "--use-https",           "Use HTTPS connection",        true,  "",          false);
     parser.AddOption("run", "--https-port-override", "Override default HTTPS port", true,  "",          false);
-    parser.AddOption("run", "--debug",               "For runtime debugging",       true,  "",          false);
+    parser.AddOption("run", "--detach",              "Run server as daemon",        true,  "",          false);
+
+    // --- Command: control ---
+    parser.AddCommand("control", "Manage running WFX servers",
+        [](const std::unordered_map<std::string, std::string>&,
+           const std::vector<std::string>& positionalArgs) -> int {
+            if(positionalArgs.empty())
+                GetLogger().Fatal(
+                    "[WFX]: Subcommand required. Usage: wfx control <list|folder|stop> [project-folder-name]"
+                );
+
+            std::string subcommand = positionalArgs[0];
+            std::string project    = positionalArgs.size() > 1 ? positionalArgs[1] : "";
+
+            return CLI::ControlCommand(subcommand, project);
+        });
+    // clang-format on
 
     return parser.Parse(argc, argv);
 }
 
-}  // namespace WFX
+} // namespace WFX
 
 // Entrypoint for the entire thing
-int main(int argc, char* argv[]) {
-    return WFX::WFXEntryPoint(argc, argv);
+int main(int argc, char* argv[])
+{
+    return WFX::BeginAwesomeness(argc, argv);
 }
 
-#endif  // WFX_CLI_MAIN_HPP
+#endif // WFX_CLI_MAIN_HPP

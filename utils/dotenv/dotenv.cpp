@@ -6,18 +6,18 @@
 #include <cerrno>
 
 #if defined(_WIN32) || defined(_WIN64)
-    #define WFX_USE_WINDOWS 1
-    #include <windows.h>
-    #include <sys/types.h>
-    #include <sys/stat.h>
+#define WFX_USE_WINDOWS 1
+#include <windows.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #else
-    #define WFX_USE_POSIX 1
-    #include <sys/types.h>
-    #include <sys/stat.h>
-    #include <fcntl.h>
-    #include <unistd.h>
-    #include <pwd.h>
-    #include <sys/mman.h>
+#define WFX_USE_POSIX 1
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <pwd.h>
+#include <sys/mman.h>
 #endif
 
 namespace WFX::Utils {
@@ -36,31 +36,23 @@ static bool CheckFileSecurityPosix(int fd, const EnvConfig& opt)
             return false;
     }
 
-    if(
-        opt.GetFlag(EnvFlags::REQUIRE_PERMS_600)
-        && (st.st_mode & (S_IRWXG | S_IRWXO))
-    )
+    if(opt.GetFlag(EnvFlags::REQUIRE_PERMS_600) && (st.st_mode & (S_IRWXG | S_IRWXO)))
         return false;
 
     return true;
 }
 
-static bool SetEnvVar(const std::string& k,
-    const std::string& v, const EnvConfig& opt)
+static bool SetEnvVar(const std::string& k, const std::string& v, const EnvConfig& opt)
 {
     bool overwriteExisting = opt.GetFlag(EnvFlags::OVERWRITE_EXISTING);
 
-    if(
-        !overwriteExisting
-        && (getenv(k.c_str()) != nullptr)
-    )
+    if(!overwriteExisting && (getenv(k.c_str()) != nullptr))
         return true;
 
     return setenv(k.c_str(), v.c_str(), overwriteExisting ? 1 : 0) == 0;
 }
 #else
-static bool SetEnvVar(const std::string& k,
-    const std::string& v, const EnvConfig& opt)
+static bool SetEnvVar(const std::string& k, const std::string& v, const EnvConfig& opt)
 {
     if(!opt.GetFlag(EnvFlag::OVERWRITE_EXISTING)) {
         size_t required = 0;
@@ -123,27 +115,24 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
     close(fd);
 
     bool mlocked = false;
-    if(
-        opts.GetFlag(EnvFlags::MLOCK_BUFFER)
-        && (mlock(buf.data(), buf.size()) == 0)
-    )
+    if(opts.GetFlag(EnvFlags::MLOCK_BUFFER) && (mlock(buf.data(), buf.size()) == 0))
         mlocked = true;
 
     auto kv = ParseFromBuffer(buf);
 
-    for(const auto &p : kv)
+    for(const auto& p : kv)
         (void)SetEnvVar(p.first, p.second, opts);
 
     if(opts.GetFlag(EnvFlags::UNLINK_AFTER_LOAD))
         unlink(path.c_str());
 
     // Zero out kv strings
-    for(auto &p : kv) {
-        volatile char *kptr = const_cast<volatile char*>(p.first.data());
+    for(auto& p : kv) {
+        volatile char* kptr = const_cast<volatile char*>(p.first.data());
         for(std::size_t i = 0; i < p.first.size(); ++i)
             kptr[i] = 0;
 
-        volatile char *vptr = const_cast<volatile char*>(p.second.data());
+        volatile char* vptr = const_cast<volatile char*>(p.second.data());
         for(std::size_t i = 0; i < p.second.size(); ++i)
             vptr[i] = 0;
     }
@@ -168,26 +157,27 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
     std::vector<char> buf(content.begin(), content.end());
     auto kv = ParseFromBuffer(buf);
 
-    for(const auto &p : kv)
+    for(const auto& p : kv)
         (void)SetEnvVar(p.first, p.second, opts);
 
     if(opts.GetFlag(EnvFlags::UNLINK_AFTER_LOAD))
         DeleteFileA(path.c_str());
 
     // Zero out kv strings
-    for(auto &p : kv) {
-        volatile char *kptr = const_cast<volatile char*>(p.first.data());
+    for(auto& p : kv) {
+        volatile char* kptr = const_cast<volatile char*>(p.first.data());
         for(std::size_t i = 0; i < p.first.size(); ++i)
             kptr[i] = 0;
 
-        volatile char *vptr = const_cast<volatile char*>(p.second.data());
+        volatile char* vptr = const_cast<volatile char*>(p.second.data());
         for(std::size_t i = 0; i < p.second.size(); ++i)
             vptr[i] = 0;
     }
 
     return true;
 #else
-    (void)path; (void)opts;
+    (void)path;
+    (void)opts;
     return false;
 #endif
 }
@@ -198,7 +188,7 @@ StringMap Dotenv::ParseFromBuffer(const std::vector<char>& buf_)
     // Work on a copy because we will inspect content
     std::vector<char> buf = buf_;
     StringMap out;
-    
+
     std::string line;
     line.reserve(256);
 
@@ -223,11 +213,8 @@ StringMap Dotenv::ParseFromBuffer(const std::vector<char>& buf_)
                     StringUtils::TrimInline(key);
                     StringUtils::TrimInline(val);
 
-                    if(
-                        !val.empty()
-                        && ((val.front() == '"' && val.back() == '"')
-                        || (val.front() == '\'' && val.back() == '\''))
-                    )
+                    if(!val.empty() &&
+                       ((val.front() == '"' && val.back() == '"') || (val.front() == '\'' && val.back() == '\'')))
                         val = val.substr(1, val.size() - 2);
 
                     if(!key.empty())
@@ -244,7 +231,7 @@ StringMap Dotenv::ParseFromBuffer(const std::vector<char>& buf_)
 
     // Attempt to zero internal buffer copy
     if(!buf.empty()) {
-        volatile char *p = buf.data();
+        volatile char* p = buf.data();
         for(std::size_t i = 0; i < buf.size(); ++i)
             p[i] = 0;
     }

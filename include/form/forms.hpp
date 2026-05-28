@@ -11,22 +11,14 @@
 namespace WFX::Form {
 
 // vvv Field Builders vvv
-template<typename Rule>
-class FieldBuilder {
+template <typename Rule> class FieldBuilder {
 public: // Helper Aliases
     using DescType = FieldDesc<Rule>;
     using PairType = std::pair<std::string_view, DescType>;
 
 public: // Constructor
     constexpr FieldBuilder(const char* name, Rule rule)
-        : pair_{
-            std::string_view{name},
-            FieldDesc<Rule>{
-                rule,
-                DefaultValidatorFor(rule),
-                DefaultSanitizerFor(rule)
-            }
-        }
+        : pair_{std::string_view{name}, FieldDesc<Rule>{rule, DefaultValidatorFor(rule), DefaultSanitizerFor(rule)}}
     {}
 
 public: // Helper Functions
@@ -55,43 +47,40 @@ public: // Helper Functions
     }
 
 public: // Getters
-    constexpr std::string_view GetName() const & { return pair_.first; }
-    constexpr DescType&& GetDesc()            && { return std::move(pair_.second); }
+    constexpr std::string_view GetName() const&
+    {
+        return pair_.first;
+    }
+    constexpr DescType&& GetDesc() &&
+    {
+        return std::move(pair_.second);
+    }
 
 private: // Storage
     PairType pair_;
 };
 
-template<typename Rule>
-constexpr auto Field(const char* name, Rule rule)
+template <typename Rule> constexpr auto Field(const char* name, Rule rule)
 {
     return FieldBuilder{name, std::move(rule)};
 }
 
 // vvv Wrapper for sanitized value vvv
-template<typename T>
-struct CleanedValue {
-    T    value{};
+template <typename T> struct CleanedValue {
+    T value{};
     bool present = false;
 };
 
 // vvv Tuple Builder vvv
-template<typename... Fields>
-struct CleanedTupleFor {
+template <typename... Fields> struct CleanedTupleFor {
     using Type = std::tuple<CleanedValue<typename Fields::RawType>...>;
 };
 
 // vvv Error Handling vvv
-enum class FormError : std::uint8_t {
-    NONE,
-    UNSUPPORTED_CONTENT_TYPE,
-    MALFORMED,
-    CLEAN_FAILED
-};
+enum class FormError : std::uint8_t { NONE, UNSUPPORTED_CONTENT_TYPE, MALFORMED, CLEAN_FAILED };
 
 // vvv Main shit vvv
-template<typename... Fields>
-struct FormSchema {
+template <typename... Fields> struct FormSchema {
     /*
      * Fields is 'FieldBuilder' returned by 'Field' function
      */
@@ -100,18 +89,16 @@ public: // Aliases
 
     // Stored
     using FieldsTuple = std::tuple<typename Fields::DescType...>;
-    using NamesArray  = std::array<std::string_view, FieldCount>;
+    using NamesArray = std::array<std::string_view, FieldCount>;
 
     // Helper
     using CleanedType = typename CleanedTupleFor<typename Fields::DescType...>::Type;
-    using InputType   = std::array<std::string_view, FieldCount>;
+    using InputType = std::array<std::string_view, FieldCount>;
 
 public:
-    template<std::size_t N>
+    template <std::size_t N>
     constexpr FormSchema(const char (&formName)[N], Fields&&... f)
-        : formName{ formName, N - 1 },
-        fieldNames{ f.GetName()... },
-        fieldRules{ std::move(f).GetDesc()... }
+        : formName{formName, N - 1}, fieldNames{f.GetName()...}, fieldRules{std::move(f).GetDesc()...}
     {
         static_assert(N > 1, "FormSchema.formName cannot be empty");
 
@@ -135,9 +122,7 @@ public: // Main Functions
         auto ct = Utils::TrimView(contentType.substr(0, contentType.find(';')));
 
         // In memory simple form
-        if(Utils::StringCanonical::InsensitiveStringCompare(
-            ct, "application/x-www-form-urlencoded"
-        ))
+        if(Utils::StringCanonical::InsensitiveStringCompare(ct, "application/x-www-form-urlencoded"))
             return ParseStatic(req.Body(), out);
 
         // Other types of forms are not supported for now
@@ -151,11 +136,7 @@ public: // Main Functions
         if(!SplitIntoArray(body, input))
             return FormError::MALFORMED;
 
-        return (
-            !Clean(input, out, std::make_index_sequence<FieldCount>{})
-                ? FormError::CLEAN_FAILED
-                : FormError::NONE
-        );
+        return (!Clean(input, out, std::make_index_sequence<FieldCount>{}) ? FormError::CLEAN_FAILED : FormError::NONE);
     }
 
     // Returns view to pre-rendered fields. NOTE: <form></form> needs to be written by user
@@ -168,11 +149,11 @@ private: // Helper Functions
     bool SplitIntoArray(std::string_view body, InputType& out) const
     {
         std::size_t fieldIdx = 0;
-        std::size_t pos      = 0;
+        std::size_t pos = 0;
 
         while(pos <= body.size()) {
             std::size_t start = pos;
-            std::size_t end   = body.find('&', pos);
+            std::size_t end = body.find('&', pos);
             if(end == std::string_view::npos)
                 end = body.size();
 
@@ -180,13 +161,13 @@ private: // Helper Functions
             if(fieldIdx >= FieldCount)
                 return false;
 
-            auto kv    = body.substr(start, end - start);
+            auto kv = body.substr(start, end - start);
             auto eqPos = kv.find('=');
             // Missing '='
             if(eqPos == std::string_view::npos)
                 return false;
 
-            std::string_view key   = kv.substr(0, eqPos);
+            std::string_view key = kv.substr(0, eqPos);
             std::string_view value = kv.substr(eqPos + 1);
 
             // Check key matches the schema field at this index
@@ -206,17 +187,13 @@ private: // Helper Functions
     }
 
     // Validate Then Sanitize
-    template<typename Field>
-    bool VTSField(
-        const Field& fd,
-        std::string_view in,
-        CleanedValue<typename Field::RawType>& out
-    ) const
+    template <typename Field>
+    bool VTSField(const Field& fd, std::string_view in, CleanedValue<typename Field::RawType>& out) const
     {
         // Presence check FIRST
         if(in.empty()) {
             if(fd.rule.required)
-                return false;   // Missing required field
+                return false; // Missing required field
 
             // Optional field
             out.present = false;
@@ -233,33 +210,22 @@ private: // Helper Functions
         return fd.sanitizer(in, &fd.rule, out.value);
     }
 
-    template<std::size_t... Is>
-    bool Clean(
-        const InputType& input,
-        CleanedType& out,
-        std::index_sequence<Is...>
-    ) const
+    template <std::size_t... Is> bool Clean(const InputType& input, CleanedType& out, std::index_sequence<Is...>) const
     {
-        return (... && VTSField(
-            std::get<Is>(fieldRules),
-            input[Is],
-            std::get<Is>(out)
-        ));
+        return (... && VTSField(std::get<Is>(fieldRules), input[Is], std::get<Is>(out)));
     }
 
 private: // Rendering
-    template<std::size_t... Is>
-    void RenderFields(std::index_sequence<Is...>)
+    template <std::size_t... Is> void RenderFields(std::index_sequence<Is...>)
     {
         // Fold expression to unroll fields
         (RenderOneField<Is>(), ...);
     }
 
-    template<std::size_t I>
-    void RenderOneField()
+    template <std::size_t I> void RenderOneField()
     {
         const auto& name = fieldNames[I];
-        const auto& fd   = std::get<I>(fieldRules);
+        const auto& fd = std::get<I>(fieldRules);
 
         // Label
         preRenderedFields += "  <label for=\"";
@@ -288,9 +254,9 @@ private: // Rendering
 
 private: // Storage
     std::string_view formName;
-    NamesArray       fieldNames;
-    FieldsTuple      fieldRules;
-    std::string      preRenderedFields;
+    NamesArray fieldNames;
+    FieldsTuple fieldRules;
+    std::string preRenderedFields;
 };
 
 } // namespace WFX::Form

@@ -7,13 +7,13 @@
 #include <memory>
 
 #ifdef _WIN32
-    #include "os_specific/windows/iocp_connection.hpp"
+#include "os_specific/windows/iocp_connection.hpp"
 #else
-    #ifdef WFX_LINUX_USE_IO_URING
-        #include "os_specific/linux/io_uring_connection.hpp"
-    #else
-        #include "os_specific/linux/epoll_connection.hpp"
-    #endif
+#ifdef WFX_LINUX_USE_IO_URING
+#include "os_specific/linux/io_uring_connection.hpp"
+#else
+#include "os_specific/linux/epoll_connection.hpp"
+#endif
 #endif
 
 namespace WFX::Http {
@@ -24,12 +24,12 @@ inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler(bool useHt
 #ifdef _WIN32
     return std::make_unique<OSSpecific::IocpConnectionHandler>();
 #else
-    #ifdef WFX_LINUX_USE_IO_URING
-        return std::make_unique<OSSpecific::IoUringConnectionHandler>();
-    #else
-        return std::make_unique<OSSpecific::EpollConnectionHandler>(useHttps);
-    #endif
-#endif
+#ifdef WFX_LINUX_USE_IO_URING
+    return std::make_unique<OSSpecific::IoUringConnectionHandler>();
+#else
+    return std::make_unique<OSSpecific::EpollConnectionHandler>(useHttps);
+#endif // WFX_LINUX_USE_IO_URING
+#endif // _WIN32
 }
 
 } // namespace WFX::Http

@@ -31,14 +31,14 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
 
     sockaddr_in addr = {};
     addr.sin_family = AF_INET;
-    addr.sin_port   = htons(port);
+    addr.sin_port = htons(port);
 
     // Handle special cases: "localhost" and "0.0.0.0"
     if(host == "localhost")
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
 
     else if(host == "0.0.0.0")
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);       // Bind all interfaces
+        addr.sin_addr.s_addr = htonl(INADDR_ANY); // Bind all interfaces
 
     else if(inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1)
         return logger_.Error("[IOCP]: Failed to parse host IP: ", host), false;
@@ -65,8 +65,7 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
             elements += 1;
             std::uint16_t timeoutTicks = 0;
 
-            switch(value->parseState)
-            {
+            switch(value->parseState) {
                 case static_cast<std::uint8_t>(WFX::Http::HttpParseState::PARSE_INCOMPLETE_HEADERS):
                     timeoutTicks = config_.networkConfig.headerTimeout;
                     break;
@@ -80,13 +79,12 @@ bool IocpConnectionHandler::Initialize(const std::string& host, int port)
                     break;
 
                 default:
-                    return false;  // Skip all other states
+                    return false; // Skip all other states
             }
 
-            bool shouldExpire = timeoutHandler_.IsExpired(
-                                    timeoutHandler_.GetCurrentTick(), value->timeoutTick, timeoutTicks
-                                );
-            
+            bool shouldExpire =
+                timeoutHandler_.IsExpired(timeoutHandler_.GetCurrentTick(), value->timeoutTick, timeoutTicks);
+
             if(shouldExpire) {
                 // We only cleanup if the state is ACTIVE
                 // If its CLOSING_DEFAULT or CLOSING_IMMEDIATE, another thread is handling it already
@@ -119,7 +117,7 @@ void IocpConnectionHandler::SetReceiveCallback(WFXSocket socket, ReceiveCallback
 
     // Store the callback for this connection
     (*ctx)->onReceive = std::move(callback);
-    
+
     // Hand off PostReceive to IOCP thread.
     if(!PostQueuedCompletionStatus(iocp_, 0, static_cast<ULONG_PTR>(socket), &(ARM_RECV_OP.overlapped))) {
         logger_.Error("[IOCP]: Failed to queue PostReceive for socket: ", socket);
@@ -153,12 +151,12 @@ int IocpConnectionHandler::Write(WFXSocket socket, std::string_view fastPathStri
         auto* ctxPtr = connections_.Get(socket);
         if(!ctxPtr || !(*ctxPtr))
             return -1;
-        
+
         // Access writeBuffer_ from ConnectionContext as it contains the write data, hopefully
-        auto& rwBuffer  = (*ctxPtr)->rwBuffer;
+        auto& rwBuffer = (*ctxPtr)->rwBuffer;
         auto* writeData = rwBuffer.GetWriteData();
         auto* writeMeta = rwBuffer.GetWriteMeta();
-    
+
         if(!writeMeta || !writeData || writeMeta->dataLength == 0) {
             logger_.Error("[IOCP]: Write failed - no data in rwBuffer for socket: ", socket);
             return -1;
@@ -173,11 +171,11 @@ int IocpConnectionHandler::Write(WFXSocket socket, std::string_view fastPathStri
     if(!ioData)
         return -1;
 
-    ioData->overlapped    = { 0 };
+    ioData->overlapped = {0};
     ioData->operationType = PerIoOperationType::SEND;
-    ioData->socket        = socket;
-    ioData->wsaBuf.buf    = const_cast<char*>(buffer); // In the hopes WSASend doesn't modify it
-    ioData->wsaBuf.len    = static_cast<ULONG>(length);
+    ioData->socket = socket;
+    ioData->wsaBuf.buf = const_cast<char*>(buffer); // In the hopes WSASend doesn't modify it
+    ioData->wsaBuf.len = static_cast<ULONG>(length);
 
     DWORD bytesSent;
     int ret = WSASend(socket, &ioData->wsaBuf, 1, &bytesSent, 0, &ioData->overlapped, nullptr);
@@ -200,23 +198,19 @@ int IocpConnectionHandler::WriteFile(WFXSocket socket, std::string_view path)
 
     // Buffer contains header, path contains file path
     WriteMetadata* writeMeta = rwBuffer.GetWriteMeta();
-    char*          writeData = rwBuffer.GetWriteData();
+    char* writeData = rwBuffer.GetWriteData();
 
     // Because its fixed size alloc, we use alloc pool for efficiency
     void* rawMem = allocPool_.Allocate(sizeof(PerTransmitFileContext));
-    if(!rawMem) return -1;
+    if(!rawMem)
+        return -1;
 
     // Placement new for construction
     PerTransmitFileContext* fileData = new (rawMem) PerTransmitFileContext();
 
     // Open the file for sending
-    HANDLE file = CreateFileA(
-        path.data(), GENERIC_READ,
-        FILE_SHARE_READ, nullptr,
-        OPEN_EXISTING,
-        FILE_FLAG_OVERLAPPED | FILE_ATTRIBUTE_NORMAL,
-        nullptr
-    );
+    HANDLE file = CreateFileA(path.data(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                              FILE_FLAG_OVERLAPPED | FILE_ATTRIBUTE_NORMAL, nullptr);
 
     if(file == INVALID_HANDLE_VALUE) {
         SafeDeleteTransmitFileCtx(fileData);
@@ -224,23 +218,16 @@ int IocpConnectionHandler::WriteFile(WFXSocket socket, std::string_view path)
     }
 
     // Set all the necessary stuff so we can clean them up later in WorkerThreads
-    fileData->overlapped     = { 0 };
-    fileData->operationType  = PerIoOperationType::SEND_FILE;
-    fileData->socket         = socket;
-    fileData->fileHandle     = file;
-    fileData->tfb.Head       = writeData;
+    fileData->overlapped = {0};
+    fileData->operationType = PerIoOperationType::SEND_FILE;
+    fileData->socket = socket;
+    fileData->fileHandle = file;
+    fileData->tfb.Head = writeData;
     fileData->tfb.HeadLength = writeMeta->dataLength;
-    fileData->tfb.Tail       = nullptr;
+    fileData->tfb.Tail = nullptr;
     fileData->tfb.TailLength = 0;
 
-    BOOL ok = TransmitFile(
-        socket,
-        file,
-        0, 0,
-        &fileData->overlapped,
-        &fileData->tfb,
-        TF_USE_KERNEL_APC
-    );
+    BOOL ok = TransmitFile(socket, file, 0, 0, &fileData->overlapped, &fileData->tfb, TF_USE_KERNEL_APC);
 
     if(!ok && WSAGetLastError() != ERROR_IO_PENDING) {
         SafeDeleteTransmitFileCtx(fileData);
@@ -268,11 +255,11 @@ void IocpConnectionHandler::Close(WFXSocket socket)
     // Atomically try to seize control
     if(!ctx.TransitionTo(HttpConnectionState::CLOSING_IMMEDIATE))
         return;
-    
+
     // We got the control. Call the helper for socket operations
     InternalSocketCleanup(socket);
 
-    //Erase the context from the map
+    // Erase the context from the map
     if(!connections_.Erase(socket))
         logger_.Warn("[IOCP]: Erase failed for a socket that was just closed: ", socket);
 }
@@ -289,9 +276,7 @@ void IocpConnectionHandler::Run(AcceptedConnectionCallback onAccepted)
     if(!acceptManager_.Initialize(listenSocket_, iocp_))
         logger_.Fatal("[IOCP]: Failed to initialize AcceptExManager");
 
-    CreateWorkerThreads(
-        config_.osSpecificConfig.workerThreadCount, config_.osSpecificConfig.callbackThreadCount
-    );
+    CreateWorkerThreads(config_.osSpecificConfig.workerThreadCount, config_.osSpecificConfig.callbackThreadCount);
     CreateFlushTimer();
 }
 
@@ -314,7 +299,7 @@ void IocpConnectionHandler::PostReceive(WFXSocket socket)
 
     // Lazy-allocate receive buffer
     std::size_t defaultSize = config_.networkConfig.bufferIncrSize;
-    RWBuffer&   buf         = ctx.rwBuffer;
+    RWBuffer& buf = ctx.rwBuffer;
 
     // Init read buffer if not already
     if(!buf.IsReadInitialized()) {
@@ -329,8 +314,9 @@ void IocpConnectionHandler::PostReceive(WFXSocket socket)
         dataPtr[0] = 0;
     }
 
-    // The way we want it is simple, we have a buffer which can grow to a certain limit 'config_.networkConfig.maxRecvBufferSize'
-    // The buffer, when growing, will increment in 'defaultSize' till 'ctx.dataLength' reaches 'ctx.bufferSize - 1'
+    // The way we want it is simple, we have a buffer which can grow to a certain limit
+    // 'config_.networkConfig.maxRecvBufferSize' The buffer, when growing, will increment in 'defaultSize' till
+    // 'ctx.dataLength' reaches 'ctx.bufferSize - 1'
     // '-1' for the null terminator :)
     ReadMetadata* meta = buf.GetReadMeta();
     if(meta->dataLength >= meta->bufferSize - 1) { // -1 for null terminator
@@ -360,16 +346,17 @@ void IocpConnectionHandler::PostReceive(WFXSocket socket)
     // Compute safe length that won't exceed buffer or policy. -1 for null terminator :)
     const std::size_t remainingBufferSize = meta->bufferSize - meta->dataLength - 1;
 
-    ioData->overlapped    = {};
+    ioData->overlapped = {};
     ioData->operationType = PerIoOperationType::RECV;
-    ioData->socket        = socket;
-    ioData->wsaBuf.buf    = buf.GetReadData() + meta->dataLength;
-    ioData->wsaBuf.len    = static_cast<ULONG>(remainingBufferSize);
+    ioData->socket = socket;
+    ioData->wsaBuf.buf = buf.GetReadData() + meta->dataLength;
+    ioData->wsaBuf.len = static_cast<ULONG>(remainingBufferSize);
 
     DWORD flags = 0, bytesRecv = 0;
     int ret = WSARecv(socket, &ioData->wsaBuf, 1, &bytesRecv, &flags, &ioData->overlapped, nullptr);
     if(ret == SOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING) {
-        logger_.Debug("[IOCP]: WSARecv failed immediately with error code: ", WSAGetLastError(), " on socket: ", socket);
+        logger_.Debug("[IOCP]: WSARecv failed immediately with error code: ", WSAGetLastError(),
+                      " on socket: ", socket);
         SafeDeleteIoData(ioData, false);
         Close(socket);
         return;
@@ -383,36 +370,30 @@ void IocpConnectionHandler::HandleReceive(ConnectionContext& ctx, ReceiveDirecti
     // Quite important, or engine will stay stuck in OCCUPIED state leaking connections
     ctx.SetState(data.state);
 
-    switch(data.action)
-    {
-        case ReceiveResult::RESUME:
-        {
+    switch(data.action) {
+        case ReceiveResult::RESUME: {
             // Just post another WSARecv on this socket so IOCP continues reading
             PostReceive(socket);
             return;
         }
-        
-        case ReceiveResult::WRITE:
-        {
+
+        case ReceiveResult::WRITE: {
             writeResult = Write(socket, data.staticBody);
             break;
         }
 
-        case ReceiveResult::WRITE_FILE:
-        {
+        case ReceiveResult::WRITE_FILE: {
             writeResult = WriteFile(socket, data.staticBody);
             break;
         }
 
-        case ReceiveResult::WRITE_DEFERRED:
-        {
+        case ReceiveResult::WRITE_DEFERRED: {
             // Just mark the connection dirty and move on
             MarkConnectionDirty(socket);
             return;
         }
-        
-        case ReceiveResult::CLOSE:
-        {
+
+        case ReceiveResult::CLOSE: {
             Close(socket);
             return;
         }
@@ -431,15 +412,15 @@ void IocpConnectionHandler::HandleReceive(ConnectionContext& ctx, ReceiveDirecti
     if(data.state != HttpConnectionState::CLOSING_DEFAULT) {
         ctx.rwBuffer.GetReadMeta()->dataLength = 0;
         ctx.expectedBodyLength = 0;
-        ctx.trackBytes         = 0;
+        ctx.trackBytes = 0;
         // state remains ACTIVE
     }
 }
 
 void IocpConnectionHandler::WorkerLoop()
 {
-    DWORD       bytesTransferred;
-    ULONG_PTR   key;
+    DWORD bytesTransferred;
+    ULONG_PTR key;
     OVERLAPPED* overlapped;
 
     // One quick protection, OVERLAPPED must be the first thing in the structs we use
@@ -456,29 +437,26 @@ void IocpConnectionHandler::WorkerLoop()
         if(!overlapped)
             continue;
 
-        auto*              base   = reinterpret_cast<PerIoBase*>(overlapped);
+        auto* base = reinterpret_cast<PerIoBase*>(overlapped);
         PerIoOperationType opType = base->operationType;
 
         switch(opType) {
-            case PerIoOperationType::ARM_RECV:
-            {
+            case PerIoOperationType::ARM_RECV: {
                 PostReceive(static_cast<SOCKET>(key));
                 break;
             }
 
-            case PerIoOperationType::RECV:
-            {
+            case PerIoOperationType::RECV: {
                 // We do not need buffer to be released as ioData does not own the buffer, ConnectionContext does
                 // Hence the 'false' in the PerIoDataDeleter
-                std::unique_ptr<PerIoData, PerIoDataDeleter> ioData(
-                    static_cast<PerIoData*>(base), PerIoDataDeleter{this, false}
-                );
+                std::unique_ptr<PerIoData, PerIoDataDeleter> ioData(static_cast<PerIoData*>(base),
+                                                                    PerIoDataDeleter{this, false});
                 SOCKET socket = ioData->socket;
 
                 if(!result) {
                     if(GetLastError() != ERROR_OPERATION_ABORTED)
                         Close(socket);
-                    
+
                     break; // Always free overlapped via unique_ptr
                 }
 
@@ -504,11 +482,10 @@ void IocpConnectionHandler::WorkerLoop()
                 // Too many requests are not allowed
                 if(!limiter_.AllowRequest(ctx.connInfo)) {
                     // Temporary solution rn, will change in future
-                    static constexpr const char* kRateLimitResponse =
-                        "HTTP/1.1 503 Service Unavailable\r\n"
-                        "Content-Length: 0\r\n"
-                        "Connection: close\r\n"
-                        "\r\n";
+                    static constexpr const char* kRateLimitResponse = "HTTP/1.1 503 Service Unavailable\r\n"
+                                                                      "Content-Length: 0\r\n"
+                                                                      "Connection: close\r\n"
+                                                                      "\r\n";
 
                     // Mark this socket for closure on next SEND call. No need to handle further
                     ctx.SetState(HttpConnectionState::CLOSING_DEFAULT);
@@ -523,7 +500,7 @@ void IocpConnectionHandler::WorkerLoop()
 
                 // Add null terminator safely
                 ReadMetadata* readMeta = ctx.rwBuffer.GetReadMeta();
-                char*         dataPtr  = ctx.rwBuffer.GetReadData();
+                char* dataPtr = ctx.rwBuffer.GetReadData();
                 dataPtr[readMeta->dataLength] = '\0';
 
                 // Try to gain ownership of the context, if not, no point in moving ahead
@@ -541,11 +518,9 @@ void IocpConnectionHandler::WorkerLoop()
                 break;
             }
 
-            case PerIoOperationType::SEND:
-            {
-                std::unique_ptr<PerIoData, PerIoDataDeleter> ioData(
-                    static_cast<PerIoData*>(base), PerIoDataDeleter{this, false}
-                );
+            case PerIoOperationType::SEND: {
+                std::unique_ptr<PerIoData, PerIoDataDeleter> ioData(static_cast<PerIoData*>(base),
+                                                                    PerIoDataDeleter{this, false});
 
                 SOCKET socket = ioData->socket;
 
@@ -563,27 +538,24 @@ void IocpConnectionHandler::WorkerLoop()
                 // Reset data length after sending
                 (*ctx)->rwBuffer.GetWriteMeta()->dataLength = 0;
 
-                switch((*ctx)->GetState())
-                {
+                switch((*ctx)->GetState()) {
                     case HttpConnectionState::CLOSING_DEFAULT:
                         Close(socket);
                         break;
-                    
+
                     case HttpConnectionState::ACTIVE:
                         ResumeReceive(socket);
                         break;
 
-                    // For CLOSING_IMMEDIATE, we do nothing. The thread that set-
-                    // -that state is responsible for the full cleanup
+                        // For CLOSING_IMMEDIATE, we do nothing. The thread that set-
+                        // -that state is responsible for the full cleanup
                 }
                 break;
             }
 
-            case PerIoOperationType::SEND_FILE:
-            {
-                std::unique_ptr<PerTransmitFileContext, PerTransmitFileCtxDeleter> transmitFileCtx(
-                    static_cast<PerTransmitFileContext*>(base), PerTransmitFileCtxDeleter{this}
-                );
+            case PerIoOperationType::SEND_FILE: {
+                std::unique_ptr<PerTransmitFileContext, PerTransmitFileCtxDeleter>
+                    transmitFileCtx(static_cast<PerTransmitFileContext*>(base), PerTransmitFileCtxDeleter{this});
 
                 SOCKET socket = transmitFileCtx->socket;
 
@@ -601,46 +573,40 @@ void IocpConnectionHandler::WorkerLoop()
                 // Reset data length after sending
                 (*ctx)->rwBuffer.GetWriteMeta()->dataLength = 0;
 
-                switch((*ctx)->GetState())
-                {
+                switch((*ctx)->GetState()) {
                     case HttpConnectionState::CLOSING_DEFAULT:
                         Close(socket);
                         break;
-                    
+
                     case HttpConnectionState::ACTIVE:
                         ResumeReceive(socket);
                         break;
 
-                    // For CLOSING_IMMEDIATE, we do nothing. The thread that set-
-                    // -that state is responsible for the full cleanup
+                        // For CLOSING_IMMEDIATE, we do nothing. The thread that set-
+                        // -that state is responsible for the full cleanup
                 }
                 break;
             }
 
-            case PerIoOperationType::ACCEPT:
-            {
+            case PerIoOperationType::ACCEPT: {
                 acceptManager_.HandleAcceptCompletion(static_cast<PerIoContext*>(base));
                 break;
             }
 
-            case PerIoOperationType::ACCEPT_DEFERRED:
-            {
+            case PerIoOperationType::ACCEPT_DEFERRED: {
                 SOCKET socket = base->socket;
                 acceptManager_.HandleSocketOptions(socket);
 
                 // Take ownership of PostAcceptOp directly
-                std::unique_ptr<PostAcceptOp, std::function<void(PostAcceptOp*)>> acceptOp(
-                    static_cast<PostAcceptOp*>(base),
-                    [this](PostAcceptOp* ptr) {
-                        bufferPool_.Release(ptr);
-                    }
-                );
+                std::unique_ptr<PostAcceptOp, std::function<void(PostAcceptOp*)>> acceptOp(static_cast<PostAcceptOp*>(
+                                                                                               base),
+                                                                                           [this](PostAcceptOp* ptr) {
+                                                                                               bufferPool_.Release(ptr);
+                                                                                           });
 
                 // Create the ConnectionContext needed for this connection to be kept alive
                 // We will lazy allocate buffer because we don't know if we need it later or not
-                ConnectionContextPtr connectionContext(
-                    new ConnectionContext(), ConnectionContextDeleter{this}
-                );
+                ConnectionContextPtr connectionContext(new ConnectionContext(), ConnectionContextDeleter{this});
                 connectionContext->connInfo = acceptOp->ipAddr;
 
                 // Just close connection and move on, most probably error with allocating memory block
@@ -649,9 +615,7 @@ void IocpConnectionHandler::WorkerLoop()
                     break;
                 }
 
-                offloadCallbacks_.enqueue([this, socket]() mutable {
-                    acceptCallback_(socket);
-                });
+                offloadCallbacks_.enqueue([this, socket]() mutable { acceptCallback_(socket); });
 
                 break;
             }
@@ -708,15 +672,8 @@ void IocpConnectionHandler::CreateFlushTimer()
         PostQueuedCompletionStatus(self->GetIOCPHandle(), 0, FLUSH_KEY, nullptr);
     };
 
-    if(!CreateTimerQueueTimer(
-        &flushTimer_,
-        timerQueue_,
-        timerCb,
-        this,
-        flushPeriodMs_,
-        flushPeriodMs_,
-        WT_EXECUTEDEFAULT
-    ))
+    if(!CreateTimerQueueTimer(&flushTimer_, timerQueue_, timerCb, this, flushPeriodMs_, flushPeriodMs_,
+                              WT_EXECUTEDEFAULT))
         logger_.Fatal("[IOCP]: CreateTimerQueueTimer failed: ", GetLastError());
 }
 
@@ -726,18 +683,21 @@ void IocpConnectionHandler::FlushWriteBuffers()
     std::vector<WFXSocket> batch;
     {
         std::lock_guard<std::mutex> lock(dirtyMutex_);
-        if(dirtyFlush_.empty()) return;
+        if(dirtyFlush_.empty())
+            return;
         batch.swap(dirtyFlush_);
     }
 
     // Time to flush all buffers
     for(WFXSocket socket : batch) {
         auto* ctxPtr = connections_.Get(socket);
-        if(!ctxPtr || !(*ctxPtr)) continue;
+        if(!ctxPtr || !(*ctxPtr))
+            continue;
 
         auto& ctx = *(*ctxPtr);
         auto* meta = ctx.rwBuffer.GetWriteMeta();
-        if(!meta || meta->dataLength == 0) continue; // Nothing to flush
+        if(!meta || meta->dataLength == 0)
+            continue; // Nothing to flush
 
         int res = Write(socket);
         if(res < 0) {
@@ -752,26 +712,28 @@ void IocpConnectionHandler::FlushWriteBuffers()
 
 void IocpConnectionHandler::SafeDeleteIoData(PerIoData* data, bool shouldCleanBuffer)
 {
-    if(!data) return;
-    
+    if(!data)
+        return;
+
     // Buffer is variable, so we used buffer pool.
     if(data->wsaBuf.buf && shouldCleanBuffer) {
         bufferPool_.Release(data->wsaBuf.buf);
         data->wsaBuf.buf = nullptr;
     }
-    
+
     // PerIoData is fixed, so we used alloc pool
     allocPool_.Free(data, sizeof(PerIoData));
 }
 
 void IocpConnectionHandler::SafeDeleteTransmitFileCtx(PerTransmitFileContext* transmitFileCtx)
 {
-    if(!transmitFileCtx) return;
-    
+    if(!transmitFileCtx)
+        return;
+
     // Close file handle if valid
     if(transmitFileCtx->fileHandle != INVALID_HANDLE_VALUE)
         CloseHandle(transmitFileCtx->fileHandle);
-    
+
     // Manually call destructor (needed due to placement new)
     transmitFileCtx->~PerTransmitFileContext();
 
@@ -795,7 +757,7 @@ void IocpConnectionHandler::DeleteFlushTimer()
         DeleteTimerQueueTimer(timerQueue_, flushTimer_, INVALID_HANDLE_VALUE);
         flushTimer_ = nullptr;
     }
-    
+
     if(timerQueue_) {
         DeleteTimerQueueEx(timerQueue_, INVALID_HANDLE_VALUE);
         timerQueue_ = nullptr;
@@ -808,11 +770,13 @@ void IocpConnectionHandler::InternalCleanup()
     timeoutHandler_.Stop();
 
     for(auto& t : workerThreads_)
-        if(t.joinable()) t.join();
+        if(t.joinable())
+            t.join();
     workerThreads_.clear();
 
     for(auto& t : offloadThreads_)
-        if(t.joinable()) t.join();
+        if(t.joinable())
+            t.join();
     offloadThreads_.clear();
 
     // Kill our AcceptExManager

@@ -5,14 +5,18 @@
 #include "shared/utils/detection_macro.hpp"
 
 #if defined(WFX_PLATFORM_POSIX)
-    #include <signal.h>
+#include <signal.h>
 #elif defined(WFX_PLATFORM_WINDOWS)
-    #define WIN32_LEAN_AND_MEAN
-    #define NOMINMAX
-    #include <windows.h>
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 #endif
 
-#define WFX_TRACE()           WFX::Utils::CrashTracer::ScopedFrame __WFXSF_{ __func__, __FILE__, __LINE__ }
+#define WFX_TRACE()                                                                                                    \
+    WFX::Utils::CrashTracer::ScopedFrame __WFXSF_                                                                      \
+    {                                                                                                                  \
+        __func__, __FILE__, __LINE__                                                                                   \
+    }
 #define WFX_CHECKPOINT(label) WFX::Utils::CrashTracer::UpdateTop(label, __FILE__, __LINE__)
 
 namespace WFX::Utils {
@@ -24,7 +28,7 @@ public:
     struct Frame {
         const char* func;
         const char* file;
-        int         line;
+        int line;
     };
 
     struct ScopedFrame {
@@ -34,8 +38,8 @@ public:
             int d = depth_;
 
             if(d < MAX_DEPTH) {
-                frames_[d] = { func, file, line };
-                depth_     = d + 1;
+                frames_[d] = {func, file, line};
+                depth_ = d + 1;
             }
         }
         ~ScopedFrame() noexcept
@@ -58,38 +62,40 @@ public:
     }
 
     static void Install(const char* logDir = nullptr) noexcept;
-    static void SetWorkerName(const char* name)       noexcept;
+    static void SetWorkerName(const char* name) noexcept;
 
 private:
     inline static Frame frames_[MAX_DEPTH];
-    inline static int   depth_;
-    inline static char  workerName_[32];
-    inline static char  logDir_[256];
-    inline static char  altStack_[65536];
+    inline static int depth_;
+    inline static char workerName_[32];
+    inline static char logDir_[256];
+    inline static char altStack_[65536];
 
 private:
-    struct UTCTime { int year, mon, day, hour, min, sec; };
-    static UTCTime    EpochToUTC(long long sec)        noexcept;
-    static long long  GetEpochNow()                    noexcept;
+    struct UTCTime {
+        int year, mon, day, hour, min, sec;
+    };
+    static UTCTime EpochToUTC(long long sec) noexcept;
+    static long long GetEpochNow() noexcept;
 
 private:
-    static void BuildLogPath(char* out, std::size_t max, long long epoch)                   noexcept;
+    static void BuildLogPath(char* out, std::size_t max, long long epoch) noexcept;
     static void WriteCrashBody(int fd, int sig, void* siginfo, void* uctx, long long epoch) noexcept;
 
-    static void SafeWrite         (int fd, const char* s)         noexcept;
-    static void SafeWriteInt      (int fd, long long v)           noexcept;
-    static void SafeWriteHex      (int fd, unsigned long long v)  noexcept;
-    static void SafeWriteFrame    (int fd, const Frame& f, int i) noexcept;
-    static void SafeWriteTimestamp(int fd, long long epoch)       noexcept;
+    static void SafeWrite(int fd, const char* s) noexcept;
+    static void SafeWriteInt(int fd, long long v) noexcept;
+    static void SafeWriteHex(int fd, unsigned long long v) noexcept;
+    static void SafeWriteFrame(int fd, const Frame& f, int i) noexcept;
+    static void SafeWriteTimestamp(int fd, long long epoch) noexcept;
 
 #if defined(WFX_PLATFORM_POSIX)
-    static void InstallPosix()                                     noexcept;
+    static void InstallPosix() noexcept;
     static void PosixHandler(int sig, siginfo_t* info, void* uctx) noexcept;
-    static void WriteRegisters(int fd, void* uctx)                 noexcept;
+    static void WriteRegisters(int fd, void* uctx) noexcept;
 #elif defined(WFX_PLATFORM_WINDOWS)
-    static void InstallWindows()                                noexcept;
+    static void InstallWindows() noexcept;
     static LONG WINAPI WindowsVEHandler(EXCEPTION_POINTERS* ep) noexcept;
-    static void WriteRegisters(int fd, CONTEXT* ctx)            noexcept;
+    static void WriteRegisters(int fd, CONTEXT* ctx) noexcept;
 #endif
 };
 

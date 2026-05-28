@@ -8,7 +8,7 @@
 namespace WFX::Core::Legacy {
 
 enum TokenType : std::uint8_t {
-    //Primitive Types
+    // Primitive Types
     TOKEN_INT,
     TOKEN_FLOAT,
     TOKEN_STRING,
@@ -24,14 +24,14 @@ enum TokenType : std::uint8_t {
     //<=, >= Type
     TOKEN_LTEQ,
     TOKEN_GTEQ,
-    //Arithmetic Types
+    // Arithmetic Types
     TOKEN_PLUS,
     TOKEN_MINUS,
     TOKEN_MULT,
     TOKEN_DIV,
     TOKEN_MODULO,
     TOKEN_POW,
-    //Assignment Type
+    // Assignment Type
     TOKEN_EQ,
     //==, != Type
     TOKEN_EEQ,
@@ -40,7 +40,7 @@ enum TokenType : std::uint8_t {
     TOKEN_AND,
     TOKEN_NOT,
     TOKEN_OR,
-    //Keyword and Identifier Types
+    // Keyword and Identifier Types
     TOKEN_ID,
     TOKEN_KEYWORD_AUTO,
     TOKEN_KEYWORD_VOID,
@@ -60,10 +60,10 @@ enum TokenType : std::uint8_t {
     TOKEN_KEYWORD_RETURN,
     //, Type
     TOKEN_COMMA,
-    //Ternary(? :) Type,
+    // Ternary(? :) Type,
     TOKEN_QUESTION,
     TOKEN_COLON,
-    //Statement End
+    // Statement End
     TOKEN_SEMIC,
     TOKEN_EOF,
     //. and .. and ... (Dot, Range and Ellipsis)
@@ -72,23 +72,17 @@ enum TokenType : std::uint8_t {
     TOKEN_ELLIPSIS,
 };
 
-//Some useful string repr of token type
-//Mostly used in printing of error messages
-const std::unordered_map<TokenType, const char* const> token_type_to_string = {
-    { TOKEN_LPAREN, "(" },
-    { TOKEN_RPAREN, ")" },
-    { TOKEN_LBRACE, "{" },
-    { TOKEN_RBRACE, "}" },
-    { TOKEN_LT,     "<" },
-    { TOKEN_GT,     ">" }
-};
+// Some useful string repr of token type
+// Mostly used in printing of error messages
+const std::unordered_map<TokenType, const char* const> token_type_to_string = {{TOKEN_LPAREN, "("}, {TOKEN_RPAREN, ")"},
+                                                                               {TOKEN_LBRACE, "{"}, {TOKEN_RBRACE, "}"},
+                                                                               {TOKEN_LT, "<"},     {TOKEN_GT, ">"}};
 
-struct Token
-{
+struct Token {
     Token() = default;
 
-    std::string  token_value;
-    TokenType    token_type;
+    std::string token_value;
+    TokenType token_type;
 };
 
 } // namespace WFX::Core::Legacy

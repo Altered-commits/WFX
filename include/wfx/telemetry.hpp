@@ -59,7 +59,8 @@ inline char* LogFmt(char* p, char* end, const char* s) noexcept
 
 inline char* LogFmt(char* p, char* end, char c) noexcept
 {
-    if(p < end) *p++ = c;
+    if(p < end)
+        *p++ = c;
     return p;
 }
 
@@ -68,12 +69,9 @@ inline char* LogFmt(char* p, char* end, bool v) noexcept
     return LogFmt(p, end, v ? "true" : "false");
 }
 
-template<typename T>
-inline std::enable_if_t<
-    std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>,
-    char*
->
-LogFmt(char* p, char* end, T value) noexcept
+template <typename T>
+inline std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>, char*> LogFmt(
+    char* p, char* end, T value) noexcept
 {
     if(end - p < 24)
         return p;
@@ -82,9 +80,8 @@ LogFmt(char* p, char* end, T value) noexcept
     return ec == std::errc() ? ep : p;
 }
 
-template<typename T>
-inline std::enable_if_t<std::is_floating_point_v<T>, char*>
-LogFmt(char* p, char* end, T value) noexcept
+template <typename T>
+inline std::enable_if_t<std::is_floating_point_v<T>, char*> LogFmt(char* p, char* end, T value) noexcept
 {
     if(end - p < 32)
         return p;
@@ -93,11 +90,9 @@ LogFmt(char* p, char* end, T value) noexcept
     return ec == std::errc() ? ep : p;
 }
 
-template<typename T>
-inline std::enable_if_t<
-    std::is_pointer_v<T> && !std::is_same_v<std::remove_cv_t<std::remove_pointer_t<T>>, char>,
-    char*
->
+template <typename T>
+inline std::enable_if_t<std::is_pointer_v<T> && !std::is_same_v<std::remove_cv_t<std::remove_pointer_t<T>>, char>,
+                        char*>
 LogFmt(char* p, char* end, T value) noexcept
 {
     if(end - p < 20)
@@ -114,15 +109,14 @@ LogFmt(char* p, char* end, T value) noexcept
 // Formats args into a stack buffer, crosses ABI boundary once via a-
 // -single (const char*) call. 'lvl' maps directly to LogFn index
 // -----------------------------------------------------------------------
-template<typename... Args>
-inline void LogEmit(int lvl, Args&&... args) noexcept
+template <typename... Args> inline void LogEmit(int lvl, Args&&... args) noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
         return;
 
-    char  buf[kLogBufSize];
-    char* p   = buf;
+    char buf[kLogBufSize];
+    char* p = buf;
     char* end = p + kLogBufSize - 1;
 
     ((p = LogFmt(p, end, std::forward<Args>(args))), ...);
@@ -138,35 +132,56 @@ inline void LogEmit(int lvl, Args&&... args) noexcept
         *p = '\0';
 
     switch(lvl) {
-        case 0: api->LogTrace(buf); break;
-        case 1: api->LogDebug(buf); break;
-        case 2: api->LogInfo(buf);  break;
-        case 3: api->LogWarn(buf);  break;
-        case 4: api->LogError(buf); break;
-        case 5: api->LogFatal(buf); break;
+        case 0:
+            api->LogTrace(buf);
+            break;
+        case 1:
+            api->LogDebug(buf);
+            break;
+        case 2:
+            api->LogInfo(buf);
+            break;
+        case 3:
+            api->LogWarn(buf);
+            break;
+        case 4:
+            api->LogError(buf);
+            break;
+        case 5:
+            api->LogFatal(buf);
+            break;
     }
 }
 
 } // namespace Detail
 
 // vvv Log API vvv
-template<typename... Args>
-inline void LogTrace(Args&&... args) noexcept { Detail::LogEmit(0, std::forward<Args>(args)...); }
+template <typename... Args> inline void LogTrace(Args&&... args) noexcept
+{
+    Detail::LogEmit(0, std::forward<Args>(args)...);
+}
 
-template<typename... Args>
-inline void LogDebug(Args&&... args) noexcept { Detail::LogEmit(1, std::forward<Args>(args)...); }
+template <typename... Args> inline void LogDebug(Args&&... args) noexcept
+{
+    Detail::LogEmit(1, std::forward<Args>(args)...);
+}
 
-template<typename... Args>
-inline void LogInfo(Args&&... args)  noexcept { Detail::LogEmit(2, std::forward<Args>(args)...); }
+template <typename... Args> inline void LogInfo(Args&&... args) noexcept
+{
+    Detail::LogEmit(2, std::forward<Args>(args)...);
+}
 
-template<typename... Args>
-inline void LogWarn(Args&&... args)  noexcept { Detail::LogEmit(3, std::forward<Args>(args)...); }
+template <typename... Args> inline void LogWarn(Args&&... args) noexcept
+{
+    Detail::LogEmit(3, std::forward<Args>(args)...);
+}
 
-template<typename... Args>
-inline void LogError(Args&&... args) noexcept { Detail::LogEmit(4, std::forward<Args>(args)...); }
+template <typename... Args> inline void LogError(Args&&... args) noexcept
+{
+    Detail::LogEmit(4, std::forward<Args>(args)...);
+}
 
-template<typename... Args>
-[[noreturn]] inline void LogFatal(Args&&... args) noexcept
+template <typename... Args> [[noreturn]] inline void LogFatal(Args&&... args) noexcept
 {
     Detail::LogEmit(5, std::forward<Args>(args)...);
     WFX_UNREACHABLE;
@@ -176,7 +191,9 @@ template<typename... Args>
 inline Shared::LogMetrics GetLogMetrics() noexcept
 {
     const auto* api = Core::UtilsApiExt1();
-    if(!api) return {};
+    if(!api)
+        return {};
+
     return api->GetLogMetricsWorker();
 }
 
@@ -187,6 +204,15 @@ inline Shared::NetworkMetrics GetNetworkMetrics() noexcept
         return {};
 
     return api->GetNetMetricsWorker();
+}
+
+inline Shared::SelfMetrics GetProcessMetrics() noexcept
+{
+    const auto* api = Core::UtilsApiExt1();
+    if(!api)
+        return {};
+
+    return api->GetSelfMetricsWorker();
 }
 
 inline Shared::LogMetrics GetLogMetricsAll() noexcept
@@ -205,6 +231,15 @@ inline Shared::NetworkMetrics GetNetworkMetricsAll() noexcept
         return {};
 
     return api->GetNetMetricsAggregate();
+}
+
+inline Shared::SelfMetrics GetProcessMetricsAll() noexcept
+{
+    const auto* api = Core::UtilsApiExt1();
+    if(!api)
+        return {};
+
+    return api->GetSelfMetricsAggregate();
 }
 
 } // namespace WFX

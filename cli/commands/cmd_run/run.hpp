@@ -5,18 +5,18 @@
 #include <cstdint>
 
 namespace WFX::CLI {
-    
+
 // Just to keep stuff tidy
 enum class ServerFlags : std::uint64_t {
-    PIN_TO_CPU          = 1ull << 1,
-    USE_HTTPS           = 1ull << 2,
+    PIN_TO_CPU = 1ull << 1,
+    USE_HTTPS = 1ull << 2,
     OVERRIDE_HTTPS_PORT = 1ull << 3,
-    USE_DEBUG           = 1ull << 4,
+    USE_DAEMON = 1ull << 4,
 };
 
 struct ServerConfig {
-    std::string   host  = "127.0.0.1";
-    std::uint16_t port  = 8080;
+    std::string host = "127.0.0.1";
+    std::uint16_t port = 8080;
     std::uint64_t flags = 0;
 
     inline bool GetFlag(ServerFlags f) const noexcept
@@ -33,6 +33,6 @@ struct ServerConfig {
 
 int RunServer(const std::string& project, const ServerConfig& cfg);
 
-}  // namespace WFX::CLI
+} // namespace WFX::CLI
 
-#endif  // WFX_CLI_COMMANDS_DEV_HPP
+#endif // WFX_CLI_COMMANDS_DEV_HPP

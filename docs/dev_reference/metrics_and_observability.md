@@ -20,15 +20,18 @@ After the fork, each worker calls `MetricTracer::InitWorker(index)` which stores
 
 ## Struct layout
 
-`WorkerMetrics` embeds the two user-facing metric structs directly:
+`WorkerMetrics` embeds all metric structs directly. The current categories are:
 
 ```
 WorkerMetrics
     LogMetrics     log        (48 bytes, 6 x uint64)
     NetworkMetrics network    (120 bytes, 15 x uint64)
+    SelfMetrics    self       (48 bytes)
 ```
 
-`LogMetrics` and `NetworkMetrics` are defined in `shared/abis/types.hpp` because they cross the ABI boundary (user code queries them directly through `UTILS_API_EXT1`). `WorkerMetrics` itself does not cross the boundary. It lives purely on the engine side inside the mapped region.
+All nested metric structs are defined in `shared/abis/types.hpp` because they cross the ABI boundary. User code queries them directly through `UTILS_API_EXT1`. `WorkerMetrics` itself does not cross the boundary. It lives purely on the engine side inside the mapped region.
+
+`SelfMetrics` is written exclusively by the master process, not workers. It holds per-slot process state: resident memory, virtual memory, restart and crash counts, backoff state, PID, and timestamps. Workers read it at scrape time but never write to it.
 
 The fields in `LogMetrics` are ordered to match `Logger::Level` exactly (trace=0, debug=1, info=2, warn=3, error=4, fatal=5). This allows the logger to increment the correct counter using pointer arithmetic rather than a switch:
 
@@ -37,7 +40,7 @@ std::uint64_t* lines = &metrics_->log.trace;
 lines[static_cast<std::uint8_t>(lvl)]++;
 ```
 
-Adding a field to `LogMetrics` or `NetworkMetrics` automatically grows `WorkerMetrics` to the next multiple of 64. The `static_assert` on `WorkerMetrics` enforces this at compile time.
+Adding a field to any of the nested metrics automatically grows `WorkerMetrics` to the next multiple of 64. The `static_assert` on `WorkerMetrics` enforces this at compile time.
 
 !!! important
     The order of fields in `LogMetrics` must always match the order of `Logger::Level` values. If you add a new log level, add its counter at the matching position in `LogMetrics` and update the assert.
@@ -72,14 +75,11 @@ metrics_->network.bytesRead += n;
 
 ## Reading metrics
 
-Any worker can read the entire mapped region at any time. `MetricTracer::AggregateLog()` and `MetricTracer::AggregateNetwork()` loop over all slots and sum the fields:
+Any worker can read the entire mapped region at any time. `MetricTracer` provides an `Aggregate...()` function for each metric category that loops over all slots and sums the relevant fields. Each category also has a per-worker variant that returns only the current worker's slot.
 
-```cpp
-auto log = MetricTracer::AggregateLog();     // all workers summed
-auto net = MetricTracer::AggregateNetwork(); // all workers summed
-```
+The aggregate and per-worker functions for each category are exposed to user code through `UTILS_API_EXT1`, and wrapped as inline functions in `include/wfx/telemetry.hpp`. See that file for the current list of available functions.
 
-These are exposed to user code through `UTILS_API_EXT1` as `GetLogMetricsAggregate` and `GetNetMetricsAggregate`. Per-worker variants (`GetLogMetricsWorker`, `GetNetMetricsWorker`) return only the current worker's slot.
+Not every field makes sense to aggregate. For `SelfMetrics`, only `rssBytes`, `vmBytes`, `restarts`, and `crashes` are summed across slots. Fields like `pid`, `startedAt`, `nextRetryAt`, and `backoffAttempts` are per-slot only and are not included in the aggregate result.
 
 Aggregation is not atomic. A worker reading slot N while another worker is mid-increment on slot N may see a partially updated value. For a metrics scrape endpoint this is acceptable. For anything requiring strict consistency it is not.
 
@@ -88,11 +88,11 @@ Aggregation is not atomic. A worker reading slot N while another worker is mid-i
 ## Lifecycle
 
 ```
-Master: MetricTracer::Create(N)    // shared memory region
+Master: MetricTracer::Create(N)     // shared memory region
         fork()
 Worker: MetricTracer::InitWorker(i) // slot index stored process-locally
         ... runs event loop ...
-Master: MetricTracer::Destroy()    // region released, hygiene only
+Master: MetricTracer::Destroy()     // region released, hygiene only
 ```
 
 If the process crashes before `Destroy()` is called, the OS reclaims the shared memory region automatically. On POSIX this is because the mapping is anonymous and not backed by a file. On Windows, all handles are closed by the OS on process termination which releases the mapping. No manual cleanup is needed.
@@ -101,23 +101,23 @@ If the process crashes before `Destroy()` is called, the OS reclaims the shared 
 
 ## Adding a new metric
 
-**Adding to an existing category (`LogMetrics` or `NetworkMetrics`):**
+**Adding to an existing category:**
 
 1. Append the new `uint64_t` field at the end of the struct in `shared/abis/types.hpp`.
-2. Add the aggregation line in `MetricTracer::AggregateLog()` or `MetricTracer::AggregateNetwork()` in `utils/diagnostics/metric_tracer.hpp`.
+2. Add the aggregation line in the corresponding `Aggregate...()` function in `utils/diagnostics/metric_tracer.cpp`.
 3. Increment it from the right place in the engine.
 4. The `static_assert` on `WorkerMetrics` will fail if the new size is not a multiple of 64. If it fails, add padding fields until it passes.
 
 !!! important
-    Never remove or reorder fields in `LogMetrics` or `NetworkMetrics`. Both structs cross the ABI boundary. Reordering breaks user binaries compiled against an older version.
+    Never remove or reorder fields in any metric struct that crosses the ABI boundary. Reordering breaks user binaries compiled against an older version.
 
 **Adding a new category entirely:**
 
-1. Define a new struct in `shared/abis/types.hpp` following the same pattern as `LogMetrics`.
+1. Define a new struct in `shared/abis/types.hpp` following the same pattern as the existing ones.
 2. Add it as a new embedded member in `WorkerMetrics`.
-3. Add a new `Aggregate...()` function in `MetricTracer`.
+3. Add a new `Aggregate...()` function in `utils/diagnostics/metric_tracer.hpp` and implement it in `metric_tracer.cpp`.
 4. Add new function pointer types and entries to `UTILS_API_EXT1` in `shared/apis/utils_api.hpp`.
-5. Wire the lambda in `shared/apis/utils_api.cpp`.
+5. Wire the lambdas in `shared/apis/utils_api.cpp`.
 6. Add the user-facing inline functions in `include/wfx/telemetry.hpp`.
 
 ---
@@ -125,10 +125,13 @@ If the process crashes before `Destroy()` is called, the OS reclaims the shared 
 ## Where things live
 
 - `shared/abis/types.hpp`  
-    Definitions for `LogMetrics`, `NetworkMetrics`, and `WorkerMetrics`.
+    Definitions for all metric structs and `WorkerMetrics`.
 
 - `utils/diagnostics/metric_tracer.hpp`  
-    `MetricTracer` class. Manages the shared memory region, slot initialization, and aggregation functions.
+    `MetricTracer` namespace. Hot path functions (`Current`, `Slot`) are inline here. Lifecycle and aggregation functions are declared here and defined in `metric_tracer.cpp`.
+
+- `utils/diagnostics/metric_tracer.cpp`  
+    Implementations of `Create`, `InitWorker`, `Destroy`, and all `Aggregate...()` functions.
 
 - `shared/apis/utils_api.hpp`  
     `UTILS_API_EXT1` function pointer declarations for metrics and logging.
@@ -137,4 +140,4 @@ If the process crashes before `Destroy()` is called, the OS reclaims the shared 
     Lambda implementations that wire `MetricTracer` to the API function pointers.
 
 - `include/wfx/telemetry.hpp`  
-    User-facing functions: `GetLogMetrics`, `GetNetworkMetrics`, `GetLogMetricsAll`, `GetNetworkMetricsAll`.
+    User-facing inline functions for querying metrics. This is the source of truth for what is currently available to user code.

@@ -11,7 +11,7 @@ static AsyncAPIDataExt1 __GlobalAsyncDataExt1;
 
 const ASYNC_API_EXT1* GetAsyncAPIExt1()
 {
-    // 'ctx' is ConnectionContext just type erased so user doesn't DO anything
+    // clang-format off
     static ASYNC_API_EXT1 __GlobalAsyncAPIExt1 = {
         // vvv Async Functions vvv
         [](void* ctx, std::uint32_t delayMs, AsyncData asyncData) { // RegisterAsyncTimer
@@ -22,7 +22,7 @@ const ASYNC_API_EXT1* GetAsyncAPIExt1()
                 return false;
             }
 
-            auto  cctx        = static_cast<ConnectionContext*>(ctx);
+            auto cctx = static_cast<ConnectionContext*>(ctx);
             auto* connHandler = __GlobalAsyncDataExt1.connHandler;
 
             // Shouldn't happen considering we set it in core_engine.cpp
@@ -34,6 +34,7 @@ const ASYNC_API_EXT1* GetAsyncAPIExt1()
             return connHandler->RefreshAsyncTimer(cctx, delayMs, asyncData);
         }
     };
+    // clang-format on
 
     return &__GlobalAsyncAPIExt1;
 }

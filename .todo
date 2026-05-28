@@ -1,8 +1,9 @@
 # SERVICES
-wfx new	    Scaffold new project
-wfx run	    Start WFX server
-wfx build	Build parts of WFX
-wfx doctor	Check requirements for WFX (Deprecated)
+wfx control   Control running servers
+wfx new	      Scaffold new project
+wfx run	      Start WFX server
+wfx build	  Build parts of WFX
+wfx doctor	  Check requirements for WFX (Deprecated)
 
 To implement (In no specific order):
 1. User project build system (Done)
@@ -27,6 +28,8 @@ To implement (In no specific order):
 18. Logging and Metrics (Done)
 
 To Fix:
-1. Add write budget for backend (epoll/io_uring/iocp/kqueue), don't let one question hoard writing
+1. Add write budget for backend (epoll/io_uring/iocp/kqueue), don't let one connection hoard writing
 2. Timer wheel shouldn't expire connections inline, or for larger count it will stall backend pipeline (negligible but still)
 3. ADD PROPER ERROR CHECKING FOR ASYNC TIMER OPERATIONS (none but still)
+4. When server reaches connection limit, drop random connections :)
+5. Template engine caching logic is still not good, need to make it more good

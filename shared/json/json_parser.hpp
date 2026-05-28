@@ -16,11 +16,14 @@ namespace WFX::Shared {
 // error  : nullptr on success, static string literal on failure
 // offset : byte offset into input where the failure occurred
 struct JsonParseResult {
-    JsonObject  object;
-    const char* error  = nullptr;
+    JsonObject object;
+    const char* error = nullptr;
     std::size_t offset = 0;
 
-    bool IsValid() const noexcept { return error == nullptr; }
+    bool IsValid() const noexcept
+    {
+        return error == nullptr;
+    }
 };
 
 // vvv Internal parser, not for direct use vvv
@@ -31,14 +34,23 @@ struct JsonParseResult {
 //
 struct JsonParser {
 public: // vvv Primitives vvv
-    bool Ok()   const noexcept { return err == nullptr; }
-    bool End()  const noexcept { return pos >= len; }
-    char Peek() const noexcept { return pos < len ? src[pos] : '\0'; }
+    bool Ok() const noexcept
+    {
+        return err == nullptr;
+    }
+    bool End() const noexcept
+    {
+        return pos >= len;
+    }
+    char Peek() const noexcept
+    {
+        return pos < len ? src[pos] : '\0';
+    }
 
     void Fail(const char* msg) noexcept
     {
         if(!err) {
-            err    = msg;
+            err = msg;
             errOff = pos;
         }
     }
@@ -94,9 +106,12 @@ public: // vvv Unicode vvv
             char c = src[pos++];
             std::uint32_t d;
 
-            if(c >= '0' && c <= '9')      d = c - '0';
-            else if(c >= 'a' && c <= 'f') d = c - 'a' + 10;
-            else if(c >= 'A' && c <= 'F') d = c - 'A' + 10;
+            if(c >= '0' && c <= '9')
+                d = c - '0';
+            else if(c >= 'a' && c <= 'f')
+                d = c - 'a' + 10;
+            else if(c >= 'A' && c <= 'F')
+                d = c - 'A' + 10;
             else {
                 Fail("invalid hex digit in \\u escape");
                 return -1;
@@ -150,8 +165,16 @@ public: // vvv String scanning vvv
                 return false;
             }
 
-            if(src[i] == '\\') { hasEscape = true;  end = i; return true; }
-            if(src[i] == '"')  { hasEscape = false; end = i; return true; }
+            if(src[i] == '\\') {
+                hasEscape = true;
+                end = i;
+                return true;
+            }
+            if(src[i] == '"') {
+                hasEscape = false;
+                end = i;
+                return true;
+            }
         }
 
         Fail("unterminated string");
@@ -170,17 +193,34 @@ public: // vvv String scanning vvv
         char esc = src[pos++];
 
         switch(esc) {
-            case '"':  out[outLen++] = '"';  return true;
-            case '\\': out[outLen++] = '\\'; return true;
-            case '/':  out[outLen++] = '/';  return true;
-            case 'b':  out[outLen++] = '\b'; return true;
-            case 'f':  out[outLen++] = '\f'; return true;
-            case 'n':  out[outLen++] = '\n'; return true;
-            case 'r':  out[outLen++] = '\r'; return true;
-            case 't':  out[outLen++] = '\t'; return true;
+            case '"':
+                out[outLen++] = '"';
+                return true;
+            case '\\':
+                out[outLen++] = '\\';
+                return true;
+            case '/':
+                out[outLen++] = '/';
+                return true;
+            case 'b':
+                out[outLen++] = '\b';
+                return true;
+            case 'f':
+                out[outLen++] = '\f';
+                return true;
+            case 'n':
+                out[outLen++] = '\n';
+                return true;
+            case 'r':
+                out[outLen++] = '\r';
+                return true;
+            case 't':
+                out[outLen++] = '\t';
+                return true;
             case 'u': {
                 std::int32_t cp = DecodeHex4();
-                if(cp < 0) return false;
+                if(cp < 0)
+                    return false;
 
                 if(cp >= 0xD800 && cp <= 0xDBFF) {
                     // High surrogate, must be followed by low surrogate \uXXXX
@@ -200,9 +240,8 @@ public: // vvv String scanning vvv
                         return false;
                     }
 
-                    std::uint32_t full = 0x10000u
-                        + ((static_cast<std::uint32_t>(cp)  - 0xD800u) << 10)
-                        +  (static_cast<std::uint32_t>(low) - 0xDC00u);
+                    std::uint32_t full = 0x10000u + ((static_cast<std::uint32_t>(cp) - 0xD800u) << 10) +
+                                         (static_cast<std::uint32_t>(low) - 0xDC00u);
 
                     outLen += EncodeUTF8(full, out + outLen);
                 }
@@ -228,14 +267,14 @@ public: // vvv String parsing vvv
     bool ParseStringEscaped(JsonStore* s, JsonNode& n) noexcept
     {
         std::uint32_t capacity = static_cast<std::uint32_t>(len - pos) + 4;
-        std::uint32_t strOff   = s->AllocStr(nullptr, capacity);
+        std::uint32_t strOff = s->AllocStr(nullptr, capacity);
 
         if(strOff == JSON_NIL) {
             Fail("out of memory");
             return false;
         }
 
-        char*         out    = s->strs + strOff;
+        char* out = s->strs + strOff;
         std::uint32_t outLen = 0;
 
         while(pos < len) {
@@ -263,10 +302,10 @@ public: // vvv String parsing vvv
                 return false;
         }
 
-        out[outLen]  = '\0';
-        s->strLen    = strOff + outLen + 1; // patch strLen, capacity may be larger
+        out[outLen] = '\0';
+        s->strLen = strOff + outLen + 1; // patch strLen, capacity may be larger
 
-        n.tag    = JsonTag::STR_OWN;
+        n.tag = JsonTag::STR_OWN;
         n.u32a() = strOff;
         n.u32c() = outLen;
         return true;
@@ -282,11 +321,13 @@ public: // vvv String parsing vvv
         if(!Expect('"'))
             return false;
 
-        std::size_t end       = pos;
-        bool        hasEscape = false;
+        std::size_t end = pos;
+        bool hasEscape = false;
 
-        if(!ScanString(end, hasEscape)) return false;
-        if(hasEscape)                   return ParseStringEscaped(s, n);
+        if(!ScanString(end, hasEscape))
+            return false;
+        if(hasEscape)
+            return ParseStringEscaped(s, n);
 
         // Fast path: no escape sequences in this string
         std::uint32_t slen = static_cast<std::uint32_t>(end - pos);
@@ -307,7 +348,7 @@ public: // vvv String parsing vvv
                 return false;
             }
 
-            n.tag    = JsonTag::STR_OWN;
+            n.tag = JsonTag::STR_OWN;
             n.u32a() = off;
             n.u32c() = slen;
         }
@@ -355,15 +396,17 @@ public: // vvv Number parsing vvv
 
     bool ParseNumber(JsonNode& n) noexcept
     {
-        std::size_t start   = pos;
-        bool        isNeg   = Peek() == '-';
-        bool        isFloat = false;
+        std::size_t start = pos;
+        bool isNeg = Peek() == '-';
+        bool isFloat = false;
 
-        if(isNeg)                ++pos;
-        if(!ScanNumber(isFloat)) return false;
+        if(isNeg)
+            ++pos;
+        if(!ScanNumber(isFloat))
+            return false;
 
         const char* begin = src + start;
-        const char* end   = src + pos;
+        const char* end = src + pos;
 
         if(isFloat) {
             double v;
@@ -412,12 +455,15 @@ public: // vvv Value vvv
             return false;
         }
 
-        char  c = Peek();
+        char c = Peek();
         JsonNode& n = r.NMut();
 
-        if(c == '"') return ParseString(r.s_, n);
-        if(c == '{') return ParseObject(r);
-        if(c == '[') return ParseArray (r);
+        if(c == '"')
+            return ParseString(r.s_, n);
+        if(c == '{')
+            return ParseObject(r);
+        if(c == '[')
+            return ParseArray(r);
 
         if(c == 't') {
             if(pos + 4 > len || std::memcmp(src + pos, "true", 4) != 0) {
@@ -426,7 +472,7 @@ public: // vvv Value vvv
             }
 
             pos += 4;
-            n.tag  = JsonTag::BOOL;
+            n.tag = JsonTag::BOOL;
             n.u64a = 1;
             return true;
         }
@@ -438,7 +484,7 @@ public: // vvv Value vvv
             }
 
             pos += 5;
-            n.tag  = JsonTag::BOOL;
+            n.tag = JsonTag::BOOL;
             n.u64a = 0;
             return true;
         }
@@ -472,7 +518,7 @@ public: // vvv Object and Array vvv
             return false;
         }
 
-        r.NMut().tag  = JsonTag::OBJECT;
+        r.NMut().tag = JsonTag::OBJECT;
         r.NMut().u64a = 0;
         r.NMut().u64b = 0;
 
@@ -491,9 +537,9 @@ public: // vvv Object and Array vvv
                 return false;
             }
 
-            std::size_t keyStart  = ++pos; // skip opening "
-            std::size_t end       = pos;
-            bool        hasEscape = false;
+            std::size_t keyStart = ++pos; // skip opening "
+            std::size_t end = pos;
+            bool hasEscape = false;
 
             if(!ScanString(end, hasEscape))
                 return false;
@@ -503,7 +549,7 @@ public: // vvv Object and Array vvv
             if(!hasEscape) {
                 // Fast path: key has no escape sequences, copy directly from src
                 std::uint32_t klen = static_cast<std::uint32_t>(end - keyStart);
-                pos    = end + 1; // skip closing "
+                pos = end + 1; // skip closing "
                 valRef = r.GetOrCreate(src + keyStart, klen);
             }
             else {
@@ -512,7 +558,7 @@ public: // vvv Object and Array vvv
                 pos = keyStart - 1; // rewind to opening quote
 
                 JsonNode tmp;
-                tmp.tag  = JsonTag::EMPTY;
+                tmp.tag = JsonTag::EMPTY;
                 tmp.u64a = 0;
                 tmp.u64b = 0;
 
@@ -526,7 +572,7 @@ public: // vvv Object and Array vvv
                 if(!ok)
                     return false;
 
-                const char*   kptr = r.s_->strs + tmp.u32a();
+                const char* kptr = r.s_->strs + tmp.u32a();
                 std::uint32_t klen = tmp.u32c();
                 valRef = r.GetOrCreate(kptr, klen);
             }
@@ -572,7 +618,7 @@ public: // vvv Object and Array vvv
             return false;
         }
 
-        r.NMut().tag  = JsonTag::ARRAY;
+        r.NMut().tag = JsonTag::ARRAY;
         r.NMut().u64a = 0;
         r.NMut().u64b = 0;
 
@@ -636,19 +682,19 @@ public: // vvv Entry point vvv
         }
 
         JsonParser p;
-        p.src      = body.data();
-        p.len      = body.size();
-        p.pos      = 0;
-        p.depth    = 0;
+        p.src = body.data();
+        p.len = body.size();
+        p.pos = 0;
+        p.depth = 0;
         p.maxDepth = maxDepth;
-        p.isView   = isView;
-        p.err      = nullptr;
-        p.errOff   = 0;
+        p.isView = isView;
+        p.err = nullptr;
+        p.errOff = 0;
 
         p.SkipWS();
 
         if(p.Peek() != '{' && p.Peek() != '[') {
-            result.error  = "root must be object or array";
+            result.error = "root must be object or array";
             result.offset = p.pos;
             return result;
         }
@@ -656,12 +702,10 @@ public: // vvv Entry point vvv
         // Root node is node 0, always allocated by JsonObject::Init()
         JsonRef root{result.object.s_, 0};
 
-        bool ok = p.Peek() == '{'
-            ? p.ParseObject(root)
-            : p.ParseArray (root);
+        bool ok = p.Peek() == '{' ? p.ParseObject(root) : p.ParseArray(root);
 
         if(!ok || !p.Ok()) {
-            result.error  = p.err ? p.err : "parse error";
+            result.error = p.err ? p.err : "parse error";
             result.offset = p.errOff;
             return result;
         }
@@ -669,7 +713,7 @@ public: // vvv Entry point vvv
         p.SkipWS();
 
         if(!p.End()) {
-            result.error  = "trailing content after root";
+            result.error = "trailing content after root";
             result.offset = p.pos;
             return result;
         }
@@ -678,14 +722,14 @@ public: // vvv Entry point vvv
     }
 
 private: // vvv State vvv
-    const char*   src;
-    std::size_t   len;
-    std::size_t   pos;
+    const char* src;
+    std::size_t len;
+    std::size_t pos;
     std::uint32_t depth;
     std::uint32_t maxDepth;
-    const char*   err    = nullptr;
-    std::size_t   errOff = 0;
-    bool          isView;
+    const char* err = nullptr;
+    std::size_t errOff = 0;
+    bool isView;
 };
 
 } // namespace WFX::Shared

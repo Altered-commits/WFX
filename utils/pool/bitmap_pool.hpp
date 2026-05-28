@@ -7,8 +7,7 @@
 
 namespace WFX::Utils {
 
-template<typename T>
-class BitmapPool {
+template <typename T> class BitmapPool {
 public: // vvv Constructor and Destructor vvv
     BitmapPool(std::uint32_t numSlots)
     {
@@ -24,7 +23,7 @@ public: // vvv Constructor and Destructor vvv
         slots_ = std::uint32_t(rounded);
         words_ = slots_ >> 6;
 
-        pool_   = new T[slots_]{};
+        pool_ = new T[slots_]{};
         bitmap_ = new std::uint64_t[words_]{0};
 
         if(!pool_ || !bitmap_)
@@ -33,27 +32,33 @@ public: // vvv Constructor and Destructor vvv
 
     ~BitmapPool()
     {
-        if(pool_)   { delete[] pool_; pool_ = nullptr; }
-        if(bitmap_) { delete[] bitmap_; bitmap_ = nullptr; }
+        if(pool_) {
+            delete[] pool_;
+            pool_ = nullptr;
+        }
+        if(bitmap_) {
+            delete[] bitmap_;
+            bitmap_ = nullptr;
+        }
     }
 
     // No copying allowed
-    BitmapPool(const BitmapPool&)            = delete;
+    BitmapPool(const BitmapPool&) = delete;
     BitmapPool& operator=(const BitmapPool&) = delete;
 
     // vvv Move semantics vvv
     BitmapPool(BitmapPool&& other) noexcept
     {
-        pool_          = other.pool_;
-        bitmap_        = other.bitmap_;
-        slots_         = other.slots_;
-        words_         = other.words_;
+        pool_ = other.pool_;
+        bitmap_ = other.bitmap_;
+        slots_ = other.slots_;
+        words_ = other.words_;
         lastUsedIndex_ = other.lastUsedIndex_;
 
-        other.pool_          = nullptr;
-        other.bitmap_        = nullptr;
-        other.slots_         = 0;
-        other.words_         = 0;
+        other.pool_ = nullptr;
+        other.bitmap_ = nullptr;
+        other.slots_ = 0;
+        other.words_ = 0;
         other.lastUsedIndex_ = 0;
     }
 
@@ -63,16 +68,16 @@ public: // vvv Constructor and Destructor vvv
             delete[] pool_;
             delete[] bitmap_;
 
-            pool_          = other.pool_;
-            bitmap_        = other.bitmap_;
-            slots_         = other.slots_;
-            words_         = other.words_;
+            pool_ = other.pool_;
+            bitmap_ = other.bitmap_;
+            slots_ = other.slots_;
+            words_ = other.words_;
             lastUsedIndex_ = other.lastUsedIndex_;
 
-            other.pool_          = nullptr;
-            other.bitmap_        = nullptr;
-            other.slots_         = 0;
-            other.words_         = 0;
+            other.pool_ = nullptr;
+            other.bitmap_ = nullptr;
+            other.slots_ = 0;
+            other.words_ = 0;
             other.lastUsedIndex_ = 0;
         }
         return *this;
@@ -102,7 +107,8 @@ public: // vvv Main Functions vvv
                 int bit = std::countr_zero(inv);
                 bitmap_[w] |= 1ULL << bit;
                 lastUsedIndex_ = w;
-                return &pool_[(w << 6) + bit];;
+                return &pool_[(w << 6) + bit];
+                ;
             }
         }
 
@@ -111,25 +117,34 @@ public: // vvv Main Functions vvv
 
     void FreeSlot(std::uint32_t idx)
     {
-        std::uint32_t w   = idx >> 6;
+        std::uint32_t w = idx >> 6;
         std::uint32_t bit = idx & 63;
         bitmap_[w] &= ~(1ULL << bit);
     }
 
-    std::uint32_t GetSlots()                { return slots_; }
-    std::uint32_t GetIndex(T* ptr)          { return static_cast<std::uint32_t>(ptr - pool_); }
-    T*            GetPtr(std::uint32_t idx) { return &pool_[idx]; }
+    std::uint32_t GetSlots()
+    {
+        return slots_;
+    }
+    std::uint32_t GetIndex(T* ptr)
+    {
+        return static_cast<std::uint32_t>(ptr - pool_);
+    }
+    T* GetPtr(std::uint32_t idx)
+    {
+        return &pool_[idx];
+    }
 
 private: // Constexpr stuff
     // Maximum valid 64-aligned slot count for std::uint32_t
     constexpr static std::uint32_t MAX_64_ALIGNED = 0xFFFF'FFC0u;
 
 private: // Storage
-    T*             pool_{nullptr};
+    T* pool_{nullptr};
     std::uint64_t* bitmap_{nullptr};
-    std::uint32_t  slots_{0};
-    std::uint32_t  words_{0};
-    std::uint32_t  lastUsedIndex_{0};
+    std::uint32_t slots_{0};
+    std::uint32_t words_{0};
+    std::uint32_t lastUsedIndex_{0};
 };
 
 } // namespace WFX::Utils

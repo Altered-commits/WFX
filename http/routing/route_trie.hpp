@@ -7,7 +7,7 @@
 namespace WFX::Http {
 
 class RouteTrie {
-public:    
+public:
     const TrieNode* Insert(std::string_view fullRoute, Shared::RouteCallback handler);
     const TrieNode* Match(std::string_view requestPath, PathSegments& outParams) const;
 

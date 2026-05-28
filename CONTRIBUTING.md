@@ -18,9 +18,9 @@ Global namespaces:
 - `WFX::Http`
 - `WFX::OSSpecific`
 - `WFX::Shared`
-- `WFX::Utils` (not a direct part of engine code)
+- `WFX::Utils`
 
-User code doesn't need global namespaces unless you wish to create them (like what i did for Async::)
+User-facing code lives in `include/`. Headers meant to be included directly by users go under `include/wfx/`. If you are adding a new user-facing feature, the public header belongs there. Namespaces inside user-facing headers should follow the same `WFX::` convention (I'm too lazy to explain rn, just check it out once)
 
 ---
 
@@ -33,7 +33,19 @@ User code doesn't need global namespaces unless you wish to create them (like wh
 - **Globals:** `__PascalCase` (e.g. `__GlobalLogger`)
 - **Macros:** `SCREAMING_SNAKE_CASE` (e.g. `WFX_IS_TTY`)
 
-**Formatting:** 4 spaces, no tabs. Braces: same line for **almost** everything except function definitions (unless u wish to write entire function in a single line).
+**Formatting** is enforced via clang-format. Before opening a PR, run:
+
+```bash
+bash scripts/format.sh
+```
+
+To format specific files only:
+
+```bash
+bash scripts/format.sh --files path/to/file.cpp path/to/other.hpp
+```
+
+If you have sections with manual alignment or complex macro blocks that clang-format mangles, wrap them with `// clang-format off` and `// clang-format on`. Use it sparingly :)
 
 **Example:**
 
@@ -55,7 +67,7 @@ private:
     static constexpr int MAX_TICK = 1000;
 };
 
-}  // namespace WFX::Utils
+} // namespace WFX::Utils
 ```
 
 ---

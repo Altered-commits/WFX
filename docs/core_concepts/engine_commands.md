@@ -11,7 +11,7 @@ Create a new WFX project.
 **Usage:**
 
 ```bash
-./wfx new <project_name>
+wfx new <project_name>
 ```
 
 `<project_name>`: Required. Name of the project to create.
@@ -33,7 +33,7 @@ Verify system requirements for the current workspace.
 **Usage (no-op):**
 
 ```bash
-./wfx doctor
+wfx doctor
 ```
 
 ---
@@ -45,25 +45,20 @@ Pre-build various parts of the project, such as templates or source code.
 **Usage:**
 
 ```bash
-./wfx build <target> [options]
+wfx build <project_name> <target>
 ```
 
-##### Compulsory Arguments
+#### Compulsory Arguments
 
-| Argument       | Description                                                          |
-|----------------|----------------------------------------------------------------------|
-| &lt;target&gt; | Specify which part of the project to build: `templates` or `source`  |
-
-##### Optional Flags
-
-| Flag       | Description                                                                         |
-|------------|-------------------------------------------------------------------------------------|
-| --debug    | Currently a **no-op**. In the future, it will be used to enable runtime debug mode  |
+| Argument          | Description                                                         |
+|-------------------|---------------------------------------------------------------------|
+| `<project_name>`  | Name of the project folder to build                                 |
+| `<target>`        | Which part to build: `templates` or `source`                        |
 
 **Example:**
 
 ```bash
-./wfx build source
+wfx build my-project source
 ```
 
 ---
@@ -75,30 +70,57 @@ Start the WFX server.
 **Usage:**
 
 ```bash
-./wfx dev [options]
+wfx run <project_name> [options]
 ```
 
-##### Optional Flags
+#### Optional Flags
 
-| Option               | Description                 | Default   | Requires value? |
-|----------------------|-----------------------------|-----------|-----------------|
-|--host	               | Host to bind	             | 127.0.0.1 | Yes             |
-|--port	               | Port to bind	             | 8080      | Yes             |
-|--pin-to-cpu          | Pin workers to CPU cores    |     –     | No              |
-|--use-https	       | Enable HTTPS connection	 |     –     | No              |
-|--https-port-override | Override default HTTPS port |     –     | No              |
-|--debug	           | Currently a **no-op**  	 |     –     | No              |
+| Option               | Description                       | Default   | Requires value? |
+|----------------------|-----------------------------------|-----------|-----------------|
+|--host	               | Host to bind	                   | 127.0.0.1 | Yes             |
+|--port	               | Port to bind	                   | 8080      | Yes             |
+|--pin-to-cpu          | Pin workers to CPU cores          |     –     | No              |
+|--use-https	       | Enable HTTPS connection	       |     –     | No              |
+|--https-port-override | Override default HTTPS port       |     –     | No              |
+|--detach              | Run server as a background daemon |     –     | No              |
 
-##### Additional Information
+#### Additional Information
 - **Default** specifies the value used by WFX when the option is not explicitly provided.
 - **Requires value?** indicates whether an option must be followed by a value (for example, `--port 3000`) or can be used as a standalone flag (for example, `--debug`).
-- `--no-cache` cannot be combined with `--no-source-cache` or `--no-template-cache`.
 - `--use-https` by default uses port 443.
 - `--https-port-override` overrides the HTTPS port using the value provided via `--port`.
 
 **Example:**
 
 ```bash
-./wfx run --host 0.0.0.0 --port 3000 --use-https --https-port-override
+wfx run my-project --host 0.0.0.0 --port 3000 --use-https --https-port-override
 ```
 This starts the server on all interfaces, port 3000 and HTTPS enabled.
+
+---
+
+## `wfx control`
+
+Manage running WFX servers.
+
+**Usage:**
+
+```bash
+wfx control <subcommand> [project_name]
+```
+
+##### Subcommands
+
+| Subcommand | Description                                      |
+|------------|--------------------------------------------------|
+| `list`     | List all running WFX servers with their status   |
+| `folder`   | Print the WFX root and daemon directories        |
+| `stop`     | Stop a running server by project name            |
+
+**Examples:**
+
+```bash
+wfx control list
+wfx control stop my-project
+wfx control folder
+```

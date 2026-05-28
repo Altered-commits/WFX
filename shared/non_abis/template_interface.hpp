@@ -22,32 +22,25 @@ struct VariableChunk {
 };
 
 // Common return type of the chunk, a monostate return value signifies end of generation
-using TemplateChunk = std::variant<
-    std::monostate,
-    FileChunk,
-    VariableChunk
->;
+using TemplateChunk = std::variant<std::monostate, FileChunk, VariableChunk>;
 
 // Enum representation of variant types
-enum class TemplateChunkType {
-    MONOSTATE,
-    FILE,
-    VARIABLE
-};
+enum class TemplateChunkType { MONOSTATE, FILE, VARIABLE };
 
 // Actual return type of the function 'GetState'
 // Returns the next state and the result of current state
 struct StateResult {
-    std::size_t   newState;
+    std::size_t newState;
     TemplateChunk chunk;
 };
 
 // Helper function. Returns invalid JsonRef if any key missing
-inline Shared::JsonRef SafeGetJson(Shared::JsonObject& ctx, std::initializer_list<std::string_view> keys) noexcept {
+inline Shared::JsonRef SafeGetJson(Shared::JsonObject& ctx, std::initializer_list<std::string_view> keys) noexcept
+{
     if(keys.size() == 0)
         return Shared::JsonRef{nullptr, Shared::JSON_NIL};
 
-    auto it  = keys.begin();
+    auto it = keys.begin();
     auto ref = ctx.Get(*it++);
 
     for(; it != keys.end(); ++it) {
@@ -78,7 +71,7 @@ public:
  * Engine loads it via dlsym/GetProcAddress
  */
 using TemplateGeneratorPtr = std::unique_ptr<BaseTemplateGenerator>;
-using TemplateCreatorFn    = TemplateGeneratorPtr(*)();
+using TemplateCreatorFn = TemplateGeneratorPtr (*)();
 
 } // namespace WFX::Core
 

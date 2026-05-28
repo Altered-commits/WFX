@@ -268,15 +268,23 @@ max_rotations     = 2         # 16-bit Unsigned Integer
 
 ## `[Misc]`
 
-Defines small engine-level limits that do not fit into other categories, mainly related to caching and internal I/O behavior. This section is **optional**.
+Miscellaneous engine-level settings covering caching, internal I/O, and worker process management. This section is **optional**.
 
 <pre class="code-format">
 [Misc]
-file_cache_size     = 20     # 16-bit Unsigned Integer
-cache_chunk_size    = 2048   # 16-bit Unsigned Integer (In bytes)
-template_chunk_size = 16384  # 32-bit Unsigned Integer (In bytes)
+file_cache_size      = 20    # 16-bit Unsigned Integer
+cache_chunk_size     = 2048  # 16-bit Unsigned Integer (In bytes)
+template_chunk_size  = 16384 # 32-bit Unsigned Integer (In bytes)
+master_poll_interval = 2     # 16-bit Unsigned Integer (In seconds)
+max_worker_restarts  = 5     # 16-bit Unsigned Integer
+worker_backoff_base  = 1     # 16-bit Unsigned Integer (In seconds)
+worker_backoff_max   = 16    # 16-bit Unsigned Integer (In seconds)
 </pre>
 
 - `file_cache_size`: Number of files cached in memory (LFU)
 - `template_chunk_size`: Max I/O chunk size during template compilation
 - `cache_chunk_size`: Max I/O chunk size for template cache files
+- `master_poll_interval`: How often the master process wakes up to check for dead workers and poll memory metrics. Lower values mean faster crash detection at the cost of slightly more wakeups.
+- `max_worker_restarts`: Maximum number of times a crashed worker slot will be restarted before it is marked permanently dead until the server restarts.
+- `worker_backoff_base`: Starting backoff delay in seconds before the first restart attempt. Doubles on each subsequent attempt.
+- `worker_backoff_max`: Maximum backoff delay cap in seconds. Backoff will never exceed this value regardless of how many attempts have occurred.

@@ -11,8 +11,7 @@ struct SleepForAwaitable : public AwaitableBase<SleepForAwaitable> {
     std::uint32_t delayMs = 0;
 
 public:
-    explicit SleepForAwaitable(std::uint32_t ms) noexcept
-        : AwaitableBase{}, delayMs(ms)
+    explicit SleepForAwaitable(std::uint32_t ms) noexcept : AwaitableBase{}, delayMs(ms)
     {}
 
 public:
@@ -21,10 +20,8 @@ public:
         handle_ = h;
 
         // Passed by engine, guaranteed
-        void* connCtx   = Core::HttpApiExt1()->GetGlobalPtrData();
-        bool  scheduled = Core::AsyncApiExt1()->RegisterAsyncTimer(
-            connCtx, delayMs, {this, OnComplete, OnDestroy}
-        );
+        void* connCtx = Core::HttpApiExt1()->GetGlobalPtrData();
+        bool scheduled = Core::AsyncApiExt1()->RegisterAsyncTimer(connCtx, delayMs, {this, OnComplete, OnDestroy});
 
         // On failure, resume the coroutine so user can handle the error
         if(!scheduled) {
@@ -37,7 +34,10 @@ public:
     }
 
     // Return status
-    AsyncStatus await_resume() const noexcept { return result_.status; }
+    AsyncStatus await_resume() const noexcept
+    {
+        return result_.status;
+    }
 };
 
 inline SleepForAwaitable SleepFor(std::uint32_t delayMs)
