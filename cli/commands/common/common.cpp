@@ -10,9 +10,15 @@
 #include "utils/process/process.hpp"
 #include "utils/string/string.hpp"
 
-// Linux
+// POSIX (Linux + macOS)
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <signal.h>
+#endif
+
+// Linux-only: CPU affinity
 #ifdef __linux__
-#include <wait.h>
+#include <sched.h>
 #endif
 
 namespace WFX::CLI {
@@ -118,6 +124,7 @@ void HandleWorkerSignal(int)
 
 void PinWorkerToCPU(int workerIndex)
 {
+#ifdef __linux__
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
 
@@ -129,6 +136,11 @@ void PinWorkerToCPU(int workerIndex)
         GetLogger().Error("[WFX-Master]: Failed to pin worker ", workerIndex, " to CPU");
 
     GetLogger().Info("[WFX-Master]: Worker ", workerIndex, " pinned to CPU ", cpu);
+#else
+    // macOS: CPU affinity pinning is not supported via POSIX sched_setaffinity.
+    // Workers run on any available core chosen by the scheduler.
+    (void)workerIndex;
+#endif
 }
 #endif
 

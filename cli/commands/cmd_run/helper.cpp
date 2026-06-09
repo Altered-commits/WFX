@@ -13,9 +13,12 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
-#include <wait.h>
+#include <sys/wait.h>
 #include <signal.h>
 #include <fcntl.h>
+#if defined(__APPLE__)
+#include "os_specific/macos/kqueue_connection.hpp"
+#endif
 #endif
 
 #include <ctime>
@@ -38,6 +41,10 @@ using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 //   -2    -> permanently dead (max restart attempts exceeded)
 static constexpr pid_t SLOT_PENDING = -1;
 static constexpr pid_t SLOT_DEAD = -2;
+
+#if defined(__APPLE__)
+static int g_sharedListenFd = -1;
+#endif
 
 // vvv Helper Functions vvv
 static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::string& logsDir,
@@ -73,8 +80,17 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
             logger.OpenFile((logsDir + workerName + ".log").c_str(), loggingConfig.maxFileSize,
                             loggingConfig.maxRotations);
 
-        // AAAAAAAAAAAAND ITS OWNNNNNNNNNNNNN BufferPool and FileCache
-        GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
+        // Size buffer pool for peak concurrent connections (avoids TLSF expansion thrashing at 10k conn)
+        {
+            const auto& net = config.networkConfig;
+            constexpr std::size_t kMetaOverhead = 64;
+            std::size_t perConn =
+                static_cast<std::size_t>(net.readBufferIncSize + net.maxSendBufferSize + kMetaOverhead);
+            std::size_t poolSize = static_cast<std::size_t>(net.maxConnections) * perConn;
+            if(poolSize < 8 * 1024 * 1024)
+                poolSize = 8 * 1024 * 1024;
+            GetBufferPool().Init(poolSize, [](std::size_t curSize) { return curSize + curSize / 2; });
+        }
         GetFileCache().Init(config.miscConfig.fileCacheSize);
 
         Core::CoreEngine engine{dllDir.c_str(), useHttps};
@@ -412,9 +428,30 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         logger.OpenFile((logsDir + "master.log").c_str(), loggingConfig.maxFileSize, loggingConfig.maxRotations);
 
     // -------------------- WORKERS SPAWNING PHASE --------------------
+#if defined(__APPLE__)
+    const std::string dllDir = buildConfig.buildDir + "/user_entry.dylib";
+#elif defined(_WIN32)
+    const std::string dllDir = buildConfig.buildDir + "/user_entry.dll";
+#else
     const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
+#endif
 
     globalState.workerPids.resize(osConfig.workerProcesses, -1);
+
+#if defined(__APPLE__)
+    // macOS: prefer SO_REUSEPORT per worker (2–4 workers) for load spread at high conn counts.
+    // Shared accept fd is used for larger worker counts where reuseport spread is unreliable.
+    if(osConfig.workerProcesses > 4) {
+        g_sharedListenFd =
+            OSSpecific::KqueueConnectionHandler::CreateSharedListenSocket(cfg.host, port, osConfig.backlog);
+        if(g_sharedListenFd < 0)
+            return 1;
+
+        char fdStr[16];
+        std::snprintf(fdStr, sizeof(fdStr), "%d", g_sharedListenFd);
+        setenv("WFX_LISTEN_FD", fdStr, 1);
+    }
+#endif
 
     for(int i = 0; i < osConfig.workerProcesses; i++) {
         if(!SpawnWorker(i, dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, cfg.host, port)) {
@@ -423,6 +460,13 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
             if(!DaemonRegistry::Delete(projectName))
                 logger.Warn("[WFX-Master]: Failed to delete PID file during fork failure cleanup");
 
+#if defined(__APPLE__)
+            if(g_sharedListenFd >= 0) {
+                close(g_sharedListenFd);
+                g_sharedListenFd = -1;
+                unsetenv("WFX_LISTEN_FD");
+            }
+#endif
             return 1;
         }
     }
@@ -430,9 +474,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     // --- Master wait loop ---
     while(!globalState.shouldStop) {
         // Sleep for poll interval, wake early on any signal
-        struct timespec ts {
-            config.miscConfig.masterPollInterval, 0
-        };
+        struct timespec ts{config.miscConfig.masterPollInterval, 0};
         nanosleep(&ts, nullptr);
 
         // Server stopped
@@ -483,6 +525,14 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
 
     // Hygiene (Not that it matters, OS would reclaim it anyways if this crashes)
     MetricTracer::Destroy();
+
+#if defined(__APPLE__)
+    if(g_sharedListenFd >= 0) {
+        close(g_sharedListenFd);
+        g_sharedListenFd = -1;
+        unsetenv("WFX_LISTEN_FD");
+    }
+#endif
 
     if(!DaemonRegistry::Delete(config.projectConfig.projectName))
         logger.Warn("[WFX-Master]: Failed to delete PID file on shutdown");

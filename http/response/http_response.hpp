@@ -84,6 +84,10 @@ public: // Queries used by CoreEngine / Serializer
         stream_ = {};
         return gen;
     }
+    bool IsStreamChunked() const
+    {
+        return streamChunked_;
+    }
 
     void SetRWBuffer(Utils::RWBuffer* ptr) noexcept
     {
@@ -127,6 +131,7 @@ private:
 
     std::string filePath_;           // When bodyKind_ == FILE
     Shared::StreamGenerator stream_; // When bodyKind_ == STREAM
+    bool streamChunked_ = true;
 
     // Used in 'Append' alot
     Core::NetworkConfig& networkConfig_ = Core::GetConfig().networkConfig;

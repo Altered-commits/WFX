@@ -111,7 +111,6 @@ public: // vvv Main Functions vvv
                 bitmap_[w] |= 1ULL << bit;
                 lastUsedIndex_ = w;
                 return &pool_[(w << 6) + bit];
-                ;
             }
         }
 
@@ -136,6 +135,27 @@ public: // vvv Main Functions vvv
     T* GetPtr(std::uint32_t idx)
     {
         return &pool_[idx];
+    }
+
+    template <typename Fn> void ForEachAllocated(Fn&& fn) const
+    {
+        for(std::uint32_t w = 0; w < words_; ++w) {
+            std::uint64_t bits = bitmap_[w];
+            while(bits) {
+                const int bit = std::countr_zero(bits);
+                const std::uint32_t idx = (w << 6) + static_cast<std::uint32_t>(bit);
+                if(idx < slots_)
+                    fn(&pool_[idx], idx);
+                bits &= bits - 1;
+            }
+        }
+    }
+
+    std::uint32_t CountAllocated() const noexcept
+    {
+        std::uint32_t count = 0;
+        ForEachAllocated([&](T*, std::uint32_t) { ++count; });
+        return count;
     }
 
 private: // Constexpr stuff

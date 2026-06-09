@@ -1,10 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2025-2026 Altered-commits
-
-#ifndef WFX_LINUX_USE_IO_URING
-
-#ifndef WFX_LINUX_EPOLL_CONNECTION_HPP
-#define WFX_LINUX_EPOLL_CONNECTION_HPP
+#ifndef WFX_MACOS_KQUEUE_CONNECTION_HPP
+#define WFX_MACOS_KQUEUE_CONNECTION_HPP
 
 #include "config/config.hpp"
 #include "http/connection/http_connection.hpp"
@@ -16,38 +11,35 @@
 #include "utils/timer/timer_wheel.hpp"
 #include "utils/timer/timer_heap.hpp"
 
-#include <sys/epoll.h>
+#include <sys/event.h>
 #include <atomic>
 
 namespace WFX::OSSpecific {
 
-using namespace WFX::Http;   // For 'HttpConnectionHandler', 'ReceiveCallback', 'ConnectionContext', ...
-using namespace WFX::Utils;  // For 'Logger', 'RWBuffer', ...
-using namespace WFX::Core;   // For 'Config'
-using namespace WFX::Shared; // For 'EndpointStatus', 'AsyncData', ...
+using namespace WFX::Http;
+using namespace WFX::Utils;
+using namespace WFX::Core;
+using namespace WFX::Shared;
 
-using HandshakeCb = std::function<void(void)>;
 using SteadyClock = std::chrono::steady_clock;
 using ConnectionPool = BitmapPool<ConnectionContext>;
 
-// Each endpoint has a fixed pool of connections (no dynamic growth allowed)
-// Think of it as a map of Endpoint -> ConnectionPool
-// We use an index based container instead of an unordered_map because maps are not cache friendly
 using EndpointContainer = std::pair<EndpointContext, ConnectionPool>;
 using EndpointPool = std::vector<EndpointContainer>;
 
-class EpollConnectionHandler : public HttpConnectionHandler {
+class KqueueConnectionHandler : public HttpConnectionHandler {
 public:
-    EpollConnectionHandler(bool useHttps);
-    ~EpollConnectionHandler();
+    KqueueConnectionHandler(bool useHttps);
+    ~KqueueConnectionHandler();
 
-public: // Initializing
+public:
+    static int CreateSharedListenSocket(const std::string& host, std::uint16_t port, int backlog);
     void Initialize(const std::string& host, std::uint16_t port) override;
     void SetEngineCallback(ReceiveCallback onData) override;
     std::uint16_t AllocateEndpoint(std::string_view host, std::string_view port, std::uint32_t cLimit,
                                    std::uint32_t ifLimit, bool useTLS) override;
 
-public: // I/O Operations
+public:
     void ResumeReceive(ConnectionContext* ctx) override;
     void Write(ConnectionContext* ctx, std::string_view buffer = {}) override;
     void WriteFile(ConnectionContext* ctx, std::string path) override;
@@ -56,7 +48,7 @@ public: // I/O Operations
     void Stream(ConnectionContext* ctx, StreamGenerator generator, bool streamChunked) override;
     void Close(ConnectionContext* ctx, bool forceClose = false) override;
 
-public: // Main Functions
+public:
     void Run() override;
     void Stop() override;
     void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) override;
@@ -68,6 +60,7 @@ private: // Helper Functions
 
     std::uint64_t NowMs();
     bool SetNonBlocking(int fd);
+    bool SetNoSigPipe(int fd);
     bool EnsureFileReady(ConnectionContext* ctx, std::string path);
     bool EnsureReadReady(ConnectionContext* ctx);
     bool ResolveHost(const char* host, const char* port, sockaddr_storage* outAddr, socklen_t* outLen);
@@ -77,67 +70,80 @@ private: // Helper Functions
     void SendFile(ConnectionContext* ctx);
     void ResumeStream(ConnectionContext* ctx);
     void HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res, bool destroy);
-    void HandleTimeoutTimer(int sfd);
-    void HandleAsyncTimer(int sfd);
-    void HandleHandshake(ConnectionContext* ctx, std::uint32_t ev);
-    void HandleWriteReady(ConnectionContext* ctx, std::uint32_t ev);
+    void HandleTimeoutTimer();
+    void HandleAsyncTimer();
+    void HandleHandshake(ConnectionContext* ctx, std::uint16_t flags);
+    void HandleWriteReady(ConnectionContext* ctx, std::uint16_t flags);
     void UpdateAsyncTimer();
 
-    std::uint64_t PackEpollData(ConnectionContext* ctx);
-    bool RegisterEpoll(ConnectionContext* ctx, int op);
+    std::uint64_t PackKqueueData(ConnectionContext* ctx);
+    bool RegisterKqueue(ConnectionContext* ctx, int op);
     bool TryHandshake(ConnectionContext* ctx, EventType onSuccess);
     bool CreateAndConnect(ConnectionContext* ctx, EndpointContext& epCtx);
 
     void WrapAccept(ConnectionContext* ctx);
     EndpointStatus WrapConnect(ConnectionContext* cctx, EndpointContainer& ecnt);
     void DrainAllConnections();
+    void ReclaimDeadPeers();
+    void FlushBenchmarkPool();
+    void MaybeFlushBeforeAccept();
+    ConnectionContext* EnsureAcceptSlot();
     ssize_t WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
     ssize_t WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len);
     ssize_t WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);
 
-private: // Misc
+private:
     Config& config_ = GetConfig();
     Logger& logger_ = GetLogger();
     FileCache& fileCache_ = GetFileCache();
     BufferPool& pool_ = GetBufferPool();
-    WorkerMetrics* metrics_ = MetricTracer::Current();
+    WorkerMetrics* metrics_ = nullptr;
 
     IpLimiter ipLimiter_ = {pool_};
     ReceiveCallback onReceive_ = {};
     std::atomic<bool> running_ = true;
     bool useHttps_ = false;
 
-private: // Constexpr stuff
+private:
     constexpr static char CHUNK_END[] = "0\r\n\r\n";
     constexpr static ssize_t SWITCH_FILE_TO_STREAM = std::numeric_limits<ssize_t>::min();
     constexpr static std::uint16_t MAX_DISTINCT_ENDPOINTS = std::numeric_limits<std::uint16_t>::max() - 1;
-    constexpr static std::uint16_t CLIENT_CONNECTION_TAG = 0xFFFF; // Tag to differentiate between client and endpoint
+    constexpr static std::uint16_t CLIENT_CONNECTION_TAG = 0xFFFF;
 
-    constexpr static int INVOKE_TIMEOUT_COOLDOWN = 5; // In seconds
-    constexpr static int INVOKE_TIMEOUT_DELAY = 1;    // In seconds
+    constexpr static int INVOKE_TIMEOUT_COOLDOWN = 5;
+    constexpr static int INVOKE_TIMEOUT_DELAY = 1;
 
-private: // Timeout handler
+    constexpr static uintptr_t TIMEOUT_TIMER_IDENT = UINTPTR_MAX - 1;
+    constexpr static uintptr_t ASYNC_TIMER_IDENT = UINTPTR_MAX - 2;
+
+    constexpr static int KQ_ADD = 0;
+    constexpr static int KQ_MOD = 1;
+    constexpr static int KQ_DEL = 2;
+    constexpr static int KQ_ADD_WRITE = 3;
+    constexpr static int KQ_DROP_WRITE = 4;
+
+    static bool IsBenchmarkMode() noexcept;
+
+private:
     TimerWheel timerWheel_;
     TimerHeap timerHeap_;
     SteadyClock::time_point startTime_ = SteadyClock::now();
-    int timeoutTimerFd_ = -1;
-    int asyncTimerFd_ = -1;
+    std::uint64_t lastBusyMs_ = 0;
 
-private: // Epoll + SSL
+private:
     int listenFd_ = -1;
-    int epollFd_ = -1;
+    bool ownsListenFd_ = true;
+    int kqFd_ = -1;
     std::uint16_t maxEvents_ = config_.osSpecificConfig.maxEvents;
 
     std::unique_ptr<HttpWFXSSL> sslHandler_ = nullptr;
-    std::unique_ptr<epoll_event[]> events_ = nullptr;
+    std::unique_ptr<struct kevent[]> events_ = nullptr;
 
-private: // Connection Context
+private:
     ConnectionPool connections_ = {config_.networkConfig.maxConnections};
     EndpointPool endpoints_ = {};
 };
 
 } // namespace WFX::OSSpecific
 
-#endif // WFX_LINUX_EPOLL_CONNECTION_HPP
-
-#endif // !WFX_LINUX_USE_IO_URING
+#endif // WFX_MACOS_KQUEUE_CONNECTION_HPP

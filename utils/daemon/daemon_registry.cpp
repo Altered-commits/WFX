@@ -218,7 +218,7 @@ bool IsAlive(pid_t pid) noexcept
         return false;
 
 #ifdef _WIN32
-        // Windows: future work
+    // Windows: future work
 #else
     return kill(pid, 0) == 0;
 #endif

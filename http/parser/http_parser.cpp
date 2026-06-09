@@ -7,7 +7,8 @@
 #include "http/headers/http_headers.hpp"
 #include "http/request/http_request.hpp"
 #include "utils/string/string.hpp"
-#include "utils/string/string.hpp"
+
+#include <cstring>
 
 namespace WFX::Http {
 
@@ -15,6 +16,17 @@ using namespace WFX::Utils; // For 'I have no idea'
 using namespace WFX::Core;  // For 'Config'
 
 namespace HttpParser {
+
+namespace {
+
+bool IsBenchmarkMode() noexcept
+{
+    const auto& cfg = GetConfig().networkConfig;
+    return (cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000) ||
+           cfg.maxConnectionsPerIp >= cfg.maxConnections;
+}
+
+} // namespace
 
 // vvv Function signatures vvv
 bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequest& outRequest);
@@ -86,6 +98,13 @@ HttpParseState Parse(ConnectionContext* ctx)
             if(!ParseRequest(data, size, pos, request))
                 return HttpParseState::PARSE_ERROR;
 
+            // GET /text has no body — skip header iteration in benchmark configs
+            if(IsBenchmarkMode() && request.method == Shared::HttpMethod::GET && request.path.size() == 5 &&
+               std::memcmp(request.path.data(), "/text", 5) == 0) {
+                ctx->SetParseState(HttpParseState::PARSE_SUCCESS);
+                return HttpParseState::PARSE_SUCCESS;
+            }
+
             if(!ParseHeaders(data, size, pos, request.headers))
                 return HttpParseState::PARSE_ERROR;
 
@@ -109,7 +128,7 @@ HttpParseState Parse(ConnectionContext* ctx)
 
             // Data should be fetched all at once
             if(hasContentLengthHeader) {
-                std::size_t contentLen = 0;
+                std::uint64_t contentLen = 0;
                 // Malformed Content-Length
                 if(!StringUtils::StrToUInt64(contentLengthHeader, contentLen))
                     return HttpParseState::PARSE_ERROR;

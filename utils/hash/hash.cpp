@@ -13,11 +13,19 @@
 #include <Windows.h>
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
-#else
+#elif defined(__linux__)
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/random.h>
 #include <errno.h>
+#else
+// macOS / other POSIX: no getrandom, use arc4random_buf or /dev/urandom
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#ifdef __APPLE__
+#include <Security/SecRandom.h>
+#endif
 #endif
 
 namespace WFX::Utils {
@@ -166,7 +174,7 @@ bool RandomPool::RefillBytes()
 #if defined(_WIN32)
     if(BCryptGenRandom(nullptr, randomPool_, static_cast<ULONG>(BUFFER_SIZE), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
         return false;
-#else
+#elif defined(__linux__)
     ssize_t totalRead = 0;
 
     while(totalRead < BUFFER_SIZE) {
@@ -201,6 +209,9 @@ bool RandomPool::RefillBytes()
         else
             totalRead += n;
     }
+#else
+    // macOS: arc4random_buf fills the buffer with cryptographic random bytes
+    arc4random_buf(randomPool_, BUFFER_SIZE);
 #endif
     cursor_ = 0;
     return true;

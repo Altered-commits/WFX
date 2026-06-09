@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <string_view>
 #include <charconv>
+#include <cstdlib>
+#include <cstring>
 
 namespace WFX::Form {
 
@@ -62,9 +64,21 @@ static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPt
     const Float& r = *static_cast<const Float*>(fieldPtr);
 
     double v{};
+#if defined(__APPLE__)
+    if(sv.empty() || sv.size() >= 128)
+        return false;
+    char tmp[128];
+    std::memcpy(tmp, sv.data(), sv.size());
+    tmp[sv.size()] = '\0';
+    char* end = nullptr;
+    v = std::strtod(tmp, &end);
+    if(end != tmp + sv.size())
+        return false;
+#else
     auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), v);
     if(ec != std::errc{} || ptr != sv.data() + sv.size())
         return false;
+#endif
 
     if(v < r.min || v > r.max)
         return false;

@@ -3,6 +3,9 @@
 
 #if defined(_WIN32)
 #include "windows/filemanip.hpp"
+#elif defined(__APPLE__)
+#include "macos/filemanip.hpp"
+#include "filesystem.hpp"
 #else
 #include "linux/filemanip.hpp"
 #include "filesystem.hpp"
@@ -38,7 +41,7 @@ bool FileExists(const char* path)
     DWORD attrib = GetFileAttributesA(path.data());
     return (attrib != INVALID_FILE_ATTRIBUTES) && !(attrib & FILE_ATTRIBUTE_DIRECTORY);
 #else
-    struct stat st {};
+    struct stat st{};
     return (stat(path, &st) == 0) && S_ISREG(st.st_mode);
 #endif
 }
@@ -80,7 +83,7 @@ std::size_t GetFileSize(const char* path)
 
     return static_cast<std::size_t>(size.QuadPart);
 #else
-    struct stat st {};
+    struct stat st{};
     if(stat(path, &st) == 0 && S_ISREG(st.st_mode))
         return static_cast<std::size_t>(st.st_size);
 
@@ -93,7 +96,7 @@ bool GetFileStats(const char* path, FileStats& out)
 #ifdef _WIN32
     ...
 #else
-    struct stat st {};
+    struct stat st{};
     if(stat(path, &st) != 0)
         return false;
 
@@ -128,10 +131,13 @@ BaseFilePtr OpenFileRead(const char* path, bool inBinaryMode)
 #ifdef _WIN32
     ...
 #else
-    // Ignored in linux
     (void)inBinaryMode;
 
+#if defined(__APPLE__)
+    auto file = std::make_unique<MacOSFile>();
+#else
     auto file = std::make_unique<LinuxFile>();
+#endif
     if(!file->OpenRead(path))
         return nullptr;
 
@@ -144,10 +150,13 @@ BaseFilePtr OpenFileWrite(const char* path, bool inBinaryMode)
 #ifdef _WIN32
     ...
 #else
-    // Ignored in linux
     (void)inBinaryMode;
 
+#if defined(__APPLE__)
+    auto file = std::make_unique<MacOSFile>();
+#else
     auto file = std::make_unique<LinuxFile>();
+#endif
     if(!file->OpenWrite(path))
         return nullptr;
 
@@ -167,7 +176,11 @@ BaseFilePtr OpenFileExisting(WFXFileDescriptor fd, bool fromCache)
     if(fstat(fd, &st) != 0)
         return nullptr;
 
+#if defined(__APPLE__)
+    auto file = std::make_unique<MacOSFile>();
+#else
     auto file = std::make_unique<LinuxFile>();
+#endif
     file->OpenExisting(fd, st.st_size, fromCache);
 
     return file;
@@ -182,7 +195,11 @@ BaseFilePtr OpenFileExisting(WFXFileDescriptor fd, std::size_t size, bool fromCa
     if(fd < 0 || size == 0)
         return nullptr;
 
+#if defined(__APPLE__)
+    auto file = std::make_unique<MacOSFile>();
+#else
     auto file = std::make_unique<LinuxFile>();
+#endif
     file->OpenExisting(fd, size, fromCache);
 
     return file;
@@ -198,7 +215,7 @@ bool DirectoryExists(const char* path)
     DWORD attrib = GetFileAttributesA(path.data());
     return (attrib != INVALID_FILE_ATTRIBUTES) && (attrib & FILE_ATTRIBUTE_DIRECTORY);
 #else
-    struct stat st {};
+    struct stat st{};
     return (stat(path, &st) == 0) && S_ISDIR(st.st_mode);
 #endif
 }
@@ -306,7 +323,7 @@ void ListDirectoryImpl(std::string& path, bool shouldRecurse, const FileCallback
         callback(fullPath);
 
         bool isDir = false;
-        struct stat st {};
+        struct stat st{};
 
         if(lstat(fullPath.c_str(), &st) == 0)
             isDir = S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode);

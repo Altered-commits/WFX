@@ -11,6 +11,8 @@
 
 #ifdef _WIN32
 #include "os_specific/windows/iocp_connection.hpp"
+#elif defined(__APPLE__)
+#include "os_specific/macos/kqueue_connection.hpp"
 #else
 #ifdef WFX_LINUX_USE_IO_URING
 #include "os_specific/linux/io_uring_connection.hpp"
@@ -26,6 +28,8 @@ inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler(bool useHt
 {
 #ifdef _WIN32
     return std::make_unique<OSSpecific::IocpConnectionHandler>();
+#elif defined(__APPLE__)
+    return std::make_unique<OSSpecific::KqueueConnectionHandler>(useHttps);
 #else
 #ifdef WFX_LINUX_USE_IO_URING
     return std::make_unique<OSSpecific::IoUringConnectionHandler>();

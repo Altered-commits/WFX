@@ -236,7 +236,13 @@ private: // For ease of use across functions
     constexpr static std::size_t PARTIAL_TAG_SIZE = PARTIAL_TAG.size();
     constexpr static std::size_t MAX_TAG_LENGTH = 300;
 
+#if defined(__APPLE__)
+    constexpr static const char* TEMPLATE_LIB_PATH = "/build/user_templates.dylib";
+#elif defined(_WIN32)
+    constexpr static const char* TEMPLATE_LIB_PATH = "/build/user_templates.dll";
+#else
     constexpr static const char* TEMPLATE_LIB_PATH = "/build/user_templates.so";
+#endif
     constexpr static const char* TEMPLATE_CACHE_PATH = "/intermediate/template.wfxmeta";
     constexpr static const char* STATIC_FOLDER = "/intermediate/static";
     constexpr static const char* DYNAMIC_FOLDER = "/intermediate/dynamic";

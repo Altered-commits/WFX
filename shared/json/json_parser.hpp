@@ -11,6 +11,8 @@
 #include <cstring>
 #include <charconv>
 #include <bit>
+#include <cerrno>
+#include <cstdlib>
 
 namespace WFX::Shared {
 
@@ -413,10 +415,21 @@ public: // vvv Number parsing vvv
 
         if(isFloat) {
             double v;
+#if defined(__APPLE__)
+            // Apple Clang: std::from_chars for double not yet supported; fall back to strtod
+            char* endPtr = nullptr;
+            errno = 0;
+            v = std::strtod(begin, &endPtr);
+            if(endPtr != end || errno != 0) {
+                Fail("invalid number");
+                return false;
+            }
+#else
             if(std::from_chars(begin, end, v).ec != std::errc{}) {
                 Fail("invalid number");
                 return false;
             }
+#endif
 
             n.tag = JsonTag::DOUBLE;
             std::memcpy(&n.u64a, &v, 8);
