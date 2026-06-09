@@ -9,9 +9,14 @@
 #include "sanitizers.hpp"
 #include "renders.hpp"
 #include "http/request.hpp"
+#include "utils/string/string.hpp"
 #include <array>
 
 namespace WFX::Form {
+
+using WFX::Utils::StringUtils::TrimView;
+using WFX::Utils::StringUtils::InsensitiveStringCompare;
+using WFX::Utils::StringUtils::DecodePercentInplace;
 
 // vvv Field Builders vvv
 template <typename Rule> class FieldBuilder {
@@ -122,10 +127,10 @@ public: // Main Functions
 
         // Content-Type can contain multiple fields seperated by ';'
         // What we need is the initial one
-        auto ct = Utils::TrimView(contentType.substr(0, contentType.find(';')));
+        auto ct = TrimView(contentType.substr(0, contentType.find(';')));
 
         // In memory simple form
-        if(Utils::StringCanonical::InsensitiveStringCompare(ct, "application/x-www-form-urlencoded"))
+        if(InsensitiveStringCompare(ct, "application/x-www-form-urlencoded"))
             return ParseStatic(req.Body(), out);
 
         // Other types of forms are not supported for now
@@ -178,7 +183,7 @@ private: // Helper Functions
                 return false;
 
             // Decode value in place
-            if(!Utils::StringCanonical::DecodePercentInplace(value))
+            if(!DecodePercentInplace(value))
                 return false;
 
             out[fieldIdx++] = value;

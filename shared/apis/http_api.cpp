@@ -118,8 +118,8 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             *outVal = StringView{val.data(), static_cast<std::uint64_t>(val.size())};
             return true;
         },
-        [](const void* request) { // GetSegmentCountFn
-            return ToReq(request)->pathSegments.size();
+        [](const void* request) -> std::uint64_t { // GetSegmentCountFn
+            return static_cast<std::uint64_t>(ToReq(request)->pathSegments.size());
         },
         [](const void* request, std::uint64_t index) { // GetSegmentFn
             auto& segments = ToReq(request)->pathSegments;

@@ -20,6 +20,7 @@ using ReturnType = ssize_t;
 #endif // _WIN32
 
 #include <cstdint>
+#include <cstddef>
 
 namespace WFX::Http {
 

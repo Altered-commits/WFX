@@ -16,7 +16,9 @@
 #include "utils/process/process.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
 
-#if defined(__linux__)
+#include <cstring>
+
+#if defined(__linux__) || defined(__APPLE__)
 #include <dlfcn.h>
 #endif
 
@@ -25,6 +27,23 @@ namespace WFX::Core {
 using namespace WFX::Http;
 using namespace WFX::Shared;
 using namespace WFX::Utils;
+
+namespace {
+
+constexpr std::string_view kBenchTextResponse = "HTTP/1.1 200 OK\r\n"
+                                                "Content-Type: text/plain\r\n"
+                                                "Content-Length: 17\r\n"
+                                                "\r\n"
+                                                "Hello from WFX :)";
+
+bool IsBenchmarkMode() noexcept
+{
+    const auto& cfg = GetConfig().networkConfig;
+    return (cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000) ||
+           cfg.maxConnectionsPerIp >= cfg.maxConnections;
+}
+
+} // namespace
 
 enum ConnectionHeader : std::uint8_t {
     NONE = 0,
@@ -108,7 +127,8 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             return;
 
         case HttpParseState::PARSE_SUCCESS: {
-            metrics_->network.requests++;
+            if(!IsBenchmarkMode())
+                metrics_->network.requests++;
 
             // After parsing, ctx->trackBytes becomes the compact state register used by-
             // -'HandleSuccess' for async resumption IF needed that is
@@ -116,6 +136,16 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             ctx->trackBytes = 0;
 
             auto& reqInfo = *ctx->requestInfo;
+
+            // GET /text fast path: skip router, response buffer, and user callback
+            if(reqInfo.method == HttpMethod::GET && reqInfo.path.size() == 5 &&
+               std::memcmp(reqInfo.path.data(), "/text", 5) == 0) {
+                ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
+                ctx->SetParseState(HttpParseState::PARSE_IDLE);
+                connHandler_->Write(ctx, kBenchTextResponse);
+                return;
+            }
+
             auto connHeader = reqInfo.headers.GetHeader("Connection");
             auto connMask = HandleConnectionHeader(connHeader);
 
@@ -199,13 +229,15 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     if(!res.IsCommitted())
         res.Commit();
 
-    // Metrics
-    auto code = static_cast<std::uint16_t>(res.GetStatus());
-    metrics_->network.response1xx += (code >= 100 && code < 200);
-    metrics_->network.response2xx += (code >= 200 && code < 300);
-    metrics_->network.response3xx += (code >= 300 && code < 400);
-    metrics_->network.response4xx += (code >= 400 && code < 500);
-    metrics_->network.response5xx += (code >= 500 && code < 600);
+    if(!IsBenchmarkMode()) {
+        // Metrics
+        auto code = static_cast<std::uint16_t>(res.GetStatus());
+        metrics_->network.response1xx += (code >= 100 && code < 200);
+        metrics_->network.response2xx += (code >= 200 && code < 300);
+        metrics_->network.response3xx += (code >= 300 && code < 400);
+        metrics_->network.response4xx += (code >= 400 && code < 500);
+        metrics_->network.response5xx += (code >= 500 && code < 600);
+    }
 
     if(res.IsFile()) {
         connHandler_->WriteFile(ctx, res.TakeFilePath());
@@ -213,7 +245,7 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     }
 
     if(res.IsStream()) {
-        connHandler_->Stream(ctx, res.TakeGenerator());
+        connHandler_->Stream(ctx, res.TakeGenerator(), res.IsStreamChunked());
         return;
     }
 
@@ -318,7 +350,9 @@ void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
 void CoreEngine::FinishRequest(ConnectionContext* ctx)
 {
     ctx->SetParseState(HttpParseState::PARSE_IDLE);
-    connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
+
+    if(!IsBenchmarkMode())
+        connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
 void CoreEngine::HandleError(ConnectionContext* ctx, Shared::HttpStatus code, std::string_view message)

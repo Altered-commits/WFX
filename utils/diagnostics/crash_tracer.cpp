@@ -892,11 +892,11 @@ void CrashTracer::PosixHandler(int sig, siginfo_t* info, void* uctx) noexcept
         ::close(fd);
 
     // Restore default and re-raise so OS can write core dump
-    struct sigaction sa {};
+    struct sigaction sa{};
     sa.sa_handler = SIG_DFL;
-    ::sigemptyset(&sa.sa_mask);
-    ::sigaction(sig, &sa, nullptr);
-    ::raise(sig);
+    sigemptyset(&sa.sa_mask);
+    sigaction(sig, &sa, nullptr);
+    raise(sig);
 }
 
 void CrashTracer::InstallPosix() noexcept
@@ -904,18 +904,18 @@ void CrashTracer::InstallPosix() noexcept
     stack_t ss{};
     ss.ss_sp = altStack_;
     ss.ss_size = sizeof(altStack_);
-    ::sigaltstack(&ss, nullptr);
+    sigaltstack(&ss, nullptr);
 
-    struct sigaction sa {};
+    struct sigaction sa{};
     sa.sa_sigaction = PosixHandler;
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESETHAND;
-    ::sigemptyset(&sa.sa_mask);
+    sigemptyset(&sa.sa_mask);
 
-    ::sigaction(SIGSEGV, &sa, nullptr);
-    ::sigaction(SIGABRT, &sa, nullptr);
-    ::sigaction(SIGBUS, &sa, nullptr);
-    ::sigaction(SIGILL, &sa, nullptr);
-    ::sigaction(SIGFPE, &sa, nullptr);
+    sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGABRT, &sa, nullptr);
+    sigaction(SIGBUS, &sa, nullptr);
+    sigaction(SIGILL, &sa, nullptr);
+    sigaction(SIGFPE, &sa, nullptr);
 }
 
 #elif defined(WFX_PLATFORM_WINDOWS)

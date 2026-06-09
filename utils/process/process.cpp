@@ -10,6 +10,10 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <cerrno>
+
+// environ is in the C runtime; declare it explicitly on macOS where some
+// inclusion orders don't pull it in automatically.
+extern char** environ;
 #endif
 
 namespace WFX::Utils {
