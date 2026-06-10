@@ -85,6 +85,24 @@ bool ResolveHostStatic(const char* host, const char* port, sockaddr_storage* out
     return found;
 }
 
+// Rate/connection limits set to "effectively disabled" in wfx.toml (e.g. max_* = 1'000'000).
+bool NetworkLimitsDisabled() noexcept
+{
+    const auto& cfg = GetConfig().networkConfig;
+    return (cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000) ||
+           cfg.maxConnectionsPerIp >= cfg.maxConnections;
+}
+
+template <typename Fn> void ForEachOpenConnection(ConnectionPool& pool, Fn&& fn)
+{
+    const std::uint32_t slots = pool.GetSlots();
+    for(std::uint32_t idx = 0; idx < slots; ++idx) {
+        ConnectionContext* ctx = pool.GetPtr(idx);
+        if(ctx->socket != WFX_INVALID_SOCKET)
+            fn(ctx, idx);
+    }
+}
+
 } // namespace
 
 int KqueueConnectionHandler::CreateSharedListenSocket(const std::string& host, std::uint16_t port, int backlog)
@@ -119,13 +137,6 @@ int KqueueConnectionHandler::CreateSharedListenSocket(const std::string& host, s
     }
 
     return listenFd;
-}
-
-bool KqueueConnectionHandler::IsBenchmarkMode() noexcept
-{
-    const auto& cfg = GetConfig().networkConfig;
-    return (cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000) ||
-           cfg.maxConnectionsPerIp >= cfg.maxConnections;
 }
 
 // vvv Constructor & Destructor vvv
@@ -216,8 +227,9 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
                              Close(ctx, true);
                      });
 
-    // Benchmark: 2s timer only to flush stale pool between wrk runs (no peer scan)
-    if(IsBenchmarkMode()) {
+    // When rate limits are disabled in config, use a short idle timer to reclaim stale slots
+    // between high-connection bursts (e.g. wrk without restarting the server).
+    if(NetworkLimitsDisabled()) {
         struct kevent timeoutKev;
         EV_SET(&timeoutKev, TIMEOUT_TIMER_IDENT, EVFILT_TIMER, EV_ADD | EV_ENABLE, NOTE_SECONDS, (intptr_t)2, nullptr);
         if(kevent(kqFd_, &timeoutKev, 1, nullptr, 0, nullptr) < 0)
@@ -647,9 +659,9 @@ void KqueueConnectionHandler::ReclaimDeadPeers()
             dead.push_back(ctx);
     };
 
-    connections_.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { probe(ctx); });
+    ForEachOpenConnection(connections_, [&](ConnectionContext* ctx, std::uint32_t) { probe(ctx); });
     for(auto& ep : endpoints_)
-        ep.second.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { probe(ctx); });
+        ForEachOpenConnection(ep.second, [&](ConnectionContext* ctx, std::uint32_t) { probe(ctx); });
 
     for(ConnectionContext* ctx : dead)
         Close(ctx, true);
@@ -657,13 +669,13 @@ void KqueueConnectionHandler::ReclaimDeadPeers()
 
 void KqueueConnectionHandler::FlushBenchmarkPool()
 {
-    if(!IsBenchmarkMode())
+    if(!NetworkLimitsDisabled())
         return;
 
     std::vector<ConnectionContext*> pending;
-    pending.reserve(connections_.CountAllocated());
+    pending.reserve(static_cast<std::size_t>(metrics_->network.activeConns));
 
-    connections_.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) {
+    ForEachOpenConnection(connections_, [&](ConnectionContext* ctx, std::uint32_t) {
         if(!ctx->IsEndpoint())
             pending.push_back(ctx);
     });
@@ -674,13 +686,13 @@ void KqueueConnectionHandler::FlushBenchmarkPool()
 
 void KqueueConnectionHandler::MaybeFlushBeforeAccept()
 {
-    if(!IsBenchmarkMode())
+    if(!NetworkLimitsDisabled())
         return;
 
     constexpr std::uint32_t kMinStaleSlots = 500;
     constexpr std::uint64_t kIdleBeforeFlushMs = 1500;
 
-    if(connections_.CountAllocated() <= kMinStaleSlots)
+    if(metrics_->network.activeConns <= kMinStaleSlots)
         return;
     if(NowMs() - lastBusyMs_ <= kIdleBeforeFlushMs)
         return;
@@ -693,7 +705,7 @@ ConnectionContext* KqueueConnectionHandler::EnsureAcceptSlot()
     if(ConnectionContext* ctx = GetConnection())
         return ctx;
 
-    if(!IsBenchmarkMode())
+    if(!NetworkLimitsDisabled())
         return nullptr;
 
     ReclaimDeadPeers();
@@ -705,10 +717,10 @@ void KqueueConnectionHandler::DrainAllConnections()
     std::vector<ConnectionContext*> pending;
     pending.reserve(256);
 
-    connections_.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
+    ForEachOpenConnection(connections_, [&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
 
     for(auto& ep : endpoints_)
-        ep.second.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
+        ForEachOpenConnection(ep.second, [&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
 
     for(ConnectionContext* ctx : pending)
         Close(ctx, true);
@@ -716,7 +728,7 @@ void KqueueConnectionHandler::DrainAllConnections()
 
 void KqueueConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)
 {
-    if(IsBenchmarkMode())
+    if(NetworkLimitsDisabled())
         return;
 
     ConnectionPool* pool = nullptr;
@@ -1153,7 +1165,7 @@ void KqueueConnectionHandler::HandleTimeoutTimer()
     std::uint64_t nowSec = NowMs() / 1000;
     timerWheel_.Tick(nowSec);
 
-    if(IsBenchmarkMode() && connections_.CountAllocated() > 500 && NowMs() - lastBusyMs_ > 1500)
+    if(NetworkLimitsDisabled() && metrics_->network.activeConns > 500 && NowMs() - lastBusyMs_ > 1500)
         FlushBenchmarkPool();
 }
 
@@ -1428,7 +1440,7 @@ ssize_t KqueueConnectionHandler::WrapRead(ConnectionContext* ctx, char* buf, std
             n = ::recv(ctx->socket, buf, len, 0);
         } while(n < 0 && errno == EINTR);
 
-        if(n > 0 && !IsBenchmarkMode()) {
+        if(n > 0) {
             metrics_->network.reads++;
             metrics_->network.bytesRead += static_cast<std::uint64_t>(n);
         }
@@ -1468,7 +1480,7 @@ ssize_t KqueueConnectionHandler::WrapWrite(ConnectionContext* ctx, const char* b
             n = ::send(ctx->socket, buf, len, 0);
         } while(n < 0 && errno == EINTR);
 
-        if(n > 0 && !IsBenchmarkMode()) {
+        if(n > 0) {
             metrics_->network.writes++;
             metrics_->network.bytesWritten += static_cast<std::uint64_t>(n);
         }

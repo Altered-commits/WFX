@@ -17,5 +17,7 @@ ignore/
 /wfx
 wfx.toml
 
-# Python env
-.venv/
+# Local test projects (not part of engine)
+wfx_loadtest/
+wfx_bench_project/
+bench_out/

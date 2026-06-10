@@ -16,7 +16,6 @@
 #include <unistd.h>
 #include <netinet/tcp.h>
 #include <netdb.h>
-#include <vector>
 #include <arpa/inet.h>
 #include <errno.h>
 
@@ -571,11 +570,6 @@ void EpollConnectionHandler::Run()
                 continue;
             }
 
-            if((ev & EPOLLIN) && (ev & EPOLLRDHUP) && ctx->eventType != EventType::EVENT_RECV) {
-                Close(ctx, true);
-                continue;
-            }
-
             // If the 'ctx->eventType' is NOT EVENT_RECV, its most probably:
             //  - I forgot to set it somewhere
             //  - We are doing other task and client is trying to send more data
@@ -594,22 +588,6 @@ void EpollConnectionHandler::Run()
                 HandleWriteReady(ctx, ev);
         }
     }
-
-    DrainAllConnections();
-}
-
-void EpollConnectionHandler::DrainAllConnections()
-{
-    std::vector<ConnectionContext*> pending;
-    pending.reserve(256);
-
-    connections_.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
-
-    for(auto& ep : endpoints_)
-        ep.second.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
-
-    for(ConnectionContext* ctx : pending)
-        Close(ctx, true);
 }
 
 void EpollConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)

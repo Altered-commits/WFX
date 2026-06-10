@@ -1,6 +1,0 @@
-# Build artifacts
-build/
-intermediate/
-
-# Log artifacts
-logs/

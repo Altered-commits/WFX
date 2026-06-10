@@ -36,13 +36,6 @@ constexpr std::string_view kBenchTextResponse = "HTTP/1.1 200 OK\r\n"
                                                 "\r\n"
                                                 "Hello from WFX :)";
 
-bool IsBenchmarkMode() noexcept
-{
-    const auto& cfg = GetConfig().networkConfig;
-    return (cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000) ||
-           cfg.maxConnectionsPerIp >= cfg.maxConnections;
-}
-
 } // namespace
 
 enum ConnectionHeader : std::uint8_t {
@@ -127,8 +120,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             return;
 
         case HttpParseState::PARSE_SUCCESS: {
-            if(!IsBenchmarkMode())
-                metrics_->network.requests++;
+            metrics_->network.requests++;
 
             // After parsing, ctx->trackBytes becomes the compact state register used by-
             // -'HandleSuccess' for async resumption IF needed that is
@@ -229,15 +221,13 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     if(!res.IsCommitted())
         res.Commit();
 
-    if(!IsBenchmarkMode()) {
-        // Metrics
-        auto code = static_cast<std::uint16_t>(res.GetStatus());
-        metrics_->network.response1xx += (code >= 100 && code < 200);
-        metrics_->network.response2xx += (code >= 200 && code < 300);
-        metrics_->network.response3xx += (code >= 300 && code < 400);
-        metrics_->network.response4xx += (code >= 400 && code < 500);
-        metrics_->network.response5xx += (code >= 500 && code < 600);
-    }
+    // Metrics
+    auto code = static_cast<std::uint16_t>(res.GetStatus());
+    metrics_->network.response1xx += (code >= 100 && code < 200);
+    metrics_->network.response2xx += (code >= 200 && code < 300);
+    metrics_->network.response3xx += (code >= 300 && code < 400);
+    metrics_->network.response4xx += (code >= 400 && code < 500);
+    metrics_->network.response5xx += (code >= 500 && code < 600);
 
     if(res.IsFile()) {
         connHandler_->WriteFile(ctx, res.TakeFilePath());
@@ -351,8 +341,7 @@ void CoreEngine::FinishRequest(ConnectionContext* ctx)
 {
     ctx->SetParseState(HttpParseState::PARSE_IDLE);
 
-    if(!IsBenchmarkMode())
-        connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
+    connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
 void CoreEngine::HandleError(ConnectionContext* ctx, Shared::HttpStatus code, std::string_view message)

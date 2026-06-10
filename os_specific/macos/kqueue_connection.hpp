@@ -122,8 +122,6 @@ private:
     constexpr static int KQ_ADD_WRITE = 3;
     constexpr static int KQ_DROP_WRITE = 4;
 
-    static bool IsBenchmarkMode() noexcept;
-
 private:
     TimerWheel timerWheel_;
     TimerHeap timerHeap_;

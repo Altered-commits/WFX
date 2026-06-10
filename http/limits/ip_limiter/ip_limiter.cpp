@@ -20,16 +20,10 @@ IpLimiter::IpLimiter(Utils::BufferPool& poolRef) : ipLimits_(poolRef)
 
 bool IpLimiter::AllowConnection(const WFXIpAddress& ip)
 {
-    auto& cfg = GetConfig().networkConfig;
-
-    // Benchmark / disabled mode: skip per-IP connection accounting
-    if(cfg.maxConnectionsPerIp >= cfg.maxConnections)
-        return true;
-    if(cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000)
-        return true;
-
     auto* entry = ipLimits_.GetOrInsert(NormalizeIp(ip), {});
     if(entry) {
+        auto& cfg = GetConfig().networkConfig;
+
         if(entry->connectionCount >= cfg.maxConnectionsPerIp)
             return false;
 
@@ -45,15 +39,10 @@ bool IpLimiter::AllowConnection(const WFXIpAddress& ip)
 
 bool IpLimiter::AllowRequest(const WFXIpAddress& ip)
 {
-    const auto& cfg = GetConfig().networkConfig;
-
-    // Benchmark / disabled mode: skip token-bucket work on every request
-    if(cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000)
-        return true;
-
     auto* entry = ipLimits_.Get(NormalizeIp(ip));
     if(entry) {
         const auto now = std::chrono::steady_clock::now();
+        const auto& cfg = GetConfig().networkConfig;
 
         TokenBucket& bucket = entry->bucket;
 
@@ -81,12 +70,6 @@ bool IpLimiter::AllowRequest(const WFXIpAddress& ip)
 
 void IpLimiter::ReleaseConnection(const WFXIpAddress& ip)
 {
-    const auto& cfg = GetConfig().networkConfig;
-    if(cfg.maxConnectionsPerIp >= cfg.maxConnections)
-        return;
-    if(cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000)
-        return;
-
     WFXIpAddress key = NormalizeIp(ip);
     bool shouldErase = false;
     auto* entry = ipLimits_.Get(key);
