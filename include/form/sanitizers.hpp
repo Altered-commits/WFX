@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <string_view>
 #include <charconv>
+#include <cerrno>
 #include <cstdlib>
-#include <cstring>
 
 namespace WFX::Form {
 
@@ -65,14 +65,14 @@ static inline bool DefaultSanitizeFloat(std::string_view sv, const void* fieldPt
 
     double v{};
 #if defined(__APPLE__)
-    if(sv.empty() || sv.size() >= 128)
+    // Apple Clang: no std::from_chars for double. strtod parses [data, data+size) via end pointer —
+    // no null-terminated copy needed (same pattern as shared/json/json_parser.hpp).
+    if(sv.empty())
         return false;
-    char tmp[128];
-    std::memcpy(tmp, sv.data(), sv.size());
-    tmp[sv.size()] = '\0';
     char* end = nullptr;
-    v = std::strtod(tmp, &end);
-    if(end != tmp + sv.size())
+    errno = 0;
+    v = std::strtod(sv.data(), &end);
+    if(end != sv.data() + sv.size() || errno != 0)
         return false;
 #else
     auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), v);

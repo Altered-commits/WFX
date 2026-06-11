@@ -81,7 +81,6 @@ void HttpResponse::Reset()
     clOffset_ = 0;
     bodyStartOffset_ = 0;
     clNeeded_ = false;
-    streamChunked_ = true;
 
     if(rwBuffer_)
         rwBuffer_->ClearWriteBuffer();
@@ -287,7 +286,6 @@ void HttpResponse::WriteStream(StreamGenerator gen, bool chunked)
         stream_.Destroy(stream_.ctx);
 
     stream_ = gen;
-    streamChunked_ = chunked;
     bodyKind_ = BodyKind::STREAM;
     phase_ = ResponsePhase::COMMITTED;
 }

@@ -16,15 +16,11 @@
 #include <windows.h>
 #endif
 
-#if defined(WFX_DEBUG)
 #define WFX_TRACE()                                                                                                    \
     WFX::Utils::CrashTracer::ScopedFrame __WFXSF_                                                                      \
     {                                                                                                                  \
         __func__, __FILE__, __LINE__                                                                                   \
     }
-#else
-#define WFX_TRACE() ((void)0)
-#endif
 #define WFX_CHECKPOINT(label) WFX::Utils::CrashTracer::UpdateTop(label, __FILE__, __LINE__)
 
 namespace WFX::Utils {

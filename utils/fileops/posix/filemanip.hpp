@@ -1,5 +1,8 @@
-#ifndef WFX_MACOS_FILEMANIP_HPP
-#define WFX_MACOS_FILEMANIP_HPP
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
+#ifndef WFX_POSIX_FILEMANIP_HPP
+#define WFX_POSIX_FILEMANIP_HPP
 
 #include "utils/fileops/filesystem.hpp"
 
@@ -12,10 +15,10 @@
 
 namespace WFX::Utils {
 
-class MacOSFile : public BaseFile {
+class PosixFile : public BaseFile {
 public:
-    MacOSFile() = default;
-    ~MacOSFile() override;
+    PosixFile() = default;
+    ~PosixFile() override;
 
 public:
     std::int64_t Read(void* buffer, std::size_t bytes) override;
@@ -46,4 +49,4 @@ private:
 
 } // namespace WFX::Utils
 
-#endif // WFX_MACOS_FILEMANIP_HPP
+#endif // WFX_POSIX_FILEMANIP_HPP

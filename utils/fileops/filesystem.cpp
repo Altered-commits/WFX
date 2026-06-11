@@ -3,11 +3,8 @@
 
 #if defined(_WIN32)
 #include "windows/filemanip.hpp"
-#elif defined(__APPLE__)
-#include "macos/filemanip.hpp"
-#include "filesystem.hpp"
 #else
-#include "linux/filemanip.hpp"
+#include "posix/filemanip.hpp"
 #include "filesystem.hpp"
 #endif
 
@@ -133,11 +130,7 @@ BaseFilePtr OpenFileRead(const char* path, bool inBinaryMode)
 #else
     (void)inBinaryMode;
 
-#if defined(__APPLE__)
-    auto file = std::make_unique<MacOSFile>();
-#else
-    auto file = std::make_unique<LinuxFile>();
-#endif
+    auto file = std::make_unique<PosixFile>();
     if(!file->OpenRead(path))
         return nullptr;
 
@@ -152,11 +145,7 @@ BaseFilePtr OpenFileWrite(const char* path, bool inBinaryMode)
 #else
     (void)inBinaryMode;
 
-#if defined(__APPLE__)
-    auto file = std::make_unique<MacOSFile>();
-#else
-    auto file = std::make_unique<LinuxFile>();
-#endif
+    auto file = std::make_unique<PosixFile>();
     if(!file->OpenWrite(path))
         return nullptr;
 
@@ -176,11 +165,7 @@ BaseFilePtr OpenFileExisting(WFXFileDescriptor fd, bool fromCache)
     if(fstat(fd, &st) != 0)
         return nullptr;
 
-#if defined(__APPLE__)
-    auto file = std::make_unique<MacOSFile>();
-#else
-    auto file = std::make_unique<LinuxFile>();
-#endif
+    auto file = std::make_unique<PosixFile>();
     file->OpenExisting(fd, st.st_size, fromCache);
 
     return file;
@@ -195,11 +180,7 @@ BaseFilePtr OpenFileExisting(WFXFileDescriptor fd, std::size_t size, bool fromCa
     if(fd < 0 || size == 0)
         return nullptr;
 
-#if defined(__APPLE__)
-    auto file = std::make_unique<MacOSFile>();
-#else
-    auto file = std::make_unique<LinuxFile>();
-#endif
+    auto file = std::make_unique<PosixFile>();
     file->OpenExisting(fd, size, fromCache);
 
     return file;

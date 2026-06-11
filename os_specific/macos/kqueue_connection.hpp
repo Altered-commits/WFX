@@ -33,7 +33,6 @@ public:
     ~KqueueConnectionHandler();
 
 public:
-    static int CreateSharedListenSocket(const std::string& host, std::uint16_t port, int backlog);
     void Initialize(const std::string& host, std::uint16_t port) override;
     void SetEngineCallback(ReceiveCallback onData) override;
     std::uint16_t AllocateEndpoint(std::string_view host, std::string_view port, std::uint32_t cLimit,
@@ -54,7 +53,7 @@ public:
     void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) override;
     bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMs, AsyncData asyncData) override;
 
-private: // Helper Functions
+private:
     ConnectionContext* GetConnection(std::uint16_t endpointIndex = 0xFFFF);
     void ReleaseConnection(ConnectionContext* ctx, bool freeOnly = false);
 
@@ -72,8 +71,8 @@ private: // Helper Functions
     void HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res, bool destroy);
     void HandleTimeoutTimer();
     void HandleAsyncTimer();
-    void HandleHandshake(ConnectionContext* ctx, std::uint16_t flags);
-    void HandleWriteReady(ConnectionContext* ctx, std::uint16_t flags);
+    void HandleHandshake(ConnectionContext* ctx, std::int16_t filter);
+    void HandleWriteReady(ConnectionContext* ctx, std::int16_t filter);
     void UpdateAsyncTimer();
 
     std::uint64_t PackKqueueData(ConnectionContext* ctx);
@@ -83,11 +82,10 @@ private: // Helper Functions
 
     void WrapAccept(ConnectionContext* ctx);
     EndpointStatus WrapConnect(ConnectionContext* cctx, EndpointContainer& ecnt);
-    void DrainAllConnections();
-    void ReclaimDeadPeers();
-    void FlushBenchmarkPool();
-    void MaybeFlushBeforeAccept();
-    ConnectionContext* EnsureAcceptSlot();
+    void CloseDeadPeers();
+    void PollRecvPeers();
+    void ReclaimStaleConnections(bool pollRecv = true);
+    ConnectionContext* AcquireClientConnection(const WFXIpAddress& ip);
     ssize_t WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
     ssize_t WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len);
     ssize_t WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);
@@ -97,7 +95,7 @@ private:
     Logger& logger_ = GetLogger();
     FileCache& fileCache_ = GetFileCache();
     BufferPool& pool_ = GetBufferPool();
-    WorkerMetrics* metrics_ = nullptr;
+    WorkerMetrics* metrics_ = MetricTracer::Current();
 
     IpLimiter ipLimiter_ = {pool_};
     ReceiveCallback onReceive_ = {};
@@ -121,16 +119,18 @@ private:
     constexpr static int KQ_DEL = 2;
     constexpr static int KQ_ADD_WRITE = 3;
     constexpr static int KQ_DROP_WRITE = 4;
+    constexpr static int KQ_REARM_READ = 5;
+
+    void TuneAcceptedSocket(int fd);
+    void FinishWriteCycle(ConnectionContext* ctx);
 
 private:
     TimerWheel timerWheel_;
     TimerHeap timerHeap_;
     SteadyClock::time_point startTime_ = SteadyClock::now();
-    std::uint64_t lastBusyMs_ = 0;
 
 private:
     int listenFd_ = -1;
-    bool ownsListenFd_ = true;
     int kqFd_ = -1;
     std::uint16_t maxEvents_ = config_.osSpecificConfig.maxEvents;
 

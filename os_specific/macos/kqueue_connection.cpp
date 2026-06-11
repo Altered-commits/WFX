@@ -15,129 +15,9 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <errno.h>
-#include <cstdlib>
 #include <vector>
 
 namespace WFX::OSSpecific {
-
-namespace {
-
-bool BindAndListen(int listenFd, const sockaddr* addr, socklen_t addrLen, int backlog, bool reusePort, Logger& logger)
-{
-    if(addr->sa_family == AF_INET6) {
-        int no = 0;
-        if(setsockopt(listenFd, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no)) < 0) {
-            logger.Error("[Kqueue]: Failed to disable IPV6_V6ONLY: ", strerror(errno));
-            return false;
-        }
-    }
-
-    int opt = 1;
-    if(setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        logger.Error("[Kqueue]: Failed to set SO_REUSEADDR: ", strerror(errno));
-        return false;
-    }
-
-    if(reusePort && setsockopt(listenFd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
-        logger.Error("[Kqueue]: Failed to set SO_REUSEPORT: ", strerror(errno));
-        return false;
-    }
-
-    int flags = fcntl(listenFd, F_GETFL, 0);
-    if(flags < 0 || fcntl(listenFd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        logger.Error("[Kqueue]: Failed to make listening socket non-blocking: ", strerror(errno));
-        return false;
-    }
-
-    if(::bind(listenFd, addr, addrLen) < 0) {
-        logger.Error("[Kqueue]: Failed to bind socket: ", strerror(errno));
-        return false;
-    }
-
-    if(::listen(listenFd, backlog) < 0) {
-        logger.Error("[Kqueue]: Failed to listen: ", strerror(errno));
-        return false;
-    }
-
-    return true;
-}
-
-bool ResolveHostStatic(const char* host, const char* port, sockaddr_storage* outAddr, socklen_t* outLen)
-{
-    addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_ADDRCONFIG;
-
-    addrinfo* res = nullptr;
-    if(getaddrinfo(host, port, &hints, &res) != 0)
-        return false;
-
-    bool found = false;
-    if(res != nullptr && res->ai_addrlen <= sizeof(sockaddr_storage)) {
-        memcpy(outAddr, res->ai_addr, res->ai_addrlen);
-        if(outLen)
-            *outLen = res->ai_addrlen;
-        found = true;
-    }
-
-    freeaddrinfo(res);
-    return found;
-}
-
-// Rate/connection limits set to "effectively disabled" in wfx.toml (e.g. max_* = 1'000'000).
-bool NetworkLimitsDisabled() noexcept
-{
-    const auto& cfg = GetConfig().networkConfig;
-    return (cfg.maxTokensPerSecond >= 1'000'000 && cfg.maxRequestBurstSize >= 1'000'000) ||
-           cfg.maxConnectionsPerIp >= cfg.maxConnections;
-}
-
-template <typename Fn> void ForEachOpenConnection(ConnectionPool& pool, Fn&& fn)
-{
-    const std::uint32_t slots = pool.GetSlots();
-    for(std::uint32_t idx = 0; idx < slots; ++idx) {
-        ConnectionContext* ctx = pool.GetPtr(idx);
-        if(ctx->socket != WFX_INVALID_SOCKET)
-            fn(ctx, idx);
-    }
-}
-
-} // namespace
-
-int KqueueConnectionHandler::CreateSharedListenSocket(const std::string& host, std::uint16_t port, int backlog)
-{
-    auto& logger = GetLogger();
-
-    sockaddr_storage addr{};
-    socklen_t addrLen = 0;
-
-    char portStr[6];
-    auto [ptr, err] = std::to_chars(portStr, portStr + sizeof(portStr), port);
-    if(err != std::errc{}) {
-        logger.Error("[Kqueue]: Failed to convert port to string");
-        return -1;
-    }
-    *ptr = '\0';
-
-    if(!ResolveHostStatic(host.c_str(), portStr, &addr, &addrLen)) {
-        logger.Error("[Kqueue]: Failed to resolve host '", host, '\'');
-        return -1;
-    }
-
-    int listenFd = socket(addr.ss_family, SOCK_STREAM, 0);
-    if(listenFd < 0) {
-        logger.Error("[Kqueue]: Failed to create listening socket: ", strerror(errno));
-        return -1;
-    }
-
-    if(!BindAndListen(listenFd, reinterpret_cast<sockaddr*>(&addr), addrLen, backlog, false, logger)) {
-        close(listenFd);
-        return -1;
-    }
-
-    return listenFd;
-}
 
 // vvv Constructor & Destructor vvv
 KqueueConnectionHandler::KqueueConnectionHandler(bool useHttps) : useHttps_(useHttps)
@@ -148,7 +28,7 @@ KqueueConnectionHandler::KqueueConnectionHandler(bool useHttps) : useHttps_(useH
 
 KqueueConnectionHandler::~KqueueConnectionHandler()
 {
-    if(listenFd_ > 0 && ownsListenFd_) {
+    if(listenFd_ > 0) {
         close(listenFd_);
         listenFd_ = -1;
     }
@@ -165,53 +45,57 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
 {
     WFX_TRACE();
 
-    metrics_ = MetricTracer::Current();
-    if(!metrics_)
-        logger_.Fatal("[Kqueue]: MetricTracer not initialized in worker");
-
     auto& osConfig = config_.osSpecificConfig;
 
     events_ = std::make_unique<struct kevent[]>(maxEvents_);
 
+    sockaddr_storage addr;
+    socklen_t addrLen;
+
     char portStr[6];
     auto [ptr, err] = std::to_chars(portStr, portStr + sizeof(portStr), port);
     if(err != std::errc{})
-        logger_.Fatal("[Kqueue]: Failed to convert port to string");
+        logger_.Fatal("[Kqueue]: Failed to convert port to string representation while resolving host");
 
     *ptr = '\0';
 
-    if(const char* inherited = std::getenv("WFX_LISTEN_FD"); inherited && inherited[0] != '\0') {
-        listenFd_ = std::atoi(inherited);
-        ownsListenFd_ = false;
-        if(listenFd_ < 0)
-            logger_.Fatal("[Kqueue]: Invalid inherited listen fd");
+    if(!ResolveHost(host.c_str(), portStr, &addr, &addrLen))
+        logger_.Fatal("[Kqueue]: Failed to resolve host '", host, '\'');
+
+    listenFd_ = socket(addr.ss_family, SOCK_STREAM, 0);
+    if(listenFd_ < 0)
+        logger_.Fatal("[Kqueue]: Failed to create listening socket: ", strerror(errno));
+
+    if(addr.ss_family == AF_INET6) {
+        int no = 0;
+        if(setsockopt(listenFd_, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no)) < 0)
+            logger_.Fatal("[Kqueue]: Failed to disable IPV6_V6ONLY: ", strerror(errno));
     }
-    else {
-        ownsListenFd_ = true;
 
-        sockaddr_storage addr{};
-        socklen_t addrLen = 0;
+    int opt = 1;
+    if(setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+        logger_.Fatal("[Kqueue]: Failed to set SO_REUSEADDR: ", strerror(errno));
 
-        if(!ResolveHost(host.c_str(), portStr, &addr, &addrLen))
-            logger_.Fatal("[Kqueue]: Failed to resolve host '", host, '\'');
+    if(setsockopt(listenFd_, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0)
+        logger_.Fatal("[Kqueue]: Failed to set SO_REUSEPORT: ", strerror(errno));
 
-        listenFd_ = socket(addr.ss_family, SOCK_STREAM, 0);
-        if(listenFd_ < 0)
-            logger_.Fatal("[Kqueue]: Failed to create listening socket: ", strerror(errno));
+    if(!SetNonBlocking(listenFd_))
+        logger_.Fatal("[Kqueue]: Failed to make listening socket non-blocking: ", strerror(errno));
 
-        if(!BindAndListen(listenFd_, reinterpret_cast<sockaddr*>(&addr), addrLen, osConfig.backlog, true, logger_))
-            logger_.Fatal("[Kqueue]: Failed to configure listening socket");
-    }
+    if(bind(listenFd_, (sockaddr*)&addr, addrLen) < 0)
+        logger_.Fatal("[Kqueue]: Failed to bind socket: ", strerror(errno));
+
+    if(listen(listenFd_, osConfig.backlog) < 0)
+        logger_.Fatal("[Kqueue]: Failed to listen: ", strerror(errno));
 
     kqFd_ = kqueue();
     if(kqFd_ < 0)
         logger_.Fatal("[Kqueue]: Failed to create kqueue: ", strerror(errno));
 
-    // Register listening socket for read events (udata = 0, so gen = 0)
     struct kevent listenEv;
     EV_SET(&listenEv, listenFd_, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, nullptr);
     if(kevent(kqFd_, &listenEv, 1, nullptr, 0, nullptr) < 0)
-        logger_.Fatal("[Kqueue]: Failed to register listening socket: ", strerror(errno));
+        logger_.Fatal("[Kqueue]: Failed to add listening socket to kqueue: ", strerror(errno));
 
     timerWheel_.Init(connections_.GetSlots(), 4096, 1, TimeUnit::SECONDS,
                      [this](std::uint32_t connId, std::uint32_t extra) {
@@ -222,28 +106,15 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
                          else
                              ctx = endpoints_[extra].second.GetPtr(connId);
 
-                         if(ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE ||
-                            (ctx->IsEndpoint() || ctx->IsAsyncOperation()))
+                         if(!ctx->IsEndpoint() && !ctx->IsAsyncOperation())
                              Close(ctx, true);
                      });
 
-    // When rate limits are disabled in config, use a short idle timer to reclaim stale slots
-    // between high-connection bursts (e.g. wrk without restarting the server).
-    if(NetworkLimitsDisabled()) {
-        struct kevent timeoutKev;
-        EV_SET(&timeoutKev, TIMEOUT_TIMER_IDENT, EVFILT_TIMER, EV_ADD | EV_ENABLE, NOTE_SECONDS, (intptr_t)2, nullptr);
-        if(kevent(kqFd_, &timeoutKev, 1, nullptr, 0, nullptr) < 0)
-            logger_.Fatal("[Kqueue]: Failed to register benchmark idle timer: ", strerror(errno));
-    }
-    else {
-        struct kevent timeoutKev;
-        EV_SET(&timeoutKev, TIMEOUT_TIMER_IDENT, EVFILT_TIMER, EV_ADD | EV_ENABLE, NOTE_SECONDS,
-               (intptr_t)INVOKE_TIMEOUT_COOLDOWN, nullptr);
-        if(kevent(kqFd_, &timeoutKev, 1, nullptr, 0, nullptr) < 0)
-            logger_.Fatal("[Kqueue]: Failed to register timeout timer: ", strerror(errno));
-    }
-
-    lastBusyMs_ = NowMs();
+    struct kevent timeoutKev;
+    EV_SET(&timeoutKev, TIMEOUT_TIMER_IDENT, EVFILT_TIMER, EV_ADD | EV_ENABLE, NOTE_SECONDS,
+           (intptr_t)INVOKE_TIMEOUT_COOLDOWN, nullptr);
+    if(kevent(kqFd_, &timeoutKev, 1, nullptr, 0, nullptr) < 0)
+        logger_.Fatal("[Kqueue]: Failed to register timeout timer: ", strerror(errno));
 }
 
 void KqueueConnectionHandler::SetEngineCallback(ReceiveCallback onData)
@@ -362,13 +233,8 @@ __CleanupOrRearm:
     __CloseConnection:
         Close(ctx);
     }
-    else {
-        (void)RegisterKqueue(ctx, KQ_DROP_WRITE);
-        ctx->ClearContext();
-        ResumeReceive(ctx);
-        lastBusyMs_ = NowMs();
-        Receive(ctx);
-    }
+    else
+        FinishWriteCycle(ctx);
 }
 
 void KqueueConnectionHandler::WriteFile(ConnectionContext* ctx, std::string path)
@@ -475,7 +341,7 @@ void KqueueConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
     ReleaseConnection(ctx);
 }
 
-// vvv Main Event Loop vvv
+// vvv Main Functions vvv
 void KqueueConnectionHandler::Run()
 {
     WFX_TRACE();
@@ -495,7 +361,6 @@ void KqueueConnectionHandler::Run()
         for(int i = 0; i < nfds; i++) {
             auto& ev = events_[i];
 
-            // kqueue timer events don't use udata for identification
             if(ev.filter == EVFILT_TIMER) {
                 if(ev.ident == TIMEOUT_TIMER_IDENT)
                     HandleTimeoutTimer();
@@ -504,68 +369,62 @@ void KqueueConnectionHandler::Run()
                 continue;
             }
 
-            std::uint64_t udata = (std::uint64_t)(uintptr_t)ev.udata;
-            std::uint16_t gen = (udata >> 32) & 0xFFFF;
+            std::uint64_t meta = (std::uint64_t)(uintptr_t)ev.udata;
+            std::uint16_t gen = (meta >> 32) & 0xFFFF;
 
-            // gen == 0 means this is a special fd (listen socket)
-            if(gen == 0) {
-                if((uintptr_t)ev.ident == (uintptr_t)listenFd_ && ev.filter == EVFILT_READ) {
-                    MaybeFlushBeforeAccept();
+            if(gen > 0)
+                goto __HandleExistingConnection;
 
-                    while(true) {
-                        sockaddr_storage addr{};
-                        socklen_t len = sizeof(addr);
+            if((uintptr_t)ev.ident == (uintptr_t)listenFd_ && ev.filter == EVFILT_READ) {
+                while(true) {
+                    sockaddr_storage addr{};
+                    socklen_t len = sizeof(addr);
 
-                        int clientFd = accept(listenFd_, (sockaddr*)&addr, &len);
-                        if(clientFd < 0) {
-                            if(errno == EAGAIN || errno == EWOULDBLOCK)
-                                break;
-                            else
-                                continue;
-                        }
-
-                        if(!SetNonBlocking(clientFd)) {
-                            close(clientFd);
+                    int clientFd = accept(listenFd_, (sockaddr*)&addr, &len);
+                    if(clientFd < 0) {
+                        if(errno == EAGAIN || errno == EWOULDBLOCK)
+                            break;
+                        else
                             continue;
-                        }
-
-                        if(!SetNoSigPipe(clientFd)) {
-                            close(clientFd);
-                            continue;
-                        }
-
-                        int nodelay = 1;
-                        (void)setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
-
-                        WFXIpAddress tmpIp;
-                        if(!ResolveIP(addr, tmpIp)) {
-                            close(clientFd);
-                            continue;
-                        }
-
-                        ConnectionContext* ctx = nullptr;
-                        if(!ipLimiter_.AllowConnection(tmpIp)) {
-                            close(clientFd);
-                            continue;
-                        }
-                        ctx = EnsureAcceptSlot();
-                        if(!ctx) {
-                            close(clientFd);
-                            continue;
-                        }
-
-                        ctx->socket = clientFd;
-                        ctx->connInfo = tmpIp;
-
-                        WrapAccept(ctx);
                     }
+
+                    if(!SetNonBlocking(clientFd)) {
+                        close(clientFd);
+                        continue;
+                    }
+
+                    if(!SetNoSigPipe(clientFd)) {
+                        close(clientFd);
+                        continue;
+                    }
+
+                    TuneAcceptedSocket(clientFd);
+
+                    WFXIpAddress tmpIp;
+                    if(!ResolveIP(addr, tmpIp)) {
+                        close(clientFd);
+                        continue;
+                    }
+
+                    ConnectionContext* ctx = AcquireClientConnection(tmpIp);
+                    if(!ctx) {
+                        close(clientFd);
+                        continue;
+                    }
+
+                    ctx->socket = clientFd;
+                    ctx->connInfo = tmpIp;
+
+                    WrapAccept(ctx);
                 }
                 continue;
             }
 
-            // Existing connection
-            std::uint16_t endpointIdx = udata >> 48;
-            std::uint32_t poolIdx = udata & 0xFFFFFFFF;
+            continue;
+
+        __HandleExistingConnection:
+            std::uint16_t endpointIdx = meta >> 48;
+            std::uint32_t poolIdx = meta & 0xFFFFFFFF;
 
             ConnectionContext* ctx = nullptr;
 
@@ -577,19 +436,11 @@ void KqueueConnectionHandler::Run()
             if(ctx->generationId != gen)
                 continue;
 
-            // System-level error on this fd
-            if(ev.flags & EV_ERROR) {
-                Close(ctx);
-                continue;
-            }
-
-            // SSL handshake in progress
             if(ctx->eventType == EventType::EVENT_HANDSHAKE) {
-                HandleHandshake(ctx, ev.flags);
+                HandleHandshake(ctx, ev.filter);
                 continue;
             }
 
-            // SSL shutdown in progress
             if(ctx->eventType == EventType::EVENT_SHUTDOWN) {
                 auto res = sslHandler_->Shutdown(ctx->sslConn);
 
@@ -606,129 +457,119 @@ void KqueueConnectionHandler::Run()
                 continue;
             }
 
-            // Readable event
+            if(ev.flags & EV_ERROR) {
+                Close(ctx);
+                continue;
+            }
+
             if(ev.filter == EVFILT_READ) {
-                // Peer close must be handled in every eventType. Ignoring EV_EOF while EVENT_SEND
-                // leaks slots/fds across benchmark runs until accepts start failing (~49k wrk read errors).
-                if(ev.flags & (EV_EOF | EV_ERROR)) {
-                    Receive(ctx);
+                if(ev.flags & EV_EOF) {
+                    if(ctx->eventType == EventType::EVENT_RECV)
+                        Receive(ctx);
+                    else
+                        Close(ctx);
                     continue;
                 }
                 if(ctx->eventType == EventType::EVENT_RECV) {
-                    const auto& netCfg = config_.networkConfig;
-                    const bool rateLimit =
-                        netCfg.maxTokensPerSecond < 1'000'000 || netCfg.maxRequestBurstSize < 1'000'000;
-                    if(rateLimit && !ipLimiter_.AllowRequest(ctx->connInfo)) {
+                    if(!ipLimiter_.AllowRequest(ctx->connInfo)) {
                         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
                         Write(ctx, HttpError::tooManyRequests);
+                        continue;
                     }
-                    else
-                        Receive(ctx);
+                    Receive(ctx);
                 }
             }
 
-            // Writable event
             if(ev.filter == EVFILT_WRITE) {
-                // EV_EOF on write: remote reset the connection
                 if(ev.flags & EV_EOF) {
                     Close(ctx);
                     continue;
                 }
-                HandleWriteReady(ctx, ev.flags);
+                HandleWriteReady(ctx, ev.filter);
             }
         }
     }
-
-    DrainAllConnections();
 }
 
-void KqueueConnectionHandler::ReclaimDeadPeers()
+void KqueueConnectionHandler::CloseDeadPeers()
 {
     static thread_local std::vector<ConnectionContext*> dead;
     dead.clear();
 
-    auto probe = [&](ConnectionContext* ctx) {
+    auto probe = [&](ConnectionContext* ctx, std::uint32_t) {
         if(ctx->socket <= 0 || ctx->isShuttingDown)
             return;
         if(ctx->eventType == EventType::EVENT_SHUTDOWN || ctx->eventType == EventType::EVENT_HANDSHAKE)
             return;
 
-        char probeByte = 0;
-        ssize_t n = ::recv(ctx->socket, &probeByte, 1, MSG_PEEK | MSG_DONTWAIT);
+        char byte = 0;
+        ssize_t n = ::recv(ctx->socket, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
         if(n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK))
             dead.push_back(ctx);
     };
 
-    ForEachOpenConnection(connections_, [&](ConnectionContext* ctx, std::uint32_t) { probe(ctx); });
+    connections_.ForEachAllocated(probe);
     for(auto& ep : endpoints_)
-        ForEachOpenConnection(ep.second, [&](ConnectionContext* ctx, std::uint32_t) { probe(ctx); });
+        ep.second.ForEachAllocated(probe);
 
     for(ConnectionContext* ctx : dead)
         Close(ctx, true);
 }
 
-void KqueueConnectionHandler::FlushBenchmarkPool()
+void KqueueConnectionHandler::PollRecvPeers()
 {
-    if(!NetworkLimitsDisabled())
-        return;
-
-    std::vector<ConnectionContext*> pending;
-    pending.reserve(static_cast<std::size_t>(metrics_->network.activeConns));
-
-    ForEachOpenConnection(connections_, [&](ConnectionContext* ctx, std::uint32_t) {
-        if(!ctx->IsEndpoint())
-            pending.push_back(ctx);
+    connections_.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) {
+        if(ctx->socket == WFX_INVALID_SOCKET || ctx->isShuttingDown)
+            return;
+        if(ctx->eventType != EventType::EVENT_RECV)
+            return;
+        Receive(ctx);
     });
-
-    for(ConnectionContext* ctx : pending)
-        Close(ctx, true);
 }
 
-void KqueueConnectionHandler::MaybeFlushBeforeAccept()
+void KqueueConnectionHandler::ReclaimStaleConnections(bool pollRecv)
 {
-    if(!NetworkLimitsDisabled())
-        return;
+    CloseDeadPeers();
 
-    constexpr std::uint32_t kMinStaleSlots = 500;
-    constexpr std::uint64_t kIdleBeforeFlushMs = 1500;
+    if(pollRecv)
+        PollRecvPeers();
 
-    if(metrics_->network.activeConns <= kMinStaleSlots)
-        return;
-    if(NowMs() - lastBusyMs_ <= kIdleBeforeFlushMs)
-        return;
-
-    FlushBenchmarkPool();
+    CloseDeadPeers();
 }
 
-ConnectionContext* KqueueConnectionHandler::EnsureAcceptSlot()
+ConnectionContext* KqueueConnectionHandler::AcquireClientConnection(const WFXIpAddress& ip)
 {
+    if(!ipLimiter_.AllowConnection(ip))
+        return nullptr;
+
     if(ConnectionContext* ctx = GetConnection())
         return ctx;
 
-    if(!NetworkLimitsDisabled())
+    ipLimiter_.ReleaseConnection(ip);
+    ReclaimStaleConnections(false);
+
+    if(!ipLimiter_.AllowConnection(ip))
         return nullptr;
 
-    ReclaimDeadPeers();
-    return GetConnection();
-}
+    if(ConnectionContext* ctx = GetConnection())
+        return ctx;
 
-void KqueueConnectionHandler::DrainAllConnections()
-{
-    std::vector<ConnectionContext*> pending;
-    pending.reserve(256);
+    ipLimiter_.ReleaseConnection(ip);
+    ReclaimStaleConnections(true);
 
-    ForEachOpenConnection(connections_, [&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
+    if(!ipLimiter_.AllowConnection(ip))
+        return nullptr;
 
-    for(auto& ep : endpoints_)
-        ForEachOpenConnection(ep.second, [&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
+    ConnectionContext* ctx = GetConnection();
+    if(!ctx)
+        ipLimiter_.ReleaseConnection(ip);
 
-    for(ConnectionContext* ctx : pending)
-        Close(ctx, true);
+    return ctx;
 }
 
 void KqueueConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)
 {
-    if(NetworkLimitsDisabled())
+    if(timeoutSeconds == 0)
         return;
 
     ConnectionPool* pool = nullptr;
@@ -852,6 +693,32 @@ bool KqueueConnectionHandler::SetNoSigPipe(int fd)
 {
     int opt = 1;
     return setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &opt, sizeof(opt)) == 0;
+}
+
+void KqueueConnectionHandler::TuneAcceptedSocket(int fd)
+{
+    int on = 1;
+    (void)setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on));
+
+    // Detect dead peers that would otherwise linger as half-open connections on kqueue.
+    int idle = 1;
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof(idle));
+}
+
+void KqueueConnectionHandler::FinishWriteCycle(ConnectionContext* ctx)
+{
+    const bool hadWriteFilter =
+        ctx->eventType == EventType::EVENT_SEND || ctx->eventType == EventType::EVENT_SEND_FILE;
+
+    if(hadWriteFilter) {
+        (void)RegisterKqueue(ctx, KQ_DROP_WRITE);
+        // Re-arm read only after write filter was registered (macOS kqueue EOF quirk).
+        (void)RegisterKqueue(ctx, KQ_REARM_READ);
+    }
+
+    ctx->ClearContext();
+    ResumeReceive(ctx);
+    Receive(ctx);
 }
 
 bool KqueueConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string path)
@@ -1018,13 +885,8 @@ void KqueueConnectionHandler::SendFile(ConnectionContext* ctx)
 
     if(ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
         Close(ctx);
-    else {
-        (void)RegisterKqueue(ctx, KQ_DROP_WRITE);
-        ctx->ClearContext();
-        ResumeReceive(ctx);
-        lastBusyMs_ = NowMs();
-        Receive(ctx);
-    }
+    else
+        FinishWriteCycle(ctx);
 }
 
 void KqueueConnectionHandler::ResumeStream(ConnectionContext* ctx)
@@ -1121,10 +983,8 @@ void KqueueConnectionHandler::ResumeStream(ConnectionContext* ctx)
             ? Write(ctx)
             : Close(ctx);
 
-    else if(ctx->GetConnectionState() == ConnectionState::CONNECTION_ALIVE) {
-        ctx->ClearContext();
-        ResumeReceive(ctx);
-    }
+    else if(ctx->GetConnectionState() == ConnectionState::CONNECTION_ALIVE)
+        FinishWriteCycle(ctx);
     else
         Close(ctx);
 }
@@ -1165,8 +1025,8 @@ void KqueueConnectionHandler::HandleTimeoutTimer()
     std::uint64_t nowSec = NowMs() / 1000;
     timerWheel_.Tick(nowSec);
 
-    if(NetworkLimitsDisabled() && metrics_->network.activeConns > 500 && NowMs() - lastBusyMs_ > 1500)
-        FlushBenchmarkPool();
+    if(connections_.CountAllocated() > 0)
+        CloseDeadPeers();
 }
 
 void KqueueConnectionHandler::HandleAsyncTimer()
@@ -1184,7 +1044,7 @@ void KqueueConnectionHandler::HandleAsyncTimer()
     UpdateAsyncTimer();
 }
 
-void KqueueConnectionHandler::HandleHandshake(ConnectionContext* ctx, std::uint16_t flags)
+void KqueueConnectionHandler::HandleHandshake(ConnectionContext* ctx, std::int16_t filter)
 {
     WFX_TRACE();
 
@@ -1200,11 +1060,11 @@ void KqueueConnectionHandler::HandleHandshake(ConnectionContext* ctx, std::uint1
 
     if(ctx->eventType == EventType::EVENT_SEND)
         Write(ctx, {});
-    else if(flags & EVFILT_READ)
+    else if(filter == EVFILT_READ)
         Receive(ctx);
 }
 
-void KqueueConnectionHandler::HandleWriteReady(ConnectionContext* ctx, std::uint16_t flags)
+void KqueueConnectionHandler::HandleWriteReady(ConnectionContext* ctx, std::int16_t filter)
 {
     WFX_TRACE();
 
@@ -1234,15 +1094,12 @@ void KqueueConnectionHandler::HandleWriteReady(ConnectionContext* ctx, std::uint
                     break;
                 }
 
-                HandleHandshake(ctx, flags);
+                HandleHandshake(ctx, filter);
                 break;
             }
 
             Write(ctx, {});
         } break;
-
-        default:
-            break;
     }
 }
 
@@ -1307,6 +1164,10 @@ bool KqueueConnectionHandler::RegisterKqueue(ConnectionContext* ctx, int op)
                 break;
             case KQ_DROP_WRITE:
                 EV_SET(&changes[n++], ctx->socket, EVFILT_WRITE, EV_DELETE, 0, 0, nullptr);
+                break;
+            case KQ_REARM_READ:
+                EV_SET(&changes[n++], ctx->socket, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
+                EV_SET(&changes[n++], ctx->socket, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, udata);
                 break;
         }
     }
@@ -1399,7 +1260,6 @@ void KqueueConnectionHandler::WrapAccept(ConnectionContext* ctx)
 
     metrics_->network.accepts++;
 
-    lastBusyMs_ = NowMs();
     RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 

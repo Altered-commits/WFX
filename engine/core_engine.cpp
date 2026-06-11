@@ -16,8 +16,6 @@
 #include "utils/process/process.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
 
-#include <cstring>
-
 #if defined(__linux__) || defined(__APPLE__)
 #include <dlfcn.h>
 #endif
@@ -27,16 +25,6 @@ namespace WFX::Core {
 using namespace WFX::Http;
 using namespace WFX::Shared;
 using namespace WFX::Utils;
-
-namespace {
-
-constexpr std::string_view kBenchTextResponse = "HTTP/1.1 200 OK\r\n"
-                                                "Content-Type: text/plain\r\n"
-                                                "Content-Length: 17\r\n"
-                                                "\r\n"
-                                                "Hello from WFX :)";
-
-} // namespace
 
 enum ConnectionHeader : std::uint8_t {
     NONE = 0,
@@ -128,16 +116,6 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
             ctx->trackBytes = 0;
 
             auto& reqInfo = *ctx->requestInfo;
-
-            // GET /text fast path: skip router, response buffer, and user callback
-            if(reqInfo.method == HttpMethod::GET && reqInfo.path.size() == 5 &&
-               std::memcmp(reqInfo.path.data(), "/text", 5) == 0) {
-                ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
-                ctx->SetParseState(HttpParseState::PARSE_IDLE);
-                connHandler_->Write(ctx, kBenchTextResponse);
-                return;
-            }
-
             auto connHeader = reqInfo.headers.GetHeader("Connection");
             auto connMask = HandleConnectionHeader(connHeader);
 
@@ -235,7 +213,7 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     }
 
     if(res.IsStream()) {
-        connHandler_->Stream(ctx, res.TakeGenerator(), res.IsStreamChunked());
+        connHandler_->Stream(ctx, res.TakeGenerator());
         return;
     }
 
@@ -340,7 +318,6 @@ void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
 void CoreEngine::FinishRequest(ConnectionContext* ctx)
 {
     ctx->SetParseState(HttpParseState::PARSE_IDLE);
-
     connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
