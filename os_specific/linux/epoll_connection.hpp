@@ -21,20 +21,29 @@
 
 namespace WFX::OSSpecific {
 
-using namespace WFX::Http;   // For 'HttpConnectionHandler', 'ReceiveCallback', 'ConnectionContext', ...
+using namespace WFX::Http;   // For 'HttpConnectionHandler', 'ReceiveCallback', 'ClientCtx', ...
 using namespace WFX::Utils;  // For 'Logger', 'RWBuffer', ...
 using namespace WFX::Core;   // For 'Config'
 using namespace WFX::Shared; // For 'EndpointStatus', 'AsyncData', ...
 
-using HandshakeCb = std::function<void(void)>;
 using SteadyClock = std::chrono::steady_clock;
-using ConnectionPool = BitmapPool<ConnectionContext>;
+using ClientPool = BitmapPool<ClientCtx>;
+using EndpointPool = BitmapPool<EndpointCtx>;
 
-// Each endpoint has a fixed pool of connections (no dynamic growth allowed)
-// Think of it as a map of Endpoint -> ConnectionPool
-// We use an index based container instead of an unordered_map because maps are not cache friendly
-using EndpointContainer = std::pair<EndpointContext, ConnectionPool>;
-using EndpointPool = std::vector<EndpointContainer>;
+// One entry per registered endpoint: metadata + fixed connection pool
+struct EndpointEntry {
+    EndpointMetadata meta;
+    EndpointPool pool;
+
+    explicit EndpointEntry(std::uint32_t connLimit) : pool(connLimit)
+    {}
+
+    // BitmapPool is move-only, so EndpointEntry must be too
+    EndpointEntry(EndpointEntry&&) = default;
+    EndpointEntry& operator=(EndpointEntry&&) = default;
+    EndpointEntry(const EndpointEntry&) = delete;
+    EndpointEntry& operator=(const EndpointEntry&) = delete;
+};
 
 class EpollConnectionHandler : public HttpConnectionHandler {
 public:
@@ -44,57 +53,121 @@ public:
 public: // Initializing
     void Initialize(const std::string& host, std::uint16_t port) override;
     void SetEngineCallback(ReceiveCallback onData) override;
-    std::uint16_t AllocateEndpoint(std::string_view host, std::string_view port, std::uint32_t cLimit,
-                                   std::uint32_t ifLimit, bool useTLS) override;
+    std::uint16_t AllocateEndpoint(const char* host, EndpointDesc desc, EndpointConfig config) override;
 
-public: // I/O Operations
-    void ResumeReceive(ConnectionContext* ctx) override;
-    void Write(ConnectionContext* ctx, std::string_view buffer = {}) override;
-    void WriteFile(ConnectionContext* ctx, std::string path) override;
-    EndpointStatus WriteEndpoint(ConnectionContext* ctx, std::uint32_t endpointIndex, const std::byte* ptr,
-                                 std::uint32_t size) override;
-    void Stream(ConnectionContext* ctx, StreamGenerator generator, bool streamChunked) override;
-    void Close(ConnectionContext* ctx, bool forceClose = false) override;
+public: // Client operations
+    void ResumeReceive(ClientCtx* ctx) override;
+    void Write(ClientCtx* ctx, std::string_view buffer = {}) override;
+    void WriteFile(ClientCtx* ctx, std::string path) override;
+    void Stream(ClientCtx* ctx, StreamGenerator generator, bool streamChunked = true) override;
+    void Close(ClientCtx* ctx, bool forceClose = false) override;
+    void RefreshExpiry(ClientCtx* ctx, std::uint16_t timeoutSeconds) override;
+    bool RefreshAsyncTimer(ClientCtx* ctx, std::uint32_t delayMs, AsyncData asyncData) override;
 
-public: // Main Functions
+public: // Endpoint operations
+    EndpointStatus SendPayload(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
+                               AsyncData asyncData) override;
+    void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, AsyncData asyncData) override;
+    void SlotReceive(EndpointCtx* slotCtx, AsyncData asyncData) override;
+    void Close(EndpointCtx* ctx, bool forceClose = false, DisconnectReason reason = DisconnectReason::ERROR) override;
+    void RefreshExpiry(EndpointCtx* ctx, std::uint16_t timeoutSeconds) override;
+
+public: // Engine control
     void Run() override;
     void Stop() override;
-    void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) override;
-    bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMs, AsyncData asyncData) override;
 
-private: // Helper Functions
-    ConnectionContext* GetConnection(std::uint16_t endpointIndex = 0xFFFF);
-    void ReleaseConnection(ConnectionContext* ctx, bool freeOnly = false);
+private: // Connection management
+    ClientCtx* GetClientConnection();
+    EndpointCtx* GetEndpointConnection(std::uint16_t endpointIdx);
+    void ReleaseClient(ClientCtx* ctx);
+    void ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason reason = DisconnectReason::ERROR);
+    void ReturnEndpointToPool(EndpointCtx* ctx);
 
+private: // I/O
+    bool Receive(ClientCtx* ctx);
+    bool Receive(EndpointCtx* ctx);
+    bool EnsureReadReady(ClientCtx* ctx);
+    bool EnsureReadReady(EndpointCtx* ctx);
+    bool EnsureFileReady(ClientCtx* ctx, std::string path);
+    void SendFile(ClientCtx* ctx);
+    void ResumeStream(ClientCtx* ctx);
+
+private: // Write paths (private, public Write is client-only)
+    void Write(EndpointCtx* ctx);
+
+private: // Epoll dispatch
+    void HandleClientEvent(ClientCtx* ctx, std::uint32_t ev, std::uint16_t gen);
+    void HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t ev, std::uint16_t gen);
+    void HandleClientEpollIn(ClientCtx* ctx);
+    void HandleEndpointEpollIn(EndpointCtx* ctx);
+    void HandleClientWriteReady(ClientCtx* ctx, std::uint32_t ev);
+    void HandleEndpointWriteReady(EndpointCtx* ctx, std::uint32_t ev);
+
+private: // Handshake
+    void HandleClientHandshake(ClientCtx* ctx, std::uint32_t ev);
+    void HandleEndpointHandshake(EndpointCtx* ctx, std::uint32_t ev);
+
+    // Both ClientCtx and EndpointCtx have sslConn + eventType. Template is the-
+    // -cleanest option here without duplicating 8 lines twice
+    template <typename Ctx> bool TryHandshake(Ctx* ctx, EventType onSuccess, EventType stayState)
+    {
+        switch(sslHandler_->Handshake(ctx->sslConn)) {
+            case SSLReturn::SUCCESS:
+                ctx->eventType = onSuccess;
+                return true;
+
+            case SSLReturn::WANT_READ:
+            case SSLReturn::WANT_WRITE:
+                ctx->eventType = stayState;
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+private: // Endpoint-specific
+    void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointDesc& desc, bool success);
+    void HandleEndpointWriteComplete(EndpointCtx* ctx);
+    void HandleEndpointReceive(EndpointCtx* ctx);
+    void HandlePrewarm();
+    void HandleDnsRefresh(std::uint16_t endpointIdx);
+    void FireOnConnect(EndpointCtx* ctx, EndpointEntry& entry);
+
+private: // Wrap / low-level
+    void WrapAccept(ClientCtx* ctx);
+    EndpointStatus WrapConnect(EndpointCtx* ctx, EndpointEntry& entry);
+    bool CreateAndConnect(EndpointCtx* ctx, EndpointMetadata& epCtx);
+
+    // WrapRead / WrapWrite take socket + sslConn directly
+    ssize_t WrapRead(WFXSocket socket, void* sslConn, char* buf, std::size_t len);
+    ssize_t WrapWrite(WFXSocket socket, void* sslConn, const char* buf, std::size_t len);
+    ssize_t WrapFile(ClientCtx* ctx, int fd, off_t* offset, std::size_t count);
+
+private: // Epoll helpers
+    std::uint64_t PackEpollData(ClientCtx* ctx);
+    std::uint64_t PackEpollData(EndpointCtx* ctx);
+    bool RegisterEpoll(ClientCtx* ctx, int op);
+    bool RegisterEpoll(EndpointCtx* ctx, int op);
+
+private: // Timer
+    void HandleTimeoutTimer(int sfd);
+    void HandleAsyncTimer(int sfd);
+    void UpdateAsyncTimer();
+
+private: // Async callback
+    // Both typed variants forward to this shared impl
+    void AsyncCallbackImpl(void* ctxPtr, AsyncData& async, AsyncResult res, bool destroy);
+    void HandleClientAsyncCallback(ClientCtx* ctx, AsyncResult res, bool destroy);
+    void HandleEndpointAsyncCallback(EndpointCtx* ctx, AsyncResult res, bool destroy);
+
+private: // Misc
     std::uint64_t NowMs();
     bool SetNonBlocking(int fd);
-    bool EnsureFileReady(ConnectionContext* ctx, std::string path);
-    bool EnsureReadReady(ConnectionContext* ctx);
     bool ResolveHost(const char* host, const char* port, sockaddr_storage* outAddr, socklen_t* outLen);
     bool ResolveIP(const sockaddr_storage& inAddr, WFXIpAddress& out);
 
-    void Receive(ConnectionContext* ctx);
-    void SendFile(ConnectionContext* ctx);
-    void ResumeStream(ConnectionContext* ctx);
-    void HandleAsyncCallback(ConnectionContext* ctx, AsyncResult res, bool destroy);
-    void HandleTimeoutTimer(int sfd);
-    void HandleAsyncTimer(int sfd);
-    void HandleHandshake(ConnectionContext* ctx, std::uint32_t ev);
-    void HandleWriteReady(ConnectionContext* ctx, std::uint32_t ev);
-    void UpdateAsyncTimer();
-
-    std::uint64_t PackEpollData(ConnectionContext* ctx);
-    bool RegisterEpoll(ConnectionContext* ctx, int op);
-    bool TryHandshake(ConnectionContext* ctx, EventType onSuccess);
-    bool CreateAndConnect(ConnectionContext* ctx, EndpointContext& epCtx);
-
-    void WrapAccept(ConnectionContext* ctx);
-    EndpointStatus WrapConnect(ConnectionContext* cctx, EndpointContainer& ecnt);
-    ssize_t WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
-    ssize_t WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len);
-    ssize_t WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);
-
-private: // Misc
+private: // Singletons / config
     Config& config_ = GetConfig();
     Logger& logger_ = GetLogger();
     FileCache& fileCache_ = GetFileCache();
@@ -106,16 +179,18 @@ private: // Misc
     std::atomic<bool> running_ = true;
     bool useHttps_ = false;
 
-private: // Constexpr stuff
+    int dnsEventFd_ = -1;
+
+private: // Constants
     constexpr static char CHUNK_END[] = "0\r\n\r\n";
     constexpr static ssize_t SWITCH_FILE_TO_STREAM = std::numeric_limits<ssize_t>::min();
     constexpr static std::uint16_t MAX_DISTINCT_ENDPOINTS = std::numeric_limits<std::uint16_t>::max() - 1;
-    constexpr static std::uint16_t CLIENT_CONNECTION_TAG = 0xFFFF; // Tag to differentiate between client and endpoint
+    constexpr static std::uint16_t CLIENT_CONNECTION_TAG = 0xFFFF;
 
-    constexpr static int INVOKE_TIMEOUT_COOLDOWN = 5; // In seconds
-    constexpr static int INVOKE_TIMEOUT_DELAY = 1;    // In seconds
+    constexpr static int INVOKE_TIMEOUT_COOLDOWN = 5;
+    constexpr static int INVOKE_TIMEOUT_DELAY = 1;
 
-private: // Timeout handler
+private: // Timer state
     TimerWheel timerWheel_;
     TimerHeap timerHeap_;
     SteadyClock::time_point startTime_ = SteadyClock::now();
@@ -130,9 +205,13 @@ private: // Epoll + SSL
     std::unique_ptr<HttpWFXSSL> sslHandler_ = nullptr;
     std::unique_ptr<epoll_event[]> events_ = nullptr;
 
-private: // Connection Context
-    ConnectionPool connections_ = {config_.networkConfig.maxConnections};
-    EndpointPool endpoints_ = {};
+private: // Pools
+    ClientPool connections_ = {config_.networkConfig.maxConnections};
+    std::vector<EndpointEntry> endpoints_ = {};
+
+private: // Static
+    static void OnSlotConnected(void* ud, AsyncResult result);
+    static EpollConnectionHandler* instance_;
 };
 
 } // namespace WFX::OSSpecific

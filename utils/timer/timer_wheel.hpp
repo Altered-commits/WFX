@@ -18,9 +18,9 @@ struct SlotMeta {
     std::uint32_t next = NIL; // |
     std::uint32_t prev = NIL; // |-> 8 bytes
 
-    std::uint32_t extra = 0;  // |
-    std::uint16_t bucket = 0; // |
-    std::uint8_t rounds = 0;  // |-> 8 bytes
+    std::uint32_t extra = 0;       // |
+    std::uint16_t bucket = 0xFFFF; // |
+    std::uint8_t rounds = 0;       // |-> 8 bytes
 };
 static_assert(sizeof(SlotMeta) == 16, "SlotMeta must STRICTLY be 16 bytes.");
 
@@ -35,6 +35,7 @@ public:
     void Init(std::uint32_t capacity, std::uint32_t wheelSlots, std::uint32_t tickVal, TimeUnit unit,
               OnExpireCallback onExpire);
     void Reinit(std::uint32_t capacity);
+    void Expand(std::uint32_t extraCapacity);
     void SetTick(std::uint32_t val, TimeUnit unit);
     std::uint64_t GetTick() const noexcept;
     void Schedule(std::uint32_t pos, std::uint32_t extra, std::uint64_t timeout);

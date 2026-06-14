@@ -202,18 +202,20 @@ max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
 [SSL]
-cert_path            = "..."           # Path to the server certificate (PEM format)
-key_path             = "..."           # Path to the private key corresponding to the certificate
-tls13_ciphers        = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
-                                    # ^^^ Colon-separated TLSv1.3 ciphers in preference order
-tls12_ciphers        = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
-                                    # ^^^ Colon-separated TLSv1.2 ciphers in preference order
-curves               = "X25519:P-256"  # Elliptic curves preference list for ECDHE
-enable_session_cache = true            # Enable server-side session caching
-enable_ktls          = false           # Enable Kernel TLS (KTLS) if supported
-session_cache_size   = 32768           # Max number of cached sessions
-min_proto_version    = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
-security_level       = 2               # SSL security level (0-5)
+cert_path                   = "..."           # Path to the server certificate (PEM format)
+key_path                    = "..."           # Path to the private key corresponding to the certificate
+tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
+                                           # ^^^ Colon-separated TLSv1.3 ciphers in preference order
+tls12_ciphers               = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+                                           # ^^^ Colon-separated TLSv1.2 ciphers in preference order
+curves                      = "X25519:P-256"  # Elliptic curves preference list for ECDHE
+enable_server_session_cache = true            # Enable server side session cache
+enable_client_session_cache = true            # Enable client side session cache
+enable_ktls                 = false           # Enable Kernel TLS (KTLS) if supported
+server_session_cache_size   = 4096            # Size of server session cache (In bytes)
+client_session_cache_size   = 1024            # Size of client session cache (In bytes)
+min_proto_version           = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
+security_level              = 2               # SSL security level (0-5)
 
 [Windows]
 accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts

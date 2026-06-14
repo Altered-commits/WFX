@@ -68,16 +68,24 @@ enum class HttpParseState : std::uint8_t {
 };
 
 enum class EventType : std::uint8_t {
-    EVENT_CONNECT,
-    EVENT_ACCEPT,
-    EVENT_HANDSHAKE, // For SSL
-    EVENT_RECV,
-    EVENT_SEND,
-    EVENT_SEND_FILE,
-    EVENT_SHUTDOWN // For SSL
+    // vvv Client slot states vvv
+    EVENT_ACCEPT,    // Accepted, pre-SSL-handshake setup
+    EVENT_HANDSHAKE, // SSL handshake with client in progress
+    EVENT_RECV,      // Reading client request
+    EVENT_SEND,      // Writing response to client
+    EVENT_SEND_FILE, // sendfile transfer in progress
+    EVENT_SHUTDOWN,  // SSL shutdown with client in progress
+
+    // vvv Endpoint slot states vvv
+    EVENT_CONNECT,            // TCP connect to backend in progress
+    EVENT_ENDPOINT_HANDSHAKE, // SSL handshake with backend in progress
+    EVENT_ENDPOINT_ONCONNECT, // onConnect coroutine running, slot not yet pooled
+    EVENT_ENDPOINT_SEND,      // Writing serialized request to backend
+    EVENT_ENDPOINT_RECV,      // Reading and parsing response from backend
+    EVENT_ENDPOINT_SHUTDOWN,  // SSL shutdown with backend in progress
 };
 
-enum class ConnectionState : std::uint8_t { CONNECTION_ALIVE, CONNECTION_CLOSE };
+enum class ConnectionState : std::uint8_t { CONNECTION_CLOSE, CONNECTION_ALIVE };
 
 enum class EndpointState : std::uint8_t {
     ENDPOINT_NONE,     // Not an endpoint type
@@ -86,9 +94,9 @@ enum class EndpointState : std::uint8_t {
 };
 
 // Forward declare it so compilers won't cry
-struct ConnectionContext;
+struct ClientCtx;
 
-using ReceiveCallback = std::function<void(ConnectionContext*)>;
+using ReceiveCallback = std::function<void(ClientCtx*)>;
 
 struct FileInfo {
 #if defined(_WIN32)
@@ -154,120 +162,143 @@ struct ConnectionTag {
     EventType eventType = EventType::EVENT_ACCEPT; // 1 byte
 };
 
-struct ConnectionContext : public ConnectionTag {
-    // ------------------------------------------  // 1 byte from ConnectionTag
+struct EndpointCtx : public ConnectionTag {
+    // ------------------------------------------ 1 byte from ConnectionTag
+    union {
+        struct {
+            std::uint8_t connectionState : 2;
+            std::uint8_t endpointState : 2;
+            std::uint8_t isShuttingDown : 1;
+            std::uint8_t inOnConnectPhase : 1;
+        };
+        std::uint8_t flags = 0;
+    }; // 1 bytes
+
+    std::uint16_t generationId = 1; // 2 bytes
+    std::uint16_t endpointIdx = 0;  // 2 bytes
+
+    ClientCtx* clientCtx = nullptr; // 8 bytes
+    void* sslConn = nullptr;        // 8 bytes
+    void* slotState = nullptr;      // 8 bytes, persists across requests
+    void* parseStateObj = nullptr;  // 8 bytes, reset between requests
+    void* outputObj = nullptr;      // 8 bytes, per-request, nulled before callback
+
+    Utils::RWBuffer rwBuffer;         // 16 bytes
+    Shared::AsyncData asyncData = {}; // 24 bytes
+
+    WFXSocket socket = WFX_INVALID_SOCKET; // 4 or 8 bytes depending on OS
+
+public:
+    void Reset();
+
+    void SetConnectionState(ConnectionState newState);
+    void SetEndpointState(EndpointState newState);
+
+    ConnectionState GetConnectionState() const;
+    EndpointState GetEndpointState() const;
+
+    bool IsAsyncOperation() const;
+};
+static_assert(sizeof(EndpointCtx) <= 96, "'EndpointCtx' must be <= 96 bytes");
+
+struct ClientCtx : public ConnectionTag {
+    // ------------------------------------------ 1 byte from ConnectionTag
     bool handshakeDone = false; // 1 byte
 
     union {
         struct {
-            std::uint16_t endpointStatus : 4;        // --
-            std::uint16_t parseState : 3;            //  |
-            std::uint16_t connectionState : 2;       //  |
-            std::uint16_t endpointState : 2;         //  |
-            std::uint16_t isStreamOperation : 1;     //  |
-            std::uint16_t isFileOperation : 1;       //  |
-            std::uint16_t isAsyncTimerOperation : 1; //  |
-            std::uint16_t isShuttingDown : 1;        //  |
-            std::uint16_t streamChunked : 1;         //  V
-        }; // 2 bytes
-        std::uint16_t __Flags = 0;
-    };
+            std::uint16_t parseState : 3;
+            std::uint16_t connectionState : 2;
+            std::uint16_t isStreamOperation : 1;
+            std::uint16_t isFileOperation : 1;
+            std::uint16_t isAsyncTimerOperation : 1;
+            std::uint16_t isShuttingDown : 1;
+            std::uint16_t streamChunked : 1;
+            std::uint16_t reserved : 6;
+        };
+        std::uint16_t flags = 0;
+    }; // 2 bytes
 
     union {
-        AsyncTrack trackAsync;        // |
-        std::uint32_t trackBytes = 0; // |-> 4 bytes (Used in HTTP parsing then async tracking if needed)
-    };
+        AsyncTrack trackAsync;
+        std::uint32_t trackBytes = 0;
+    }; // 4 bytes
 
     std::uint32_t expectedBodyLength = 0; // 4 bytes
-    std::uint16_t generationId = 1;       // 2 bytes (0 is specially reserved)
-    std::uint16_t endpointIdx = 0;        // 2 bytes
+    std::uint16_t generationId = 1;       // 2 bytes
+    std::uint16_t padding = 0;            // 2 bytes
 
-    void* sslConn = nullptr;                      // 8 bytes
-    HttpRequest* requestInfo = nullptr;           // 8 bytes
-    HttpResponse* responseInfo = nullptr;         // 8 bytes (Async functions require larger scope)
+    EndpointCtx* endpointCtx = nullptr; // 8 bytes
+    void* sslConn = nullptr;            // 8 bytes
+
+    HttpRequest* requestInfo = nullptr;   // 8 bytes
+    HttpResponse* responseInfo = nullptr; // 8 bytes
+
     Utils::RWBuffer rwBuffer;                     // 16 bytes
     Shared::AsyncData asyncData = {};             // 24 bytes
     FileInfo fileInfo = {};                       // 24 bytes
     Shared::StreamGenerator streamGenerator = {}; // 24 bytes
 
     WFXIpAddress connInfo = {};            // 20 bytes
-    WFXSocket socket = WFX_INVALID_SOCKET; // 4 | 8 bytes
-                                           // Padded if sizeof(WFXSocket) == 4
+    WFXSocket socket = WFX_INVALID_SOCKET; // 4 | 8 bytes depending on OS
 
-    ConnectionContext* clientContext = nullptr;   // 8 bytes (Set only on endpoint contexts)
-    ConnectionContext* endpointContext = nullptr; // 8 bytes (Set only on client contexts)
-
-public: // Helper functions
-    void ResetContext();
-    void ClearContext();
+public:
+    void Reset();
+    void Clear();
     void CleanupStreamGenerator();
 
     void SetParseState(HttpParseState newState);
     void SetConnectionState(ConnectionState newState);
-    void SetEndpointState(EndpointState newState);
-    void SetEndpointStatus(Shared::EndpointStatus newStatus);
 
     HttpParseState GetParseState() const;
     ConnectionState GetConnectionState() const;
-    EndpointState GetEndpointState() const;
-    Shared::EndpointStatus GetEndpointStatus() const;
 
-    bool IsEndpoint() const;
     bool IsAsyncOperation() const;
 };
-static_assert(sizeof(ConnectionContext) <= 196, "ConnectionContext must STRICTLY be less than or equal to 196 bytes.");
+static_assert(sizeof(ClientCtx) <= 168, "'ClientCtx' must be <= 168 bytes");
 
-struct EndpointContext {
-    std::string host;
+struct EndpointMetadata {
+    std::string hostname;
     sockaddr_storage addr = {0};
     socklen_t addrLen = 0;
+    std::uint16_t port = 0;
+    std::uint32_t timerBase = 0; // Specific to timer wheel
+    std::uint64_t dnsNextRefreshMs = 0;
+    Shared::EndpointDesc desc = {0};
+    Shared::EndpointConfig config = {0};
+    std::unordered_map<std::uint64_t, EndpointCtx*> coalescePending;
 };
-static_assert(sizeof(EndpointContext) <= 256, "EndpointContext must STRICTLY be less than or equal to 256 bytes.");
+static_assert(sizeof(EndpointMetadata) <= 512, "'EndpointMetadata' must be <= 512 bytes");
 
 // Abstraction for OS impl
 struct HttpConnectionHandler {
     virtual ~HttpConnectionHandler() = default;
 
-    // Initialize sockets, bind and listen on given host:port
     virtual void Initialize(const std::string& host, std::uint16_t port) = 0;
-
-    // Set the receive callback ONCE per socket (can be overwritten if needed)
     virtual void SetEngineCallback(ReceiveCallback onData) = 0;
+    virtual std::uint16_t AllocateEndpoint(const char* host, Shared::EndpointDesc desc,
+                                           Shared::EndpointConfig config) = 0;
 
-    // Create new endpoint on backend
-    virtual std::uint16_t AllocateEndpoint(std::string_view host, std::string_view port, std::uint32_t cLimit,
-                                           std::uint32_t ifLimit, bool useTLS) = 0;
+    // vvv Client operations vvv
+    virtual void ResumeReceive(ClientCtx* ctx) = 0;
+    virtual void Write(ClientCtx* ctx, std::string_view buffer = {}) = 0;
+    virtual void WriteFile(ClientCtx* ctx, std::string path) = 0;
+    virtual void Stream(ClientCtx* ctx, Shared::StreamGenerator generator, bool streamChunked = true) = 0;
+    virtual void Close(ClientCtx* ctx, bool forceClose = false) = 0;
+    virtual void RefreshExpiry(ClientCtx* ctx, std::uint16_t timeoutSeconds) = 0;
+    virtual bool RefreshAsyncTimer(ClientCtx* ctx, std::uint32_t delayMs, Shared::AsyncData asyncData) = 0;
 
-    // Read more data if required (Async)
-    virtual void ResumeReceive(ConnectionContext* ctx) = 0;
+    // vvv Endpoint operations vvv
+    virtual Shared::EndpointStatus SendPayload(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
+                                               Shared::AsyncData asyncData) = 0;
+    virtual void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, Shared::AsyncData asyncData) = 0;
+    virtual void SlotReceive(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
+    virtual void Close(EndpointCtx* ctx, bool forceClose = false,
+                       Shared::DisconnectReason reason = Shared::DisconnectReason::ERROR) = 0;
+    virtual void RefreshExpiry(EndpointCtx* ctx, std::uint16_t timeoutSeconds) = 0;
 
-    // Write data to socket (Async)
-    virtual void Write(ConnectionContext* ctx, std::string_view buffer = {}) = 0;
-
-    // Write file directly to sockets (Async)
-    virtual void WriteFile(ConnectionContext* ctx, std::string path) = 0;
-
-    // Write data directly to an endpoint (Async)
-    virtual Shared::EndpointStatus WriteEndpoint(ConnectionContext* ctx, std::uint32_t endpointIndex,
-                                                 const std::byte* ptr, std::uint32_t size) = 0;
-
-    // Stream data to socket via a generator function (Async)
-    virtual void Stream(ConnectionContext* ctx, Shared::StreamGenerator generator, bool streamChunked = true) = 0;
-
-    // Close a client socket
-    virtual void Close(ConnectionContext* ctx, bool forceClose = false) = 0;
-
-    // Refresh the connection's expiry time
-    virtual void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) = 0;
-
-    // Refresh the connection's async timer
-    virtual bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMilliseconds,
-                                   Shared::AsyncData asyncData) = 0;
-
-    // Run the main connection loop
+    // vvv Engine control vvv
     virtual void Run() = 0;
-
-    // Shutdown the main connection loop, cleanup everything
     virtual void Stop() = 0;
 };
 

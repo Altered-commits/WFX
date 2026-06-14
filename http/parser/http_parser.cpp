@@ -4,6 +4,7 @@
 #include "http_parser.hpp"
 
 #include "config/config.hpp"
+#include "http/connection/http_connection.hpp"
 #include "http/headers/http_headers.hpp"
 #include "http/request/http_request.hpp"
 #include "utils/string/string.hpp"
@@ -27,7 +28,7 @@ bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std
 std::string_view Trim(std::string_view sv);
 
 // vvv Function definitions vvv
-HttpParseState Parse(ConnectionContext* ctx)
+HttpParseState Parse(ClientCtx* ctx)
 {
     ReadMetadata* readMeta = ctx->rwBuffer.GetReadMeta();
     const char* data = ctx->rwBuffer.GetReadData();

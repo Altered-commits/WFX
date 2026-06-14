@@ -42,7 +42,8 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 
     // Initialize API backend before anything else
-    Shared::InitHttpAPIExt1(connHandler_.get(), &router_, &middleware_);
+    Shared::InitHttpAPIExt1(&router_, &middleware_);
+    Shared::InitEndpointAPIExt1(connHandler_.get());
     Shared::InitAsyncAPIExt1(connHandler_.get());
 
     // We set it on our end because each compiled binary has its own copy of '__WFXApi'
@@ -60,7 +61,7 @@ void CoreEngine::Listen(const std::string& host, std::uint16_t port)
 {
     connHandler_->Initialize(host, port);
 
-    connHandler_->SetEngineCallback([this](ConnectionContext* ctx) { this->HandleRequest(ctx); });
+    connHandler_->SetEngineCallback([this](ClientCtx* ctx) { this->HandleRequest(ctx); });
     connHandler_->Run();
 }
 
@@ -71,7 +72,7 @@ void CoreEngine::Stop()
 }
 
 // vvv Internal Functions vvv
-void CoreEngine::HandleRequest(ConnectionContext* ctx)
+void CoreEngine::HandleRequest(ClientCtx* ctx)
 {
     WFX_TRACE();
 
@@ -189,7 +190,7 @@ void CoreEngine::HandleRequest(ConnectionContext* ctx)
     }
 }
 
-void CoreEngine::HandleResponse(ConnectionContext* ctx)
+void CoreEngine::HandleResponse(ClientCtx* ctx)
 {
     WFX_TRACE();
 
@@ -221,7 +222,7 @@ void CoreEngine::HandleResponse(ConnectionContext* ctx)
     connHandler_->Write(ctx, {});
 }
 
-void CoreEngine::HandleSuccess(ConnectionContext* ctx)
+void CoreEngine::HandleSuccess(ClientCtx* ctx)
 {
     WFX_TRACE();
 
@@ -293,7 +294,7 @@ __HandleResponse:
 // vvv Helper Functions vvv
 void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
 {
-    auto* ctx = static_cast<ConnectionContext*>(ud);
+    auto* ctx = static_cast<ClientCtx*>(ud);
     auto* engine = GetMasterState().enginePtr;
 
     if(result.status != AsyncStatus::COMPLETED) {
@@ -315,13 +316,13 @@ void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
     engine->HandleResponse(ctx);
 }
 
-void CoreEngine::FinishRequest(ConnectionContext* ctx)
+void CoreEngine::FinishRequest(ClientCtx* ctx)
 {
     ctx->SetParseState(HttpParseState::PARSE_IDLE);
     connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
-void CoreEngine::HandleError(ConnectionContext* ctx, Shared::HttpStatus code, std::string_view message)
+void CoreEngine::HandleError(ClientCtx* ctx, Shared::HttpStatus code, std::string_view message)
 {
     auto& res = *ctx->responseInfo;
 

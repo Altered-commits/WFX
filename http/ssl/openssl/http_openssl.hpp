@@ -29,11 +29,14 @@ public: // Main functions
     SSLReturn ForceShutdown(void* conn) override;
 
 private: // Helper functions
+    void InitServerContext();
+    void InitClientContext();
     void GlobalOpenSSLInit();
-    void LogOpenSSLError(const char* message, bool fatal = true);
+    void LogOpenSSLError(const char* message, SSL* ssl = nullptr, bool fatal = true);
 
 private:
-    SSL_CTX* ctx = nullptr;
+    SSL_CTX* serverCtx = nullptr;
+    SSL_CTX* clientCtx = nullptr;
     bool useKtls = false;
 };
 

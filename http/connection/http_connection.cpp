@@ -88,8 +88,8 @@ bool WFXIpAddress::ToSockAddr(sockaddr_storage& out, socklen_t& len) const
     }
 }
 
-// vvv Connection Context Methods vvv
-void ConnectionContext::ResetContext()
+// vvv Client Context Methods vvv
+void ClientCtx::Reset()
 {
     rwBuffer.ResetBuffer();
 
@@ -104,25 +104,21 @@ void ConnectionContext::ResetContext()
 
     CleanupStreamGenerator();
 
-    // Clear all flags except 'endpointState', tis special
-    const bool keep = endpointState;
-    __Flags = 0;
-    endpointState = keep;
-
-    // Rest of the stuff
+    flags = 0;
+    handshakeDone = false;
     expectedBodyLength = 0;
     eventType = EventType::EVENT_ACCEPT;
-    parseState = 0;
     trackBytes = 0;
     socket = WFX_INVALID_SOCKET;
     fileInfo = FileInfo{};
     connInfo = WFXIpAddress{};
     asyncData = AsyncData{};
-    clientContext = nullptr;
-    endpointContext = nullptr;
+    endpointCtx = nullptr;
+    // sslConn:      caller freed it before Reset()
+    // generationId: managed by GetConnection()
 }
 
-void ConnectionContext::ClearContext()
+void ClientCtx::Clear()
 {
     rwBuffer.ClearBuffer();
 
@@ -141,11 +137,10 @@ void ConnectionContext::ClearContext()
     trackBytes = 0;
     fileInfo = FileInfo{};
     asyncData = AsyncData{};
-    clientContext = nullptr;
-    endpointContext = nullptr;
+    endpointCtx = nullptr;
 }
 
-void ConnectionContext::CleanupStreamGenerator()
+void ClientCtx::CleanupStreamGenerator()
 {
     if(streamGenerator.ctx && streamGenerator.Destroy)
         streamGenerator.Destroy(streamGenerator.ctx);
@@ -155,52 +150,71 @@ void ConnectionContext::CleanupStreamGenerator()
     streamGenerator.Destroy = nullptr;
 }
 
-void ConnectionContext::SetParseState(HttpParseState newState)
+void ClientCtx::SetParseState(HttpParseState newState)
 {
     parseState = static_cast<std::uint16_t>(newState);
 }
 
-void ConnectionContext::SetConnectionState(ConnectionState newState)
+void ClientCtx::SetConnectionState(ConnectionState newState)
 {
     connectionState = static_cast<std::uint16_t>(newState);
 }
 
-void ConnectionContext::SetEndpointState(EndpointState newState)
-{
-    endpointState = static_cast<std::uint16_t>(newState);
-}
-
-void ConnectionContext::SetEndpointStatus(EndpointStatus newStatus)
-{
-    endpointStatus = static_cast<std::uint16_t>(newStatus);
-}
-
-HttpParseState ConnectionContext::GetParseState() const
+HttpParseState ClientCtx::GetParseState() const
 {
     return static_cast<HttpParseState>(parseState);
 }
 
-ConnectionState ConnectionContext::GetConnectionState() const
+ConnectionState ClientCtx::GetConnectionState() const
 {
     return static_cast<ConnectionState>(connectionState);
 }
 
-EndpointState ConnectionContext::GetEndpointState() const
+bool ClientCtx::IsAsyncOperation() const
+{
+    return asyncData.AsyncComplete != nullptr;
+}
+
+// vvv Endpoint Context Methods vvv
+void EndpointCtx::Reset()
+{
+    rwBuffer.ResetBuffer();
+
+    SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+
+    isShuttingDown = 0;
+    inOnConnectPhase = 0;
+    eventType = EventType::EVENT_ACCEPT;
+    clientCtx = nullptr;
+    asyncData = AsyncData{};
+    socket = WFX_INVALID_SOCKET;
+    // endpointState, endpointIdx:          preserved, TLS config and pool identity survive reset
+    // sslConn:                             caller freed it before Reset()
+    // generationId:                        managed by GetConnection()
+    // slotState, parseStateObj, outputObj: managed by FinalizeEndpointRequest/ReleaseEndpoint
+}
+
+void EndpointCtx::SetConnectionState(ConnectionState newState)
+{
+    connectionState = static_cast<std::uint8_t>(newState);
+}
+
+void EndpointCtx::SetEndpointState(EndpointState newState)
+{
+    endpointState = static_cast<std::uint8_t>(newState);
+}
+
+ConnectionState EndpointCtx::GetConnectionState() const
+{
+    return static_cast<ConnectionState>(connectionState);
+}
+
+EndpointState EndpointCtx::GetEndpointState() const
 {
     return static_cast<EndpointState>(endpointState);
 }
 
-EndpointStatus ConnectionContext::GetEndpointStatus() const
-{
-    return static_cast<EndpointStatus>(endpointStatus);
-}
-
-bool ConnectionContext::IsEndpoint() const
-{
-    return GetEndpointState() != EndpointState::ENDPOINT_NONE;
-}
-
-bool ConnectionContext::IsAsyncOperation() const
+bool EndpointCtx::IsAsyncOperation() const
 {
     return asyncData.AsyncComplete != nullptr;
 }

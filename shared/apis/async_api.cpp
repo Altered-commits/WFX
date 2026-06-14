@@ -7,8 +7,6 @@
 
 namespace WFX::Shared {
 
-using WFX::Http::ConnectionContext;
-
 // Important stuff :)
 static AsyncAPIDataExt1 __GlobalAsyncDataExt1;
 
@@ -25,7 +23,7 @@ const ASYNC_API_EXT1* GetAsyncAPIExt1()
                 return false;
             }
 
-            auto cctx = static_cast<ConnectionContext*>(ctx);
+            auto cctx = static_cast<Http::ClientCtx*>(ctx);
             auto* connHandler = __GlobalAsyncDataExt1.connHandler;
 
             // Shouldn't happen considering we set it in core_engine.cpp

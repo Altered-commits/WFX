@@ -13,7 +13,7 @@ namespace WFX::Http {
 
 // Fwd declare stuff
 struct TrieNode;
-struct ConnectionContext;
+struct ClientCtx;
 
 using MiddlewareStack = std::vector<Shared::MwCallback>;
 using MiddlewareConfigOrder = const std::vector<std::string>&;
@@ -40,7 +40,7 @@ public:
     void RegisterMiddleware(std::string_view name, Shared::MwCallback mw);
     void RegisterPerRouteMiddleware(const TrieNode* node, MiddlewareStack mwStack);
 
-    MiddlewareResult ExecuteMiddleware(ConnectionContext* ctx, const TrieNode* node, Request req, Response res);
+    MiddlewareResult ExecuteMiddleware(ClientCtx* ctx, const TrieNode* node, Request req, Response res);
 
     // Using std::string because TOML loader returns vector<string>
     void LoadMiddlewareFromConfig(MiddlewareConfigOrder order);
@@ -51,8 +51,8 @@ private:
     HttpMiddleware& operator=(const HttpMiddleware&) = delete;
 
 private: // Helper functions
-    MiddlewareResult ExecuteHelper(ConnectionContext* ctx, Request req, Response res, MiddlewareStack& stack);
-    MiddlewareFunctionResult ExecuteFunction(ConnectionContext* ctx, Request req, Response res, Shared::MwCallback mw);
+    MiddlewareResult ExecuteHelper(ClientCtx* ctx, Request req, Response res, MiddlewareStack& stack);
+    MiddlewareFunctionResult ExecuteFunction(ClientCtx* ctx, Request req, Response res, Shared::MwCallback mw);
 
 private:
     // Temporary construct

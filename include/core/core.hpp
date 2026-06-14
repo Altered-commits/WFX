@@ -29,6 +29,10 @@ inline const Shared::HTTP_API_EXT1* HttpApiExt1() noexcept
 {
     return __WFXApi->GetHttpAPIExt1();
 }
+inline const Shared::ENDPOINT_API_EXT1* EndpointApiExt1() noexcept
+{
+    return __WFXApi->GetEndpointAPIExt1();
+}
 inline const Shared::ASYNC_API_EXT1* AsyncApiExt1() noexcept
 {
     return __WFXApi->GetAsyncAPIExt1();

@@ -30,7 +30,6 @@ using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 #ifdef _WIN32
 // Windows: future work
 #else
-
 // vvv Constants vvv
 // Slot state encoding via workerPids:
 //   >= 0  -> live worker PID
@@ -77,9 +76,6 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
         GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
         GetFileCache().Init(config.miscConfig.fileCacheSize);
 
-        Core::CoreEngine engine{dllDir.c_str(), useHttps};
-        globalState.enginePtr = &engine;
-
         signal(SIGTERM, HandleWorkerSignal);
         signal(SIGINT, SIG_IGN);  // SigTerm will kill it, SigInt handled by master
         signal(SIGPIPE, SIG_IGN); // We will handle it internally
@@ -88,7 +84,13 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
         if(pinToCpu)
             PinWorkerToCPU(slotIndex);
 
-        engine.Listen(host, port);
+        // Starting the server bois. Brace yourself cuz shits about to get real
+        {
+            Core::CoreEngine engine{dllDir.c_str(), useHttps};
+            globalState.enginePtr = &engine;
+            engine.Listen(host, port);
+        }
+
         std::exit(0);
     }
 

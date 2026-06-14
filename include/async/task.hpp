@@ -56,6 +56,11 @@ inline Task<Shared::MiddlewareAction> Promise<Shared::MiddlewareAction>::get_ret
         std::coroutine_handle<Promise<Shared::MiddlewareAction>>::from_promise(*this)};
 }
 
+inline Task<Shared::ConnectResult> Promise<Shared::ConnectResult>::get_return_object()
+{
+    return Task<Shared::ConnectResult>{std::coroutine_handle<Promise<Shared::ConnectResult>>::from_promise(*this)};
+}
+
 } // namespace WFX::Async
 
 #endif // WFX_INC_CXX_ASYNC_TASK_HPP

@@ -23,13 +23,13 @@ public: // Static stuff
     static void OnCoroutineComplete(void* ud, Shared::AsyncResult result);
 
 private: // Internal Functions
-    void HandleRequest(Http::ConnectionContext* ctx);
-    void HandleResponse(Http::ConnectionContext* ctx);
-    void HandleSuccess(Http::ConnectionContext* ctx);
+    void HandleRequest(Http::ClientCtx* ctx);
+    void HandleResponse(Http::ClientCtx* ctx);
+    void HandleSuccess(Http::ClientCtx* ctx);
 
 private: // Helper Functions
-    void FinishRequest(Http::ConnectionContext* ctx);
-    void HandleError(Http::ConnectionContext* ctx, Shared::HttpStatus code, std::string_view message);
+    void FinishRequest(Http::ClientCtx* ctx);
+    void HandleError(Http::ClientCtx* ctx, Shared::HttpStatus code, std::string_view message);
     std::uint8_t HandleConnectionHeader(std::string_view header);
     void HandleUserDLLInjection(const char* dllDir);
     void HandleMiddlewareLoading();

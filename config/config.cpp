@@ -44,13 +44,16 @@ void Config::LoadCoreSettings(std::string_view path)
         // vvv SSL vvv
         ExtractValueOrFatal(tbl, "SSL", "cert_path", sslConfig.certPath);
         ExtractValueOrFatal(tbl, "SSL", "key_path", sslConfig.keyPath);
+        ExtractValueOrFatal(tbl, "SSL", "ca_cert_path", sslConfig.caCertPath);
 
         ExtractValue(tbl, "SSL", "tls13_ciphers", sslConfig.tls13Ciphers);
         ExtractValue(tbl, "SSL", "tls12_ciphers", sslConfig.tls12Ciphers);
         ExtractValue(tbl, "SSL", "curves", sslConfig.curves);
-        ExtractValue(tbl, "SSL", "enable_session_cache", sslConfig.enableSessionCache);
+        ExtractValue(tbl, "SSL", "enable_server_session_cache", sslConfig.enableServerSessionCache);
+        ExtractValue(tbl, "SSL", "enable_client_session_cache", sslConfig.enableClientSessionCache);
         ExtractValue(tbl, "SSL", "enable_ktls", sslConfig.enableKTLS);
-        ExtractValue(tbl, "SSL", "session_cache_size", sslConfig.sessionCacheSize);
+        ExtractValue(tbl, "SSL", "server_session_cache_size", sslConfig.serverSessionCacheSize);
+        ExtractValue(tbl, "SSL", "client_session_cache_size", sslConfig.clientSessionCacheSize);
         ExtractValue(tbl, "SSL", "min_proto_version", sslConfig.minProtoVersion);
         ExtractValue(tbl, "SSL", "security_level", sslConfig.securityLevel);
 

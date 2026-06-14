@@ -33,3 +33,4 @@ To Fix:
 3. ADD PROPER ERROR CHECKING FOR ASYNC TIMER OPERATIONS (none but still)
 4. When server reaches connection limit, drop random connections :)
 5. Template engine caching logic is still not good, need to make it more good
+6. Handle endpoint allocation better, aka handle Coalescing, connectTimeoutMs timer, RETRY backoff, DNS refresh
