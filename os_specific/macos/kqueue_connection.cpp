@@ -45,17 +45,21 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
 {
     WFX_TRACE();
 
+    metrics_ = MetricTracer::Current();
+    if(!metrics_)
+        logger_.Fatal("[Kqueue]: MetricTracer not initialized in worker");
+
     auto& osConfig = config_.osSpecificConfig;
 
     events_ = std::make_unique<struct kevent[]>(maxEvents_);
 
-    sockaddr_storage addr;
-    socklen_t addrLen;
+    sockaddr_storage addr{};
+    socklen_t addrLen = 0;
 
     char portStr[6];
     auto [ptr, err] = std::to_chars(portStr, portStr + sizeof(portStr), port);
     if(err != std::errc{})
-        logger_.Fatal("[Kqueue]: Failed to convert port to string representation while resolving host");
+        logger_.Fatal("[Kqueue]: Failed to convert port to string");
 
     *ptr = '\0';
 
@@ -92,10 +96,11 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
     if(kqFd_ < 0)
         logger_.Fatal("[Kqueue]: Failed to create kqueue: ", strerror(errno));
 
+    // Register listening socket for read events (udata = 0, so gen = 0)
     struct kevent listenEv;
     EV_SET(&listenEv, listenFd_, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, nullptr);
     if(kevent(kqFd_, &listenEv, 1, nullptr, 0, nullptr) < 0)
-        logger_.Fatal("[Kqueue]: Failed to add listening socket to kqueue: ", strerror(errno));
+        logger_.Fatal("[Kqueue]: Failed to register listening socket: ", strerror(errno));
 
     timerWheel_.Init(connections_.GetSlots(), 4096, 1, TimeUnit::SECONDS,
                      [this](std::uint32_t connId, std::uint32_t extra) {
@@ -106,7 +111,8 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
                          else
                              ctx = endpoints_[extra].second.GetPtr(connId);
 
-                         if(!ctx->IsEndpoint() && !ctx->IsAsyncOperation())
+                         if(ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE ||
+                            (ctx->IsEndpoint() || ctx->IsAsyncOperation()))
                              Close(ctx, true);
                      });
 
@@ -237,6 +243,14 @@ __CleanupOrRearm:
         FinishWriteCycle(ctx);
 }
 
+void KqueueConnectionHandler::FinishWriteCycle(ConnectionContext* ctx)
+{
+    (void)RegisterKqueue(ctx, KQ_DROP_WRITE);
+    ctx->ClearContext();
+    ResumeReceive(ctx);
+    Receive(ctx);
+}
+
 void KqueueConnectionHandler::WriteFile(ConnectionContext* ctx, std::string path)
 {
     if(!EnsureFileReady(ctx, std::move(path))) {
@@ -341,7 +355,7 @@ void KqueueConnectionHandler::Close(ConnectionContext* ctx, bool forceClose)
     ReleaseConnection(ctx);
 }
 
-// vvv Main Functions vvv
+// vvv Main Event Loop vvv
 void KqueueConnectionHandler::Run()
 {
     WFX_TRACE();
@@ -358,9 +372,12 @@ void KqueueConnectionHandler::Run()
             break;
         }
 
+        bool listenReady = false;
+
         for(int i = 0; i < nfds; i++) {
             auto& ev = events_[i];
 
+            // kqueue timer events don't use udata for identification
             if(ev.filter == EVFILT_TIMER) {
                 if(ev.ident == TIMEOUT_TIMER_IDENT)
                     HandleTimeoutTimer();
@@ -369,62 +386,18 @@ void KqueueConnectionHandler::Run()
                 continue;
             }
 
-            std::uint64_t meta = (std::uint64_t)(uintptr_t)ev.udata;
-            std::uint16_t gen = (meta >> 32) & 0xFFFF;
+            std::uint64_t udata = (std::uint64_t)(uintptr_t)ev.udata;
+            std::uint16_t gen = (udata >> 32) & 0xFFFF;
 
-            if(gen > 0)
-                goto __HandleExistingConnection;
-
-            if((uintptr_t)ev.ident == (uintptr_t)listenFd_ && ev.filter == EVFILT_READ) {
-                while(true) {
-                    sockaddr_storage addr{};
-                    socklen_t len = sizeof(addr);
-
-                    int clientFd = accept(listenFd_, (sockaddr*)&addr, &len);
-                    if(clientFd < 0) {
-                        if(errno == EAGAIN || errno == EWOULDBLOCK)
-                            break;
-                        else
-                            continue;
-                    }
-
-                    if(!SetNonBlocking(clientFd)) {
-                        close(clientFd);
-                        continue;
-                    }
-
-                    if(!SetNoSigPipe(clientFd)) {
-                        close(clientFd);
-                        continue;
-                    }
-
-                    TuneAcceptedSocket(clientFd);
-
-                    WFXIpAddress tmpIp;
-                    if(!ResolveIP(addr, tmpIp)) {
-                        close(clientFd);
-                        continue;
-                    }
-
-                    ConnectionContext* ctx = AcquireClientConnection(tmpIp);
-                    if(!ctx) {
-                        close(clientFd);
-                        continue;
-                    }
-
-                    ctx->socket = clientFd;
-                    ctx->connInfo = tmpIp;
-
-                    WrapAccept(ctx);
-                }
+            if(gen == 0) {
+                if((uintptr_t)ev.ident == (uintptr_t)listenFd_ && ev.filter == EVFILT_READ)
+                    listenReady = true;
                 continue;
             }
 
-            continue;
-
-        __HandleExistingConnection:
-            std::uint16_t endpointIdx = meta >> 48;
-            std::uint32_t poolIdx = meta & 0xFFFFFFFF;
+            // Existing connection
+            std::uint16_t endpointIdx = udata >> 48;
+            std::uint32_t poolIdx = udata & 0xFFFFFFFF;
 
             ConnectionContext* ctx = nullptr;
 
@@ -436,11 +409,19 @@ void KqueueConnectionHandler::Run()
             if(ctx->generationId != gen)
                 continue;
 
+            // System-level error on this fd
+            if(ev.flags & EV_ERROR) {
+                Close(ctx);
+                continue;
+            }
+
+            // SSL handshake in progress
             if(ctx->eventType == EventType::EVENT_HANDSHAKE) {
                 HandleHandshake(ctx, ev.filter);
                 continue;
             }
 
+            // SSL shutdown in progress
             if(ctx->eventType == EventType::EVENT_SHUTDOWN) {
                 auto res = sslHandler_->Shutdown(ctx->sslConn);
 
@@ -457,30 +438,25 @@ void KqueueConnectionHandler::Run()
                 continue;
             }
 
-            if(ev.flags & EV_ERROR) {
-                Close(ctx);
-                continue;
-            }
-
+            // Readable event
             if(ev.filter == EVFILT_READ) {
-                if(ev.flags & EV_EOF) {
-                    if(ctx->eventType == EventType::EVENT_RECV)
-                        Receive(ctx);
-                    else
-                        Close(ctx);
+                if(ev.flags & (EV_EOF | EV_ERROR)) {
+                    Receive(ctx);
                     continue;
                 }
                 if(ctx->eventType == EventType::EVENT_RECV) {
                     if(!ipLimiter_.AllowRequest(ctx->connInfo)) {
                         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
                         Write(ctx, HttpError::tooManyRequests);
-                        continue;
                     }
-                    Receive(ctx);
+                    else
+                        Receive(ctx);
                 }
             }
 
+            // Writable event
             if(ev.filter == EVFILT_WRITE) {
+                // EV_EOF on write: remote reset the connection
                 if(ev.flags & EV_EOF) {
                     Close(ctx);
                     continue;
@@ -488,83 +464,82 @@ void KqueueConnectionHandler::Run()
                 HandleWriteReady(ctx, ev.filter);
             }
         }
+
+        if(listenReady) {
+            while(true) {
+                sockaddr_storage addr{};
+                socklen_t len = sizeof(addr);
+
+                int clientFd = accept(listenFd_, (sockaddr*)&addr, &len);
+                if(clientFd < 0) {
+                    if(errno == EAGAIN || errno == EWOULDBLOCK)
+                        break;
+                    else
+                        continue;
+                }
+
+                if(!SetNonBlocking(clientFd)) {
+                    close(clientFd);
+                    continue;
+                }
+
+                if(!SetNoSigPipe(clientFd)) {
+                    close(clientFd);
+                    continue;
+                }
+
+                int nodelay = 1;
+                (void)setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+
+                WFXIpAddress tmpIp;
+                if(!ResolveIP(addr, tmpIp)) {
+                    close(clientFd);
+                    continue;
+                }
+
+                if(!ipLimiter_.AllowConnection(tmpIp)) {
+                    close(clientFd);
+                    continue;
+                }
+
+                ConnectionContext* ctx = EnsureAcceptSlot();
+                if(!ctx) {
+                    ipLimiter_.ReleaseConnection(tmpIp);
+                    close(clientFd);
+                    continue;
+                }
+
+                ctx->socket = clientFd;
+                ctx->connInfo = tmpIp;
+
+                WrapAccept(ctx);
+            }
+        }
     }
+
+    DrainAllConnections();
 }
 
-void KqueueConnectionHandler::CloseDeadPeers()
+ConnectionContext* KqueueConnectionHandler::EnsureAcceptSlot()
 {
-    static thread_local std::vector<ConnectionContext*> dead;
-    dead.clear();
+    if(ConnectionContext* ctx = GetConnection())
+        return ctx;
 
-    auto probe = [&](ConnectionContext* ctx, std::uint32_t) {
-        if(ctx->socket <= 0 || ctx->isShuttingDown)
-            return;
-        if(ctx->eventType == EventType::EVENT_SHUTDOWN || ctx->eventType == EventType::EVENT_HANDSHAKE)
-            return;
+    return nullptr;
+}
 
-        char byte = 0;
-        ssize_t n = ::recv(ctx->socket, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
-        if(n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK))
-            dead.push_back(ctx);
-    };
+void KqueueConnectionHandler::DrainAllConnections()
+{
+    std::vector<ConnectionContext*> pending;
+    pending.reserve(256);
 
-    connections_.ForEachAllocated(probe);
+    connections_.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
+
     for(auto& ep : endpoints_)
-        ep.second.ForEachAllocated(probe);
+        ep.second.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
 
-    for(ConnectionContext* ctx : dead)
+    for(ConnectionContext* ctx : pending)
         Close(ctx, true);
-}
-
-void KqueueConnectionHandler::PollRecvPeers()
-{
-    connections_.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) {
-        if(ctx->socket == WFX_INVALID_SOCKET || ctx->isShuttingDown)
-            return;
-        if(ctx->eventType != EventType::EVENT_RECV)
-            return;
-        Receive(ctx);
-    });
-}
-
-void KqueueConnectionHandler::ReclaimStaleConnections(bool pollRecv)
-{
-    CloseDeadPeers();
-
-    if(pollRecv)
-        PollRecvPeers();
-
-    CloseDeadPeers();
-}
-
-ConnectionContext* KqueueConnectionHandler::AcquireClientConnection(const WFXIpAddress& ip)
-{
-    if(!ipLimiter_.AllowConnection(ip))
-        return nullptr;
-
-    if(ConnectionContext* ctx = GetConnection())
-        return ctx;
-
-    ipLimiter_.ReleaseConnection(ip);
-    ReclaimStaleConnections(false);
-
-    if(!ipLimiter_.AllowConnection(ip))
-        return nullptr;
-
-    if(ConnectionContext* ctx = GetConnection())
-        return ctx;
-
-    ipLimiter_.ReleaseConnection(ip);
-    ReclaimStaleConnections(true);
-
-    if(!ipLimiter_.AllowConnection(ip))
-        return nullptr;
-
-    ConnectionContext* ctx = GetConnection();
-    if(!ctx)
-        ipLimiter_.ReleaseConnection(ip);
-
-    return ctx;
 }
 
 void KqueueConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)
@@ -693,32 +668,6 @@ bool KqueueConnectionHandler::SetNoSigPipe(int fd)
 {
     int opt = 1;
     return setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &opt, sizeof(opt)) == 0;
-}
-
-void KqueueConnectionHandler::TuneAcceptedSocket(int fd)
-{
-    int on = 1;
-    (void)setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on));
-
-    // Detect dead peers that would otherwise linger as half-open connections on kqueue.
-    int idle = 1;
-    (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof(idle));
-}
-
-void KqueueConnectionHandler::FinishWriteCycle(ConnectionContext* ctx)
-{
-    const bool hadWriteFilter =
-        ctx->eventType == EventType::EVENT_SEND || ctx->eventType == EventType::EVENT_SEND_FILE;
-
-    if(hadWriteFilter) {
-        (void)RegisterKqueue(ctx, KQ_DROP_WRITE);
-        // Re-arm read only after write filter was registered (macOS kqueue EOF quirk).
-        (void)RegisterKqueue(ctx, KQ_REARM_READ);
-    }
-
-    ctx->ClearContext();
-    ResumeReceive(ctx);
-    Receive(ctx);
 }
 
 bool KqueueConnectionHandler::EnsureFileReady(ConnectionContext* ctx, std::string path)
@@ -938,8 +887,7 @@ void KqueueConnectionHandler::ResumeStream(ConnectionContext* ctx)
             }
             else {
                 char chunkHeader[16];
-                int headerLen =
-                    snprintf(chunkHeader, sizeof(chunkHeader), "%zX\r\n", streamResult.writtenBytes);
+                int headerLen = snprintf(chunkHeader, sizeof(chunkHeader), "%zX\r\n", streamResult.writtenBytes);
                 if(headerLen <= 0 || headerLen >= static_cast<int>(sizeof(chunkHeader))) {
                     Close(ctx);
                     return;
@@ -1024,9 +972,6 @@ void KqueueConnectionHandler::HandleTimeoutTimer()
 {
     std::uint64_t nowSec = NowMs() / 1000;
     timerWheel_.Tick(nowSec);
-
-    if(connections_.CountAllocated() > 0)
-        CloseDeadPeers();
 }
 
 void KqueueConnectionHandler::HandleAsyncTimer()
@@ -1100,6 +1045,9 @@ void KqueueConnectionHandler::HandleWriteReady(ConnectionContext* ctx, std::int1
 
             Write(ctx, {});
         } break;
+
+        default:
+            break;
     }
 }
 
@@ -1180,6 +1128,9 @@ bool KqueueConnectionHandler::RegisterKqueue(ConnectionContext* ctx, int op)
             continue;
 
         if((op == KQ_DEL || op == KQ_DROP_WRITE) && errno == ENOENT)
+            return true;
+
+        if((op == KQ_ADD || op == KQ_REARM_READ || op == KQ_MOD || op == KQ_ADD_WRITE) && errno == EEXIST)
             return true;
 
         return false;

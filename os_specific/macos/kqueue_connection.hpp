@@ -53,7 +53,7 @@ public:
     void RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds) override;
     bool RefreshAsyncTimer(ConnectionContext* ctx, std::uint32_t delayMs, AsyncData asyncData) override;
 
-private:
+private: // Helper Functions
     ConnectionContext* GetConnection(std::uint16_t endpointIndex = 0xFFFF);
     void ReleaseConnection(ConnectionContext* ctx, bool freeOnly = false);
 
@@ -82,10 +82,8 @@ private:
 
     void WrapAccept(ConnectionContext* ctx);
     EndpointStatus WrapConnect(ConnectionContext* cctx, EndpointContainer& ecnt);
-    void CloseDeadPeers();
-    void PollRecvPeers();
-    void ReclaimStaleConnections(bool pollRecv = true);
-    ConnectionContext* AcquireClientConnection(const WFXIpAddress& ip);
+    void DrainAllConnections();
+    ConnectionContext* EnsureAcceptSlot();
     ssize_t WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
     ssize_t WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len);
     ssize_t WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count);
@@ -95,7 +93,7 @@ private:
     Logger& logger_ = GetLogger();
     FileCache& fileCache_ = GetFileCache();
     BufferPool& pool_ = GetBufferPool();
-    WorkerMetrics* metrics_ = MetricTracer::Current();
+    WorkerMetrics* metrics_ = nullptr;
 
     IpLimiter ipLimiter_ = {pool_};
     ReceiveCallback onReceive_ = {};
@@ -121,7 +119,6 @@ private:
     constexpr static int KQ_DROP_WRITE = 4;
     constexpr static int KQ_REARM_READ = 5;
 
-    void TuneAcceptedSocket(int fd);
     void FinishWriteCycle(ConnectionContext* ctx);
 
 private:
