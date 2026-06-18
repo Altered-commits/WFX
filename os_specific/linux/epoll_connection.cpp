@@ -592,9 +592,6 @@ void EpollConnectionHandler::Run()
 
 void EpollConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)
 {
-    if(timeoutSeconds == 0)
-        return;
-
     ConnectionPool* pool = nullptr;
     std::uint32_t extra = CLIENT_CONNECTION_TAG;
 

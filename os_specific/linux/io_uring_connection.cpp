@@ -329,9 +329,6 @@ void IoUringConnectionHandler::Run()
 
 void IoUringConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)
 {
-    if(timeoutSeconds == 0)
-        return;
-
     ctx->expiry = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSeconds);
 }
 

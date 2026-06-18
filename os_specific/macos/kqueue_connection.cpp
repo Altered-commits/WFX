@@ -15,6 +15,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <algorithm>
 #include <vector>
 
 namespace WFX::OSSpecific {
@@ -96,7 +97,6 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
     if(kqFd_ < 0)
         logger_.Fatal("[Kqueue]: Failed to create kqueue: ", strerror(errno));
 
-    // Register listening socket for read events (udata = 0, so gen = 0)
     struct kevent listenEv;
     EV_SET(&listenEv, listenFd_, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, nullptr);
     if(kevent(kqFd_, &listenEv, 1, nullptr, 0, nullptr) < 0)
@@ -106,6 +106,7 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
                      [this](std::uint32_t connId, std::uint32_t extra) {
                          ConnectionContext* ctx = nullptr;
 
+                         // extra is either the client tag or the endpoint index.
                          if(extra >= CLIENT_CONNECTION_TAG)
                              ctx = connections_.GetPtr(connId);
                          else
@@ -138,6 +139,7 @@ std::uint16_t KqueueConnectionHandler::AllocateEndpoint(std::string_view host, s
 
     auto& endpointSlot =
         endpoints_.emplace_back(std::piecewise_construct, std::forward_as_tuple(), std::forward_as_tuple(cLimit));
+    activeEndpoints_.emplace_back();
 
     auto& endpointInfo = endpointSlot.first;
     auto& endpointPool = endpointSlot.second;
@@ -186,6 +188,8 @@ void KqueueConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg
                 if(!ctx->rwBuffer.IsWriteInitialized() && !ctx->rwBuffer.InitWriteBuffer(netCfg.maxSendBufferSize)) {
                     goto __CloseConnection;
                 }
+
+                // Socket buffer is full. Store only the unsent tail and wait for EVFILT_WRITE.
                 if(!ctx->rwBuffer.AppendWriteData(msg.data() + sent, static_cast<std::uint32_t>(msg.size() - sent),
                                                   netCfg.sendBufferIncSize, netCfg.maxSendBufferSize)) {
                     goto __CloseConnection;
@@ -205,6 +209,7 @@ void KqueueConnectionHandler::Write(ConnectionContext* ctx, std::string_view msg
         if(!writeMeta || writeMeta->writtenLength >= writeMeta->dataLength)
             goto __CleanupOrRearm;
 
+        // Empty msg means resume a previous buffered write.
         while(writeMeta->writtenLength < writeMeta->dataLength) {
             const char* buf = ctx->rwBuffer.GetWriteData() + writeMeta->writtenLength;
             std::size_t remaining = writeMeta->dataLength - writeMeta->writtenLength;
@@ -245,6 +250,8 @@ __CleanupOrRearm:
 
 void KqueueConnectionHandler::FinishWriteCycle(ConnectionContext* ctx)
 {
+    // Drop write interest after flushing, otherwise kqueue keeps waking us up
+    // just because most sockets are writable most of the time.
     (void)RegisterKqueue(ctx, KQ_DROP_WRITE);
     ctx->ClearContext();
     ResumeReceive(ctx);
@@ -389,13 +396,14 @@ void KqueueConnectionHandler::Run()
             std::uint64_t udata = (std::uint64_t)(uintptr_t)ev.udata;
             std::uint16_t gen = (udata >> 32) & 0xFFFF;
 
+            // Listener/timer events don't point to a ConnectionContext.
             if(gen == 0) {
                 if((uintptr_t)ev.ident == (uintptr_t)listenFd_ && ev.filter == EVFILT_READ)
                     listenReady = true;
                 continue;
             }
 
-            // Existing connection
+            // udata packs enough info to find the context without fd->ctx maps.
             std::uint16_t endpointIdx = udata >> 48;
             std::uint32_t poolIdx = udata & 0xFFFFFFFF;
 
@@ -470,6 +478,7 @@ void KqueueConnectionHandler::Run()
                 sockaddr_storage addr{};
                 socklen_t len = sizeof(addr);
 
+                // Edge-triggered listener: accept until the queue is empty.
                 int clientFd = accept(listenFd_, (sockaddr*)&addr, &len);
                 if(clientFd < 0) {
                     if(errno == EAGAIN || errno == EWOULDBLOCK)
@@ -531,22 +540,38 @@ ConnectionContext* KqueueConnectionHandler::EnsureAcceptSlot()
 void KqueueConnectionHandler::DrainAllConnections()
 {
     std::vector<ConnectionContext*> pending;
-    pending.reserve(256);
+    pending.reserve(activeConnections_.size());
 
-    connections_.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
+    // Copy first; Close() mutates the active lists while releasing slots.
+    pending.insert(pending.end(), activeConnections_.begin(), activeConnections_.end());
 
-    for(auto& ep : endpoints_)
-        ep.second.ForEachAllocated([&](ConnectionContext* ctx, std::uint32_t) { pending.push_back(ctx); });
+    for(auto& activeEndpoint : activeEndpoints_)
+        pending.insert(pending.end(), activeEndpoint.begin(), activeEndpoint.end());
 
     for(ConnectionContext* ctx : pending)
         Close(ctx, true);
 }
 
+void KqueueConnectionHandler::TrackConnection(ConnectionContext* ctx)
+{
+    // BitmapPool intentionally stays simple, so kqueue tracks active slots
+    // itself for shutdown cleanup.
+    if(ctx->IsEndpoint())
+        activeEndpoints_[ctx->endpointIdx].push_back(ctx);
+    else
+        activeConnections_.push_back(ctx);
+}
+
+void KqueueConnectionHandler::UntrackConnection(ConnectionContext* ctx)
+{
+    auto& active = ctx->IsEndpoint() ? activeEndpoints_[ctx->endpointIdx] : activeConnections_;
+    auto it = std::find(active.begin(), active.end(), ctx);
+    if(it != active.end())
+        active.erase(it);
+}
+
 void KqueueConnectionHandler::RefreshExpiry(ConnectionContext* ctx, std::uint16_t timeoutSeconds)
 {
-    if(timeoutSeconds == 0)
-        return;
-
     ConnectionPool* pool = nullptr;
     std::uint32_t extra = CLIENT_CONNECTION_TAG;
 
@@ -605,6 +630,8 @@ ConnectionContext* KqueueConnectionHandler::GetConnection(std::uint16_t endpoint
     if(ctx->generationId == 0)
         ctx->generationId = 1;
 
+    TrackConnection(ctx);
+
     return ctx;
 }
 
@@ -619,7 +646,10 @@ void KqueueConnectionHandler::ReleaseConnection(ConnectionContext* ctx, bool fre
 
     auto& pool = ctx->IsEndpoint() ? endpoints_[ctx->endpointIdx].second : connections_;
     std::uint32_t idx = pool.GetIndex(ctx);
+    UntrackConnection(ctx);
 
+    // Some paths allocate a slot but fail before the fd/timers/API callbacks
+    // are fully wired. In that case we only need to return the pool slot.
     if(freeOnly)
         goto __FreeContext;
 
@@ -1082,6 +1112,7 @@ std::uint64_t KqueueConnectionHandler::PackKqueueData(ConnectionContext* ctx)
 
     std::uint32_t idx = pool.GetIndex(ctx);
 
+    // tag:16 | generation:16 | pool index:32
     return (static_cast<std::uint64_t>(tag) << 48) | (static_cast<std::uint64_t>(ctx->generationId) << 32) |
            static_cast<std::uint64_t>(idx);
 }
@@ -1103,7 +1134,7 @@ bool KqueueConnectionHandler::RegisterKqueue(ConnectionContext* ctx, int op)
 
         switch(op) {
             case KQ_ADD:
-                // Recv-only: avoid 10k spurious EVFILT_WRITE events when sockets are writable.
+                // Start read-only; write is added only when bytes are pending.
                 EV_SET(&changes[n++], ctx->socket, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, udata);
                 break;
             case KQ_MOD:
@@ -1174,6 +1205,7 @@ bool KqueueConnectionHandler::CreateAndConnect(ConnectionContext* ctx, EndpointC
         if(errno == EINTR)
             continue;
 
+        // Non-blocking connect completes later through EVFILT_WRITE.
         if(errno == EINPROGRESS) {
             ctx->eventType = EventType::EVENT_CONNECT;
             return true;
@@ -1190,6 +1222,7 @@ void KqueueConnectionHandler::WrapAccept(ConnectionContext* ctx)
     int clientFd = ctx->socket;
 
     if(useHttps_) {
+        // TLS accept can finish now or continue through the normal handshake state.
         ctx->sslConn = sslHandler_->Wrap(clientFd);
         if(!ctx->sslConn) {
             ReleaseConnection(ctx);
@@ -1235,7 +1268,7 @@ EndpointStatus KqueueConnectionHandler::WrapConnect(ConnectionContext* ctx, Endp
     if(!RegisterKqueue(ctx, KQ_ADD))
         return EndpointStatus::INTERNAL_ERROR;
 
-    // Re-register to force kqueue to re-evaluate state (mimics EPOLL_CTL_MOD)
+    // Force kqueue to re-check writability after a fast connect.
     if(ctx->eventType != EventType::EVENT_CONNECT && !RegisterKqueue(ctx, KQ_MOD))
         return EndpointStatus::INTERNAL_ERROR;
 
@@ -1325,8 +1358,7 @@ ssize_t KqueueConnectionHandler::WrapWrite(ConnectionContext* ctx, const char* b
 ssize_t KqueueConnectionHandler::WrapFile(ConnectionContext* ctx, int fd, off_t* offset, std::size_t count)
 {
     if(!ctx->sslConn) {
-        // macOS sendfile: int sendfile(int fd, int s, off_t offset, off_t* len, sf_hdtr* hdtr, int flags)
-        // Note: arg order differs from Linux. *len is both input (to send) and output (sent so far).
+        // macOS sendfile writes the transferred byte count back into len.
         off_t len = static_cast<off_t>(count);
         int ret = ::sendfile(fd, ctx->socket, *offset, &len, nullptr, 0);
 
@@ -1344,8 +1376,8 @@ ssize_t KqueueConnectionHandler::WrapFile(ConnectionContext* ctx, int fd, off_t*
         // ret == -1: either EAGAIN (partial ok) or fatal error
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             if(sentSome)
-                return (ssize_t)len; // Partial progress – caller loops back until EAGAIN with 0 bytes
-            return -1;               // No progress at all – caller arms EVFILT_WRITE and waits
+                return (ssize_t)len;
+            return -1;
         }
 
         return -1; // Fatal error

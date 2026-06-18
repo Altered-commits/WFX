@@ -83,6 +83,8 @@ private: // Helper Functions
     void WrapAccept(ConnectionContext* ctx);
     EndpointStatus WrapConnect(ConnectionContext* cctx, EndpointContainer& ecnt);
     void DrainAllConnections();
+    void TrackConnection(ConnectionContext* ctx);
+    void UntrackConnection(ConnectionContext* ctx);
     ConnectionContext* EnsureAcceptSlot();
     ssize_t WrapRead(ConnectionContext* ctx, char* buf, std::size_t len);
     ssize_t WrapWrite(ConnectionContext* ctx, const char* buf, std::size_t len);
@@ -137,6 +139,8 @@ private:
 private:
     ConnectionPool connections_ = {config_.networkConfig.maxConnections};
     EndpointPool endpoints_ = {};
+    std::vector<ConnectionContext*> activeConnections_ = {};
+    std::vector<std::vector<ConnectionContext*>> activeEndpoints_ = {};
 };
 
 } // namespace WFX::OSSpecific
