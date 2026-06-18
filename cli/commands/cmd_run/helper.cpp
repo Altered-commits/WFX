@@ -13,11 +13,16 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
-#include <wait.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <netinet/in.h>
+#include <netdb.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <unistd.h>
 #endif
 
+#include <charconv>
 #include <ctime>
 #include <thread>
 
@@ -40,9 +45,77 @@ static constexpr pid_t SLOT_PENDING = -1;
 static constexpr pid_t SLOT_DEAD = -2;
 
 // vvv Helper Functions vvv
+static WFXSocket CreateSharedListenSocket(const std::string& host, std::uint16_t port)
+{
+#if defined(__APPLE__)
+    auto& logger = GetLogger();
+    auto& osConfig = GetConfig().osSpecificConfig;
+
+    char portStr[6];
+    auto [ptr, err] = std::to_chars(portStr, portStr + sizeof(portStr), port);
+    if(err != std::errc{})
+        logger.Fatal("[WFX-Master]: Failed to convert port to string");
+
+    *ptr = '\0';
+
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_ADDRCONFIG;
+
+    addrinfo* res = nullptr;
+    if(getaddrinfo(host.c_str(), portStr, &hints, &res) != 0)
+        logger.Fatal("[WFX-Master]: Failed to resolve host '", host, '\'');
+
+    WFXSocket listenFd = WFX_INVALID_SOCKET;
+
+    for(addrinfo* ai = res; ai; ai = ai->ai_next) {
+        listenFd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if(listenFd < 0)
+            continue;
+
+        if(ai->ai_family == AF_INET6) {
+            int no = 0;
+            (void)setsockopt(listenFd, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(no));
+        }
+
+        int opt = 1;
+        if(setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+            close(listenFd);
+            listenFd = WFX_INVALID_SOCKET;
+            continue;
+        }
+
+        int flags = fcntl(listenFd, F_GETFL, 0);
+        if(flags < 0 || fcntl(listenFd, F_SETFL, flags | O_NONBLOCK) < 0) {
+            close(listenFd);
+            listenFd = WFX_INVALID_SOCKET;
+            continue;
+        }
+
+        if(bind(listenFd, ai->ai_addr, ai->ai_addrlen) == 0 && listen(listenFd, osConfig.backlog) == 0)
+            break;
+
+        close(listenFd);
+        listenFd = WFX_INVALID_SOCKET;
+    }
+
+    freeaddrinfo(res);
+
+    if(listenFd == WFX_INVALID_SOCKET)
+        logger.Fatal("[WFX-Master]: Failed to create shared listen socket");
+
+    return listenFd;
+#else
+    (void)host;
+    (void)port;
+    return WFX_INVALID_SOCKET;
+#endif
+}
+
 static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::string& logsDir,
                         const std::string& crashLogsDir, bool useHttps, bool pinToCpu, const std::string& host,
-                        std::uint16_t port)
+                        std::uint16_t port, WFXSocket listenFd)
 {
     auto& globalState = GetMasterState();
     auto& logger = GetLogger();
@@ -77,7 +150,7 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
         GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
         GetFileCache().Init(config.miscConfig.fileCacheSize);
 
-        Core::CoreEngine engine{dllDir.c_str(), useHttps};
+        Core::CoreEngine engine{dllDir.c_str(), useHttps, listenFd};
         globalState.enginePtr = &engine;
 
         signal(SIGTERM, HandleWorkerSignal);
@@ -186,7 +259,8 @@ static void ReapDeadWorkers()
 
 // Step 2: Revive slots whose backoff window has expired
 static void RevivePendingWorkers(const std::string& dllDir, const std::string& logsDir, const std::string& crashLogsDir,
-                                 bool useHttps, bool pinToCpu, const std::string& host, std::uint16_t port)
+                                 bool useHttps, bool pinToCpu, const std::string& host, std::uint16_t port,
+                                 WFXSocket listenFd)
 {
     auto& globalState = GetMasterState();
     auto& logger = GetLogger();
@@ -211,7 +285,7 @@ static void RevivePendingWorkers(const std::string& dllDir, const std::string& l
         logger.Info("[WFX-Master]: Reviving worker ", i, " (attempt ", slot->self.backoffAttempts + 1, "/",
                     miscConfig.maxWorkerRestarts, ")");
 
-        if(SpawnWorker(i, dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, host, port)) {
+        if(SpawnWorker(i, dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, host, port, listenFd)) {
             slot->self.restarts++;
             slot->self.backoffAttempts++;
         }
@@ -353,6 +427,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
 
     // Switch ports if we enable https and we don't want to override https default port
     std::uint16_t port = useHttps && !ohp ? 443U : cfg.port;
+    WFXSocket sharedListenFd = CreateSharedListenSocket(cfg.host, port);
 
     logger.Info("[WFX-Master]: Server running at ", useHttps ? "https://" : "http://", cfg.host, ':', port);
     logger.Info("[WFX-Master]: Press Ctrl+C to stop");
@@ -412,14 +487,22 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         logger.OpenFile((logsDir + "master.log").c_str(), loggingConfig.maxFileSize, loggingConfig.maxRotations);
 
     // -------------------- WORKERS SPAWNING PHASE --------------------
+#if defined(__APPLE__)
+    const std::string dllDir = buildConfig.buildDir + "/user_entry.dylib";
+#elif defined(_WIN32)
+    const std::string dllDir = buildConfig.buildDir + "/user_entry.dll";
+#else
     const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
+#endif
 
     globalState.workerPids.resize(osConfig.workerProcesses, -1);
 
     for(int i = 0; i < osConfig.workerProcesses; i++) {
-        if(!SpawnWorker(i, dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, cfg.host, port)) {
+        if(!SpawnWorker(i, dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, cfg.host, port, sharedListenFd)) {
             // Clean up before bailing
             MetricTracer::Destroy();
+            if(sharedListenFd != WFX_INVALID_SOCKET)
+                close(sharedListenFd);
             if(!DaemonRegistry::Delete(projectName))
                 logger.Warn("[WFX-Master]: Failed to delete PID file during fork failure cleanup");
 
@@ -430,9 +513,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     // --- Master wait loop ---
     while(!globalState.shouldStop) {
         // Sleep for poll interval, wake early on any signal
-        struct timespec ts {
-            config.miscConfig.masterPollInterval, 0
-        };
+        struct timespec ts{config.miscConfig.masterPollInterval, 0};
         nanosleep(&ts, nullptr);
 
         // Server stopped
@@ -443,7 +524,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         ReapDeadWorkers();
 
         // 2. Revive slots whose backoff window has expired
-        RevivePendingWorkers(dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, cfg.host, port);
+        RevivePendingWorkers(dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, cfg.host, port, sharedListenFd);
 
         // 3. Poll metrics for all live workers
         PollWorkerMetrics();
@@ -483,6 +564,9 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
 
     // Hygiene (Not that it matters, OS would reclaim it anyways if this crashes)
     MetricTracer::Destroy();
+
+    if(sharedListenFd != WFX_INVALID_SOCKET)
+        close(sharedListenFd);
 
     if(!DaemonRegistry::Delete(config.projectConfig.projectName))
         logger.Warn("[WFX-Master]: Failed to delete PID file on shutdown");

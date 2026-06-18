@@ -41,7 +41,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 function(filter_sources_by_os out_var)
     set(filtered_sources "")
     foreach(src IN LISTS ${out_var})
-        if(NOT src MATCHES "/(windows|linux|macos)/")
+        if(NOT src MATCHES "/(windows|linux|macos|posix)/")
+            list(APPEND filtered_sources "${src}")
+        elseif(src MATCHES "/posix/" AND (CURRENT_OS STREQUAL "linux" OR CURRENT_OS STREQUAL "macos"))
             list(APPEND filtered_sources "${src}")
         elseif(src MATCHES "/${CURRENT_OS}/")
             list(APPEND filtered_sources "${src}")
@@ -127,9 +129,14 @@ target_compile_options(wfx PRIVATE
 # Linker options
 # -----------------------------
 target_link_options(wfx PRIVATE
-    # Release (GCC / Clang / AppleClang / Intel)
-    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:IntelLLVM>>>:
+    # Release (GCC / Clang / Intel — Linux/other non-Apple Unix)
+    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:IntelLLVM>>,$<NOT:$<PLATFORM_ID:Darwin>>>:
         -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto
+    >
+
+    # Release (AppleClang / Clang on macOS — use ld64-compatible flags)
+    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>>,$<PLATFORM_ID:Darwin>>:
+        -Wl,-dead_strip -flto=auto
     >
 
     # Release (MSVC)

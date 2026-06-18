@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 
-#ifndef WFX_LINUX_FILEMANIP_HPP
-#define WFX_LINUX_FILEMANIP_HPP
+#ifndef WFX_POSIX_FILEMANIP_HPP
+#define WFX_POSIX_FILEMANIP_HPP
 
 #include "utils/fileops/filesystem.hpp"
 
-// Including them here because these will be common for both filesystem.cpp and filemanip.cpp
-// And this file will STRICTLY be included in those two files only so no issue :)
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -17,10 +15,10 @@
 
 namespace WFX::Utils {
 
-class LinuxFile : public BaseFile {
+class PosixFile : public BaseFile {
 public:
-    LinuxFile() = default;
-    ~LinuxFile() override;
+    PosixFile() = default;
+    ~PosixFile() override;
 
 public:
     std::int64_t Read(void* buffer, std::size_t bytes) override;
@@ -37,7 +35,7 @@ public:
     void Close() override;
     bool IsOpen() const override;
 
-public: // For internal public use
+public:
     bool OpenRead(const char* path);
     bool OpenWrite(const char* path);
     void OpenExisting(int fd, std::size_t size, bool cached);
@@ -51,4 +49,4 @@ private:
 
 } // namespace WFX::Utils
 
-#endif // WFX_LINUX_FILEMANIP_HPP
+#endif // WFX_POSIX_FILEMANIP_HPP

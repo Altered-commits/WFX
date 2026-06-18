@@ -5,6 +5,7 @@
 #define WFX_UTILS_CRASH_TRACER_HPP
 
 #include <cstdint>
+#include <cstddef>
 #include "shared/utils/detection_macro.hpp"
 
 #if defined(WFX_PLATFORM_POSIX)

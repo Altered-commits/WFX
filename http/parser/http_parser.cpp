@@ -7,7 +7,6 @@
 #include "http/headers/http_headers.hpp"
 #include "http/request/http_request.hpp"
 #include "utils/string/string.hpp"
-#include "utils/string/string.hpp"
 
 namespace WFX::Http {
 
@@ -109,7 +108,7 @@ HttpParseState Parse(ConnectionContext* ctx)
 
             // Data should be fetched all at once
             if(hasContentLengthHeader) {
-                std::size_t contentLen = 0;
+                std::uint64_t contentLen = 0;
                 // Malformed Content-Length
                 if(!StringUtils::StrToUInt64(contentLengthHeader, contentLen))
                     return HttpParseState::PARSE_ERROR;
