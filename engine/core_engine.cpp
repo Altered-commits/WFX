@@ -35,9 +35,9 @@ enum ConnectionHeader : std::uint8_t {
 };
 
 // vvv Main Functions vvv
-CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
+CoreEngine::CoreEngine(const char* dllPath, bool useHttps, WFXSocket listenFd)
 {
-    connHandler_ = CreateConnectionHandler(useHttps);
+    connHandler_ = CreateConnectionHandler(useHttps, listenFd);
     if(!connHandler_)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 

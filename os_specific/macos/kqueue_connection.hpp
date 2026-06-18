@@ -29,7 +29,7 @@ using EndpointPool = std::vector<EndpointContainer>;
 
 class KqueueConnectionHandler : public HttpConnectionHandler {
 public:
-    KqueueConnectionHandler(bool useHttps);
+    KqueueConnectionHandler(bool useHttps, WFXSocket listenFd = WFX_INVALID_SOCKET);
     ~KqueueConnectionHandler();
 
 public:

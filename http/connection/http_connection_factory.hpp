@@ -24,13 +24,16 @@
 namespace WFX::Http {
 
 // Factory function that returns the correct handler
-inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler(bool useHttps)
+inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler(bool useHttps,
+                                                                      WFXSocket listenFd = WFX_INVALID_SOCKET)
 {
 #ifdef _WIN32
+    (void)listenFd;
     return std::make_unique<OSSpecific::IocpConnectionHandler>();
 #elif defined(__APPLE__)
-    return std::make_unique<OSSpecific::KqueueConnectionHandler>(useHttps);
+    return std::make_unique<OSSpecific::KqueueConnectionHandler>(useHttps, listenFd);
 #else
+    (void)listenFd;
 #ifdef WFX_LINUX_USE_IO_URING
     return std::make_unique<OSSpecific::IoUringConnectionHandler>();
 #else

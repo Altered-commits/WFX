@@ -21,7 +21,8 @@
 namespace WFX::OSSpecific {
 
 // vvv Constructor & Destructor vvv
-KqueueConnectionHandler::KqueueConnectionHandler(bool useHttps) : useHttps_(useHttps)
+KqueueConnectionHandler::KqueueConnectionHandler(bool useHttps, WFXSocket listenFd)
+    : listenFd_(listenFd), useHttps_(useHttps)
 {
     if(useHttps)
         sslHandler_ = CreateSSLHandler();
@@ -54,44 +55,48 @@ void KqueueConnectionHandler::Initialize(const std::string& host, std::uint16_t 
 
     events_ = std::make_unique<struct kevent[]>(maxEvents_);
 
-    sockaddr_storage addr{};
-    socklen_t addrLen = 0;
+    if(listenFd_ == WFX_INVALID_SOCKET) {
+        sockaddr_storage addr{};
+        socklen_t addrLen = 0;
 
-    char portStr[6];
-    auto [ptr, err] = std::to_chars(portStr, portStr + sizeof(portStr), port);
-    if(err != std::errc{})
-        logger_.Fatal("[Kqueue]: Failed to convert port to string");
+        char portStr[6];
+        auto [ptr, err] = std::to_chars(portStr, portStr + sizeof(portStr), port);
+        if(err != std::errc{})
+            logger_.Fatal("[Kqueue]: Failed to convert port to string");
 
-    *ptr = '\0';
+        *ptr = '\0';
 
-    if(!ResolveHost(host.c_str(), portStr, &addr, &addrLen))
-        logger_.Fatal("[Kqueue]: Failed to resolve host '", host, '\'');
+        if(!ResolveHost(host.c_str(), portStr, &addr, &addrLen))
+            logger_.Fatal("[Kqueue]: Failed to resolve host '", host, '\'');
 
-    listenFd_ = socket(addr.ss_family, SOCK_STREAM, 0);
-    if(listenFd_ < 0)
-        logger_.Fatal("[Kqueue]: Failed to create listening socket: ", strerror(errno));
+        listenFd_ = socket(addr.ss_family, SOCK_STREAM, 0);
+        if(listenFd_ < 0)
+            logger_.Fatal("[Kqueue]: Failed to create listening socket: ", strerror(errno));
 
-    if(addr.ss_family == AF_INET6) {
-        int no = 0;
-        if(setsockopt(listenFd_, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no)) < 0)
-            logger_.Fatal("[Kqueue]: Failed to disable IPV6_V6ONLY: ", strerror(errno));
+        if(addr.ss_family == AF_INET6) {
+            int no = 0;
+            if(setsockopt(listenFd_, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no)) < 0)
+                logger_.Fatal("[Kqueue]: Failed to disable IPV6_V6ONLY: ", strerror(errno));
+        }
+
+        int opt = 1;
+        if(setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+            logger_.Fatal("[Kqueue]: Failed to set SO_REUSEADDR: ", strerror(errno));
+
+        if(setsockopt(listenFd_, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0)
+            logger_.Fatal("[Kqueue]: Failed to set SO_REUSEPORT: ", strerror(errno));
+
+        if(!SetNonBlocking(listenFd_))
+            logger_.Fatal("[Kqueue]: Failed to make listening socket non-blocking: ", strerror(errno));
+
+        if(bind(listenFd_, (sockaddr*)&addr, addrLen) < 0)
+            logger_.Fatal("[Kqueue]: Failed to bind socket: ", strerror(errno));
+
+        if(listen(listenFd_, osConfig.backlog) < 0)
+            logger_.Fatal("[Kqueue]: Failed to listen: ", strerror(errno));
     }
-
-    int opt = 1;
-    if(setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-        logger_.Fatal("[Kqueue]: Failed to set SO_REUSEADDR: ", strerror(errno));
-
-    if(setsockopt(listenFd_, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0)
-        logger_.Fatal("[Kqueue]: Failed to set SO_REUSEPORT: ", strerror(errno));
-
-    if(!SetNonBlocking(listenFd_))
-        logger_.Fatal("[Kqueue]: Failed to make listening socket non-blocking: ", strerror(errno));
-
-    if(bind(listenFd_, (sockaddr*)&addr, addrLen) < 0)
-        logger_.Fatal("[Kqueue]: Failed to bind socket: ", strerror(errno));
-
-    if(listen(listenFd_, osConfig.backlog) < 0)
-        logger_.Fatal("[Kqueue]: Failed to listen: ", strerror(errno));
+    else if(!SetNonBlocking(listenFd_))
+        logger_.Fatal("[Kqueue]: Failed to make inherited listening socket non-blocking: ", strerror(errno));
 
     kqFd_ = kqueue();
     if(kqFd_ < 0)

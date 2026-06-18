@@ -15,7 +15,7 @@ namespace WFX::Core {
 
 class CoreEngine {
 public: // Main Stuff
-    CoreEngine(const char* dllPath, bool useHttps);
+    CoreEngine(const char* dllPath, bool useHttps, WFXSocket listenFd = WFX_INVALID_SOCKET);
     void Listen(const std::string& host, std::uint16_t port);
     void Stop();
 
