@@ -109,7 +109,7 @@ public:
 
         // Async failure (engine fired IO_FAILURE via HandleAsyncCallback)
         if(this->result_.status != AsyncStatus::COMPLETED)
-            return {EndpointStatus::INTERNAL_ERROR, nullptr};
+            return {this->result_.endpointStatus, nullptr};
 
         return {EndpointStatus::SUCCESS, static_cast<TRes*>(this->result_.data)};
     }

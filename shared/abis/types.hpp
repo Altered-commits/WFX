@@ -18,6 +18,7 @@ namespace WFX::Shared {
 
 // Forward declare stuff
 enum class ConnectResult : std::uint8_t;
+enum class EndpointStatus : std::uint8_t;
 
 // vvv Middleware Enums vvv
 enum class MiddlewareLevel : std::uint8_t { GLOBAL = 0, PER_ROUTE };
@@ -41,8 +42,10 @@ struct AsyncResult {
     void* data;
     std::uint32_t dataLen;
     union {
-        MiddlewareAction action;     // CONTINUE for non-middleware
-        ConnectResult connectResult; // Set by Promise<ConnectResult> on final_suspend
+        MiddlewareAction action;       // CONTINUE for non-middleware
+        ConnectResult connectResult;   // Set by Promise<ConnectResult> on final_suspend
+        EndpointStatus endpointStatus; // Set by ReleaseEndpoint and HandleEndpointReceive on client failure
+        std::uint8_t unused;           // Filler when none of the above apply (e.g. endpoint success)
     };
     AsyncStatus status;
 };
@@ -146,7 +149,8 @@ enum class EndpointStatus : std::uint8_t {
     INTERNAL_ERROR,    // Something went wrong
     SERIALIZE_ERROR,   // desc.serialize returned SerializeResult::ERROR
     EPOLL_ERROR,       // RegisterEpoll(MOD) failed on reused slot
-    HANDSHAKE_TIMEOUT, // onConnect coroutine exceeded connectTimeoutMs
+    HANDSHAKE_TIMEOUT, // onConnect coroutine exceeded connectTimeoutSeconds
+    REQUEST_TIMEOUT,   // Did not get response within requestTimeoutSeconds
     DNS_FAILURE,       // All DNS resolution retries exhausted
 };
 
@@ -239,15 +243,16 @@ static_assert(sizeof(EndpointDesc) == 104, "'EndpointDesc' must be exactly 104 b
 static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be standard layout");
 
 struct EndpointConfig {
-    std::uint32_t connLimit;            // Max simultaneous connections in the slot pool
-    std::uint32_t dnsRefreshSeconds;    // 0 = respect actual DNS TTL, N = override with N seconds
-    std::uint32_t connectTimeoutMs;     // TCP+TLS+onConnect must complete within this window
-    std::uint32_t idleTimeoutSeconds;   // Idle slots are closed after this many seconds
-    std::uint32_t maxReconnectAttempts; // Max backoff attempts before slot is marked FATAL
-    std::uint32_t reconnectBackoffBase; // Initial backoff seconds
-    std::uint32_t reconnectBackoffMax;  // Backoff cap seconds
-    std::uint32_t prewarm;              // Slots to connect eagerly on first epoll loop iteration
-    EndpointTLSConfig tlsConfig;        // TLS mode for this endpoint
+    std::uint32_t connLimit;             // Max simultaneous connections in the slot pool
+    std::uint32_t dnsRefreshSeconds;     // 0 = respect actual DNS TTL, N = override with N seconds
+    std::uint16_t connectTimeoutSeconds; // TCP+TLS+onConnect must complete within this window
+    std::uint16_t requestTimeoutSeconds; // Send+receive cycle must complete within this window
+    std::uint32_t idleTimeoutSeconds;    // Idle slots are closed after this many seconds
+    std::uint32_t maxReconnectAttempts;  // Max backoff attempts before slot is marked FATAL
+    std::uint32_t reconnectBackoffBase;  // Initial backoff seconds
+    std::uint32_t reconnectBackoffMax;   // Backoff cap seconds
+    std::uint32_t prewarm;               // Slots to connect eagerly on first epoll loop iteration
+    EndpointTLSConfig tlsConfig;         // TLS mode for this endpoint
 };
 static_assert(sizeof(EndpointConfig) == 36, "'EndpointConfig' must be exactly 36 bytes.");
 static_assert(std::is_standard_layout_v<EndpointConfig>, "'EndpointConfig' must be standard layout");

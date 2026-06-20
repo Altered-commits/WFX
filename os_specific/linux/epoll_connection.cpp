@@ -225,6 +225,12 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
 
     std::string_view hostView{host};
 
+    // Scheme prefixes are not allowed. Use FORCE_REQUIRE or FORCE_INSECURE for-
+    // -non-standard ports, or rely on port heuristics with AUTO
+    if(hostView.find("://") != std::string_view::npos)
+        logger_.Fatal("[Epoll]: Endpoint host must not contain a scheme prefix, got: ", host,
+                      ". Use 'hostname:port' format and set tlsConfig explicitly if needed");
+
     // Parse "hostname:port" (rfind handles IPv6 addresses correctly)
     auto colonPos = hostView.rfind(':');
     if(colonPos == std::string_view::npos)
@@ -259,8 +265,19 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
     meta.dnsNextRefreshMs =
         config.dnsRefreshSeconds > 0 ? NowMs() + static_cast<std::uint64_t>(config.dnsRefreshSeconds) * 1000 : 0;
 
-    // TODO: AUTO logic can be expanded later (port-based heuristics)
-    bool useTLS = (config.tlsConfig == EndpointTLSConfig::FORCE_REQUIRE || config.tlsConfig == EndpointTLSConfig::AUTO);
+    bool useTLS = false;
+    switch(config.tlsConfig) {
+        case EndpointTLSConfig::FORCE_REQUIRE:
+            useTLS = true;
+            break;
+        case EndpointTLSConfig::FORCE_INSECURE:
+            useTLS = false;
+            break;
+        case EndpointTLSConfig::AUTO:
+        default:
+            useTLS = ResolveTLSFromAuto(port);
+            break;
+    }
 
     if(!ResolveHost(meta.hostname.c_str(), portStr.c_str(), &meta.addr, &meta.addrLen))
         logger_.Fatal("[Epoll]: Failed to resolve endpoint: ", host);
@@ -586,8 +603,8 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
     else {
         slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
 
-        // Refresh timeout so the idle timer does not fire mid-request
-        RefreshExpiry(slotCtx, meta.config.idleTimeoutSeconds);
+        // Switch from idle timeout to request timeout for the duration of this request
+        RefreshExpiry(slotCtx, meta.config.requestTimeoutSeconds);
 
         result = RegisterEpoll(slotCtx, EPOLL_CTL_MOD) ? EndpointStatus::PENDING : EndpointStatus::EPOLL_ERROR;
         if(result == EndpointStatus::EPOLL_ERROR)
@@ -611,7 +628,7 @@ void EpollConnectionHandler::SlotSend(EndpointCtx* slotCtx, const void* data, st
     auto& rwBuf = slotCtx->rwBuffer;
 
     auto fireFailure = [&]() {
-        AsyncResult fail{nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::IO_FAILURE};
+        AsyncResult fail{nullptr, 0, {.unused = 0}, AsyncStatus::IO_FAILURE};
         if(asyncData.AsyncComplete)
             asyncData.AsyncComplete(asyncData.userData, fail);
     };
@@ -687,6 +704,7 @@ void EpollConnectionHandler::Run()
 
             if(sfd == timeoutTimerFd_) {
                 HandleTimeoutTimer(sfd);
+                logger_.Info("CONNECTIONS: ", metrics_->network.activeConns);
                 continue;
             }
             if(sfd == asyncTimerFd_) {
@@ -838,6 +856,7 @@ EndpointCtx* EpollConnectionHandler::GetEndpointConnection(std::uint16_t endpoin
         return nullptr;
 
     ctx->generationId++;
+    ctx->isPooledIdle = 0;
     metrics_->network.activeConns++;
 
     // If it wraps to 0, bump it to 1 cuz 0 is reserved for identifying fds such as Listen/Timer
@@ -898,7 +917,13 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
     if(!ctx)
         return;
 
-    metrics_->network.activeConns--;
+    // If this slot was idle-pooled (returned via ReturnEndpointToPool and never-
+    // -re-leased), activeConns was already decremented at that point. Decrementing-
+    // -again here would undercount. Only decrement for slots that were actively leased
+    if(!ctx->isPooledIdle)
+        metrics_->network.activeConns--;
+
+    ctx->isPooledIdle = 0;
 
     auto& entry = endpoints_[ctx->endpointIdx];
     auto& meta = entry.meta;
@@ -946,7 +971,14 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
         ctx->clientCtx = nullptr;
         client->endpointCtx = nullptr;
 
-        HandleClientAsyncCallback(client, {nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::IO_FAILURE}, false);
+        AsyncResult result{};
+        result.data = nullptr;
+        result.dataLen = 0;
+        result.status = AsyncStatus::IO_FAILURE;
+        result.endpointStatus = (disconnectReason == DisconnectReason::TIMEOUT) ? EndpointStatus::REQUEST_TIMEOUT
+                                                                                : EndpointStatus::INTERNAL_ERROR;
+
+        HandleClientAsyncCallback(client, result, false);
     }
 
     if(ctx->socket > 0)
@@ -965,13 +997,21 @@ void EpollConnectionHandler::ReturnEndpointToPool(EndpointCtx* slotCtx)
     auto& entry = endpoints_[slotCtx->endpointIdx];
     std::uint32_t idx = entry.pool.GetIndex(slotCtx);
 
-    // CRITICAL: cancel timer so it cannot fire on an idle slot and double-decrement-
-    // -activeConns, or worse fire on a newly-leased slot at the same pool index
+    // CRITICAL: cancel any leftover timer schedule first (e.g. a stale request-timeout-
+    // -from a previous lease cycle) before arming the fresh idle timeout below
     std::uint32_t timerIdx = entry.meta.timerBase + idx;
     timerWheel_.Cancel(timerIdx);
 
     entry.pool.FreeSlot(idx);
     metrics_->network.activeConns--;
+
+    // Slot is now idle-pooled, open socket, no in-flight request. Arm idle-
+    // -timeout so the connection doesn't sit open forever without traffic
+    // isPooledIdle marks that activeConns was already decremented above
+    // ReleaseEndpoint checks this to avoid double-decrementing if the idle-
+    // -timer actually fires before this slot is re-leased
+    slotCtx->isPooledIdle = 1;
+    RefreshExpiry(slotCtx, entry.meta.config.idleTimeoutSeconds);
 }
 
 //  --- MISC Handlers ---
@@ -987,6 +1027,47 @@ bool EpollConnectionHandler::SetNonBlocking(int fd)
         return false;
 
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+}
+
+bool EpollConnectionHandler::ResolveTLSFromAuto(std::uint16_t port)
+{
+    // Sorted TLS port array
+    static constexpr std::uint16_t TLS_PORTS[] = {
+        443,  // HTTPS          RFC 2818
+        465,  // SMTPS          RFC 8314
+        563,  // NNTPS          RFC 4642
+        636,  // LDAPS          RFC 4513
+        989,  // FTPS data      RFC 4217
+        990,  // FTPS implicit  RFC 4217
+        992,  // Telnet/TLS     RFC 5572
+        993,  // IMAPS          RFC 8314
+        995,  // POP3S          RFC 8314
+        5061, // SIPS           RFC 3261
+        5223, // XMPP TLS       IANA registered
+        5349, // STUNS/TURNS    RFC 5389 / RFC 5766
+        5671, // AMQPS          OASIS AMQP 1.0
+        5684, // CoAPS          RFC 7252
+        6380, // Redis TLS      IANA registered
+        6514, // Syslog/TLS     RFC 5425
+        6697, // IRC TLS        RFC 7194
+        8443, // HTTPS alt      IANA registered
+        8883, // MQTTS          OASIS MQTT
+        9093, // Kafka TLS      IANA registered
+    };
+
+    // Port binary search
+    std::size_t lo = 0, hi = std::size(TLS_PORTS);
+    while(lo < hi) {
+        std::size_t mid = lo + (hi - lo) / 2;
+        if(TLS_PORTS[mid] == port)
+            return true;
+        if(TLS_PORTS[mid] < port)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+
+    return false;
 }
 
 bool EpollConnectionHandler::EnsureFileReady(ClientCtx* ctx, std::string path)
@@ -1438,7 +1519,7 @@ void EpollConnectionHandler::HandleAsyncTimer(int sfd)
         ClientCtx* ctx = connections_.GetPtr(connId);
         ctx->isAsyncTimerOperation = 0;
 
-        HandleClientAsyncCallback(ctx, {nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::COMPLETED}, false);
+        HandleClientAsyncCallback(ctx, {nullptr, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
     }
 
     // Because the async timer is one shot, update it just in case there exists more async-
@@ -1489,10 +1570,34 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx, std::uint
     // - Frankenstein
     ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
 
+    auto& entry = endpoints_[ctx->endpointIdx];
+
+    // TLS handshake done, connectTimeoutSeconds phase is over. What happens next-
+    // -depends on whether onConnect exists and whether a client is waiting:
+    //   - onConnect hook exists -> FireOnConnect drives the handshake protocol,
+    //     requestTimeoutSeconds covers onConnect + the eventual send/receive
+    //   - no onConnect, but a client is waiting -> Write the already-serialized
+    //     request, requestTimeoutSeconds covers the round trip
+    //   - no onConnect, no client (prewarm) -> nothing to send, the refresh
+    //     below is immediately superseded by ReturnEndpointToPool's idle timeout
+    RefreshExpiry(ctx, entry.meta.config.requestTimeoutSeconds);
+
     if(ctx->eventType == EventType::EVENT_ENDPOINT_ONCONNECT)
-        FireOnConnect(ctx, endpoints_[ctx->endpointIdx]);
-    else
+        FireOnConnect(ctx, entry);
+    else if(ctx->clientCtx)
         Write(ctx);
+    else {
+        ReturnEndpointToPool(ctx);
+
+        // Slot is idle-pooled at this point. If MOD fails the fd is left in an-
+        // -inconsistent epoll registration state with no way to detect future-
+        // -readability/writability. Force close it rather than leak a half-dead slot
+        if(!RegisterEpoll(ctx, EPOLL_CTL_MOD)) {
+            logger_.Error("[Epoll]: 'RegisterEpoll(MOD)' failed for endpoint '", entry.meta.hostname,
+                          "' after prewarm handshake: ", strerror(errno));
+            Close(ctx, true);
+        }
+    }
 }
 
 void EpollConnectionHandler::HandleClientEvent(ClientCtx* ctx, std::uint32_t ev, std::uint16_t gen)
@@ -1620,14 +1725,16 @@ void EpollConnectionHandler::HandleEndpointEpollIn(EndpointCtx* ctx)
             return;
 
         case EventType::EVENT_ENDPOINT_ONCONNECT:
+            // clang-format off
+
             // onConnect coroutine called SlotReceive and is now suspended waiting for data
             // Wake it by firing its asyncData completion with the buffer contents
             if(Receive(ctx))
-                HandleEndpointAsyncCallback(ctx,
-                                            {ctx->rwBuffer.GetReadData(), ctx->rwBuffer.GetReadMeta()->dataLength,
-                                             MiddlewareAction::CONTINUE, AsyncStatus::COMPLETED},
-                                            false);
+                HandleEndpointAsyncCallback(ctx, {ctx->rwBuffer.GetReadData(), ctx->rwBuffer.GetReadMeta()->dataLength,
+                                             {.unused = 0}, AsyncStatus::COMPLETED}, false);
             return;
+
+            // clang-format on
 
         default:
             // Any other state, connection is doing something else, ignore stray EPOLLIN
@@ -1701,13 +1808,26 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
                 break;
             }
 
+            // Plain TCP, no handshake needed. Connection phase is fully complete
+            // Switch to request timeout now since onConnect / Write starts immediately
+            RefreshExpiry(ctx, meta.config.requestTimeoutSeconds);
+
             // Plain TCP, check for onConnect hook before writing
             if(meta.desc.onConnect) {
                 FireOnConnect(ctx, endpoints_[ctx->endpointIdx]);
                 break;
             }
 
-            Write(ctx);
+            // No onConnect hook. Only Write if a client request is actually-
+            // -waiting in the buffer. A prewarm slot with no client has nothing-
+            // -to send and should go straight to the idle pool instead
+            if(ctx->clientCtx)
+                Write(ctx);
+            else {
+                ctx->eventType = EventType::EVENT_ENDPOINT_RECV;
+                ReturnEndpointToPool(ctx);
+                RegisterEpoll(ctx, EPOLL_CTL_MOD);
+            }
         } break;
 
         default:
@@ -1771,7 +1891,7 @@ void EpollConnectionHandler::HandleEndpointWriteComplete(EndpointCtx* slotCtx)
     // If asyncData is set, this write was initiated by SlotSend from inside onConnect
     // Fire the SlotSend completion and stay in the onConnect phase
     if(slotCtx->asyncData.AsyncComplete) {
-        HandleEndpointAsyncCallback(slotCtx, {nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::COMPLETED}, false);
+        HandleEndpointAsyncCallback(slotCtx, {nullptr, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
         return;
     }
 
@@ -1889,8 +2009,7 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx)
                 }
 
                 // Fire callback. Coroutine gets valid outputObj pointer
-                HandleClientAsyncCallback(clientCtx, {outputObj, 0, MiddlewareAction::CONTINUE, AsyncStatus::COMPLETED},
-                                          false);
+                HandleClientAsyncCallback(clientCtx, {outputObj, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
 
                 // NOW destroy output. Coroutine has already run and is done with outputObj
                 if(outputObj && desc.destroyOutput)
@@ -1909,8 +2028,13 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx)
                     slotCtx->clientCtx = nullptr;
                     clientCtx->endpointCtx = nullptr;
 
-                    HandleClientAsyncCallback(clientCtx,
-                                              {nullptr, 0, MiddlewareAction::CONTINUE, AsyncStatus::IO_FAILURE}, false);
+                    AsyncResult result{};
+                    result.data = nullptr;
+                    result.dataLen = 0;
+                    result.status = AsyncStatus::IO_FAILURE;
+                    result.endpointStatus = EndpointStatus::INTERNAL_ERROR;
+
+                    HandleClientAsyncCallback(clientCtx, result, false);
                 }
 
                 FinalizeEndpointRequest(slotCtx, desc, false);
@@ -1986,9 +2110,12 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
         instance_->Write(slotCtx);
     }
     else {
-        // Prewarm: no client waiting, no data in the write buffer. Re-arm so future-
-        // -SendPayload can lease this slot and the next MOD triggers EPOLLOUT correctly
+        // Prewarm: no client waiting. Return this slot to the free list so-
+        // -SendPayload's AllocSlot can actually lease it for a future request
+        // Without this, prewarmed slots stay permanently marked allocated and-
+        // -are never reused, silently shrinking the effective pool by 'prewarm' count
         slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+        instance_->ReturnEndpointToPool(slotCtx);
         instance_->RegisterEpoll(slotCtx, EPOLL_CTL_MOD);
     }
 }
@@ -2202,7 +2329,8 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
                 return EndpointStatus::SSL_FAILURE;
             }
 
-            if(!TryHandshake(ctx, EventType::EVENT_ENDPOINT_SEND, EventType::EVENT_ENDPOINT_HANDSHAKE))
+            EventType onSuccess = desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_RECV;
+            if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE))
                 return EndpointStatus::SSL_FAILURE;
         }
         else
@@ -2222,7 +2350,20 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
         return EndpointStatus::EPOLL_ERROR;
     }
 
-    RefreshExpiry(ctx, meta.config.idleTimeoutSeconds);
+    // Three possible states after the connect/handshake attempt above:
+    //   - still mid-TCP-connect or mid-TLS-handshake (async, EPOLLOUT pending)
+    //     -> arm connectTimeoutSeconds, the in-progress connection must finish in time
+    //   - connected (and handshake done, if any) AND a client is waiting
+    //     -> arm requestTimeoutSeconds, onConnect/Write is about to run for that client
+    //   - connected with no client waiting (prewarm, no onConnect hook)
+    //     -> nothing to do or send, park the slot straight in the idle pool
+    if(ctx->eventType == EventType::EVENT_CONNECT || ctx->eventType == EventType::EVENT_ENDPOINT_HANDSHAKE)
+        RefreshExpiry(ctx, meta.config.connectTimeoutSeconds);
+    else if(ctx->clientCtx)
+        RefreshExpiry(ctx, meta.config.requestTimeoutSeconds);
+    else
+        ReturnEndpointToPool(ctx);
+
     return EndpointStatus::PENDING;
 }
 

@@ -32,7 +32,7 @@ public:
     ~TimerWheel() = default;
 
 public:
-    void Init(std::uint32_t capacity, std::uint32_t wheelSlots, std::uint32_t tickVal, TimeUnit unit,
+    void Init(std::uint32_t capacity, std::uint16_t wheelSlots, std::uint32_t tickVal, TimeUnit unit,
               OnExpireCallback onExpire);
     void Reinit(std::uint32_t capacity);
     void Expand(std::uint32_t extraCapacity);
@@ -48,8 +48,8 @@ private:
 
 private:
     std::uint32_t cap_ = 0;
-    std::uint32_t slots_ = 0;
     std::uint32_t mask_ = 0;
+    std::uint16_t slots_ = 0;
     std::uint16_t shift_ = 0;
     std::uint16_t tickVal_ = 1; // Tick size in unit
     std::uint64_t nowTick_ = 0; // Current tick counter

@@ -164,6 +164,7 @@ private: // Async callback
 private: // Misc
     std::uint64_t NowMs();
     bool SetNonBlocking(int fd);
+    bool ResolveTLSFromAuto(std::uint16_t port);
     bool ResolveHost(const char* host, const char* port, sockaddr_storage* outAddr, socklen_t* outLen);
     bool ResolveIP(const sockaddr_storage& inAddr, WFXIpAddress& out);
 

@@ -8,7 +8,7 @@
 namespace WFX::Utils {
 
 // vvv User Functions vvv
-void TimerWheel::Init(std::uint32_t capacity, std::uint32_t wheelSlots, std::uint32_t tickVal, TimeUnit unit,
+void TimerWheel::Init(std::uint32_t capacity, std::uint16_t wheelSlots, std::uint32_t tickVal, TimeUnit unit,
                       OnExpireCallback onExpire)
 {
     auto& logger = GetLogger();

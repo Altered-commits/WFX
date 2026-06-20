@@ -170,6 +170,7 @@ struct EndpointCtx : public ConnectionTag {
             std::uint8_t endpointState : 2;
             std::uint8_t isShuttingDown : 1;
             std::uint8_t inOnConnectPhase : 1;
+            std::uint8_t isPooledIdle : 1;
         };
         std::uint8_t flags = 0;
     }; // 1 bytes
