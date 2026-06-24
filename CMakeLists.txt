@@ -147,9 +147,10 @@ if(WIN32)
         Dbghelp
         mswsock
         bcrypt
+        Dnsapi
     )
 elseif(UNIX)
-    target_link_libraries(wfx PRIVATE dl pthread)
+    target_link_libraries(wfx PRIVATE dl pthread resolv)
 
     if(WFX_LINUX_USE_IO_URING)
         target_link_libraries(wfx PRIVATE uring)

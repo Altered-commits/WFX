@@ -19,6 +19,14 @@
 #include <sys/epoll.h>
 #include <atomic>
 
+// IMPORTANT: these headers are used exclusively for the DNS background-refresh-
+// -mechanism (short-lived std::threads capped by a counting_semaphore, handing-
+// -results back to the epoll thread via a mutex-guarded queue + eventfd). The-
+// -rest of the engine is single-threaded by design and must never need locking;-
+// -do not reach for these outside the DNS refresh path
+#include <mutex>
+#include <semaphore>
+
 namespace WFX::OSSpecific {
 
 using namespace WFX::Http;   // For 'HttpConnectionHandler', 'ReceiveCallback', 'ClientCtx', ...
@@ -43,6 +51,16 @@ struct EndpointEntry {
     EndpointEntry& operator=(EndpointEntry&&) = default;
     EndpointEntry(const EndpointEntry&) = delete;
     EndpointEntry& operator=(const EndpointEntry&) = delete;
+};
+
+// DNS refresh result, posted from a background resolver thread back to the epoll-
+// -thread via dnsResultEventFd_. One entry per completed refresh
+struct DnsResult {
+    bool success;
+    std::uint16_t endpointIdx;
+    std::uint32_t minTtlSeconds;
+    ResolvedAddrs addrs;
+    std::string wakeupError;
 };
 
 class EpollConnectionHandler : public HttpConnectionHandler {
@@ -127,11 +145,14 @@ private: // Handshake
     }
 
 private: // Endpoint-specific
+    void ValidateEndpoint(const char* host, const EndpointDesc& desc, const EndpointConfig& config);
+    std::uint64_t ComputeNextDnsRefresh(std::uint32_t minTtlSeconds, std::uint32_t userOverrideSeconds, const std::string& hostname);
     void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointDesc& desc, bool success);
     void HandleEndpointWriteComplete(EndpointCtx* ctx);
     void HandleEndpointReceive(EndpointCtx* ctx);
     void HandlePrewarm();
     void HandleDnsRefresh(std::uint16_t endpointIdx);
+    void HandleDnsResultReady(int sfd);
     void FireOnConnect(EndpointCtx* ctx, EndpointEntry& entry);
 
 private: // Wrap / low-level
@@ -180,8 +201,6 @@ private: // Singletons / config
     std::atomic<bool> running_ = true;
     bool useHttps_ = false;
 
-    int dnsEventFd_ = -1;
-
 private: // Constants
     constexpr static char CHUNK_END[] = "0\r\n\r\n";
     constexpr static ssize_t SWITCH_FILE_TO_STREAM = std::numeric_limits<ssize_t>::min();
@@ -191,12 +210,30 @@ private: // Constants
     constexpr static int INVOKE_TIMEOUT_COOLDOWN = 5;
     constexpr static int INVOKE_TIMEOUT_DELAY = 1;
 
+    // Sane bounds regardless of source: never hammer DNS faster than 5s (protects-
+    // -against a misconfigured/malicious 0-1s TTL), never wait longer than 1hr (bounds-
+    // -staleness even if TTL is absurdly large or userOverride is set very high)
+    constexpr static std::uint32_t MIN_REFRESH_SECONDS = 5;
+    constexpr static std::uint32_t MAX_REFRESH_SECONDS = 3600;
+
+    // Caps concurrent background DNS resolver threads. 32 provides enough parallelism-
+    // -for large deployments (hundreds of endpoints) while staying well within OS thread-
+    // -limits on all supported hardware
+    constexpr static std::uint16_t MAX_DNS_THREADS = 32;
+    constexpr static std::uint32_t MAX_DNS_RESULT_QUEUE_SIZE = MAX_DNS_THREADS * 2;
+
 private: // Timer state
     TimerWheel timerWheel_;
     TimerHeap timerHeap_;
     SteadyClock::time_point startTime_ = SteadyClock::now();
     int timeoutTimerFd_ = -1;
     int asyncTimerFd_ = -1;
+
+private: // DNS state
+    std::mutex dnsResultMutex_;
+    std::counting_semaphore<MAX_DNS_THREADS> dnsThreadSemaphore_{MAX_DNS_THREADS};
+    std::vector<DnsResult> dnsResultQueue_;
+    int dnsResultEventFd_ = -1;
 
 private: // Epoll + SSL
     int listenFd_ = -1;

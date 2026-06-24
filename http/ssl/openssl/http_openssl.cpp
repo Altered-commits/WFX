@@ -30,8 +30,6 @@ HttpOpenSSL::HttpOpenSSL()
 
     InitServerContext();
     InitClientContext();
-
-    logger.Info("[HttpOpenSSL]: SSL context initialized successfully");
 }
 
 HttpOpenSSL::~HttpOpenSSL()
@@ -160,6 +158,8 @@ void HttpOpenSSL::InitServerContext()
             return SSL_TLSEXT_ERR_NOACK;
         },
         nullptr);
+
+    logger.Info("[HttpOpenSSL]: Server SSL context initialized successfully");
 }
 
 void HttpOpenSSL::InitClientContext()

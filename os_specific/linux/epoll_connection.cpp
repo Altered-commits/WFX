@@ -11,6 +11,7 @@
 #include "utils/diagnostics/crash_tracer.hpp"
 #include <sys/sendfile.h>
 #include <sys/socket.h>
+#include <sys/eventfd.h>
 #include <sys/timerfd.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -19,7 +20,24 @@
 #include <arpa/inet.h>
 #include <errno.h>
 
+// Used exclusively for DNS background-refresh resolver threads, see HandleDnsRefresh
+#include <thread>
+
 namespace WFX::OSSpecific {
+
+// Retries a syscall-style operation while it fails with EINTR. 'fn' should-
+// -perform exactly one attempt of the underlying syscall and return its raw-
+// -result (whatever a successful call returns, typically >= 0). On any error-
+// -other than EINTR, returns immediately with that result so the caller can-
+// -inspect errno itself
+template <typename Fn> static auto RetryOnEintr(Fn&& fn) -> decltype(fn())
+{
+    while(true) {
+        auto result = fn();
+        if(result >= 0 || errno != EINTR)
+            return result;
+    }
+}
 
 // Used by 'OnSlotConnected' to call back into the engine without a capture
 EpollConnectionHandler* EpollConnectionHandler::instance_ = nullptr;
@@ -69,6 +87,10 @@ EpollConnectionHandler::~EpollConnectionHandler()
     if(timeoutTimerFd_ > 0) {
         close(timeoutTimerFd_);
         timeoutTimerFd_ = -1;
+    }
+    if(dnsResultEventFd_ > 0) {
+        close(dnsResultEventFd_);
+        dnsResultEventFd_ = -1;
     }
     if(asyncTimerFd_ > 0) {
         close(asyncTimerFd_);
@@ -211,6 +233,17 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
     aev.data.u64 = static_cast<std::uint64_t>(asyncTimerFd_) & 0xFFFFFFFFULL; // Lower 32 bits = fd, upper 32 = 0
     if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, asyncTimerFd_, &aev) < 0)
         logger_.Fatal("[Epoll]: Failed to add async timer to epoll: ", strerror(errno));
+
+    // vvv Initializing DNS refresh event vvv
+    dnsResultEventFd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if(dnsResultEventFd_ < 0)
+        logger_.Fatal("[Epoll]: Failed to create DNS result eventfd: ", strerror(errno));
+
+    epoll_event dnsEv{};
+    dnsEv.events = EPOLLIN;
+    dnsEv.data.u64 = static_cast<std::uint64_t>(dnsResultEventFd_) & 0xFFFFFFFFULL; // Lower 32 bits = fd, upper 32 = 0
+    if(epoll_ctl(epollFd_, EPOLL_CTL_ADD, dnsResultEventFd_, &dnsEv) < 0)
+        logger_.Fatal("[Epoll]: Failed to add DNS result eventfd to epoll: ", strerror(errno));
 }
 
 void EpollConnectionHandler::SetEngineCallback(ReceiveCallback onData)
@@ -223,10 +256,12 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
     if(endpoints_.size() >= MAX_DISTINCT_ENDPOINTS)
         logger_.Fatal("[Epoll]: Too many distinct domain endpoints registered");
 
-    std::string_view hostView{host};
+    ValidateEndpoint(host, desc, config);
 
     // Scheme prefixes are not allowed. Use FORCE_REQUIRE or FORCE_INSECURE for-
     // -non-standard ports, or rely on port heuristics with AUTO
+    std::string_view hostView{host};
+
     if(hostView.find("://") != std::string_view::npos)
         logger_.Fatal("[Epoll]: Endpoint host must not contain a scheme prefix, got: ", host,
                       ". Use 'hostname:port' format and set tlsConfig explicitly if needed");
@@ -247,7 +282,7 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
     std::uint16_t endpointIdx = static_cast<std::uint16_t>(endpoints_.size());
     std::uint32_t timerBase = connections_.GetSlots();
 
-    // Used in RefreshExpiry(EndpointCtx*) overload, do check it out for info
+    // 'timerBase' used in RefreshExpiry(EndpointCtx*) overload, do check it out for info
     if(!endpoints_.empty()) {
         auto& last = endpoints_.back();
         timerBase = last.meta.timerBase + last.pool.GetSlots();
@@ -262,8 +297,6 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
     meta.config = config;
     meta.hostname = std::move(hostname);
     meta.port = port;
-    meta.dnsNextRefreshMs =
-        config.dnsRefreshSeconds > 0 ? NowMs() + static_cast<std::uint64_t>(config.dnsRefreshSeconds) * 1000 : 0;
 
     bool useTLS = false;
     switch(config.tlsConfig) {
@@ -279,8 +312,12 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
             break;
     }
 
-    if(!ResolveHost(meta.hostname.c_str(), portStr.c_str(), &meta.addr, &meta.addrLen))
+    // Resolve AFTER hostname/port are set on meta
+    std::uint32_t minTtl = 0;
+    if(!DNSResolver::Resolve(meta.hostname.c_str(), meta.port, meta.addrs, minTtl))
         logger_.Fatal("[Epoll]: Failed to resolve endpoint: ", host);
+
+    meta.dnsNextRefreshSeconds = ComputeNextDnsRefresh(minTtl, config.dnsRefreshSeconds, meta.hostname);
 
     for(std::uint32_t i = 0; i < pool.GetSlots(); i++) {
         EndpointCtx* ctx = pool.GetPtr(i);
@@ -289,7 +326,10 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
         ctx->SetEndpointState(useTLS ? EndpointState::ENDPOINT_SECURE : EndpointState::ENDPOINT_INSECURE);
     }
 
-    // Prewarm fires on first Run() iteration via HandlePrewarm()
+    logger_.Info("[Epoll]: Endpoint allocated -- host='", meta.hostname, "' port=", meta.port,
+                 " endpointIdx=", endpointIdx, " tls=", (useTLS ? "yes" : "no"), " connLimit=", config.connLimit,
+                 " prewarm=", config.prewarm, " addrs=", meta.addrs.size(),
+                 " nextDnsRefreshInSeconds=", (meta.dnsNextRefreshSeconds - NowMs() / 1000));
 
     return endpointIdx;
 }
@@ -648,7 +688,12 @@ void EpollConnectionHandler::SlotSend(EndpointCtx* slotCtx, const void* data, st
     slotCtx->asyncData = asyncData;
     slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
 
-    RegisterEpoll(slotCtx, EPOLL_CTL_MOD);
+    // Fail the operation immediately so that the user's onConnect coroutine-
+    // -gets a definite answer rather than a slow hang
+    if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
+        logger_.Error("[Epoll]: 'SlotSend -> RegisterEpoll(MOD)' failed: ", strerror(errno));
+        fireFailure();
+    }
 }
 
 void EpollConnectionHandler::SlotReceive(EndpointCtx* slotCtx, AsyncData asyncData)
@@ -664,7 +709,13 @@ void EpollConnectionHandler::SlotReceive(EndpointCtx* slotCtx, AsyncData asyncDa
     // -SlotSend write phase. During that phase eventType was EVENT_ENDPOINT_SEND, so any-
     // -EPOLLIN edge that fired was consumed and ignored by HandleEpollIn's default case
     // Without this MOD call, EPOLLIN would never re-fire in ET mode for that data
-    RegisterEpoll(slotCtx, EPOLL_CTL_MOD);
+    if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
+        logger_.Error("[Epoll]: 'SlotReceive -> RegisterEpoll(MOD)' failed: ", strerror(errno));
+
+        AsyncResult fail{nullptr, 0, {.unused = 0}, AsyncStatus::IO_FAILURE};
+        if(asyncData.AsyncComplete)
+            asyncData.AsyncComplete(asyncData.userData, fail);
+    }
 }
 
 // vvv Main Functions vvv
@@ -674,8 +725,7 @@ void EpollConnectionHandler::Run()
 
     // Just a simple sanity check before we do anything
     if(!onReceive_)
-        logger_.Fatal(
-            "[Epoll]: Member 'onReceive_' was not initialized. Call 'SetEngineCallback' before calling 'Run'");
+        logger_.Fatal("[Epoll]: 'onReceive_' was not initialized. Call 'SetEngineCallback' before calling 'Run'");
 
     // Handle endpoint pre-warming to improve performance
     HandlePrewarm();
@@ -709,6 +759,10 @@ void EpollConnectionHandler::Run()
             }
             if(sfd == asyncTimerFd_) {
                 HandleAsyncTimer(sfd);
+                continue;
+            }
+            if(sfd == dnsResultEventFd_) {
+                HandleDnsResultReady(sfd);
                 continue;
             }
 
@@ -779,10 +833,10 @@ void EpollConnectionHandler::Run()
         }
 
         // DNS refresh check, cheap time comparison, runs once per epoll wakeup
-        std::uint64_t nowMs = NowMs();
+        std::uint64_t nowSeconds = NowMs() / 1000;
         for(std::uint16_t i = 0; i < static_cast<std::uint16_t>(endpoints_.size()); i++) {
             auto& m = endpoints_[i].meta;
-            if(m.dnsNextRefreshMs > 0 && nowMs >= m.dnsNextRefreshMs)
+            if(nowSeconds >= m.dnsNextRefreshSeconds)
                 HandleDnsRefresh(i);
         }
     }
@@ -1500,9 +1554,26 @@ void EpollConnectionHandler::HandleEndpointAsyncCallback(EndpointCtx* ctx, Async
 
 void EpollConnectionHandler::HandleTimeoutTimer(int sfd)
 {
-    // TODO: properly handle read return value
     std::uint64_t expirations = 0;
-    (void)read(sfd, &expirations, sizeof(expirations));
+    ssize_t n = RetryOnEintr([&] { return read(sfd, &expirations, sizeof(expirations)); });
+
+    if(n < 0) {
+        // EAGAIN here would mean epoll reported readiness but the count was already-
+        // -drained by the time we got here. Shouldn't normally happen since nothing-
+        // -else reads this fd, but harmless if it does: skip this call, the level-
+        // -triggered registration means epoll will report it again if truly still ready
+        if(errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+
+        // Any other error means the read itself is broken. timeoutTimerFd_ is-
+        // -registered level-triggered (no EPOLLET), so its readiness is cleared only-
+        // -by a successful read here. If read() can no longer succeed at all, this-
+        // -fd's state is now unknown/unrecoverable from inside this function. Worse,-
+        // -if the fd somehow stays marked ready without being drained, epoll_wait-
+        // -would return immediately on every iteration from here on, busy-spinning-
+        // -the entire event loop at 100% CPU. Fail loudly rather than risk that
+        logger_.Fatal("[Epoll]: Timeout timer fd read failed: ", strerror(errno));
+    }
 
     timerWheel_.Tick(NowMs() / 1000);
 }
@@ -1510,7 +1581,17 @@ void EpollConnectionHandler::HandleTimeoutTimer(int sfd)
 void EpollConnectionHandler::HandleAsyncTimer(int sfd)
 {
     std::uint64_t expirations = 0;
-    (void)read(sfd, &expirations, sizeof(expirations));
+    ssize_t n = RetryOnEintr([&] { return read(sfd, &expirations, sizeof(expirations)); });
+
+    if(n < 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+
+        // Same reasoning as HandleTimeoutTimer: asyncTimerFd_ is level-triggered,-
+        // -a broken read here risks either silently dead async timer delivery or-
+        // -an undrained-readiness busy-spin on the event loop
+        logger_.Fatal("[Epoll]: Async timer fd read failed: ", strerror(errno));
+    }
 
     std::uint64_t newTick = NowMs();
     std::uint64_t connId = 0;
@@ -1826,7 +1907,11 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
             else {
                 ctx->eventType = EventType::EVENT_ENDPOINT_RECV;
                 ReturnEndpointToPool(ctx);
-                RegisterEpoll(ctx, EPOLL_CTL_MOD);
+                if(!RegisterEpoll(ctx, EPOLL_CTL_MOD)) {
+                    logger_.Error("[Epoll]: 'RegisterEpoll(MOD)' failed for endpoint '", meta.hostname,
+                                  "' after prewarm connect: ", strerror(errno));
+                    Close(ctx, true);
+                }
             }
         } break;
 
@@ -1855,13 +1940,88 @@ void EpollConnectionHandler::UpdateAsyncTimer()
     ts.it_value.tv_nsec = (remain % 1000) * 1'000'000;
     ts.it_interval = {0, 0};
 
-    while(timerfd_settime(asyncTimerFd_, 0, &ts, nullptr) < 0) {
-        if(errno == EINTR)
-            continue;
-
+    if(RetryOnEintr([&] { return timerfd_settime(asyncTimerFd_, 0, &ts, nullptr); }) < 0)
         logger_.Error("[Epoll]: Failed to set async timer: ", strerror(errno));
-        break;
-    }
+}
+
+void EpollConnectionHandler::ValidateEndpoint(const char* host, const EndpointDesc& desc, const EndpointConfig& config)
+{
+    // vvv EndpointHooks vvv
+    if(!desc.serialize)
+        logger_.Fatal("[Epoll]: EndpointHooks.serialize must not be null for endpoint: ", host);
+    if(!desc.parse)
+        logger_.Fatal("[Epoll]: EndpointHooks.parse must not be null for endpoint: ", host);
+
+    // create/destroy pairs must both be present or both absent, otherwise leaks/double-frees
+    if((desc.createParseState != nullptr) != (desc.destroyParseState != nullptr))
+        logger_.Fatal("[Epoll]: EndpointHooks.createParseState and destroyParseState must both be set or both null "
+                      "for endpoint: ",
+                      host);
+    if((desc.createOutput != nullptr) != (desc.destroyOutput != nullptr))
+        logger_.Fatal("[Epoll]: EndpointHooks.createOutput and destroyOutput must both be set or both null "
+                      "for endpoint: ",
+                      host);
+    if((desc.createSlotState != nullptr) != (desc.destroySlotState != nullptr))
+        logger_.Fatal("[Epoll]: EndpointHooks.createSlotState and destroySlotState must both be set or both null "
+                      "for endpoint: ",
+                      host);
+
+    // vvv EndpointConfig vvv
+    if(config.connLimit == 0)
+        logger_.Fatal("[Epoll]: EndpointConfig.connLimit must be > 0 for endpoint: ", host);
+
+    // Timeout timer ticks at most once every INVOKE_TIMEOUT_COOLDOWN seconds, so any-
+    // -timeout value below that fires no earlier than the next tick. The configured-
+    // -value would silently lie about how soon it actually triggers
+    if(config.connectTimeoutSeconds < INVOKE_TIMEOUT_COOLDOWN)
+        logger_.Fatal("[Epoll]: EndpointConfig.connectTimeoutSeconds must be >= ", INVOKE_TIMEOUT_COOLDOWN,
+                      " (timer tick interval) for endpoint: ", host);
+    if(config.requestTimeoutSeconds < INVOKE_TIMEOUT_COOLDOWN)
+        logger_.Fatal("[Epoll]: EndpointConfig.requestTimeoutSeconds must be >= ", INVOKE_TIMEOUT_COOLDOWN,
+                      " (timer tick interval) for endpoint: ", host);
+    if(config.idleTimeoutSeconds < INVOKE_TIMEOUT_COOLDOWN)
+        logger_.Fatal("[Epoll]: EndpointConfig.idleTimeoutSeconds must be >= ", INVOKE_TIMEOUT_COOLDOWN,
+                      " (timer tick interval) for endpoint: ", host);
+
+    if(config.maxReconnectAttempts > 0 && config.reconnectBackoffBase > config.reconnectBackoffMax)
+        logger_.Fatal("[Epoll]: EndpointConfig.reconnectBackoffBase must be <= reconnectBackoffMax for endpoint: ",
+                      host);
+    if(config.prewarm > config.connLimit)
+        logger_.Fatal("[Epoll]: EndpointConfig.prewarm (", config.prewarm, ") exceeds connLimit (", config.connLimit,
+                     ") for endpoint: ", host);
+}
+
+std::uint64_t EpollConnectionHandler::ComputeNextDnsRefresh(std::uint32_t minTtlSeconds,
+                                                            std::uint32_t userOverrideSeconds,
+                                                            const std::string& hostname)
+{
+    // UINT32_MAX TTL means no real DNS involved (literal IP or loopback alias)
+    // The address can never change, so refreshing is always a no-op regardless of-
+    // -any user-configured interval. Schedule the furthest-out check the wheel allows
+    if(minTtlSeconds == UINT32_MAX)
+        return (NowMs() / 1000) + MAX_REFRESH_SECONDS;
+
+    std::uint32_t interval;
+
+    // User explicitly set a refresh cadence (this is a CEILING, not an override-
+    // -of TTL entirely). If the record's actual TTL is shorter, still honor it,-
+    // -since refreshing later than the DNS-promised validity risks stale addresses
+    if(userOverrideSeconds > 0)
+        interval = std::min(userOverrideSeconds, minTtlSeconds > 0 ? minTtlSeconds : userOverrideSeconds);
+
+    // 0 = fully TTL-driven, refresh exactly when the DNS record says to
+    else
+        interval = minTtlSeconds > 0 ? minTtlSeconds : MAX_REFRESH_SECONDS;
+
+    interval = std::clamp(interval, MIN_REFRESH_SECONDS, MAX_REFRESH_SECONDS);
+
+    // Jitter range is 10% of interval, minimum 5 seconds regardless of interval size
+    // Ensures meaningful spread even at MIN_REFRESH_SECONDS where 10% would be < 1s
+    std::uint32_t jitterRange = std::max(MIN_REFRESH_SECONDS, interval / 10);
+    std::uint32_t hash32 = static_cast<std::uint32_t>(std::hash<std::string>{}(hostname));
+    std::uint32_t jitter = static_cast<std::uint32_t>((static_cast<std::uint64_t>(hash32) * jitterRange) >> 32);
+
+    return (NowMs() / 1000) + interval + jitter;
 }
 
 void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointDesc& desc, bool success)
@@ -2116,7 +2276,12 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
         // -are never reused, silently shrinking the effective pool by 'prewarm' count
         slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
         instance_->ReturnEndpointToPool(slotCtx);
-        instance_->RegisterEpoll(slotCtx, EPOLL_CTL_MOD);
+
+        if(!instance_->RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
+            instance_->logger_.Error("[Epoll]: 'RegisterEpoll(MOD)' failed for endpoint after onConnect prewarm: ",
+                                     strerror(errno));
+            instance_->Close(slotCtx, true);
+        }
     }
 }
 
@@ -2155,13 +2320,113 @@ void EpollConnectionHandler::HandleDnsRefresh(std::uint16_t endpointIdx)
 {
     auto& meta = endpoints_[endpointIdx].meta;
 
-    // Reschedule to prevent tight loop while the real implementation is pending
-    std::uint64_t interval =
-        meta.config.dnsRefreshSeconds > 0 ? static_cast<std::uint64_t>(meta.config.dnsRefreshSeconds) * 1000 : 30000;
+    // With MAX_DNS_THREADS capping concurrent resolves, the queue can only exceed-
+    // -MAX_DNS_RESULT_QUEUE_SIZE if eventfd writes are persistently failing and-
+    // -HandleDnsResultReady is never draining it
+    {
+        std::lock_guard<std::mutex> lock(dnsResultMutex_);
+        if(dnsResultQueue_.size() >= MAX_DNS_RESULT_QUEUE_SIZE)
+            logger_.Fatal("[Epoll]: DNS result queue exceeded ", MAX_DNS_RESULT_QUEUE_SIZE,
+                          " entries. Event signaling has persistently failed, DNS refresh dead engine wide");
+    }
 
-    meta.dnsNextRefreshMs = NowMs() + interval;
+    // Computed once and reused across all failure paths (semaphore busy, write fail, spawn fail)
+    std::uint64_t retrySchedule = ComputeNextDnsRefresh(MIN_REFRESH_SECONDS, 0, meta.hostname);
 
-    // TODO: spawn std::thread, call getaddrinfo blocking, post result via eventfd
+    // All resolver slots busy. Reschedule with jitter so waiting endpoints don't-
+    // -all reconverge at the same instant when slots free up
+    if(!dnsThreadSemaphore_.try_acquire()) {
+        meta.dnsNextRefreshSeconds = retrySchedule;
+        return;
+    }
+
+    // Push schedule to ceiling (doubles as the in-flight marker, prevents Run()-
+    // -from spawning a second overlapping resolve for this endpoint)
+    meta.dnsNextRefreshSeconds = (NowMs() / 1000) + MAX_REFRESH_SECONDS;
+
+    // meta captured by reference below (safe since endpoints_ is fully-
+    // -populated before Run() starts and never reallocated afterward)
+    try {
+        std::thread([=, this, &meta]() {
+            // Always release the semaphore slot on exit regardless of outcome
+            struct SemGuard {
+                std::counting_semaphore<MAX_DNS_THREADS>& sem;
+                ~SemGuard() { sem.release(); }
+            } guard{dnsThreadSemaphore_};
+
+            Utils::ResolvedAddrs newAddrs;
+            std::uint32_t minTtl = 0;
+            bool ok = DNSResolver::Resolve(meta.hostname.c_str(), meta.port, newAddrs, minTtl);
+
+            {
+                std::lock_guard<std::mutex> lock(dnsResultMutex_);
+                dnsResultQueue_.push_back({ok, endpointIdx, minTtl, std::move(newAddrs)});
+            }
+
+            std::uint64_t one = 1;
+            ssize_t written = RetryOnEintr([&] { return write(dnsResultEventFd_, &one, sizeof(one)); });
+
+            // On write error, push error to queue. If future writes succeed, the errors will be logged
+            // If future writes keep failing, the queue fills rapidly and triggers the-
+            // -MAX_DNS_RESULT_QUEUE_SIZE condition above
+            if(written < 0) {
+                std::lock_guard<std::mutex> lock(dnsResultMutex_);
+                dnsResultQueue_.back().wakeupError = strerror(errno);
+                meta.dnsNextRefreshSeconds = retrySchedule;
+            }
+        }).detach();
+    }
+    catch(const std::system_error& e) {
+        // Thread spawn failed, release the acquired slot and reschedule for retry
+        dnsThreadSemaphore_.release();
+        logger_.Error("[Epoll]: Failed to spawn DNS refresh thread: ", e.what());
+        meta.dnsNextRefreshSeconds = retrySchedule;
+    }
+}
+
+void EpollConnectionHandler::HandleDnsResultReady(int sfd)
+{
+    std::uint64_t val = 0;
+    ssize_t n = RetryOnEintr([&] { return read(sfd, &val, sizeof(val)); });
+
+    if(n < 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+
+        // Same reason as why HandleTimeoutTimer and HandleAsyncTimer fail, too lazy to-
+        // -write the reason again
+        logger_.Fatal("[Epoll]: DNS result eventfd read failed: ", strerror(errno));
+    }
+
+    std::vector<DnsResult> results;
+    {
+        std::lock_guard<std::mutex> lock(dnsResultMutex_);
+        results.swap(dnsResultQueue_);
+    }
+
+    std::uint64_t nowSeconds = NowMs() / 1000;
+
+    for(auto& r : results) {
+        // Just sanity checks
+        if(r.endpointIdx >= endpoints_.size())
+            continue;
+
+        auto& meta = endpoints_[r.endpointIdx].meta;
+
+        if(!r.wakeupError.empty())
+            logger_.Error("[Epoll]: DNS refresh signal failed for '", meta.hostname, "': ", r.wakeupError);
+
+        // Resolver failed, reschedule it again
+        if(!r.success) {
+            logger_.Warn("[Epoll]: DNS refresh failed for '", meta.hostname, "', keeping existing addresses");
+            meta.dnsNextRefreshSeconds = ComputeNextDnsRefresh(MIN_REFRESH_SECONDS, 0, meta.hostname);
+            continue;
+        }
+
+        meta.addrs = std::move(r.addrs);
+        meta.dnsNextRefreshSeconds =
+            ComputeNextDnsRefresh(r.minTtlSeconds, meta.config.dnsRefreshSeconds, meta.hostname);
+    }
 }
 
 std::uint64_t EpollConnectionHandler::PackEpollData(ClientCtx* ctx)
@@ -2200,15 +2465,7 @@ bool EpollConnectionHandler::RegisterEpoll(ClientCtx* ctx, int op)
 
     // Like any other syscall, this can be interrupted by signals, in which case just retry
     // For other errors just return false
-    while(true) {
-        if(epoll_ctl(epollFd_, op, ctx->socket, evPtr) == 0)
-            return true;
-
-        if(errno == EINTR)
-            continue;
-
-        return false;
-    }
+    return RetryOnEintr([&] { return epoll_ctl(epollFd_, op, ctx->socket, evPtr); }) == 0;
 }
 
 bool EpollConnectionHandler::RegisterEpoll(EndpointCtx* ctx, int op)
@@ -2228,20 +2485,25 @@ bool EpollConnectionHandler::RegisterEpoll(EndpointCtx* ctx, int op)
 
     // Like any other syscall, this can be interrupted by signals, in which case just retry
     // For other errors just return false
-    while(true) {
-        if(epoll_ctl(epollFd_, op, ctx->socket, evPtr) == 0)
-            return true;
-
-        if(errno == EINTR)
-            continue;
-
-        return false;
-    }
+    return RetryOnEintr([&] { return epoll_ctl(epollFd_, op, ctx->socket, evPtr); }) == 0;
 }
 
 bool EpollConnectionHandler::CreateAndConnect(EndpointCtx* ctx, EndpointMetadata& epMeta)
 {
-    ctx->socket = socket(epMeta.addr.ss_family, SOCK_STREAM, 0);
+    // Should never happen post AllocateEndpoint validation, but guard anyway. An-
+    // -empty list here would be a div/mod-by-zero on the round-robin pick below
+    if(epMeta.addrs.empty())
+        return false;
+
+    // Round-robin pick. nextAddrIdx keeps counting up across the uint16_t range and-
+    // -wraps naturally. We only ever use it modulo the current list size, so the-
+    // -stored cursor never needs to know or care about addrs.size() directly
+    std::uint16_t idx = epMeta.nextAddrIdx % static_cast<std::uint16_t>(epMeta.addrs.size());
+    epMeta.nextAddrIdx++;
+
+    ResolvedAddr& chosen = epMeta.addrs[idx];
+
+    ctx->socket = socket(chosen.addr.ss_family, SOCK_STREAM, 0);
     if(ctx->socket < 0)
         return false;
 
@@ -2249,7 +2511,7 @@ bool EpollConnectionHandler::CreateAndConnect(EndpointCtx* ctx, EndpointMetadata
         return false;
 
     while(true) {
-        int ret = connect(ctx->socket, reinterpret_cast<const sockaddr*>(&epMeta.addr), epMeta.addrLen);
+        int ret = connect(ctx->socket, reinterpret_cast<const sockaddr*>(&chosen.addr), chosen.addrLen);
         if(ret == 0)
             return true;
 

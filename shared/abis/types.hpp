@@ -155,10 +155,9 @@ enum class EndpointStatus : std::uint8_t {
 };
 
 enum class EndpointTLSConfig : std::uint8_t {
-    AUTO = 0,              // TLS automatically on some preconfigured ports
-    FORCE_REQUIRE,         // Force TLS (port doesn't matter)
-    FORCE_INSECURE,        // Explicitly allow no TLS even on secure ports
-    NONE = FORCE_INSECURE, // Alias: explicit opt-out of TLS, same as FORCE_INSECURE
+    AUTO = 0,       // TLS automatically on some preconfigured ports
+    FORCE_REQUIRE,  // Force TLS (port doesn't matter)
+    FORCE_INSECURE, // Explicitly allow no TLS even on secure ports
 };
 
 enum class ConnectResult : std::uint8_t {

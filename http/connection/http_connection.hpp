@@ -7,6 +7,7 @@
 #include "shared/abis/types.hpp"
 #include "utils/hash/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
+#include "utils/resolver/dns_resolver.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -260,11 +261,11 @@ static_assert(sizeof(ClientCtx) <= 168, "'ClientCtx' must be <= 168 bytes");
 
 struct EndpointMetadata {
     std::string hostname;
-    sockaddr_storage addr = {0};
-    socklen_t addrLen = 0;
+    Utils::ResolvedAddrs addrs;
+    std::uint64_t dnsNextRefreshSeconds = 0;
+    std::uint16_t nextAddrIdx = 0;
     std::uint16_t port = 0;
     std::uint32_t timerBase = 0; // Specific to timer wheel
-    std::uint64_t dnsNextRefreshMs = 0;
     Shared::EndpointDesc desc = {0};
     Shared::EndpointConfig config = {0};
     std::unordered_map<std::uint64_t, EndpointCtx*> coalescePending;
