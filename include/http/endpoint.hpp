@@ -32,28 +32,60 @@ public:
     }
 };
 
-// Non-template aggregate the user fills out with designated-
-// -initializers. All fields except 'onConnect' match the ABI-
-// -function signatures directly. State pointer parameters are-
-// -void* at the ABI level, the user casts internally
-//
-// 'onConnect' is intentionally absent from this struct because-
-// -it requires ABI erasure that depends on a compile-time constant-
-// -function pointer. It is passed as a non-type template argument-
-// -on Resolve instead, which lets the compiler produce a zero-cost-
-// -stateless erasing wrapper per distinct user function
-struct EndpointHooks {
-    EndpointSerializeFn serialize = nullptr;
-    EndpointParseFn parse = nullptr;
-    EndpointOnDisconnectFn onDisconnect = nullptr;      // nullable
-    EndpointCreateStateFn createSlotState = nullptr;    // nullable
-    EndpointDestroyStateFn destroySlotState = nullptr;  // nullable
-    EndpointCreateStateFn createParseState = nullptr;   // nullable
-    EndpointDestroyStateFn destroyParseState = nullptr; // nullable
-    EndpointResetStateFn resetParseState = nullptr;     // nullable
-    EndpointCreateStateFn createOutput = nullptr;       // nullable
-    EndpointDestroyStateFn destroyOutput = nullptr;     // nullable
-    EndpointCoalesceKeyFn coalesceKey = nullptr;        // nullable -> 0 = no coalescing
+// RAII owner for the response object returned by SendPayload
+// Calls destroyOutput when it goes out of scope
+// Using the response pointer after this object is destroyed is undefined behavior
+template <typename T> struct EndpointOutput {
+    EndpointOutput() = default;
+    EndpointOutput(T* ptr, EndpointDestroyStateFn destroy) noexcept : ptr_(ptr), destroy_(destroy)
+    {}
+    ~EndpointOutput()
+    {
+        if(ptr_ && destroy_)
+            destroy_(ptr_);
+    }
+
+    EndpointOutput(EndpointOutput&& o) noexcept : ptr_(o.ptr_), destroy_(o.destroy_)
+    {
+        o.ptr_ = nullptr;
+    }
+    EndpointOutput& operator=(EndpointOutput&& o) noexcept
+    {
+        if(this != &o) {
+            if(ptr_ && destroy_)
+                destroy_(ptr_);
+
+            ptr_ = o.ptr_;
+            destroy_ = o.destroy_;
+            o.ptr_ = nullptr;
+        }
+
+        return *this;
+    }
+    EndpointOutput(const EndpointOutput&) = delete;
+    EndpointOutput& operator=(const EndpointOutput&) = delete;
+
+public:
+    T* operator->() const noexcept
+    {
+        return ptr_;
+    }
+    T& operator*() const noexcept
+    {
+        return *ptr_;
+    }
+    explicit operator bool() const noexcept
+    {
+        return ptr_ != nullptr;
+    }
+    T* get() const noexcept
+    {
+        return ptr_;
+    }
+
+private:
+    T* ptr_ = nullptr;
+    EndpointDestroyStateFn destroy_ = nullptr;
 };
 
 // Returned by Resolve::SendPayload. Suspends the calling route-
@@ -64,17 +96,17 @@ struct EndpointHooks {
 // -immediately so the caller can inspect the status without-
 // -suspending at all
 //
-// On success the response pointer (TRes*) is non-owning. The-
-// -engine owns the object's lifetime via destroyOutput. The-
-// -pointer is valid only until the next co_await on this path
+// On success the result is an EndpointOutput<TRes> (an RAII owner)
+// It is valid for as long as the variable is in scope
 template <typename TRes> struct SendPayloadAwaitable : public AwaitableBase<SendPayloadAwaitable<TRes>> {
     EndpointStatus syncStatus{}; // set on synchronous failure path
     std::uint16_t endpointIdx{0};
     const void* req{};
+    EndpointDestroyStateFn destroyOutput_{nullptr};
 
 public:
-    SendPayloadAwaitable(std::uint16_t idx, const void* r) noexcept
-        : AwaitableBase<SendPayloadAwaitable<TRes>>{}, endpointIdx(idx), req(r)
+    SendPayloadAwaitable(std::uint16_t idx, const void* r, EndpointDestroyStateFn destroy) noexcept
+        : AwaitableBase<SendPayloadAwaitable<TRes>>{}, endpointIdx(idx), req(r), destroyOutput_(destroy)
     {}
 
     bool await_suspend(std::coroutine_handle<> h) noexcept
@@ -101,17 +133,17 @@ public:
         return true;
     }
 
-    std::pair<EndpointStatus, TRes*> await_resume() const noexcept
+    std::pair<EndpointStatus, EndpointOutput<TRes>> await_resume() noexcept
     {
         // Synchronous failure. Return the actual engine status
         if(this->result_.status == AsyncStatus::IO_FAILURE && syncStatus != EndpointStatus::SUCCESS)
-            return {syncStatus, nullptr};
+            return {syncStatus, EndpointOutput<TRes>{}};
 
         // Async failure (engine fired IO_FAILURE via HandleAsyncCallback)
         if(this->result_.status != AsyncStatus::COMPLETED)
-            return {this->result_.endpointStatus, nullptr};
+            return {this->result_.endpointStatus, EndpointOutput<TRes>{}};
 
-        return {EndpointStatus::SUCCESS, static_cast<TRes*>(this->result_.data)};
+        return {EndpointStatus::SUCCESS, EndpointOutput<TRes>{static_cast<TRes*>(this->result_.data), destroyOutput_}};
     }
 };
 
@@ -145,42 +177,28 @@ template <UserOnConnectFn UserFn> constexpr EndpointOnConnectFn GetErasedOnConne
         return &EraseOnConnectImpl<UserFn>;
 }
 
-// Constructed once at namespace scope before Run(). Registers the-
-// -endpoint with the engine via the deferred init vector and stores-
-// -the assigned index for use in SendPayload calls
+// Constructed once at namespace scope before Run(). Registers the endpoint with the engine-
+// -via the deferred init vector and stores the assigned index for use in SendPayload calls
 //
-// OnConnect: pass a named function Task<ConnectResult>(SlotHandle, void*)-
-// -or omit it (defaults to nullptr) for protocols with no handshake
+// Pass EndpointDesc directly. Leave onConnect = nullptr in the desc (Resolve fills it in from the-
+// OnConnect template parameter so the compiler produces a zero-cost stateless erasing wrapper)
 //
 // Example with onConnect:
 //   inline const auto PgEndpoint = Resolve<PgReq, PgRes, PgOnConnect>{
-//       "postgres.internal:5432", hooks, config, &pgConfig };
+//       "postgres.internal:5432", EndpointDesc{.serialize=..., .userCtx=&pgConfig}, config };
 //
-// Example without onConnect (Redis, Memcached, etc.):
+// Example without onConnect:
 //   inline const auto RedisEndpoint = Resolve<RedisReq, RedisRes>{
-//       "redis.internal:6379", hooks, config };
-// ============================================================
+//       "redis.internal:6379", EndpointDesc{.serialize=..., .parse=...}, config };
 template <typename TReq, typename TRes, UserOnConnectFn OnConnect = nullptr> class Resolve {
 public:
-    Resolve(const char* host, EndpointHooks hooks, EndpointConfig config, void* userCtx = nullptr)
+    Resolve(const char* host, EndpointDesc desc, EndpointConfig config)
     {
+        destroyOutput_ = desc.destroyOutput;
         Core::__WFXDeferred.emplace_back([=, this] {
-            EndpointDesc desc{};
-            desc.serialize = hooks.serialize;
-            desc.parse = hooks.parse;
-            desc.onConnect = GetErasedOnConnect<OnConnect>();
-            desc.onDisconnect = hooks.onDisconnect;
-            desc.createSlotState = hooks.createSlotState;
-            desc.destroySlotState = hooks.destroySlotState;
-            desc.createParseState = hooks.createParseState;
-            desc.destroyParseState = hooks.destroyParseState;
-            desc.resetParseState = hooks.resetParseState;
-            desc.createOutput = hooks.createOutput;
-            desc.destroyOutput = hooks.destroyOutput;
-            desc.coalesceKey = hooks.coalesceKey;
-            desc.userCtx = userCtx;
-
-            endpointIdx_ = Core::EndpointApiExt1()->AllocateEndpoint(host, desc, config);
+            EndpointDesc d = desc;
+            d.onConnect = GetErasedOnConnect<OnConnect>();
+            endpointIdx_ = Core::EndpointApiExt1()->AllocateEndpoint(host, d, config);
         });
     }
 
@@ -191,15 +209,15 @@ public:
     Resolve& operator=(Resolve&&) = default;
 
 public:
-    // Returns std::pair<EndpointStatus, TRes*>.
-    // TRes* is non-owning. See SendPayloadAwaitable for lifetime notes
+    // Returns std::pair<EndpointStatus, EndpointOutput<TRes>>
     SendPayloadAwaitable<TRes> SendPayload(const TReq& req) const noexcept
     {
-        return {endpointIdx_, static_cast<const void*>(&req)};
+        return {endpointIdx_, static_cast<const void*>(&req), destroyOutput_};
     }
 
 private:
     std::uint16_t endpointIdx_ = 0;
+    EndpointDestroyStateFn destroyOutput_ = nullptr;
 };
 
 } // namespace WFX::Http

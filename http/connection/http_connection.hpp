@@ -184,6 +184,7 @@ struct EndpointCtx : public ConnectionTag {
     void* slotState = nullptr;      // 8 bytes, persists across requests
     void* parseStateObj = nullptr;  // 8 bytes, reset between requests
     void* outputObj = nullptr;      // 8 bytes, per-request, nulled before callback
+    std::uint64_t coalesceKey = 0;  // 8 bytes, per-request, set by SendPayload
 
     Utils::RWBuffer rwBuffer;         // 16 bytes
     Shared::AsyncData asyncData = {}; // 24 bytes
@@ -201,7 +202,7 @@ public:
 
     bool IsAsyncOperation() const;
 };
-static_assert(sizeof(EndpointCtx) <= 96, "'EndpointCtx' must be <= 96 bytes");
+static_assert(sizeof(EndpointCtx) <= 128, "'EndpointCtx' must be <= 128 bytes");
 
 struct ClientCtx : public ConnectionTag {
     // ------------------------------------------ 1 byte from ConnectionTag
@@ -259,6 +260,21 @@ public:
 };
 static_assert(sizeof(ClientCtx) <= 168, "'ClientCtx' must be <= 168 bytes");
 
+// Per-waiter entry for a coalesced in-flight request
+// Both pointers are non-owning (lifetime is tied to the owning CoalesceEntry)
+struct CoalesceWaiter {
+    ClientCtx* clientCtx;
+    std::uint16_t generationId; // saved at registration; stale if clientCtx was freed and bumped
+};
+
+// One entry per in-flight coalesce key
+// 'inflight' is the slot doing the actual backend request
+// 'waiters' are clients parked until that slot's response arrives
+struct CoalesceEntry {
+    EndpointCtx* inflight = nullptr;
+    std::vector<CoalesceWaiter> waiters;
+};
+
 struct EndpointMetadata {
     std::string hostname;
     Utils::ResolvedAddrs addrs;
@@ -268,7 +284,7 @@ struct EndpointMetadata {
     std::uint32_t timerBase = 0; // Specific to timer wheel
     Shared::EndpointDesc desc = {0};
     Shared::EndpointConfig config = {0};
-    std::unordered_map<std::uint64_t, EndpointCtx*> coalescePending;
+    std::unordered_map<std::uint64_t, CoalesceEntry> coalescePending; // TODO: Gotta switch to our hashmap
 };
 static_assert(sizeof(EndpointMetadata) <= 512, "'EndpointMetadata' must be <= 512 bytes");
 

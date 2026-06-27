@@ -537,15 +537,19 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
     auto& meta = entry.meta;
     auto& desc = meta.desc;
 
+    std::uint64_t pendingCoalesceKey = 0;
+
     // If an identical in-flight request exists, park the client as a waiter
+    // Key is computed once here and reused below when registering the primary
+    // Do NOT set clientCtx->endpointCtx for waiters (ReleaseClient would otherwise-
+    // -kill the in-flight slot when a waiter disconnects)
     if(desc.coalesceKey) {
-        std::uint64_t key = desc.coalesceKey(req);
-        if(key != 0) {
-            auto it = meta.coalescePending.find(key);
+        pendingCoalesceKey = desc.coalesceKey(req);
+        if(pendingCoalesceKey != 0) {
+            auto it = meta.coalescePending.find(pendingCoalesceKey);
             if(it != meta.coalescePending.end()) {
-                // TODO: push clientCtx onto a per-slot waiter list so it gets-
-                // -notified when the in-flight request completes (coalesce follow-up)
-                clientCtx->endpointCtx = it->second;
+                it->second.waiters.push_back({clientCtx, clientCtx->generationId});
+                clientCtx->asyncData = asyncData;
                 return EndpointStatus::PENDING;
             }
         }
@@ -622,13 +626,15 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
         return EndpointStatus::SERIALIZE_ERROR;
     }
 
-    // Register in coalesce map after successful serialize
-    if(desc.coalesceKey) {
-        std::uint64_t key = desc.coalesceKey(req);
-        if(key != 0)
-            meta.coalescePending[key] = slotCtx;
+    // Register in coalesce map after successful serialize (master)
+    if(pendingCoalesceKey != 0) {
+        auto& ce = meta.coalescePending[pendingCoalesceKey];
+        ce.inflight = slotCtx;
+        // ce.waiters starts empty, pushed to by subsequent SendPayload calls with the same key
+        slotCtx->coalesceKey = pendingCoalesceKey;
     }
 
+    // Create a communication link between endpoint and client
     slotCtx->clientCtx = clientCtx;
     clientCtx->endpointCtx = slotCtx;
     clientCtx->asyncData = asyncData;
@@ -754,7 +760,6 @@ void EpollConnectionHandler::Run()
 
             if(sfd == timeoutTimerFd_) {
                 HandleTimeoutTimer(sfd);
-                logger_.Info("CONNECTIONS: ", metrics_->network.activeConns);
                 continue;
             }
             if(sfd == asyncTimerFd_) {
@@ -957,8 +962,14 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
 
     ipLimiter_.ReleaseConnection(ctx->connInfo);
 
-    if(ctx->socket > 0)
+    if(ctx->socket >= 0)
         close(ctx->socket);
+
+    // Bump before Reset so any saved generationId in a CoalesceWaiter no longer-
+    // -matches this slot, preventing a spurious delivery to a freed-but-not-reused slot
+    ctx->generationId++;
+    if(ctx->generationId == 0)
+        ctx->generationId = 1;
 
     ctx->Reset();
     connections_.FreeSlot(idx);
@@ -1002,13 +1013,34 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
         ctx->slotState = nullptr;
     }
 
-    // Remove from coalesce map, O(n) scan on a tiny map, faster than a hash lookup here
-    auto& pending = meta.coalescePending;
-    for(auto it = pending.begin(); it != pending.end(); ++it) {
-        if(it->second == ctx) {
+    // Remove from coalesce map and fail any parked waiters (O(1) via stored key)
+    // slotState is already destroyed above (failure delivery doesn't need it)
+    // For the COMPLETE path, coalesceKey was cleared and entry erased already, this is a no-op
+    if(ctx->coalesceKey != 0) {
+        auto& pending = meta.coalescePending;
+
+        auto it = pending.find(ctx->coalesceKey);
+        if(it != pending.end()) {
+            for(auto& w : it->second.waiters) {
+                if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
+                    continue;
+
+                w.clientCtx->endpointCtx = nullptr;
+
+                AsyncResult failResult{};
+                failResult.data = nullptr;
+                failResult.dataLen = 0;
+                failResult.status = AsyncStatus::IO_FAILURE;
+                failResult.endpointStatus = (disconnectReason == DisconnectReason::TIMEOUT)
+                                                ? EndpointStatus::REQUEST_TIMEOUT
+                                                : EndpointStatus::INTERNAL_ERROR;
+
+                HandleClientAsyncCallback(w.clientCtx, failResult, false);
+            }
+
             pending.erase(it);
-            break;
         }
+        // coalesceKey = 0 handled by Reset() at end of ReleaseEndpoint
     }
 
     // If slot died during onConnect phase, destroy the suspended coroutine frame-
@@ -1035,7 +1067,7 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
         HandleClientAsyncCallback(client, result, false);
     }
 
-    if(ctx->socket > 0)
+    if(ctx->socket >= 0)
         close(ctx->socket);
 
     ctx->Reset();
@@ -1273,7 +1305,7 @@ bool EpollConnectionHandler::Receive(ClientCtx* ctx)
     return gotData;
 }
 
-bool EpollConnectionHandler::Receive(EndpointCtx* ctx)
+bool EpollConnectionHandler::Receive(EndpointCtx* ctx, bool* outEof)
 {
     WFX_TRACE();
 
@@ -1307,6 +1339,14 @@ bool EpollConnectionHandler::Receive(EndpointCtx* ctx)
 
         // Connection closed by peer
         else if(n == 0) {
+            // If the caller can finalize on EOF (the request RECV path), don't tear the slot-
+            // -down here. Report EOF and let it run one last isEof parse so a close-delimited-
+            // -body (no Content-Length, no chunked) can be delivered before teardown
+            if(outEof) {
+                *outEof = true;
+                break;
+            }
+
             Close(ctx);
             return false;
         }
@@ -1798,12 +1838,28 @@ void EpollConnectionHandler::HandleEndpointEpollIn(EndpointCtx* ctx)
     WFX_TRACE();
 
     switch(ctx->eventType) {
-        case EventType::EVENT_ENDPOINT_RECV:
+        case EventType::EVENT_ENDPOINT_RECV: {
             // Data arrived from backend, run the parse loop
-            if(Receive(ctx))
-                HandleEndpointReceive(ctx);
+            bool eof = false;
+            bool gotData = Receive(ctx, &eof);
+
+            // Nothing to act on: EAGAIN with no new bytes, or Receive already closed on a fatal-
+            // -error (ctx may be released, must not touch it)
+            if(!eof && !gotData)
+                return;
+
+            // The parse callback only ever runs for a slot with a request in flight. A slot with-
+            // -no client is idle-pooled or prewarmed: any EOF (peer closing an idle keep-alive) or-
+            // -unsolicited bytes (a misbehaving backend) have nothing to parse or deliver, and the-
+            // -slot has no outputObj, so just release it. Otherwise parse, passing eof through so a-
+            // -close-delimited body gets finalized on the last call
+            if(!ctx->clientCtx)
+                Close(ctx, true);
+            else
+                HandleEndpointReceive(ctx, eof);
 
             return;
+        }
 
         case EventType::EVENT_ENDPOINT_ONCONNECT:
             // clang-format off
@@ -1965,6 +2021,9 @@ void EpollConnectionHandler::ValidateEndpoint(const char* host, const EndpointDe
         logger_.Fatal("[Epoll]: EndpointHooks.createSlotState and destroySlotState must both be set or both null "
                       "for endpoint: ",
                       host);
+    if(desc.coalesceKey != nullptr && desc.cloneOutput == nullptr)
+        logger_.Fatal("[Epoll]: EndpointHooks.cloneOutput must not be null when coalesceKey is set for endpoint: ",
+                      host);
 
     // vvv EndpointConfig vvv
     if(config.connLimit == 0)
@@ -1988,7 +2047,7 @@ void EpollConnectionHandler::ValidateEndpoint(const char* host, const EndpointDe
                       host);
     if(config.prewarm > config.connLimit)
         logger_.Fatal("[Epoll]: EndpointConfig.prewarm (", config.prewarm, ") exceeds connLimit (", config.connLimit,
-                     ") for endpoint: ", host);
+                      ") for endpoint: ", host);
 }
 
 std::uint64_t EpollConnectionHandler::ComputeNextDnsRefresh(std::uint32_t minTtlSeconds,
@@ -2095,7 +2154,7 @@ void EpollConnectionHandler::Write(EndpointCtx* ctx)
     HandleEndpointWriteComplete(ctx);
 }
 
-void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx)
+void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx, bool isEof)
 {
     WFX_TRACE();
 
@@ -2106,7 +2165,7 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx)
     while(true) {
         std::uint32_t consumed = 0;
         ParseResult pr = desc.parse(slotCtx->slotState, slotCtx->parseStateObj, rwBuf.GetReadData(),
-                                    rwBuf.GetReadMeta()->dataLength, &consumed, slotCtx->outputObj);
+                                    rwBuf.GetReadMeta()->dataLength, &consumed, slotCtx->outputObj, isEof);
 
         if(consumed > 0) {
             auto* readMeta = rwBuf.GetReadMeta();
@@ -2128,6 +2187,14 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx)
 
         switch(pr) {
             case ParseResult::INCOMPLETE:
+                // At EOF there are no more bytes coming. A parser that still wants more means the-
+                // -response was truncated, fail the in-flight request and any waiters, then close
+                if(isEof) {
+                    FinalizeEndpointRequest(slotCtx, desc, false);
+                    Close(slotCtx, true);
+                    return;
+                }
+
                 // Need more bytes. eventType is already EVENT_ENDPOINT_RECV from Receive()
                 return;
 
@@ -2136,23 +2203,61 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx)
                 ClientCtx* clientCtx = slotCtx->clientCtx;
                 void* outputObj = slotCtx->outputObj;
 
-                // Remove from coalesce map
+                std::vector<CoalesceWaiter> waiters;
+
+                // Extract waiters and remove from coalesce map (O(1) via stored key)
                 auto& pending = entry.meta.coalescePending;
-                for(auto it = pending.begin(); it != pending.end(); ++it) {
-                    if(it->second == slotCtx) {
+                if(slotCtx->coalesceKey != 0) {
+                    auto it = pending.find(slotCtx->coalesceKey);
+                    if(it != pending.end()) {
+                        waiters = std::move(it->second.waiters);
                         pending.erase(it);
-                        break;
                     }
+
+                    slotCtx->coalesceKey = 0;
                 }
 
                 slotCtx->clientCtx = nullptr;
                 clientCtx->endpointCtx = nullptr;
                 slotCtx->outputObj = nullptr; // disown before any cleanup
 
+                // Fan out clones to waiters while slotCtx->slotState is still live
+                // This MUST happen before close/pool-return: COMPLETE_CLOSE destroys slotState
+                for(auto& w : waiters) {
+                    // Client disconnected before result arrived
+                    if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
+                        continue;
+
+                    w.clientCtx->endpointCtx = nullptr;
+                    void* cloned = desc.cloneOutput(slotCtx->slotState, outputObj);
+
+                    // Ownership transfers to the waiter's EndpointOutput<T> RAII wrapper
+                    if(cloned)
+                        HandleClientAsyncCallback(w.clientCtx, {cloned, 0, {.unused = 0}, AsyncStatus::COMPLETED},
+                                                  false);
+                    // Kind of worst case, normally it wouldn't happen
+                    else {
+                        AsyncResult failResult{};
+                        failResult.data = nullptr;
+                        failResult.dataLen = 0;
+                        failResult.endpointStatus = EndpointStatus::INTERNAL_ERROR;
+                        failResult.status = AsyncStatus::IO_FAILURE;
+                        HandleClientAsyncCallback(w.clientCtx, failResult, false);
+                    }
+                }
+
                 if(pr == ParseResult::COMPLETE_KEEP_ALIVE) {
                     // Only reset parse state, do NOT touch outputObj here
-                    if(slotCtx->parseStateObj && desc.resetParseState)
-                        desc.resetParseState(slotCtx->parseStateObj);
+                    // If resetParseState is absent, destroy+null so SendPayload recreates fresh next request-
+                    // -without this, a keep-alive slot would carry dirty parse state into the next request
+                    if(slotCtx->parseStateObj) {
+                        if(desc.resetParseState)
+                            desc.resetParseState(slotCtx->parseStateObj);
+                        else {
+                            desc.destroyParseState(slotCtx->parseStateObj);
+                            slotCtx->parseStateObj = nullptr;
+                        }
+                    }
 
                     rwBuf.ClearReadBuffer();
                     slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
@@ -2168,21 +2273,14 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx)
                     Close(slotCtx);
                 }
 
-                // Fire callback. Coroutine gets valid outputObj pointer
+                // Ownership transfers to the primary's EndpointOutput<T> RAII wrapper
                 HandleClientAsyncCallback(clientCtx, {outputObj, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
-
-                // NOW destroy output. Coroutine has already run and is done with outputObj
-                if(outputObj && desc.destroyOutput)
-                    desc.destroyOutput(outputObj);
-
                 return;
             }
 
             case ParseResult::ERROR:
             default: {
-                logger_.Error("[Epoll]: Parse error for endpoint '", entry.meta.hostname, "' consumed=", consumed,
-                              " dataLength=", rwBuf.GetReadMeta()->dataLength);
-
+                // Notify client if exists (as its suspended)
                 if(slotCtx->clientCtx) {
                     ClientCtx* clientCtx = slotCtx->clientCtx;
                     slotCtx->clientCtx = nullptr;
@@ -2351,7 +2449,10 @@ void EpollConnectionHandler::HandleDnsRefresh(std::uint16_t endpointIdx)
             // Always release the semaphore slot on exit regardless of outcome
             struct SemGuard {
                 std::counting_semaphore<MAX_DNS_THREADS>& sem;
-                ~SemGuard() { sem.release(); }
+                ~SemGuard()
+                {
+                    sem.release();
+                }
             } guard{dnsThreadSemaphore_};
 
             Utils::ResolvedAddrs newAddrs;

@@ -213,8 +213,11 @@ static_assert(std::is_standard_layout_v<EndpointSlotHandle>, "'EndpointSlotHandl
 // 'ctx' is userCtx for slot, 'slotState' for parse/output
 using EndpointSerializeFn = SerializeResult (*)(void* slotState, const void* req, char* buf, std::uint32_t bufLen,
                                                 std::uint32_t* written);
+// isEof is true on the final call after the peer closed the connection, letting the parser-
+// -finalize a close-delimited body (no Content-Length, no chunked). When isEof is true the-
+// -parser must NOT return INCOMPLETE for the same buffer, there will be no more bytes
 using EndpointParseFn = ParseResult (*)(void* slotState, void* parseState, const char* buf, std::uint32_t len,
-                                        std::uint32_t* consumed, void* outObj);
+                                        std::uint32_t* consumed, void* outObj, bool isEof);
 using EndpointOnConnectFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone,
                                      void* onDoneUd);
 using EndpointOnDisconnectFn = void (*)(void* slotState, DisconnectReason reason);
@@ -222,6 +225,9 @@ using EndpointCreateStateFn = void* (*)(void* ctx);
 using EndpointDestroyStateFn = void (*)(void* state);
 using EndpointResetStateFn = void (*)(void* parseState);
 using EndpointCoalesceKeyFn = std::uint64_t (*)(const void* req);
+// Returns a freshly allocated deep clone of srcOutput, or null on allocation failure
+// Required when coalesceKey is set (each coalesced waiter receives its own owned clone)
+using EndpointCloneOutputFn = void* (*)(void* slotState, const void* srcOutput);
 
 struct EndpointDesc {
     EndpointSerializeFn serialize;
@@ -236,9 +242,10 @@ struct EndpointDesc {
     EndpointCreateStateFn createOutput;       // nullable, takes slotState as ctx
     EndpointDestroyStateFn destroyOutput;     // nullable
     EndpointCoalesceKeyFn coalesceKey;        // nullable, no coalescing if null
+    EndpointCloneOutputFn cloneOutput;        // nullable, REQUIRED when coalesceKey is set
     void* userCtx;                            // injected into createSlotState
 };
-static_assert(sizeof(EndpointDesc) == 104, "'EndpointDesc' must be exactly 104 bytes.");
+static_assert(sizeof(EndpointDesc) == 112, "'EndpointDesc' must be exactly 112 bytes.");
 static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be standard layout");
 
 struct EndpointConfig {

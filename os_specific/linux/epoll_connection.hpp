@@ -103,7 +103,9 @@ private: // Connection management
 
 private: // I/O
     bool Receive(ClientCtx* ctx);
-    bool Receive(EndpointCtx* ctx);
+    // outEof (endpoint only): set true when the peer closed mid-receive instead of closing the-
+    // -slot, so the caller can run a final isEof parse to finalize a close-delimited body
+    bool Receive(EndpointCtx* ctx, bool* outEof = nullptr);
     bool EnsureReadReady(ClientCtx* ctx);
     bool EnsureReadReady(EndpointCtx* ctx);
     bool EnsureFileReady(ClientCtx* ctx, std::string path);
@@ -146,10 +148,11 @@ private: // Handshake
 
 private: // Endpoint-specific
     void ValidateEndpoint(const char* host, const EndpointDesc& desc, const EndpointConfig& config);
-    std::uint64_t ComputeNextDnsRefresh(std::uint32_t minTtlSeconds, std::uint32_t userOverrideSeconds, const std::string& hostname);
+    std::uint64_t ComputeNextDnsRefresh(std::uint32_t minTtlSeconds, std::uint32_t userOverrideSeconds,
+                                        const std::string& hostname);
     void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointDesc& desc, bool success);
     void HandleEndpointWriteComplete(EndpointCtx* ctx);
-    void HandleEndpointReceive(EndpointCtx* ctx);
+    void HandleEndpointReceive(EndpointCtx* ctx, bool isEof);
     void HandlePrewarm();
     void HandleDnsRefresh(std::uint16_t endpointIdx);
     void HandleDnsResultReady(int sfd);
