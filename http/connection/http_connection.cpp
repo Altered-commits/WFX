@@ -184,10 +184,12 @@ void EndpointCtx::Reset()
 
     isShuttingDown = 0;
     inOnConnectPhase = 0;
+    isAwaitingReconnect = 0;
     eventType = EventType::EVENT_ACCEPT;
     clientCtx = nullptr;
     asyncData = AsyncData{};
     coalesceKey = 0;
+    reconnectAttempts = 0;
     socket = WFX_INVALID_SOCKET;
     // endpointState, endpointIdx:          preserved, TLS config and pool identity survive reset
     // sslConn:                             caller freed it before Reset()

@@ -172,12 +172,14 @@ struct EndpointCtx : public ConnectionTag {
             std::uint8_t isShuttingDown : 1;
             std::uint8_t inOnConnectPhase : 1;
             std::uint8_t isPooledIdle : 1;
+            std::uint8_t isAwaitingReconnect : 1;
         };
         std::uint8_t flags = 0;
     }; // 1 bytes
 
-    std::uint16_t generationId = 1; // 2 bytes
-    std::uint16_t endpointIdx = 0;  // 2 bytes
+    std::uint16_t generationId = 1;      // 2 bytes
+    std::uint16_t endpointIdx = 0;       // 2 bytes
+    std::uint16_t reconnectAttempts = 0; // 2 bytes, backoff attempt count, fits in existing padding
 
     ClientCtx* clientCtx = nullptr; // 8 bytes
     void* sslConn = nullptr;        // 8 bytes

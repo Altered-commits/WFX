@@ -63,6 +63,15 @@ struct DnsResult {
     std::string wakeupError;
 };
 
+// A slot parked for a backoff reconnect, drained on the timeout tick once wakeAtMs is due
+// generationId guards against the slot being freed and reused under the same pool index
+struct PendingReconnect {
+    std::uint64_t wakeAtMs;
+    std::uint16_t endpointIdx;
+    std::uint16_t generationId;
+    std::uint32_t slotIdx;
+};
+
 class EpollConnectionHandler : public HttpConnectionHandler {
 public:
     EpollConnectionHandler(bool useHttps);
@@ -154,6 +163,13 @@ private: // Endpoint-specific
     void HandleEndpointWriteComplete(EndpointCtx* ctx);
     void HandleEndpointReceive(EndpointCtx* ctx, bool isEof);
     void HandlePrewarm();
+
+    void HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,
+                              DisconnectReason reason = DisconnectReason::ERROR);
+    void ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& entry);
+    void HandleReconnects();
+    std::uint32_t ComputeBackoffSeconds(const EndpointConfig& config, std::uint16_t attempt);
+
     void HandleDnsRefresh(std::uint16_t endpointIdx);
     void HandleDnsResultReady(int sfd);
     void FireOnConnect(EndpointCtx* ctx, EndpointEntry& entry);
@@ -231,6 +247,10 @@ private: // Timer state
     SteadyClock::time_point startTime_ = SteadyClock::now();
     int timeoutTimerFd_ = -1;
     int asyncTimerFd_ = -1;
+
+private: // Reconnect state (single-threaded, drained on the timeout tick)
+    std::vector<PendingReconnect> pendingReconnects_;
+    std::uint64_t reconnectRngState_ = 0x9E3779B97F4A7C15ULL; // xorshift state for backoff jitter
 
 private: // DNS state
     std::mutex dnsResultMutex_;

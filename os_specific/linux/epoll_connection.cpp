@@ -47,6 +47,15 @@ EpollConnectionHandler::EpollConnectionHandler(bool useHttps) : useHttps_(useHtt
 {
     instance_ = this;
 
+    // Decorrelate backoff jitter across worker processes. Without per-process entropy every worker-
+    // -would share the same xorshift sequence and reconnect in lockstep, re-creating the thundering-
+    // -herd the jitter exists to prevent. Mix pid + a clock + this; OR-in 1 so the state is never 0-
+    // -(0 is the xorshift fixed point)
+    std::uint64_t seed = static_cast<std::uint64_t>(::getpid());
+    seed ^= static_cast<std::uint64_t>(SteadyClock::now().time_since_epoch().count()) * 0x9E3779B97F4A7C15ULL;
+    seed ^= reinterpret_cast<std::uintptr_t>(this);
+    reconnectRngState_ = seed | 1ULL;
+
     if(useHttps)
         sslHandler_ = CreateSSLHandler();
 }
@@ -190,13 +199,25 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
                                  Close(ctx, true);
                          }
                          else {
-                             // Endpoint: always close on timeout (idle or in-flight)
-                             // Also, connId is an absolute timer wheel index, recover pool index by subtracting-
-                             // -timerBase
+                             // connId is an absolute timer wheel index, recover pool index by-
+                             // -subtracting timerBase
                              auto& entry = endpoints_[extra];
                              std::uint32_t slotIdx = connId - entry.meta.timerBase;
                              EndpointCtx* ctx = entry.pool.GetPtr(slotIdx);
-                             Close(ctx, true, DisconnectReason::TIMEOUT);
+
+                             // A timeout during the connect phase (TCP connect / TLS handshake /-
+                             // -onConnect) is a transient connect failure: route it through the funnel-
+                             // -so a background slot reconnects with backoff and a client-waiting slot-
+                             // -fails fast. A timeout during request/idle just closes as before
+                             EventType et = ctx->eventType;
+                             bool connectPhase = et == EventType::EVENT_CONNECT ||
+                                                 et == EventType::EVENT_ENDPOINT_HANDSHAKE ||
+                                                 et == EventType::EVENT_ENDPOINT_ONCONNECT;
+
+                             if(connectPhase)
+                                 HandleConnectFailure(ctx, entry, false, DisconnectReason::TIMEOUT);
+                             else
+                                 Close(ctx, true, DisconnectReason::TIMEOUT);
                          }
                      });
 
@@ -426,7 +447,7 @@ void EpollConnectionHandler::Stream(ClientCtx* ctx, StreamGenerator generator, b
 {
     // Sanity checks
     if(!generator.ctx || !generator.Next) {
-        logger_.Error("[Epoll]: 'Stream()' called but received empty generator");
+        logger_.Warn("[Epoll]: 'Stream()' called but received empty generator");
         Close(ctx);
         return;
     }
@@ -1091,6 +1112,10 @@ void EpollConnectionHandler::ReturnEndpointToPool(EndpointCtx* slotCtx)
     entry.pool.FreeSlot(idx);
     metrics_->network.activeConns--;
 
+    // Slot reached a healthy idle state (fresh connect, successful reconnect, or a completed-
+    // -keep-alive request), so clear any accumulated backoff attempts
+    slotCtx->reconnectAttempts = 0;
+
     // Slot is now idle-pooled, open socket, no in-flight request. Arm idle-
     // -timeout so the connection doesn't sit open forever without traffic
     // isPooledIdle marks that activeConns was already decremented above
@@ -1616,6 +1641,9 @@ void EpollConnectionHandler::HandleTimeoutTimer(int sfd)
     }
 
     timerWheel_.Tick(NowMs() / 1000);
+
+    // Fire any backoff reconnects that have come due
+    HandleReconnects();
 }
 
 void EpollConnectionHandler::HandleAsyncTimer(int sfd)
@@ -1679,7 +1707,7 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx, std::uint
 
     if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE)) {
         logger_.Error("[Epoll]: TLS handshake failed for endpoint '", meta.hostname, "'");
-        Close(ctx);
+        HandleConnectFailure(ctx, endpoints_[ctx->endpointIdx], false);
         return;
     }
 
@@ -1922,11 +1950,12 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
             int err = 0;
             socklen_t len = sizeof(err);
 
-            auto& meta = endpoints_[ctx->endpointIdx].meta;
+            auto& ep = endpoints_[ctx->endpointIdx];
+            auto& meta = ep.meta;
 
             if(getsockopt(ctx->socket, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0) {
                 logger_.Error("[Epoll]: Connect failed for endpoint '", meta.hostname, "': ", strerror(err));
-                Close(ctx);
+                HandleConnectFailure(ctx, ep, false);
                 break;
             }
 
@@ -1937,7 +1966,7 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
                 ctx->sslConn = sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str());
 
                 if(!ctx->sslConn) {
-                    Close(ctx);
+                    HandleConnectFailure(ctx, ep, false);
                     break;
                 }
 
@@ -2002,27 +2031,27 @@ void EpollConnectionHandler::UpdateAsyncTimer()
 
 void EpollConnectionHandler::ValidateEndpoint(const char* host, const EndpointDesc& desc, const EndpointConfig& config)
 {
-    // vvv EndpointHooks vvv
+    // vvv EndpointDesc vvv
     if(!desc.serialize)
-        logger_.Fatal("[Epoll]: EndpointHooks.serialize must not be null for endpoint: ", host);
+        logger_.Fatal("[Epoll]: EndpointDesc.serialize must not be null for endpoint: ", host);
     if(!desc.parse)
-        logger_.Fatal("[Epoll]: EndpointHooks.parse must not be null for endpoint: ", host);
+        logger_.Fatal("[Epoll]: EndpointDesc.parse must not be null for endpoint: ", host);
 
     // create/destroy pairs must both be present or both absent, otherwise leaks/double-frees
     if((desc.createParseState != nullptr) != (desc.destroyParseState != nullptr))
-        logger_.Fatal("[Epoll]: EndpointHooks.createParseState and destroyParseState must both be set or both null "
+        logger_.Fatal("[Epoll]: EndpointDesc.createParseState and destroyParseState must both be set or both null "
                       "for endpoint: ",
                       host);
     if((desc.createOutput != nullptr) != (desc.destroyOutput != nullptr))
-        logger_.Fatal("[Epoll]: EndpointHooks.createOutput and destroyOutput must both be set or both null "
+        logger_.Fatal("[Epoll]: EndpointDesc.createOutput and destroyOutput must both be set or both null "
                       "for endpoint: ",
                       host);
     if((desc.createSlotState != nullptr) != (desc.destroySlotState != nullptr))
-        logger_.Fatal("[Epoll]: EndpointHooks.createSlotState and destroySlotState must both be set or both null "
+        logger_.Fatal("[Epoll]: EndpointDesc.createSlotState and destroySlotState must both be set or both null "
                       "for endpoint: ",
                       host);
     if(desc.coalesceKey != nullptr && desc.cloneOutput == nullptr)
-        logger_.Fatal("[Epoll]: EndpointHooks.cloneOutput must not be null when coalesceKey is set for endpoint: ",
+        logger_.Fatal("[Epoll]: EndpointDesc.cloneOutput must not be null when coalesceKey is set for endpoint: ",
                       host);
 
     // vvv EndpointConfig vvv
@@ -2335,20 +2364,16 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
 {
     auto* slotCtx = static_cast<EndpointCtx*>(ud);
     auto& entry = instance_->endpoints_[slotCtx->endpointIdx];
-    auto& desc = entry.meta.desc;
 
     slotCtx->inOnConnectPhase = 0;
 
-    // Any failure. Call onDisconnect, clean up, close slot
+    // Any failure routes through the connect-failure funnel: a client-waiting slot fails fast, an-
+    // -explicit FATAL is discarded, and a background slot returning RETRY (or a coroutine that errored-
+    // -out) reconnects with backoff. connectResult is only meaningful when the coroutine completed
     if(result.status != AsyncStatus::COMPLETED || result.connectResult == ConnectResult::FATAL ||
        result.connectResult == ConnectResult::RETRY) {
-        if(desc.onDisconnect && slotCtx->slotState)
-            desc.onDisconnect(slotCtx->slotState, DisconnectReason::ERROR);
-
-        instance_->FinalizeEndpointRequest(slotCtx, desc, false);
-        instance_->Close(slotCtx, true);
-
-        // TODO: RETRY. Schedule reconnect with exponential backoff
+        bool fatal = (result.status == AsyncStatus::COMPLETED && result.connectResult == ConnectResult::FATAL);
+        instance_->HandleConnectFailure(slotCtx, entry, fatal);
         return;
     }
 
@@ -2383,6 +2408,139 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
     }
 }
 
+std::uint32_t EpollConnectionHandler::ComputeBackoffSeconds(const EndpointConfig& config, std::uint16_t attempt)
+{
+    // Exponential: base * 2 ^ attempt, capped at max (computed without overflow)
+    std::uint64_t exp = config.reconnectBackoffBase;
+    for(std::uint16_t i = 0; i < attempt && exp < config.reconnectBackoffMax; i++)
+        exp <<= 1;
+
+    std::uint32_t cap = static_cast<std::uint32_t>(std::min<std::uint64_t>(exp, config.reconnectBackoffMax));
+
+    // Pick uniformly in [0, cap] so a whole pool never reconnects in lockstep and re-DDoSes a-
+    // -recovering upstream. xorshift64 is plenty for jitter
+    reconnectRngState_ ^= reconnectRngState_ << 13;
+    reconnectRngState_ ^= reconnectRngState_ >> 7;
+    reconnectRngState_ ^= reconnectRngState_ << 17;
+
+    std::uint32_t jittered = (cap == 0) ? 0 : static_cast<std::uint32_t>(reconnectRngState_ % (cap + 1ULL));
+
+    // Clamp to at least 1s so we never busy-retry at a 0s delay
+    return jittered < 1 ? 1 : jittered;
+}
+
+void EpollConnectionHandler::ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& entry)
+{
+    WFX_TRACE();
+
+    auto& meta = entry.meta;
+    std::uint32_t idx = entry.pool.GetIndex(ctx);
+
+    // Soft close: drop the socket + TLS + per-request objects, but KEEP the slot reserved in the-
+    // -pool and KEEP slotState alive (the slot persists across retry attempts; onConnect re-runs-
+    // -against the same slotState, and onDisconnect fires only on final ejection via ReleaseEndpoint)
+    timerWheel_.Cancel(meta.timerBase + idx);
+    (void)RegisterEpoll(ctx, EPOLL_CTL_DEL);
+
+    if(ctx->sslConn) {
+        sslHandler_->ForceShutdown(ctx->sslConn);
+        ctx->sslConn = nullptr;
+    }
+    if(ctx->socket != WFX_INVALID_SOCKET) {
+        close(ctx->socket);
+        ctx->socket = WFX_INVALID_SOCKET;
+    }
+
+    // If a connect-phase timeout interrupted a suspended onConnect coroutine, destroy its frame now-
+    // -(mirrors ReleaseEndpoint) so it doesn't leak. A fresh coroutine starts on the reconnect attempt
+    if(ctx->inOnConnectPhase)
+        HandleEndpointAsyncCallback(ctx, {}, true);
+
+    FinalizeEndpointRequest(ctx, meta.desc, false);
+
+    ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+    ctx->inOnConnectPhase = 0;
+    ctx->clientCtx = nullptr; // background slot, no waiting client (already failed/never had one)
+    ctx->isAwaitingReconnect = 1;
+
+    std::uint32_t backoff = ComputeBackoffSeconds(meta.config, ctx->reconnectAttempts);
+    ctx->reconnectAttempts++;
+
+    pendingReconnects_.push_back(
+        {NowMs() + static_cast<std::uint64_t>(backoff) * 1000ULL, ctx->endpointIdx, ctx->generationId, idx});
+
+    logger_.Debug("[Epoll]: Endpoint '", meta.hostname, "' slot ", idx, " (gen ", ctx->generationId,
+                  ") connect failed, reconnect attempt ", ctx->reconnectAttempts, "/", meta.config.maxReconnectAttempts,
+                  " in ", backoff, "s");
+}
+
+void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,
+                                                  DisconnectReason reason)
+{
+    WFX_TRACE();
+
+    auto& meta = entry.meta;
+
+    // Permanent teardown when: a client is actively waiting (fail it fast, it can retry at the app-
+    // -layer rather than block on backoff), the failure is fatal, or retries are exhausted. Close ->-
+    // -ReleaseEndpoint fires onDisconnect once, notifies any waiting client (with reason so the-
+    // -status code is accurate), and frees the slot
+    bool exhausted = ctx->reconnectAttempts >= meta.config.maxReconnectAttempts;
+    if(ctx->clientCtx || fatal || exhausted) {
+        // A background slot (no waiting client) being permanently discarded is the operationally-
+        // -significant event worth alerting on. Client-driven failures already surface to the caller-
+        // -via the returned status, so they don't need an engine-level error here
+        if(!ctx->clientCtx)
+            logger_.Error("[Epoll]: Endpoint '", meta.hostname, "' slot ", entry.pool.GetIndex(ctx),
+                          " giving up after ", ctx->reconnectAttempts, "/", meta.config.maxReconnectAttempts,
+                          " reconnect attempts, slot ejected");
+
+        FinalizeEndpointRequest(ctx, meta.desc, false);
+        Close(ctx, true, reason);
+        return;
+    }
+
+    // Background (prewarm/pool) slot, transient failure, retries remaining: heal in the background
+    ScheduleReconnect(ctx, entry);
+}
+
+void EpollConnectionHandler::HandleReconnects()
+{
+    if(pendingReconnects_.empty())
+        return;
+
+    std::uint64_t now = NowMs();
+
+    for(std::size_t i = 0; i < pendingReconnects_.size();) {
+        PendingReconnect& pr = pendingReconnects_[i];
+        if(pr.wakeAtMs > now) {
+            i++;
+            continue;
+        }
+
+        // Due: remove the entry (order doesn't matter, swap-erase)
+        PendingReconnect due = pr;
+        pendingReconnects_[i] = pendingReconnects_.back();
+        pendingReconnects_.pop_back();
+
+        auto& entry = endpoints_[due.endpointIdx];
+        EndpointCtx* ctx = entry.pool.GetPtr(due.slotIdx);
+
+        // Stale guard: slot must still be the same parked one. isAwaitingReconnect is cleared by-
+        // -Reset() on teardown (covers freed-but-not-reused), generationId catches freed-and-reused
+        if(!ctx || !ctx->isAwaitingReconnect || ctx->generationId != due.generationId)
+            continue;
+
+        ctx->isAwaitingReconnect = 0;
+
+        // Re-attempt. CreateAndConnect advances nextAddrIdx, so this naturally rotates to the next-
+        // -resolved IP. WrapConnect re-registers epoll and re-arms the connect timeout
+        EndpointStatus s = WrapConnect(ctx, entry);
+        if(s != EndpointStatus::PENDING)
+            HandleConnectFailure(ctx, entry, false); // immediate failure: reschedule or eject
+    }
+}
+
 void EpollConnectionHandler::HandlePrewarm()
 {
     for(std::uint16_t i = 0; i < static_cast<std::uint16_t>(endpoints_.size()); i++) {
@@ -2402,14 +2560,12 @@ void EpollConnectionHandler::HandlePrewarm()
                 slotCtx->slotState = desc.createSlotState(desc.userCtx);
 
             EndpointStatus result = WrapConnect(slotCtx, entry);
-            if(result != EndpointStatus::PENDING) {
-                if(desc.destroySlotState && slotCtx->slotState) {
-                    desc.destroySlotState(slotCtx->slotState);
-                    slotCtx->slotState = nullptr;
-                }
 
-                ReleaseEndpoint(slotCtx);
-            }
+            // An immediate (synchronous) failure goes through the same funnel as async ones, so a
+            // prewarm slot retries with backoff instead of being silently abandoned. The teardown
+            // branch (retries off / exhausted) destroys slotState and frees the slot via Close
+            if(result != EndpointStatus::PENDING)
+                HandleConnectFailure(slotCtx, entry, false);
         }
     }
 }
@@ -2515,7 +2671,7 @@ void EpollConnectionHandler::HandleDnsResultReady(int sfd)
         auto& meta = endpoints_[r.endpointIdx].meta;
 
         if(!r.wakeupError.empty())
-            logger_.Error("[Epoll]: DNS refresh signal failed for '", meta.hostname, "': ", r.wakeupError);
+            logger_.Warn("[Epoll]: DNS refresh signal failed for '", meta.hostname, "': ", r.wakeupError);
 
         // Resolver failed, reschedule it again
         if(!r.success) {
@@ -2687,10 +2843,8 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
         // Immediate SSL connect (no EINPROGRESS). Attempt handshake now
         if(ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE) {
             ctx->sslConn = sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str());
-            if(!ctx->sslConn) {
-                logger_.Error("[Epoll]: 'WrapClient' failed for endpoint '", meta.hostname, "'");
+            if(!ctx->sslConn)
                 return EndpointStatus::SSL_FAILURE;
-            }
 
             EventType onSuccess = desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_RECV;
             if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE))

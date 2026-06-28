@@ -254,13 +254,13 @@ struct EndpointConfig {
     std::uint16_t connectTimeoutSeconds; // TCP+TLS+onConnect must complete within this window
     std::uint16_t requestTimeoutSeconds; // Send+receive cycle must complete within this window
     std::uint32_t idleTimeoutSeconds;    // Idle slots are closed after this many seconds
-    std::uint32_t maxReconnectAttempts;  // Max backoff attempts before slot is marked FATAL
-    std::uint32_t reconnectBackoffBase;  // Initial backoff seconds
-    std::uint32_t reconnectBackoffMax;   // Backoff cap seconds
-    std::uint32_t prewarm;               // Slots to connect eagerly on first epoll loop iteration
+    std::uint16_t maxReconnectAttempts;  // Max backoff attempts before slot is marked FATAL
+    std::uint16_t reconnectBackoffBase;  // Initial backoff seconds
+    std::uint16_t reconnectBackoffMax;   // Backoff cap seconds
     EndpointTLSConfig tlsConfig;         // TLS mode for this endpoint
+    std::uint32_t prewarm;               // Slots to connect eagerly on first epoll loop iteration
 };
-static_assert(sizeof(EndpointConfig) == 36, "'EndpointConfig' must be exactly 36 bytes.");
+static_assert(sizeof(EndpointConfig) == 28, "'EndpointConfig' must be exactly 28 bytes.");
 static_assert(std::is_standard_layout_v<EndpointConfig>, "'EndpointConfig' must be standard layout");
 
 // vvv Server Metrics vvv
