@@ -13,9 +13,6 @@ Release/
 # Internal
 ignore/
 
-# Binary artifacts
-/wfx
-wfx.toml
-
-# Python env
+# Python
 .venv/
+__pycache__/

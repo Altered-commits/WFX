@@ -1457,101 +1457,90 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
         return;
     }
 
-    // Stuff for ease of understanding
-    constexpr std::size_t chunkHeaderReserve = 10;
+    constexpr std::size_t HDR_RESERVE = 10; // max "%X\r\n" = 8 hex + \r\n
     auto& rwBuffer = ctx->rwBuffer;
+    const bool chunked = static_cast<bool>(ctx->streamChunked);
 
-    // Before we call stream generator, we need to reset buffer because we assume-
-    // -the last time it was called, the content of it has been written of to socket
-    auto writeMeta = rwBuffer.GetWriteMeta();
+    auto* writeMeta = rwBuffer.GetWriteMeta();
     if(!writeMeta) {
         Close(ctx);
         return;
     }
 
-    writeMeta->dataLength = 0;
-    writeMeta->writtenLength = 0;
+    // Loop: one iteration per chunk. Drives send() inline to skip the-
+    // -epoll_ctl(MOD) + epoll_wait round trip when the socket stays writable
+    // On EAGAIN: yield via EVENT_SEND; EPOLLET re-fires EPOLLOUT when the kernel-
+    // -drains the send buffer; Write() finishes the partial chunk then re-enters here
+    while(true) {
+        writeMeta->dataLength = 0;
+        writeMeta->writtenLength = 0;
 
-    // Call stream generator function, passing in the write buffer of rwBuffer
-    auto writeRegion = rwBuffer.GetWritableWriteRegion();
-    if(!writeRegion.ptr || writeRegion.len == 0) {
-        Close(ctx);
-        return;
-    }
-
-    // The format for chunk is (if framing is true):
-    // <Chunk Size in Hex> \r\n [3 - 10 bytes]
-    // <Chunk> \r\n             [2 bytes]
-    char* chunkPtr = !ctx->streamChunked ? writeRegion.ptr : writeRegion.ptr + chunkHeaderReserve;
-    std::size_t chunkCap = !ctx->streamChunked ? writeRegion.len : writeRegion.len - chunkHeaderReserve - 2;
-
-    auto streamResult = ctx->streamGenerator.Next(ctx->streamGenerator.ctx, {chunkPtr, chunkCap});
-
-    // Refresh timeout everytime a chunk is sent
-    RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
-
-    switch(streamResult.action) {
-        case StreamAction::CONTINUE: {
-            // The actual rwbuffer allows chunks only upto uint32 max only, if its 0 or > uint32 max-
-            // -its an invalid / corrupted output, 'Close' connection
-            if(streamResult.writtenBytes == 0 || streamResult.writtenBytes > UINT32_MAX) {
-                Close(ctx);
-                return;
-            }
-
-            // No need to add all the stuff, just send it as is
-            if(!ctx->streamChunked) {
-                writeMeta->dataLength = streamResult.writtenBytes;
-                Write(ctx, {});
-                return;
-            }
-
-            // Write chunk header to an intermediate buffer first
-            char chunkHeader[chunkHeaderReserve + 1] = {0};
-            int headerLen = snprintf(chunkHeader, chunkHeaderReserve, "%zX\r\n", streamResult.writtenBytes);
-            if(headerLen <= 0 || headerLen >= static_cast<int>(chunkHeaderReserve)) {
-                Close(ctx);
-                return;
-            }
-
-            // Manually set the amount of bytes that were reserved + written to the buffer
-            // Reason being, we artifically advance write pointer below, for that the data length-
-            // -needs to show the total size of buffer from start to end even if we skipped bytes
-            writeMeta->dataLength = chunkHeaderReserve + streamResult.writtenBytes + 2;
-
-            // So we don't want to leave space between header and chunk start
-            // So write header in reverse order from chunk start going back
-            // Also move the internal write pointer of write buffer to point to the header start
-            // So 'Write' will pickup from where write pointer left off
-            std::memcpy(chunkPtr - headerLen, chunkHeader, headerLen);
-            rwBuffer.AdvanceWriteLength(chunkHeaderReserve - headerLen);
-
-            // Append CRLF after data
-            char* trailer = chunkPtr + streamResult.writtenBytes;
-            *trailer++ = '\r';
-            *trailer++ = '\n';
-
-            Write(ctx, {});
+        auto writeRegion = rwBuffer.GetWritableWriteRegion();
+        if(!writeRegion.ptr || writeRegion.len == 0) {
+            Close(ctx);
             return;
         }
-        // Just resume the connection, we are done streaming
-        case StreamAction::STOP_AND_ALIVE_CONN:
-            ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
-            break;
 
-        // Do not resume connection, close it
-        case StreamAction::STOP_AND_CLOSE_CONN:
-        default:
-            ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+        // Reserve header + trailer space upfront so chunkPtr points at payload start
+        char* chunkPtr = writeRegion.ptr + (chunked ? HDR_RESERVE : 0);
+        std::size_t chunkCap = writeRegion.len - (chunked ? HDR_RESERVE + 2 : 0);
+
+        auto result = ctx->streamGenerator.Next(ctx->streamGenerator.ctx, {chunkPtr, chunkCap});
+        RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
+
+        if(result.action != StreamAction::CONTINUE) {
+            ctx->SetConnectionState(result.action == StreamAction::STOP_AND_ALIVE_CONN
+                                        ? ConnectionState::CONNECTION_ALIVE
+                                        : ConnectionState::CONNECTION_CLOSE);
             break;
+        }
+
+        if(result.writtenBytes == 0 || result.writtenBytes > UINT32_MAX) {
+            Close(ctx);
+            return;
+        }
+
+        if(!chunked)
+            writeMeta->dataLength = result.writtenBytes;
+        else {
+            char hdr[HDR_RESERVE + 1];
+            int hdrLen = snprintf(hdr, HDR_RESERVE, "%zX\r\n", result.writtenBytes);
+            if(hdrLen <= 0 || hdrLen >= static_cast<int>(HDR_RESERVE)) {
+                Close(ctx);
+                return;
+            }
+
+            writeMeta->dataLength = HDR_RESERVE + result.writtenBytes + 2;
+
+            std::memcpy(chunkPtr - hdrLen, hdr, hdrLen);
+
+            rwBuffer.AdvanceWriteLength(HDR_RESERVE - hdrLen);
+            chunkPtr[result.writtenBytes] = '\r';
+            chunkPtr[result.writtenBytes + 1] = '\n';
+        }
+
+        const char* base = rwBuffer.GetWriteData();
+        while(writeMeta->writtenLength < writeMeta->dataLength) {
+            ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, base + writeMeta->writtenLength,
+                                  writeMeta->dataLength - writeMeta->writtenLength);
+            if(n > 0)
+                writeMeta->writtenLength += static_cast<std::uint32_t>(n);
+            else if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                ctx->eventType = EventType::EVENT_SEND;
+                return;
+            }
+            else {
+                Close(ctx);
+                return;
+            }
+        }
+        // Chunk fully sent, next iteration
     }
 
-    // Call destructor if one is present
     if(ctx->streamGenerator.Destroy)
         ctx->streamGenerator.Destroy(ctx->streamGenerator.ctx);
 
-    // Storing value before resetting it below
-    bool wasChunked = static_cast<bool>(ctx->streamChunked);
+    bool wasChunked = chunked; // ctx->streamChunked cleared below
 
     // Only STOP_AND_... states can reach here
     rwBuffer.ClearWriteBuffer();
