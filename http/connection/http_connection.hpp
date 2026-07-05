@@ -163,6 +163,22 @@ struct ConnectionTag {
     EventType eventType = EventType::EVENT_ACCEPT; // 1 byte
 };
 
+// Per-stream entry for a multiplexed slot (mirrors CoalesceWaiter's shape below, including-
+// -the generationId staleness guard). Owned by EndpointCtx::pendingStreams; erased on-
+// -completion (parse() reports a non-zero completedKey for it). Only populated when the-
+// -endpoint's EndpointDesc::hasCapacity is set; non-multiplexed slots never touch this
+// Completion delivery reuses clientCtx->asyncData (set once by SendPayload), same as the-
+// -single-slot path and CoalesceWaiter, so no separate AsyncData copy is stored here. No-
+// -outputObj field: the protocol owns per-stream output internally and hands it over via-
+// -EndpointDesc::takeStreamOutput when the stream completes (or is abandoned early)
+struct PendingStream {
+    ClientCtx* clientCtx = nullptr;
+    void* parseState = nullptr;
+    std::uint64_t coalesceKey = 0; // Per-stream, unlike EndpointCtx::coalesceKey which is per-slot
+    std::uint16_t generationId = 0;
+};
+using PendingStreamMap = std::unordered_map<std::uint64_t, PendingStream>;
+
 struct EndpointCtx : public ConnectionTag {
     // ------------------------------------------ 1 byte from ConnectionTag
     union {
@@ -187,6 +203,8 @@ struct EndpointCtx : public ConnectionTag {
     void* parseStateObj = nullptr;  // 8 bytes, reset between requests
     void* outputObj = nullptr;      // 8 bytes, per-request, nulled before callback
     std::uint64_t coalesceKey = 0;  // 8 bytes, per-request, set by SendPayload
+
+    PendingStreamMap* pendingStreams = nullptr; // 8 bytes, lazily allocated, only used when hasCapacity is set
 
     Utils::RWBuffer rwBuffer;         // 16 bytes
     Shared::AsyncData asyncData = {}; // 24 bytes
@@ -234,6 +252,7 @@ struct ClientCtx : public ConnectionTag {
     std::uint16_t padding = 0;            // 2 bytes
 
     EndpointCtx* endpointCtx = nullptr; // 8 bytes
+    std::uint64_t streamKey = 0;        // 8 bytes, key into endpointCtx->pendingStreams; 0 = not multiplexed
     void* sslConn = nullptr;            // 8 bytes
 
     HttpRequest* requestInfo = nullptr;   // 8 bytes
@@ -283,7 +302,8 @@ struct EndpointMetadata {
     std::uint64_t dnsNextRefreshSeconds = 0;
     std::uint16_t nextAddrIdx = 0;
     std::uint16_t port = 0;
-    std::uint32_t timerBase = 0; // Specific to timer wheel
+    std::uint32_t timerBase = 0;            // Specific to timer wheel
+    std::uint32_t lastMultiplexHintIdx = 0; // Last slot idx that had multiplex capacity, tried first next time
     Shared::EndpointDesc desc = {0};
     Shared::EndpointConfig config = {0};
     std::unordered_map<std::uint64_t, CoalesceEntry> coalescePending; // TODO: Gotta switch to our hashmap
@@ -313,6 +333,9 @@ struct HttpConnectionHandler {
                                                Shared::AsyncData asyncData) = 0;
     virtual void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, Shared::AsyncData asyncData) = 0;
     virtual void SlotReceive(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
+    // Empty if the slot isn't TLS or the handshake hasn't completed yet. Not HTTP-specific: any-
+    // -ALPN-aware protocol can call this from onConnect to decide how to speak on this connection
+    virtual Shared::StringView NegotiatedProtocol(EndpointCtx* slotCtx) = 0;
     virtual void Close(EndpointCtx* ctx, bool forceClose = false,
                        Shared::DisconnectReason reason = Shared::DisconnectReason::ERROR) = 0;
     virtual void RefreshExpiry(EndpointCtx* ctx, std::uint16_t timeoutSeconds) = 0;

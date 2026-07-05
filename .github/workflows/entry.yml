@@ -1,0 +1,55 @@
+name: WFX CI
+
+# Top-level orchestrator: the ONLY workflow triggered on push / PR. It runs the-
+# -three checks LINEARLY, each still living in its own file:
+#
+#   filter_check.yml  ->  format_check.yml  ->  compile_check.yml
+#
+# The filter runs once; format runs only if the filter says so; compile runs only-
+# -after format succeeds. A final collector reports one stable status for branch-
+# -protection (green when the filter skips CI, red if any stage fails)
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev, main]
+
+jobs:
+  # 1. CI ignore check (decides whether the rest should run at all)
+  filter:
+    uses: ./.github/workflows/filter_check.yml
+
+  # 2. Formatting check (gated on the filter)
+  format:
+    needs: filter
+    if: needs.filter.outputs.should_run == '1'
+    uses: ./.github/workflows/format_check.yml
+
+  # 3. Compile check (runs only AFTER formatting passes)
+  compile:
+    needs: [filter, format]
+    if: needs.filter.outputs.should_run == '1'
+    uses: ./.github/workflows/compile_check.yml
+
+  # Collector: single required status. Success when the filter skipped CI or every-
+  # -stage passed; failure if any stage failed or was cancelled.
+  ci-success:
+    name: WFX CI Success
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [filter, format, compile]
+    steps:
+      - name: Check status
+        run: |
+          if [[ "${{ needs.filter.outputs.should_run }}" == "0" ]]; then
+            echo "CI skipped by filter. Marking as success."
+            exit 0
+          fi
+
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "CI failed."
+            exit 1
+          fi
+
+          echo "CI passed!"

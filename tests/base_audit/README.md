@@ -16,21 +16,21 @@ phases, stops the server
 ## Quick start
 
 ```bash
-cd tests/audit
+cd tests/base_audit
 
 # All phases
-python3 audit.py
+python3 base_audit.py
 
 # Single phase
-python3 audit.py --phase security
-python3 audit.py --phase features
-python3 audit.py --phase chaos
+python3 base_audit.py --phase security
+python3 base_audit.py --phase features
+python3 base_audit.py --phase chaos
 
 # Different binary or port
-python3 audit.py --wfx /path/to/wfx --port 9090
+python3 base_audit.py --wfx /path/to/wfx --port 9090
 
 # GitHub Actions
-python3 audit.py --ci
+python3 base_audit.py --ci
 ```
 
 ---

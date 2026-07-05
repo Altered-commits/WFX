@@ -96,6 +96,7 @@ public: // Endpoint operations
                                AsyncData asyncData) override;
     void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, AsyncData asyncData) override;
     void SlotReceive(EndpointCtx* slotCtx, AsyncData asyncData) override;
+    StringView NegotiatedProtocol(EndpointCtx* slotCtx) override;
     void Close(EndpointCtx* ctx, bool forceClose = false, DisconnectReason reason = DisconnectReason::ERROR) override;
     void RefreshExpiry(EndpointCtx* ctx, std::uint16_t timeoutSeconds) override;
 
@@ -106,6 +107,7 @@ public: // Engine control
 private: // Connection management
     ClientCtx* GetClientConnection();
     EndpointCtx* GetEndpointConnection(std::uint16_t endpointIdx);
+    EndpointCtx* FindMultiplexableSlot(std::uint16_t endpointIdx, EndpointMetadata& meta);
     void ReleaseClient(ClientCtx* ctx);
     void ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason reason = DisconnectReason::ERROR);
     void ReturnEndpointToPool(EndpointCtx* ctx);
@@ -159,9 +161,17 @@ private: // Endpoint-specific
     void ValidateEndpoint(const char* host, const EndpointDesc& desc, const EndpointConfig& config);
     std::uint64_t ComputeNextDnsRefresh(std::uint32_t minTtlSeconds, std::uint32_t userOverrideSeconds,
                                         const std::string& hostname);
-    void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointDesc& desc, bool success);
+    void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointMetadata& meta, bool success);
+    // Split out of SendPayload so the non-multiplexed path (the overwhelming majority of-
+    // -endpoints) stays byte-for-byte untouched. Only called when desc.hasCapacity is set
+    EndpointStatus SendPayloadMultiplexed(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
+                                          AsyncData asyncData, EndpointEntry& entry, std::uint64_t pendingCoalesceKey);
     void HandleEndpointWriteComplete(EndpointCtx* ctx);
     void HandleEndpointReceive(EndpointCtx* ctx, bool isEof);
+    // Resolves and erases a single completed stream from ctx->pendingStreams (fires its client-
+    // -callback / coalesce waiters, destroys its parse state), leaving the shared slot and every-
+    // -other in-flight stream on it untouched. No-op if key isn't found (already resolved/stale)
+    void ResolveMultiplexedStream(EndpointCtx* ctx, EndpointEntry& entry, std::uint64_t key);
     void HandlePrewarm();
 
     void HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,

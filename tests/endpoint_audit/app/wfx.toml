@@ -1,0 +1,86 @@
+[Project]
+middleware_list = []    # Order of middleware registered by either User or Engine
+
+[Build]
+dir_name            = "build"          # Build directory used by CMake
+preferred_config    = "Debug"          # Active build configuration (must match CMake: Debug / Release)
+preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure the build directory
+
+[Network]
+send_buffer_max              = 16384   # Max total send buffer size per connection (in bytes)
+send_buffer_incr             = 4096    # Buffer growth step (in bytes)
+recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
+recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
+header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
+max_header_size              = 8192    # Max total size of all headers (in bytes)
+max_header_count             = 64      # Max number of headers allowed
+max_body_size                = 8192    # Max size of request body (in bytes)
+header_timeout               = 15      # Max time limit for entire header to arrive (in seconds)
+body_timeout                 = 20      # Max time limit for entire body to arrive (in seconds)
+idle_timeout                 = 40      # Max time limit for a connection to stay idle (in seconds)
+max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
+max_connections_per_ip       = 512     # ENDPOINT TEST: the audit drives many concurrent inbound
+                                       # requests from a single IP (127.0.0.1) to exercise pool
+                                       # exhaustion + coalescing, so the per-IP caps are raised
+                                       # well above the burst sizes the harness fires.
+max_request_burst_per_ip     = 512     # Initial request tokens per IP (was 10 -> throttled 16-way bursts)
+max_requests_per_ip_per_sec  = 512     # Refill rate (tokens per second per IP)
+
+[ENV]
+env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
+
+[SSL]
+cert_path                   = "..."           # Path to the server certificate (PEM format)
+key_path                    = "..."           # Path to the private key corresponding to the certificate
+ca_cert_path                = ""              # Path to the CA certificate for client verification (PEM format) [Keep empty if not used]
+tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
+                                           # ^^^ Colon-separated TLSv1.3 ciphers in preference order
+tls12_ciphers               = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+                                           # ^^^ Colon-separated TLSv1.2 ciphers in preference order
+curves                      = "X25519:P-256"  # Elliptic curves preference list for ECDHE
+enable_server_session_cache = true            # Enable server side session cache
+enable_client_session_cache = true            # Enable client side session cache
+enable_ktls                 = false           # Enable Kernel TLS (KTLS) if supported
+server_session_cache_size   = 4096            # Size of server session cache (In bytes)
+client_session_cache_size   = 1024            # Size of client session cache (In bytes)
+min_proto_version           = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
+security_level              = 2               # SSL security level (0-5)
+
+[Windows]
+accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts
+connection_threads = "auto"  # IOCP worker thread count
+request_threads    = "all"   # Threads executing user handlers
+
+[Linux]
+worker_processes        = 1      # ENDPOINT TEST: single worker so the outbound connection pool
+                                 # (and coalescing dedup) is a single shared instance — makes
+                                 # keep-alive reuse and coalesce hit-counts deterministic.
+worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
+backlog                 = 1024   # Max pending connections in OS listen queue
+
+[Linux.IoUring]
+accept_slots     = 64     # Max simultaneous connections being accepted
+queue_depth      = 4096   # Internal connection queue depth
+batch_size       = 64     # How many connections to process per iteration
+file_chunk_size  = 65536  # How big of a file chunk to send at once
+
+[Linux.Epoll]
+max_events       = 1024   # How many events should epoll handle at a time
+
+[Logging]
+min_level         = 2          # Minimum level to emit (0->trace, 1->debug, 2->info, 3->warn, 4->error, 5->fatal)
+enable_stdout     = false       # Write to stdout
+enable_colors     = false       # ANSI colors on stdout (auto-disabled if not a tty)
+enable_timestamps = true       # Prepend [HH:MM:SS.mmm] to each line
+enable_file       = true      # Write to log files
+max_file_size     = 16777216   # Max log file size before rotation (in bytes) [if enable_file = true]
+max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
+
+[Misc]
+file_cache_size      = 20      # Number of files cached for efficiency (LFU)
+template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
+cache_chunk_size     = 2048    # Max chunk size to read / write from template cache file (in bytes)
+master_poll_interval = 2       # Master wake interval in seconds: worker restart detection and metrics polling
+max_worker_restarts  = 5       # Max restart attempts before slot is permanently dead
+worker_backoff_base  = 1       # Base backoff in seconds (doubles each attempt)
+worker_backoff_max   = 16      # Max backoff cap in seconds

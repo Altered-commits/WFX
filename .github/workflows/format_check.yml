@@ -1,22 +1,13 @@
 name: WFX Format Check
 
+# Reusable: invoked by the top-level orchestrator (ci.yml) AFTER the CI filter,-
+# -so this file owns ONLY the formatting logic
 on:
-  push:
-    branches: [dev]
-  pull_request:
-    branches: [dev, main]
+  workflow_call:
 
 jobs:
-  ci_filter:
-    uses: ./.github/workflows/ci_filter.yml
-
-  # ---------------------------------------------------------------
-  # Format check
-  # ---------------------------------------------------------------
   format:
     name: Format Check
-    needs: ci_filter
-    if: needs.ci_filter.outputs.should_run == '1'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -29,26 +20,3 @@ jobs:
 
       - name: Check formatting
         run: bash scripts/format.sh --dry-run
-
-  # ---------------------------------------------------------------
-  # Collector
-  # ---------------------------------------------------------------
-  ci-success:
-    name: WFX Format Check Success
-    runs-on: ubuntu-latest
-    if: always()
-    needs: [format, ci_filter]
-    steps:
-      - name: Check Status
-        run: |
-          if [[ "${{ needs.ci_filter.outputs.should_run }}" == "0" ]]; then
-            echo "Format check skipped by filter. Marking as success."
-            exit 0
-          fi
-
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
-            echo "Format check failed."
-            exit 1
-          fi
-
-          echo "Format check passed!"

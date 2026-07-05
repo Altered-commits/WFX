@@ -16,3 +16,6 @@ ignore/
 # Python
 .venv/
 __pycache__/
+
+# mkcert leaf certs
+certs/

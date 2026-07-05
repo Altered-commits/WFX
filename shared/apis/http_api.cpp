@@ -231,6 +231,10 @@ const ENDPOINT_API_EXT1* GetEndpointAPIExt1()
         [](void* endpointCtx, AsyncData asyncData) -> void {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
             __GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, asyncData);
+        },
+        [](void* endpointCtx) -> StringView {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            return __GlobalEndpointDataExt1.connHandler->NegotiatedProtocol(ctx);
         }
     };
     // clang-format on

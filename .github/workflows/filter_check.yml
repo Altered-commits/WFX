@@ -1,4 +1,4 @@
-name: WFX CI Filter
+name: WFX Filter Check
 
 on:
   workflow_call:

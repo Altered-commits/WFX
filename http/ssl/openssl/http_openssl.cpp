@@ -18,7 +18,7 @@ using namespace WFX::Utils; // For 'Logger'
 using namespace WFX::Core;  // For 'Config'
 
 // vvv Constants vvv
-static constexpr unsigned char ALPN_PROTOS[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
+static constexpr unsigned char DEFAULT_PROTOS[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
 
 // vvv Constructors and Destructors vvv
 HttpOpenSSL::HttpOpenSSL()
@@ -149,8 +149,8 @@ void HttpOpenSSL::InitServerContext()
         serverCtx,
         [](SSL*, const unsigned char** out, unsigned char* outlen, const unsigned char* in, unsigned int inlen,
            void*) -> int {
-            if(SSL_select_next_proto(const_cast<unsigned char**>(out), outlen, ALPN_PROTOS, sizeof(ALPN_PROTOS), in,
-                                     inlen) == OPENSSL_NPN_NEGOTIATED)
+            if(SSL_select_next_proto(const_cast<unsigned char**>(out), outlen, DEFAULT_PROTOS, sizeof(DEFAULT_PROTOS),
+                                     in, inlen) == OPENSSL_NPN_NEGOTIATED)
                 return SSL_TLSEXT_ERR_OK;
 
             // Client didn't offer http/1.1 but don't reject. Accept without ALPN
@@ -268,7 +268,7 @@ void* HttpOpenSSL::Wrap(SSLSocket sock)
     return ssl;
 }
 
-void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host)
+void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view alpnList)
 {
     SSL* ssl = SSL_new(clientCtx);
     if(!ssl)
@@ -321,12 +321,31 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host)
     }
 
     // ALPN: SSL_set_alpn_protos is client side per-connection advertisement
-    if(SSL_set_alpn_protos(ssl, ALPN_PROTOS, sizeof(ALPN_PROTOS)) != 0) {
+    const unsigned char* alpnData =
+        alpnList.empty() ? DEFAULT_PROTOS : reinterpret_cast<const unsigned char*>(alpnList.data());
+    unsigned int alpnLen = alpnList.empty() ? sizeof(DEFAULT_PROTOS) : static_cast<unsigned int>(alpnList.size());
+
+    if(SSL_set_alpn_protos(ssl, alpnData, alpnLen) != 0) {
         SSL_free(ssl);
         return nullptr;
     }
 
     return ssl;
+}
+
+std::string_view HttpOpenSSL::NegotiatedProtocol(void* conn)
+{
+    if(!conn)
+        return {};
+
+    const unsigned char* proto = nullptr;
+    unsigned int protoLen = 0;
+
+    SSL_get0_alpn_selected(static_cast<SSL*>(conn), &proto, &protoLen);
+    if(!proto || protoLen == 0)
+        return {};
+
+    return std::string_view{reinterpret_cast<const char*>(proto), protoLen};
 }
 
 SSLReturn HttpOpenSSL::Handshake(void* conn)

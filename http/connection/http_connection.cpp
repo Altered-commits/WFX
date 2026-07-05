@@ -114,6 +114,7 @@ void ClientCtx::Reset()
     connInfo = WFXIpAddress{};
     asyncData = AsyncData{};
     endpointCtx = nullptr;
+    streamKey = 0;
     // sslConn:      caller freed it before Reset()
     // generationId: managed by GetConnection()
 }
@@ -138,6 +139,7 @@ void ClientCtx::Clear()
     fileInfo = FileInfo{};
     asyncData = AsyncData{};
     endpointCtx = nullptr;
+    streamKey = 0;
 }
 
 void ClientCtx::CleanupStreamGenerator()
@@ -191,10 +193,10 @@ void EndpointCtx::Reset()
     coalesceKey = 0;
     reconnectAttempts = 0;
     socket = WFX_INVALID_SOCKET;
-    // endpointState, endpointIdx:          preserved, TLS config and pool identity survive reset
-    // sslConn:                             caller freed it before Reset()
-    // generationId:                        managed by GetConnection()
-    // slotState, parseStateObj, outputObj: managed by FinalizeEndpointRequest/ReleaseEndpoint
+    // endpointState, endpointIdx:                        preserved, TLS config and pool identity survive reset
+    // sslConn:                                            caller freed it before Reset()
+    // generationId:                                       managed by GetConnection()
+    // slotState, parseStateObj, outputObj, pendingStreams: managed by FinalizeEndpointRequest/ReleaseEndpoint
 }
 
 void EndpointCtx::SetConnectionState(ConnectionState newState)

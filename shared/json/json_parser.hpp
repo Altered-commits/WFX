@@ -575,9 +575,11 @@ public: // vvv Object and Array vvv
                 if(!ok)
                     return false;
 
-                const char* kptr = r.s_->strs + tmp.u32a();
-                std::uint32_t klen = tmp.u32c();
-                valRef = r.GetOrCreate(kptr, klen);
+                // The decoded key already lives in the store (ParseStringEscaped wrote it there)
+                // Insert it by offset, NOT by pointer: GetOrCreate would feed that strs-interior-
+                // -pointer to AllocStr, which reallocs strs and then memcpy's from the freed-
+                // -original (use-after-free), on top of storing the key a second time
+                valRef = r.GetOrCreateStored(tmp.u32a(), tmp.u32c());
             }
 
             if(!valRef.Valid()) {

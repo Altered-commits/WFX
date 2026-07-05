@@ -114,12 +114,14 @@ using SendPayloadApiFn = EndpointStatus (*)(void* clientCtx, std::uint16_t endpo
                                             AsyncData onComplete);
 using SlotSendApiFn = void (*)(void* endpointCtx, const void* data, std::uint32_t size, AsyncData);
 using SlotReceiveApiFn = void (*)(void* endpointCtx, AsyncData);
+using NegotiatedProtocolApiFn = StringView (*)(void* endpointCtx);
 
 struct ENDPOINT_API_EXT1 {
     AllocateEndpointApiFn AllocateEndpoint;
     SendPayloadApiFn SendPayload;
     SlotSendApiFn SlotSend;
     SlotReceiveApiFn SlotReceive;
+    NegotiatedProtocolApiFn NegotiatedProtocol;
 };
 static_assert(std::is_standard_layout_v<ENDPOINT_API_EXT1>, "'ENDPOINT_API_EXT1' must be standard layout");
 

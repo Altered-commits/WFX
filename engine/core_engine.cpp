@@ -60,7 +60,6 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
 void CoreEngine::Listen(const std::string& host, std::uint16_t port)
 {
     connHandler_->Initialize(host, port);
-
     connHandler_->SetEngineCallback([this](ClientCtx* ctx) { this->HandleRequest(ctx); });
     connHandler_->Run();
 }

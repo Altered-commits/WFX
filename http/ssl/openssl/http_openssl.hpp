@@ -18,7 +18,8 @@ public:
 
 public: // Main functions
     void* Wrap(SSLSocket fd) override;
-    void* WrapClient(SSLSocket fd, const char* host) override;
+    void* WrapClient(SSLSocket fd, const char* host, std::string_view alpnList = {}) override;
+    std::string_view NegotiatedProtocol(void* conn) override;
     SSLReturn Handshake(void* conn) override;
 
     SSLResult Read(void* conn, char* buf, int len) override;

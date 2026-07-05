@@ -25,7 +25,7 @@ docs/*
 
 # Misc / Binary artifacts
 .todo
-test/
+tests/
 lib/
 wfx
 wfx.toml
