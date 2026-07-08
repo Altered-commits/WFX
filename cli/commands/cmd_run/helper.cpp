@@ -20,6 +20,7 @@
 
 #include <ctime>
 #include <thread>
+#include <vector>
 
 namespace WFX::CLI {
 
@@ -396,6 +397,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         info.port = port;
         info.https = useHttps;
         info.workers = osConfig.workerProcesses;
+        info.workerShutdownTimeout = static_cast<int>(osConfig.workerShutdownTimeout);
         info.started = static_cast<std::int64_t>(std::time(nullptr));
         info.pid = getpid();
 
@@ -454,33 +456,40 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     logger.Info("[WFX-Master]: Signal received (INT / TERM), waiting for workers to shutdown...");
 
     // -------------------- SHUTDOWN PHASE --------------------
+    // Wait on every worker CONCURRENTLY, inside one shared 'workerShutdownTimeout' window,-
+    // -instead of one worker's full timeout at a time: N workers waited on serially could take-
+    // -N times as long as configured, long enough for an external 'wfx control stop' to give up-
+    // -and kill this process first, orphaning whichever workers hadn't been reached yet
+    std::vector<pid_t> pending;
     for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(osConfig.workerProcesses); i++) {
         pid_t pid = globalState.workerPids[i];
 
         // Slot may be dead from backoff exhaustion or failed restart
-        if(pid <= 0)
-            continue;
+        if(pid > 0)
+            pending.push_back(pid);
+    }
 
-        bool exited = false;
-
-        for(std::uint32_t t = 0; t < config.osSpecificConfig.workerShutdownTimeout * 10; t++) {
+    for(std::uint32_t t = 0; !pending.empty() && t < config.osSpecificConfig.workerShutdownTimeout * 10; t++) {
+        for(auto it = pending.begin(); it != pending.end();) {
             int status;
-            pid_t ret = waitpid(pid, &status, WNOHANG);
+            pid_t ret = waitpid(*it, &status, WNOHANG);
 
-            // Worker exited normally
-            if(ret == pid) {
-                exited = true;
-                break;
-            }
+            if(ret == *it)
+                it = pending.erase(it);
+            else
+                ++it;
+        }
 
+        if(!pending.empty())
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
+    }
 
-        if(!exited) {
-            // Worker didn't exit in time, force kill
-            kill(pid, SIGKILL);
-            waitpid(pid, nullptr, 0); // Reap zombie
-        }
+    // Anything still here ignored SIGTERM, or was spawned too late to receive it. Either way,-
+    // -force it and block until it's actually reaped, no worker is left running past this point
+    for(pid_t pid : pending) {
+        logger.Warn("[WFX-Master]: Worker (pid=", pid, ") did not exit in time, sending SIGKILL");
+        kill(pid, SIGKILL);
+        waitpid(pid, nullptr, 0);
     }
 
     // Hygiene (Not that it matters, OS would reclaim it anyways if this crashes)

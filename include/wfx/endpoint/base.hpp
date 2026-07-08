@@ -23,11 +23,10 @@
 //     WFX::EpPoolExhausted       all connections in use, try later
 //     WFX::EpConnectFailure      TCP handshake failed
 //     WFX::EpSslFailure          TLS handshake failed
-//     WFX::EpHandshakeTimeout    onConnect coroutine took too long
+//     WFX::EpHandshakeTimeout    TCP connect / TLS handshake / onConnect took too long
 //     WFX::EpRequestTimeout      no response within requestTimeoutSeconds
-//     WFX::EpDnsFailure          host could not be resolved
 //     WFX::EpSerializeError      your serialize() returned EpSerError
-//     WFX::EpSocketFailure       socket creation / options failed
+//     WFX::EpSocketFailure       socket creation / options failed (before ever reaching connect())
 //     WFX::EpBufferError         internal buffer init failure
 //     WFX::EpInsufficientBuffer  buffer too small (engine retries once with a larger one)
 //     WFX::EpInvalidKey          endpoint index out of range (engine bug, not user error)
@@ -40,9 +39,9 @@
 //     WFX::EpFatal               permanent failure, slot is discarded
 //
 //   onDisconnect reason (parameter to onDisconnect):
-//     WFX::EpDrained             slot evicted intentionally (DNS refresh, shutdown)
-//     WFX::EpIdleTimeout         slot closed after idleTimeoutSeconds with no activity
-//     WFX::EpDisconnectError     I/O or protocol error on the slot
+//     WFX::EpIdleTimeout             slot closed after idleTimeoutSeconds with no activity
+//     WFX::EpHandshakeTimeoutReason  slot closed while still connecting / handshaking
+//     WFX::EpDisconnectError         everything else: I/O error, protocol error, peer closed, etc
 //
 //   TLS config (set in EndpointConfig::tlsConfig):
 //     WFX::EpTlsAuto             TLS on by default for port 443/8443
@@ -102,8 +101,8 @@
 //       WFX::EndpointDesc{
 //           .serialize     = Serialize,
 //           .parse         = Parse,
-//           .createOutput  = [](void*) -> void* { return new ApiRes{}; },
-//           .destroyOutput = [](void* p) { delete static_cast<ApiRes*>(p); },
+//           .createOutput  = [](void*) -> void* { return WFX::New<ApiRes>(); },
+//           .destroyOutput = [](void* p) { WFX::Delete(static_cast<ApiRes*>(p)); },
 //       },
 //       WFX::EndpointConfig{
 //           .connLimit             = 4,
@@ -148,7 +147,7 @@
 //   -or EpParseError). Used for HTTP/1.0-style close-delimited bodies.
 // -----------------------------------------------------------------------
 
-#include "http/endpoint.hpp"
+#include "async/endpoint.hpp"
 #include "wfx/async.hpp"
 
 namespace WFX {
@@ -164,8 +163,8 @@ namespace WFX {
 // With an onConnect coroutine (TLS auth, Redis AUTH, SMTP EHLO, etc.):
 //   inline const auto MyEp = WFX::Endpoint<MyReq, MyRes, &MyOnConnect>{ ... };
 // -----------------------------------------------------------------------
-template <typename TReq, typename TRes, Http::UserOnConnectFn OnConnect = nullptr>
-using Endpoint = Http::Resolve<TReq, TRes, OnConnect>;
+template <typename TReq, typename TRes, Async::UserOnConnectFn OnConnect = nullptr>
+using Endpoint = Async::Resolve<TReq, TRes, OnConnect>;
 
 // -----------------------------------------------------------------------
 // RAII owner for the response returned by co_await ep.SendPayload()
@@ -173,13 +172,13 @@ using Endpoint = Http::Resolve<TReq, TRes, OnConnect>;
 // Access the response with * or -> or .get().
 // Valid until the variable goes out of scope. Do not store the raw pointer.
 // -----------------------------------------------------------------------
-template <typename T> using EndpointOutput = Http::EndpointOutput<T>;
+template <typename T> using EndpointOutput = Async::EndpointOutput<T>;
 
 // -----------------------------------------------------------------------
 // Passed into onConnect coroutines. Use handle.Send() and handle.Receive()-
 // -to perform the handshake before the slot enters the pool.
 // -----------------------------------------------------------------------
-using SlotHandle = Http::SlotHandle;
+using SlotHandle = Async::SlotHandle;
 
 // -----------------------------------------------------------------------
 // Returned by co_await handle.Receive()
@@ -271,7 +270,6 @@ inline constexpr auto EpSerializeError = Shared::EndpointStatus::SERIALIZE_ERROR
 inline constexpr auto EpEpollError = Shared::EndpointStatus::EPOLL_ERROR;
 inline constexpr auto EpHandshakeTimeout = Shared::EndpointStatus::HANDSHAKE_TIMEOUT;
 inline constexpr auto EpRequestTimeout = Shared::EndpointStatus::REQUEST_TIMEOUT;
-inline constexpr auto EpDnsFailure = Shared::EndpointStatus::DNS_FAILURE;
 
 // -----------------------------------------------------------------------
 // onConnect flow control (co_return one of these from your EpCoro)
@@ -283,8 +281,10 @@ inline constexpr auto EpFatal = Shared::ConnectResult::FATAL;
 // -----------------------------------------------------------------------
 // onDisconnect reason (parameter to EndpointDesc::onDisconnect)
 // -----------------------------------------------------------------------
-inline constexpr auto EpDrained = Shared::DisconnectReason::POOL_DRAIN;
+using DisconnectReason = Shared::DisconnectReason;
+
 inline constexpr auto EpIdleTimeout = Shared::DisconnectReason::TIMEOUT;
+inline constexpr auto EpHandshakeTimeoutReason = Shared::DisconnectReason::HANDSHAKE_TIMEOUT;
 inline constexpr auto EpDisconnectError = Shared::DisconnectReason::ERROR;
 
 // -----------------------------------------------------------------------

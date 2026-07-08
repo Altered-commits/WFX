@@ -218,7 +218,7 @@ Response operations write into the engine-managed response pipeline buffers and 
     - once body operations begin, both status and headers become immutable,
     - once committed, the entire response becomes immutable.
 
-    Invalid lifecycle transitions are considered fatal engine misuse errors and may immediately terminate the engine through internal fatal validation handlers.
+    Invalid lifecycle transitions do not crash or terminate the engine. WFX logs an error, discards whatever was written so far, and forces the response to `500 Internal Server Error` with the message `Response contract violation`. Any further calls made on that same response are silently ignored.
 
     Invalid operation examples include:
 

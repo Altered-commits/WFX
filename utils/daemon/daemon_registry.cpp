@@ -84,10 +84,11 @@ bool Write(const DaemonInfo& info) noexcept
                             "port=%d\n"
                             "https=%s\n"
                             "workers=%d\n"
+                            "worker_shutdown_timeout=%d\n"
                             "started=%lld\n",
                             static_cast<int>(info.pid), info.project.c_str(), info.path.c_str(), info.host.c_str(),
                             static_cast<int>(info.port), info.https ? "true" : "false", info.workers,
-                            static_cast<long long>(info.started));
+                            info.workerShutdownTimeout, static_cast<long long>(info.started));
 
     if(len <= 0 || len >= static_cast<int>(sizeof(buf)))
         return false;
@@ -144,6 +145,8 @@ ReadResult Read(const std::string& project, DaemonInfo& out) noexcept
                 out.https = (val == "true");
             else if(key == "workers")
                 out.workers = std::atoi(val.data());
+            else if(key == "worker_shutdown_timeout")
+                out.workerShutdownTimeout = std::atoi(val.data());
             else if(key == "path")
                 out.path.assign(val);
             else if(key == "started")
@@ -224,7 +227,7 @@ bool IsAlive(pid_t pid) noexcept
 #endif
 }
 
-StopResult Stop(const std::string& project, int timeoutSeconds) noexcept
+StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
 {
     auto& logger = GetLogger();
 
@@ -254,6 +257,12 @@ StopResult Stop(const std::string& project, int timeoutSeconds) noexcept
 
         return StopResult::FAILED;
     }
+
+    // The master waits up to 'workerShutdownTimeout' (once, for every worker together, see-
+    // -the shutdown loop in 'RunServerImpl') before it force-kills stragglers itself. Wait at-
+    // -least that long here too, plus a small buffer for its own exit bookkeeping, so we never-
+    // -SIGKILL the master while it's still busy cleaning up its own children.
+    int timeoutSeconds = info.workerShutdownTimeout + extraGraceSeconds;
 
     // Poll for clean exit every 100ms
     int polls = timeoutSeconds * 10;

@@ -10,109 +10,47 @@
 # never hangs past its timeout, never mis-frames one response into another, never
 # smuggles a request, never lets a hostile upstream poison a pooled connection.
 #
-# Architecture (mirrors tests/audit): the .py coordinates everything. The harness
+# Architecture (mirrors tests/base_audit): the .py coordinates everything. The harness
 # talks to WFX; WFX talks to the mock. For byte-level fuzzing the harness STAGES a
 # raw response blob at the mock (/ctl/stage) then asks WFX to fetch /raw/<id>, so
 # the mock replays those exact bytes. WFX reflects the parsed outcome back as JSON:
 #   {"ep": <EndpointStatus int, 0==SUCCESS>, "status", "bodylen", "body", "hdr"}
 #
-# Exit codes:  0 all pass   1 correctness failure   2 SECURITY finding (desync /
-#              smuggle / request-injection) — these are called out separately.
+# Exit codes:  0 all pass   1 correctness failure   2 SECURITY finding (desync,
+#              smuggle, request-injection); these are called out separately.
 
 import argparse
 import json
 import os
-import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _audit_common as common
+
 # EndpointStatus ints (shared/abis/types.hpp)
 EP_SUCCESS        = 0
 EP_POOL_EXHAUSTED = 5
 EP_INTERNAL       = 9   # parse / protocol error surfaces here
 EP_SERIALIZE      = 10
+EP_HANDSHAKE_TIMEOUT = 12
 EP_REQ_TIMEOUT    = 13
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Tiny terminal helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# Terminal / logging / raw HTTP client / log follower: shared with the other
+# audits, see _audit_common.py. Aliased under the old names so the rest of
+# this file (and the diffs below) don't need touching call by call.
+_green, _red, _yellow, _cyan, _bold = common.green, common.red, common.yellow, common.cyan, common.bold
+_log, _hdr = common.log, common.hdr
+raw_send = common.raw_send
+_build = common.build_request
+_body_of = common.response_body
+_status_of = common.response_status
+LogFollower = common.LogFollower
 
-_TTY = sys.stdout.isatty()
-def _c(code, t): return ("\x1b[%sm%s\x1b[0m" % (code, t)) if _TTY else t
-def _green(t):  return _c("32", t)
-def _red(t):    return _c("31", t)
-def _yellow(t): return _c("33", t)
-def _cyan(t):   return _c("36", t)
-def _bold(t):   return _c("1", t)
-
-def _log(tag, msg="", c=None):
-    tag = "[%s]" % tag
-    print("%s %s" % (_cyan(tag) if c is None else c(tag), msg), flush=True)
-
-def _hdr(t):
-    print("\n" + _bold("═" * 78))
-    print(_bold("  " + t))
-    print(_bold("═" * 78), flush=True)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Minimal HTTP client (raw sockets; never raises)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def raw_send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20):
-    try:
-        s = socket.create_connection((host, port), timeout=ctimeout)
-    except OSError:
-        return None
-    try:
-        s.sendall(payload)
-        s.settimeout(rtimeout)
-        chunks, total = [], 0
-        while total < rmax:
-            try:
-                d = s.recv(65536)
-            except (socket.timeout, OSError):
-                break
-            if not d:
-                break
-            chunks.append(d)
-            total += len(d)
-        return b"".join(chunks)
-    except OSError:
-        return None
-    finally:
-        try: s.close()
-        except OSError: pass
-
-def _build(method, path, headers=None, body=b""):
-    if isinstance(body, str):
-        body = body.encode("latin-1")
-    lines = ["%s %s HTTP/1.1" % (method, path), "Host: h", "Connection: close"]
-    if headers:
-        for k, v in headers.items():
-            lines.append("%s: %s" % (k, v))
-    if body or method in ("POST", "PUT", "PATCH"):
-        lines.append("Content-Length: %d" % len(body))
-    return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + body
-
-def _body_of(raw):
-    i = raw.find(b"\r\n\r\n")
-    return raw[i + 4:] if i >= 0 else b""
-
-def _status_of(raw):
-    if not raw or not raw.startswith(b"HTTP/"):
-        return None
-    try: return int(raw.split(b" ", 2)[1])
-    except Exception: return None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Config + process management
-# ─────────────────────────────────────────────────────────────────────────────
-
 class Cfg:
     pass
 
@@ -123,7 +61,8 @@ class Mock:
 
     def start(self):
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "upstream.py")
-        cmd = [sys.executable, script, "--host", self.cfg.host, "--port", str(self.cfg.up_port)]
+        cmd = [sys.executable, script, "--host", self.cfg.host, "--port", str(self.cfg.up_port),
+              "--proto-port", str(self.cfg.proto_port)]
         _log("mock", "starting: %s" % " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         for _ in range(50):
@@ -158,6 +97,10 @@ class Mock:
         try: return int(self.get("/ctl/conns"))
         except ValueError: return -1
 
+    def proto_conn_count(self):
+        try: return int(self.get("/ctl/protoconns"))
+        except ValueError: return -1
+
     def total_count(self):
         try: return int(self.get("/ctl/total"))
         except ValueError: return -1
@@ -173,7 +116,7 @@ class Mock:
             try: self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired: self.proc.kill()
 
-
+# Server context
 class Server:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -209,103 +152,7 @@ class Server:
         _log("server", "stopping …")
         subprocess.run([self.cfg.wfx, "control", "stop", "app"], capture_output=True, text=True)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Live WFX log follower
-#
-# The worker runs detached, so its logs only exist on disk. When a worker crashes
-# the master revives it FAST and the new worker TRUNCATES worker-N.log — so any
-# read done after the fact misses the crash. This thread tails the log files
-# continuously (like `tail -F`) and echoes new lines into our terminal the moment
-# WFX writes them, before revival can overwrite them. It detects truncation
-# (size shrank) / rotation (inode changed) and re-follows the fresh file, so it
-# keeps streaming across a crash+revive without losing the crash lines it already
-# printed. Crash-dump files are streamed in full; worker/master logs are filtered
-# to important lines by default (WRN/ERR/FTL + crash keywords) to stay readable.
-# ─────────────────────────────────────────────────────────────────────────────
-
-_IMPORTANT = ("[WRN]", "[ERR]", "[FTL]")
-_IMPORTANT_KW = ("died", "crash", "abort", "signal", "segfault", "segv", "terminate",
-                 "revive", "revival", "panic", "assert", "fatal")
-
-def _is_important(line):
-    if any(tag in line for tag in _IMPORTANT):
-        return True
-    low = line.lower()
-    return any(kw in low for kw in _IMPORTANT_KW)
-
-class LogFollower(threading.Thread):
-    def __init__(self, cfg, mode="important", interval=0.1):
-        super().__init__(daemon=True)
-        self.cfg = cfg
-        self.mode = mode            # "off" | "important" | "all"
-        self.interval = interval
-        self._stop = threading.Event()
-        self._pos = {}              # path -> (inode, offset)
-
-    def _dirs(self):
-        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.cfg.app_dir, "logs")
-        return [(os.path.join(root, "default_logs"), False),
-                (os.path.join(root, "crash_logs"), True)]
-
-    def _emit(self, name, line, is_crash):
-        if is_crash:
-            print("%s %s" % (_red("[wfx-crash:%s]" % name), line), flush=True)
-        elif self.mode == "all" or _is_important(line):
-            print("%s %s" % (_cyan("[wfx:%s]" % name), line), flush=True)
-
-    def _scan_once(self):
-        for d, is_crash in self._dirs():
-            if not os.path.isdir(d):
-                continue
-            for name in sorted(os.listdir(d)):
-                path = os.path.join(d, name)
-                try:
-                    st = os.stat(path)
-                except OSError:
-                    continue
-                if not os.path.isfile(path):
-                    continue
-
-                ino, off = self._pos.get(path, (None, 0))
-                if ino is None:                                   # first sight
-                    ino, off = st.st_ino, 0
-                elif st.st_ino != ino or st.st_size < off:        # rotated / truncated
-                    if not is_crash:
-                        print(_yellow("[wfx] %s truncated (worker revived?) — re-following" % name), flush=True)
-                    ino, off = st.st_ino, 0
-
-                if st.st_size > off:
-                    try:
-                        with open(path, "r", errors="replace") as f:
-                            f.seek(off)
-                            chunk = f.read()
-                            off = f.tell()
-                    except OSError:
-                        continue
-                    for line in chunk.splitlines():
-                        if line.strip():
-                            self._emit(name, line, is_crash)
-                self._pos[path] = (ino, off)
-
-    def run(self):
-        if self.mode == "off":
-            return
-        while not self._stop.is_set():
-            try: self._scan_once()
-            except Exception: pass
-            self._stop.wait(self.interval)
-        try: self._scan_once()   # final drain
-        except Exception: pass
-
-    def stop(self):
-        self._stop.set()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Driving WFX
-# ─────────────────────────────────────────────────────────────────────────────
-
 _sid_counter = [0]
 def _next_sid():
     _sid_counter[0] += 1
@@ -330,7 +177,7 @@ def drive(cfg, path, ep="default", method="GET", want=None, fwd=None, body=None,
         return None
 
 # keep defaults to True so the mock keeps the connection open after replaying a
-# COMPLETE self-delimiting (Content-Length / chunked) response — which is exactly
+# COMPLETE self-delimiting (Content-Length / chunked) response, which is exactly
 # what the client does (it pools the keep-alive slot). If the mock closed instead
 # (keep=False) while the client pooled the slot, the NEXT staged request would
 # reuse a dead socket and intermittently get None. EOF / truncation / close-
@@ -358,11 +205,43 @@ def inject(cfg, mode, body, ep="default"):
     except Exception:
         return None
 
+# ── /proto/* helpers: onConnect / onDisconnect / multiplexing, driven against
+#    app/src/proto.cpp's raw WFX::Endpoint<> instances (good/bad/slow/reset) ──
+def proto_call(cfg, key="hello", proto="good", rtimeout=8.0):
+    headers = {"X-Proto": proto, "X-Key": key}
+    raw = raw_send(cfg.host, cfg.port, _build("GET", "/proto/call", headers), rtimeout=rtimeout)
+    if not raw or _status_of(raw) != 200:
+        return None
+    try:
+        return json.loads(_body_of(raw))
+    except Exception:
+        return None
 
-# ─────────────────────────────────────────────────────────────────────────────
+def proto_call_async(cfg, key="hello", proto="good", rtimeout=8.0):
+    """Fire proto_call on a background thread; returns a function that blocks for the result."""
+    box = {}
+    def run():
+        box["r"] = proto_call(cfg, key=key, proto=proto, rtimeout=rtimeout)
+    t = threading.Thread(target=run)
+    t.start()
+    def join():
+        t.join()
+        return box.get("r")
+    return join
+
+def proto_disconnects(cfg):
+    raw = raw_send(cfg.host, cfg.port, _build("GET", "/proto/disconnects"))
+    if not raw or _status_of(raw) != 200:
+        return {"idle": -1, "handshake": -1, "error": -1}
+    try:
+        return json.loads(_body_of(raw))
+    except Exception:
+        return {"idle": -1, "handshake": -1, "error": -1}
+
+def proto_disconnects_reset(cfg):
+    raw_send(cfg.host, cfg.port, _build("POST", "/proto/disconnects/reset"))
+
 # Expectation predicates over the parsed result dict
-# ─────────────────────────────────────────────────────────────────────────────
-
 def is_ok(r, status=None, body=None):
     if not r or r.get("ep") != EP_SUCCESS: return False
     if status is not None and r.get("status") != status: return False
@@ -378,9 +257,7 @@ def is_errc(r, code):
 def is_alive(r):        # WFX answered *something* well-formed (no crash/hang)
     return r is not None
 
-
 # ── /reflectraw helpers: inspect the EXACT request head WFX emitted ───────────
-
 def raw_head(cfg, fwd=None, fwd2=None, fwd3=None, method="GET", x_body=None):
     """Drive /reflectraw and return the request head string WFX put on the wire."""
     headers = {"X-Ep": "default", "X-Method": method, "X-Path": "/reflectraw"}
@@ -399,31 +276,11 @@ def raw_head(cfg, fwd=None, fwd2=None, fwd3=None, method="GET", x_body=None):
 def _count_ci(head, needle):
     return head.lower().count(needle.lower())
 
+# Result collection: shared with the other audits, see _audit_common.py
+Results = common.Results
+check = common.check
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Result collection
-# ─────────────────────────────────────────────────────────────────────────────
-
-class Results:
-    def __init__(self):
-        self.phases = []   # (phase, [(name, passed, security, detail)])
-
-    def phase(self, name):
-        bucket = []
-        self.phases.append((name, bucket))
-        return bucket
-
-def check(bucket, name, passed, detail="", security=False):
-    bucket.append((name, bool(passed), security, detail))
-    mark = _green("ok  ") if passed else (_red("SEC ") if security else _red("FAIL"))
-    print("  %s %-48s %s" % (mark, name, "" if passed else _yellow(detail)), flush=True)
-    return passed
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Wire builders for staged responses
-# ─────────────────────────────────────────────────────────────────────────────
-
 def R(status_line, headers=(), body=b""):
     if isinstance(body, str): body = body.encode("latin-1")
     head = status_line + "\r\n" + "".join("%s\r\n" % h for h in headers) + "\r\n"
@@ -432,11 +289,7 @@ def R(status_line, headers=(), body=b""):
 def CHUNKED(chunks_raw):
     return b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + chunks_raw
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 1 — happy-path framing (the client must accept the whole legal matrix)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 1: happy-path framing (the client must accept the whole legal matrix)
 def phase_framing(cfg, mock, results):
     b = results.phase("framing")
     check(b, "content-length small",       is_ok(drive(cfg, "/ok"), 200, "hello"))
@@ -459,15 +312,11 @@ def phase_framing(cfg, mock, results):
     check(b, "status 204 no body",         is_ok(drive(cfg, "/status/204"), 204, ""))
     check(b, "status 304 no body",         is_ok(drive(cfg, "/status/304"), 304, ""))
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 2 — status-line fuzz (malformed first line must be rejected, not crash)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 2: status-line fuzz (malformed first line must be rejected, not crash)
 def phase_statusline(cfg, mock, results):
     b = results.phase("statusline")
 
-    # (name, status_line, expectation) — response is <line>\r\nContent-Length: 0\r\n\r\n
+    # (name, status_line, expectation), response is <line>\r\nContent-Length: 0\r\n\r\n
     ok_lines = [
         ("valid 200",          "HTTP/1.1 200 OK"),
         ("valid no reason",    "HTTP/1.1 200"),
@@ -545,11 +394,7 @@ def phase_statusline(cfg, mock, results):
         r = drive_staged(cfg, mock, (line + "\r\n\r\n").encode("latin-1"))
         check(b, "line bad: %s" % name, is_err(r), "expected err, got %r" % r)
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 3 — header fuzz (malformed / smuggling headers)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 3: header fuzz (malformed / smuggling headers)
 def phase_headers(cfg, mock, results):
     b = results.phase("headers")
 
@@ -630,11 +475,7 @@ def phase_headers(cfg, mock, results):
         blob = ("HTTP/1.1 200 OK\r\nTransfer-Encoding: %s\r\n\r\n3\r\nabc\r\n0\r\n\r\n" % te).encode("latin-1")
         check(b, "hdr ok: %s" % name, is_ok(drive_staged(cfg, mock, blob), 200, "abc"))
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 4 — chunked-body fuzz
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 4: chunked-body fuzz
 def phase_chunked(cfg, mock, results):
     b = results.phase("chunked")
 
@@ -698,11 +539,7 @@ def phase_chunked(cfg, mock, results):
     # 4 GiB single chunk: valid hex, but must be rejected against the body cap
     check(b, "chunk 4GiB > cap", is_err(drive_staged(cfg, mock, CHUNKED(b"FFFFFFFF\r\n"))))
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 5 — EOF / truncation at every parser phase (client must error, not hang)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 5: EOF / truncation at every parser phase (client must error, not hang)
 def phase_eof(cfg, mock, results):
     b = results.phase("eof")
     trunc = [
@@ -740,11 +577,7 @@ def phase_eof(cfg, mock, results):
     for name, blob in drip_trunc:
         check(b, "eof %s" % name, is_err(drive_drip(cfg, mock, blob, piece=1, keep=False)), "expected err")
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 6 — DESYNC / SMUGGLING / keep-alive poisoning  (SECURITY)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 6: DESYNC / SMUGGLING / keep-alive poisoning  (SECURITY)
 def _reuse_clean(cfg, ep, n=10):
     """After a poison request on `ep`, every following /ok must be pristine."""
     for _ in range(n):
@@ -780,11 +613,7 @@ def phase_desync(cfg, mock, results):
     drive(cfg, "/status/204", ep="small")
     check(b, "legit 204 keeps conn clean", _reuse_clean(cfg, "small"))
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 7 — serialize / request-side (dedup + injection)  (injection is SECURITY)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 7: serialize / request-side (dedup + injection)  (injection is SECURITY)
 def phase_serialize(cfg, mock, results):
     b = results.phase("serialize")
     host = "%s:%d" % (cfg.host, cfg.up_port) if cfg.up_port != 80 else cfg.host
@@ -897,11 +726,7 @@ def phase_serialize(cfg, mock, results):
     check(b, "buffer-grow big body", is_ok(r, 200) and ("|clen=%d|" % len(bigbody)) in (r.get("body") or "") and
           ("|blen=%d|" % len(bigbody)) in (r.get("body") or ""), "reflected clen/blen mismatch")
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 8 — limit enforcement (boundaries on the small-caps endpoint)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 8: limit enforcement (boundaries on the small-caps endpoint)
 def phase_limits(cfg, mock, results):
     b = results.phase("limits")
     # EpSmall: maxHeaderBytes=256, maxBodyBytes=1024, maxHeaderCount=8.
@@ -940,7 +765,7 @@ def phase_limits(cfg, mock, results):
     check(b, "close-delimited over cap",  is_err(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\n\r\n" + b"B" * 2000, keep=False, ep="small")))
     check(b, "trailer count over cap",    is_err(drive_staged(cfg, mock, CHUNKED(b"2\r\nxy\r\n0\r\n" + b"".join(b"X-%d: v\r\n" % i for i in range(20)) + b"\r\n"), ep="small")))
 
-    # Informational cap (fixed at 8 in the client) — exact boundary.
+    # Informational cap (fixed at 8 in the client): exact boundary.
     check(b, "1xx count at cap (8)", is_ok(drive(cfg, "/continue/8"), 200, "done"))
     check(b, "1xx count 9 over cap", is_err(drive(cfg, "/continue/9")))
     check(b, "1xx count over cap",   is_err(drive(cfg, "/continue/12")))
@@ -951,17 +776,13 @@ def phase_limits(cfg, mock, results):
         ("HTTP/1.1 200 " + "R" * 300 + "\r\nContent-Length: 0\r\n\r\n").encode("latin-1"), ep="small")))
 
     # Content-Length exactly at cap, then a truncated body + EOF: reserve() runs at
-    # the cap, then the parser must error on the short read — never hang, never OOB.
+    # the cap, then the parser must error on the short read, never hang, never OOB.
     check(b, "CL at cap then eof", is_err(drive_staged(cfg, mock,
         b"HTTP/1.1 200 OK\r\nContent-Length: 1024\r\n\r\n" + b"B" * 512, keep=False, ep="small")))
     # A 1xx that hides a body must not desync (client ignores the CL on 1xx).
     check(b, "1xx with body rejected", is_err(drive_staged(cfg, mock, b"HTTP/1.1 100 Continue\r\nContent-Length: 3\r\n\r\nXXXHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")), security=True)
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 9 — resource exhaustion, timeouts, coalescing
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 9: resource exhaustion, timeouts, coalescing
 def _concurrent(fn, n, stagger=0.01):
     # A tiny stagger between thread starts spreads the inbound connection burst so
     # WFX's accept path isn't hit by N simultaneous SYNs (which dropped a few as
@@ -1022,7 +843,7 @@ def phase_resource(cfg, mock, results):
     check(b, "coalesce error fan-out", all(is_err(r) for r in res), "results: %r" % res)
 
     # Two DISTINCT coalesce keys in flight at once: each key must dedupe to its own
-    # single backend hit AND every waiter must receive ITS key's body — never the
+    # single backend hit AND every waiter must receive ITS key's body, never the
     # other group's. A key-collision / cross-delivery bug is an info-disclosure leak.
     mock.coalesce_reset()
     def fire(i):
@@ -1035,11 +856,7 @@ def phase_resource(cfg, mock, results):
     check(b, "coalesce 2 keys no cross-delivery", small_ok and big_ok, "results: %r" % res, security=True)
     check(b, "coalesce 2 keys hit twice", hits == 2, "backend hits = %d (expected 2)" % hits)
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 10 — fragmentation (the incremental parser under recv() splitting)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 10: fragmentation (the incremental parser under recv() splitting)
 def phase_fragmentation(cfg, mock, results):
     b = results.phase("fragmentation")
 
@@ -1061,7 +878,7 @@ def phase_fragmentation(cfg, mock, results):
     check(b, "drip 1xx + final",    is_ok(drive_drip(cfg, mock, info, piece=1), 200, "done"))
     check(b, "split 1xx + final",   is_ok(drive_split(cfg, mock, info, 17), 200, "done"))
 
-    # Single split at EVERY byte offset of a fixed CL response — one aggregate check.
+    # Single split at EVERY byte offset of a fixed CL response: one aggregate check.
     blob = cl("SPLITBODY")
     bad_off = None
     for off in range(1, len(blob)):
@@ -1081,11 +898,7 @@ def phase_fragmentation(cfg, mock, results):
     check(b, "split big body mid",  (lambda r: is_ok(r, 200) and r.get("bodylen") == 500)(drive_split(cfg, mock, big, len(big) // 2)))
     check(b, "drip big 8-byte",     (lambda r: is_ok(r, 200) and r.get("bodylen") == 500)(drive_drip(cfg, mock, big, piece=8)))
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 11 — methods (each verb serializes correctly; typed API body rules)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 11: methods (each verb serializes correctly; typed API body rules)
 def phase_methods(cfg, mock, results):
     b = results.phase("methods")
 
@@ -1107,11 +920,7 @@ def phase_methods(cfg, mock, results):
     # HEAD stays bodyless even when the upstream advertises a Content-Length.
     check(b, "HEAD bodyless", is_ok(drive(cfg, "/evil/headbody", method="HEAD"), 200, ""))
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 12 — SECURITY: smuggling, poisoning, cross-request bleed, leaks, DoS
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 12: SECURITY: smuggling, poisoning, cross-request bleed, leaks, DoS
 def phase_security(cfg, mock, results):
     b = results.phase("security")
 
@@ -1158,8 +967,8 @@ def phase_security(cfg, mock, results):
         check(b, "no poison: %s" % name, _reuse_clean(cfg, "small", n=12),
               "pooled connection poisoned by %s" % name, security=True)
 
-    # A 204 whose (illegal) body is delivered LATE — dribbled in after the client has
-    # already completed the no-body response and returned the socket to the pool — can't
+    # A 204 whose (illegal) body is delivered LATE, dribbled in after the client has
+    # already completed the no-body response and returned the socket to the pool, can't
     # be discarded at completion time, so the phantom bytes land on the idle keep-alive
     # connection. The engine releases a pooled slot that receives unsolicited bytes, but
     # that races with immediate reuse, so the very next request may break. The security
@@ -1200,7 +1009,7 @@ def phase_security(cfg, mock, results):
               "expected serialize-err", security=True)
 
     # Bytes that are NOT CR/LF/NUL are passed through (documents the exact filter):
-    # must neither crash nor smuggle — WFX simply answers.
+    # must neither crash nor smuggle: WFX simply answers.
     for name, p in [("VT", b"/a\x0bb"), ("FF", b"/a\x0cb"), ("DEL", b"/a\x7fb"),
                     ("high 0xFF", b"/a\xffb"), ("tab", b"/a\tb")]:
         check(b, "path passthrough: %s" % name, is_alive(inject(cfg, "path", p)))
@@ -1217,11 +1026,7 @@ def phase_security(cfg, mock, results):
     check(b, "pipelined burst first only", is_ok(r, 200) and r.get("body") == "R00",
           "delivered smuggled pipelined response: %r" % r, security=True)
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# PHASE 13 — connection lifecycle (connect failure/timeout, reconnect, idle, prewarm)
-# ═════════════════════════════════════════════════════════════════════════════
-
+# PHASE 13: connection lifecycle (connect failure/timeout, reconnect, idle, prewarm)
 def _wfx_healthy(cfg):
     raw = raw_send(cfg.host, cfg.port, _build("GET", "/health"), rtimeout=2.0, ctimeout=2.0)
     return bool(raw) and _status_of(raw) == 200
@@ -1276,27 +1081,87 @@ def phase_lifecycle(cfg, mock, results):
     check(b, "prewarm opened idle conns", idle_prewarmed >= 3,
           "idle prewarmed conns at boot = %d (expected >= 3)" % idle_prewarmed)
 
+# PHASE 14: onConnect / onDisconnect / multiplexing (raw WFX::Endpoint<>)
+#
+# HttpEndpoint (every other phase) structurally cannot exercise any of this:
+# HTTP/1.1 has no connection handshake and no concept of concurrent requests
+# sharing one connection. app/src/main.cpp's ProtoGood/Bad/Slow/Reset instances
+# drive the raw primitive against proto_upstream.py's second listener instead.
+#
+# The two security-shaped guarantees this phase actually cares about:
+#   - a request must never be served over a connection whose handshake did not
+#     complete successfully (auth bypass would be a real vulnerability class);
+#   - under multiplexing, one caller must never receive another caller's
+#     response (the same "cross-request bleed" class the security phase checks
+#     for HTTP, just here at the connection-sharing layer instead).
+def phase_protocol(cfg, mock, results):
+    b = results.phase("protocol")
 
-# ═════════════════════════════════════════════════════════════════════════════
+    proto_disconnects_reset(cfg)
+
+    # ── onConnect: the handshake gate ───────────────────────────────────────
+    check(b, "onConnect success -> value round-trips",
+          (lambda r: is_alive(r) and r.get("ep") == EP_SUCCESS and r.get("value") == "alpha")(
+              proto_call(cfg, key="alpha", proto="good")))
+
+    check(b, "onConnect rejected (bad auth) -> clean failure, never served",
+          is_errc(proto_call(cfg, proto="bad"), EP_INTERNAL), security=True)
+
+    check(b, "onConnect dropped mid-handshake -> clean failure, never served",
+          is_errc(proto_call(cfg, proto="reset"), EP_INTERNAL), security=True)
+
+    t0 = time.time()
+    r = proto_call(cfg, proto="slow", rtimeout=20.0)
+    dt = time.time() - t0
+    check(b, "onConnect handshake timeout -> EpHandshakeTimeout",
+          is_errc(r, EP_HANDSHAKE_TIMEOUT) and dt < 18, "elapsed %.1fs r=%r" % (dt, r))
+
+    check(b, "worker survives every onConnect failure", _wfx_healthy(cfg) and mock.ping())
+
+    # ── onDisconnect: the right reason for the right scenario ───────────────
+    dc = proto_disconnects(cfg)
+    check(b, "onDisconnect: handshake-timeout counted", dc.get("handshake", 0) >= 1, "counters=%r" % dc)
+    check(b, "onDisconnect: error counted (bad + reset)", dc.get("error", 0) >= 2, "counters=%r" % dc)
+
+    # ── Recovery: a rejected/dropped/timed-out handshake must not poison the
+    #    pool for the NEXT, legitimate connection attempt ────────────────────
+    check(b, "good connection still works after prior failures",
+          (lambda r: is_alive(r) and r.get("ep") == EP_SUCCESS and r.get("value") == "still-good")(
+              proto_call(cfg, key="still-good", proto="good")))
+
+    # ── Multiplexing: N concurrent requests, one connLimit=1 slot, deliberately
+    #    resolved out of order (varied sleep delays), every caller must get
+    #    back EXACTLY its own value, never another caller's (the bleed check) ─
+    conns_before = mock.proto_conn_count()
+    n = 12
+    delays = [0.30, 0.02, 0.18, 0.05, 0.25, 0.01, 0.12, 0.28, 0.08, 0.22, 0.03, 0.15]
+    joins = [proto_call_async(cfg, key="sleep:%.2f:tok%d" % (delays[i], i), proto="good", rtimeout=10.0)
+             for i in range(n)]
+    got = [j() for j in joins]
+
+    all_ok = all(is_alive(r) and r.get("ep") == EP_SUCCESS for r in got)
+    check(b, "multiplexing: all concurrent requests succeed", all_ok, "results=%r" % got)
+
+    matched = all(is_alive(got[i]) and got[i].get("value") == "tok%d" % i for i in range(n))
+    check(b, "multiplexing: no cross-request bleed (id-matched, not order-matched)", matched,
+          "expected tok0..tok%d in order, got %r" % (n - 1, [r.get("value") if r else None for r in got]),
+          security=True)
+
+    conns_after = mock.proto_conn_count()
+    check(b, "multiplexing: shares one connection under load", conns_after - conns_before <= 1,
+          "proto connections before=%d after=%d (expected at most +1)" % (conns_before, conns_after))
+
+    # ── onDisconnect: idle timeout ───────────────────────────────────────────
+    # idleTimeoutSeconds=5 (engine floor), fired on the next 5s timer tick, so
+    # wait past both. No request rides this connection in the meantime.
+    time.sleep(11)
+    dc2 = proto_disconnects(cfg)
+    check(b, "onDisconnect: idle timeout counted", dc2.get("idle", 0) >= 1, "counters=%r" % dc2)
+
 # Report
-# ═════════════════════════════════════════════════════════════════════════════
-
 def report(results, server_alive):
     _hdr("REPORT")
-    total = passed = sec_fail = fail = 0
-    for phase, bucket in results.phases:
-        p = sum(1 for _, ok, _, _ in bucket if ok)
-        n = len(bucket)
-        total += n
-        passed += p
-        color = _green if p == n else _red
-        print("  %-14s %s" % (phase, color("%d/%d" % (p, n))))
-        for name, ok, sec, detail in bucket:
-            if not ok:
-                if sec: sec_fail += 1
-                else:   fail += 1
-                tag = _red("SECURITY") if sec else _red("fail")
-                print("      %s  %s  %s" % (tag, name, _yellow(detail)))
+    passed, total, sec_fail, fail = common.format_report(results)
     print()
     _log("harness", "server still alive at end: %s" % (_green("yes") if server_alive else _red("NO")))
     print(_bold("  TOTAL  %s   security-findings: %s   other-failures: %s" % (
@@ -1308,11 +1173,7 @@ def report(results, server_alive):
     if fail: return 1
     return 0
 
-
-# ═════════════════════════════════════════════════════════════════════════════
 # main
-# ═════════════════════════════════════════════════════════════════════════════
-
 PHASES = {
     "framing":    phase_framing,
     "statusline": phase_statusline,
@@ -1327,23 +1188,20 @@ PHASES = {
     "methods":    phase_methods,
     "security":   phase_security,
     "lifecycle":  phase_lifecycle,
+    "protocol":   phase_protocol,
 }
 
 def main():
     ap = argparse.ArgumentParser(description="WFX HttpEndpoint audit")
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8080, help="WFX inbound port")
+    common.add_common_args(ap, PHASES)
     ap.add_argument("--up-port", type=int, default=8091,
                     help="mock upstream port (MUST match UPSTREAM in app/src/main.cpp)")
-    ap.add_argument("--wfx", default="wfx", metavar="BIN")
-    ap.add_argument("--app-dir", default="app", metavar="DIR")
-    ap.add_argument("--ready-timeout", type=int, default=30, metavar="S")
-    ap.add_argument("--phase", default="all", choices=["all"] + list(PHASES))
-    ap.add_argument("--list-phases", action="store_true")
-    ap.add_argument("--wfx-logs", default="important", choices=["off", "important", "all"],
-                    help="stream WFX worker/master logs into this terminal live "
-                         "(important=WRN/ERR/FTL+crash keywords, all=everything, off=none)")
+    ap.add_argument("--proto-port", type=int, default=8092,
+                    help="mock proto-upstream port (MUST match PROTO_UPSTREAM in app/src/proto.cpp)")
     args = ap.parse_args()
+
+    if args.ci:
+        common.enable_ci_mode()
 
     if args.list_phases:
         for p in PHASES: print(p)
@@ -1353,6 +1211,7 @@ def main():
     cfg.host = args.host
     cfg.port = args.port
     cfg.up_port = args.up_port
+    cfg.proto_port = args.proto_port
     cfg.wfx = args.wfx
     cfg.app_dir = args.app_dir
     cfg.ready_timeout = args.ready_timeout
@@ -1360,16 +1219,20 @@ def main():
     if cfg.up_port != 8091:
         _log("harness", _yellow("NOTE: --up-port=%d must match UPSTREAM in app/src/main.cpp (default 8091); "
                                 "the port is baked in at compile time." % cfg.up_port))
+    if cfg.proto_port != 8092:
+        _log("harness", _yellow("NOTE: --proto-port=%d must match PROTO_UPSTREAM in app/src/proto.cpp "
+                                "(default 8092); the port is baked in at compile time." % cfg.proto_port))
 
     results = Results()
     mock = Mock(cfg)
     server = Server(cfg)
-    follower = LogFollower(cfg, mode=args.wfx_logs)
+    app_dir_abs = os.path.join(os.path.dirname(os.path.abspath(__file__)), cfg.app_dir)
+    follower = LogFollower(app_dir_abs, mode=args.wfx_logs)
     try:
         mock.start()
         server.start()
-        # Start tailing WFX logs immediately — so even a crash during boot / static
-        # endpoint validation (a Fatal in the deferred AllocateEndpoint) is visible.
+        # Start tailing WFX logs immediately so even a crash during boot (a Fatal in
+        # the deferred AllocateEndpoint, for example) is visible.
         follower.start()
         server.wait_ready()
 
@@ -1387,23 +1250,25 @@ def main():
 
         # sanity: WFX can reach the mock at all
         if not is_ok(drive(cfg, "/ok"), 200, "hello"):
-            _log("harness", _red("WFX cannot reach the mock upstream — aborting "
+            _log("harness", _red("WFX cannot reach the mock upstream, aborting "
                                  "(is UPSTREAM in main.cpp == %d?)" % cfg.up_port))
             return 1
 
         run = list(PHASES) if args.phase == "all" else [args.phase]
         for name in run:
             _hdr("PHASE: " + name)
+            common.gh_group("phase: " + name)
             try:
                 PHASES[name](cfg, mock, results)
             except Exception as e:
                 _log("harness", _red("phase %s crashed: %r" % (name, e)))
                 results.phase(name).append(("phase-exception", False, False, repr(e)))
+            common.gh_endgroup()
 
             # A wall of `None` results usually means the WFX worker died mid-phase;
             # call it out explicitly (the follower has already streamed the crash).
             if not server.alive():
-                _log("harness", _red("WFX worker NOT responding after phase '%s' — "
+                _log("harness", _red("WFX worker NOT responding after phase '%s', "
                                      "results below it may be crash collateral, see WFX logs above" % name))
                 time.sleep(1.5)   # give the master a beat to revive before the next phase
 
@@ -1413,7 +1278,6 @@ def main():
         follower.stop()
         server.stop()
         mock.stop()
-
 
 if __name__ == "__main__":
     try:

@@ -20,7 +20,6 @@ bool InsensitiveStringCompare(std::string_view lhs, std::string_view rhs) noexce
 // NOTE: 'path' must point into a mutable buffer owned by the caller
 bool NormalizeURIPathInplace(std::string_view& path) noexcept;
 std::string NormalizePathToIdentifier(std::string_view path, std::string_view prefix) noexcept;
-bool DecodePercentInplace(std::string_view& buf) noexcept;
 
 // Conversions
 std::uint8_t ToLowerAscii(std::uint8_t c) noexcept;

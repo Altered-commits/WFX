@@ -18,6 +18,7 @@
 
 #include <sys/epoll.h>
 #include <atomic>
+#include <type_traits>
 
 // IMPORTANT: these headers are used exclusively for the DNS background-refresh-
 // -mechanism (short-lived std::threads capped by a counting_semaphore, handing-
@@ -113,12 +114,6 @@ private: // Connection management
     void ReturnEndpointToPool(EndpointCtx* ctx);
 
 private: // I/O
-    bool Receive(ClientCtx* ctx);
-    // outEof (endpoint only): set true when the peer closed mid-receive instead of closing the-
-    // -slot, so the caller can run a final isEof parse to finalize a close-delimited body
-    bool Receive(EndpointCtx* ctx, bool* outEof = nullptr);
-    bool EnsureReadReady(ClientCtx* ctx);
-    bool EnsureReadReady(EndpointCtx* ctx);
     bool EnsureFileReady(ClientCtx* ctx, std::string path);
     void SendFile(ClientCtx* ctx);
     void ResumeStream(ClientCtx* ctx);
@@ -138,24 +133,28 @@ private: // Handshake
     void HandleClientHandshake(ClientCtx* ctx, std::uint32_t ev);
     void HandleEndpointHandshake(EndpointCtx* ctx, std::uint32_t ev);
 
-    // Both ClientCtx and EndpointCtx have sslConn + eventType. Template is the-
-    // -cleanest option here without duplicating 8 lines twice
-    template <typename Ctx> bool TryHandshake(Ctx* ctx, EventType onSuccess, EventType stayState)
-    {
-        switch(sslHandler_->Handshake(ctx->sslConn)) {
-            case SSLReturn::SUCCESS:
-                ctx->eventType = onSuccess;
-                return true;
+private: // Shared ClientCtx/EndpointCtx templates
+    // Drives one SSL handshake step off its return value: success sets 'onSuccess',-
+    // -WANT_READ/WANT_WRITE sets 'stayState' and waits for the next epoll event
+    template <typename Ctx> bool TryHandshake(Ctx* ctx, EventType onSuccess, EventType stayState);
 
-            case SSLReturn::WANT_READ:
-            case SSLReturn::WANT_WRITE:
-                ctx->eventType = stayState;
-                return true;
+    // Arms EPOLLIN|EPOLLOUT|EPOLLET, or issues EPOLL_CTL_DEL. PackEpollData is overloaded-
+    // -per ctx type; that's the only thing that actually differs between the two
+    template <typename Ctx> bool RegisterEpoll(Ctx* ctx, int op);
 
-            default:
-                return false;
-        }
-    }
+    // Lazily allocates ctx->rwBuffer's read side, closing ctx on allocation failure
+    template <typename Ctx> bool EnsureReadReady(Ctx* ctx);
+
+    // Drains the socket until EAGAIN (ET mode). outEof (endpoint only): set true when the-
+    // -peer closed mid-receive instead of closing the slot, so the caller can run one last-
+    // -isEof parse to finalize a close-delimited body
+    template <typename Ctx> bool Receive(Ctx* ctx, bool* outEof = nullptr);
+
+    // Shared SSL-shutdown state machine behind both public Close() overrides. Returns true-
+    // -once synchronous cleanup (RegisterEpoll DEL + Release*) should run now; false means-
+    // -either there was nothing to do, or the event loop must wait for an in-progress-
+    // -shutdown to finish (the shutdown eventType is already armed on ctx in that case)
+    template <typename Ctx> bool CloseCommon(Ctx* ctx, bool forceClose);
 
 private: // Endpoint-specific
     void ValidateEndpoint(const char* host, const EndpointDesc& desc, const EndpointConfig& config);
@@ -166,6 +165,13 @@ private: // Endpoint-specific
     // -endpoints) stays byte-for-byte untouched. Only called when desc.hasCapacity is set
     EndpointStatus SendPayloadMultiplexed(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
                                           AsyncData asyncData, EndpointEntry& entry, std::uint64_t pendingCoalesceKey);
+    // Shared serialize step used by both SendPayload/SendPayloadMultiplexed and-
+    // -FlushDeferredRequest (a fresh connect with onConnect defers serializing until the-
+    // -handshake finishes, see EndpointCtx::pendingConnectReq). Returns EndpointStatus::SUCCESS-
+    // -on success; caller does its own cleanup on any other status
+    EndpointStatus SerializeSingleSlot(EndpointCtx* slotCtx, EndpointMetadata& meta, const void* req);
+    EndpointStatus SerializeMultiplexed(EndpointCtx* slotCtx, EndpointMetadata& meta, const void* req,
+                                        std::uint64_t* streamKey);
     void HandleEndpointWriteComplete(EndpointCtx* ctx);
     void HandleEndpointReceive(EndpointCtx* ctx, bool isEof);
     // Resolves and erases a single completed stream from ctx->pendingStreams (fires its client-
@@ -184,10 +190,16 @@ private: // Endpoint-specific
     void HandleDnsResultReady(int sfd);
     void FireOnConnect(EndpointCtx* ctx, EndpointEntry& entry);
 
+    // Serializes a request that SendPayload/SendPayloadMultiplexed deferred until onConnect-
+    // -succeeded (see EndpointCtx::pendingConnectReq). Returns false on a serialize failure,-
+    // -having already notified the client and torn the slot down via FailDeferredRequest
+    bool FlushDeferredRequest(EndpointCtx* ctx, EndpointEntry& entry);
+    void FailDeferredRequest(EndpointCtx* ctx, EndpointStatus status);
+
 private: // Wrap / low-level
     void WrapAccept(ClientCtx* ctx);
     EndpointStatus WrapConnect(EndpointCtx* ctx, EndpointEntry& entry);
-    bool CreateAndConnect(EndpointCtx* ctx, EndpointMetadata& epCtx);
+    EndpointStatus CreateAndConnect(EndpointCtx* ctx, EndpointMetadata& epCtx);
 
     // WrapRead / WrapWrite take socket + sslConn directly
     ssize_t WrapRead(WFXSocket socket, void* sslConn, char* buf, std::size_t len);
@@ -197,8 +209,6 @@ private: // Wrap / low-level
 private: // Epoll helpers
     std::uint64_t PackEpollData(ClientCtx* ctx);
     std::uint64_t PackEpollData(EndpointCtx* ctx);
-    bool RegisterEpoll(ClientCtx* ctx, int op);
-    bool RegisterEpoll(EndpointCtx* ctx, int op);
 
 private: // Timer
     void HandleTimeoutTimer(int sfd);

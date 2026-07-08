@@ -205,6 +205,7 @@ struct EndpointCtx : public ConnectionTag {
     std::uint64_t coalesceKey = 0;  // 8 bytes, per-request, set by SendPayload
 
     PendingStreamMap* pendingStreams = nullptr; // 8 bytes, lazily allocated, only used when hasCapacity is set
+    const void* pendingConnectReq = nullptr;    // 8 bytes, request waiting on a fresh onConnect handshake
 
     Utils::RWBuffer rwBuffer;         // 16 bytes
     Shared::AsyncData asyncData = {}; // 24 bytes

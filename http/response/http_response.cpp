@@ -29,6 +29,15 @@ static constexpr const char* CL_ZERO = "Content-Length: 0\r\n";
 static constexpr std::uint32_t CL_ZERO_LEN = 19;
 
 // vvv Static helpers vvv
+static bool HasCRLFOrNull(std::string_view s) noexcept
+{
+    for(char c : s)
+        if(c == '\r' || c == '\n' || c == '\0')
+            return true;
+
+    return false;
+}
+
 static void FormatFixed10(std::uint32_t value, char out[CL_FIELD_WIDTH])
 {
     for(int i = CL_FIELD_WIDTH - 1; i >= 0; --i) {
@@ -223,6 +232,14 @@ void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
     // TODO: Think if we should also block Content-Length and Transfer-Encoding key as well
     if(Utils::StringUtils::InsensitiveStringCompare(key, "connection")) {
         AbortContractViolation("'Connection' header is engine-owned and must not be set manually");
+        return;
+    }
+
+    // CR/LF/NUL in either the name or value would let a caller smuggle extra-
+    // -headers or split the response (CWE-113). Reject outright rather than-
+    // -writing attacker controlled bytes straight onto the wire
+    if(HasCRLFOrNull(key) || HasCRLFOrNull(value)) {
+        AbortContractViolation("WriteHeader() key/value must not contain CR, LF, or NUL bytes");
         return;
     }
 

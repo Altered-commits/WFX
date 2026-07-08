@@ -38,7 +38,6 @@
 #include "http/response.hpp"
 #include "http/routes.hpp"
 #include "http/middleware.hpp"
-#include "http/endpoint.hpp"
 #include "wfx/async.hpp"
 #include "wfx/types.hpp"
 

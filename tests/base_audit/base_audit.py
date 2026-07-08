@@ -7,8 +7,10 @@
 # Phases:
 #   security   path traversal, CRLF/response-splitting, info leakage,
 #              header attacks, contract violations
-#   protocol   malformed and abusive request vectors — server must survive without crashing
+#   protocol   malformed and abusive request vectors: server must survive without crashing
 #   features   every route verified: correct status, body, headers
+#   forms      WFX::Form: Content-Type matching, field structure, percent-decoding,
+#              validator bounds, decoded-value-into-header injection
 #   chaos      worker kills, SIGSTOP/SIGCONT, kill under mixed load
 #
 # Usage:
@@ -34,68 +36,44 @@ import sys
 import threading
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _audit_common as common
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Terminal
-# ─────────────────────────────────────────────────────────────────────────────
-
-_TTY = sys.stdout.isatty()
-_CI  = False  # set via --ci; enables GitHub Actions workflow commands
-
-def _c(code, t): return ("\x1b[%sm%s\x1b[0m" % (code, t)) if _TTY else t
-def _green(t):   return _c("32", t)
-def _red(t):     return _c("31", t)
-def _yellow(t):  return _c("33", t)
-def _cyan(t):    return _c("36", t)
-def _mag(t):     return _c("35", t)
-def _bold(t):    return _c("1",  t)
+# Terminal: colors, GitHub Actions workflow commands, and --ci state are
+# shared with the other audits, see _audit_common.py. _dot/_progress_*/_sec
+# below are specific to this harness's dot-progress + chaos-phase output.
+_green, _red, _yellow, _cyan, _bold = common.green, common.red, common.yellow, common.cyan, common.bold
+_mag = lambda t: common.color("35", t)
+_gh_group, _gh_endgroup, _gh_error, _gh_warning = common.gh_group, common.gh_endgroup, common.gh_error, common.gh_warning
+_hdr = common.hdr
 
 def _log(tag, msg="", c=None):
     ts = time.strftime("%H:%M:%S")
     print("[%s] %s  %s" % (ts, (c or _cyan)("%-10s" % tag), msg), flush=True)
 
 def _dot(ch=".", col="32"):
-    if _CI: return
-    sys.stdout.write(_c(col, ch)); sys.stdout.flush()
+    if common.CI: return
+    sys.stdout.write(common.color(col, ch)); sys.stdout.flush()
 
 def _progress_hdr(text):
     """Inline progress prefix. TTY: no newline. CI: full log line."""
-    if _CI:
+    if common.CI:
         print(text.rstrip(), flush=True)
     else:
         sys.stdout.write(text); sys.stdout.flush()
 
 def _progress_end(suffix=""):
     """End a dot-progress line. TTY: newline. CI: print suffix if any."""
-    if _CI:
+    if common.CI:
         if suffix: print("  " + suffix, flush=True)
     else:
         print((" " + suffix) if suffix else "", flush=True)
-
-def _gh_group(name):
-    if _CI: print("::group::" + name, flush=True)
-
-def _gh_endgroup():
-    if _CI: print("::endgroup::", flush=True)
-
-def _gh_error(msg):
-    if _CI: print("::error::" + msg, flush=True)
-
-def _gh_warning(msg):
-    if _CI: print("::warning::" + msg, flush=True)
-
-def _hdr(title, w=78):
-    print("═" * w); print("  " + _bold(title)); print("═" * w)
 
 def _sec(name, verdict, w=78):
     print("\n  %s  [%s]" % (_bold("── " + name), verdict))
     print("─" * w)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Raw HTTP — stdlib socket only, no external deps
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Raw HTTP: stdlib socket only, no external deps
 def raw_send(host, port, payload, rtimeout=3.0, rmax=1<<20, ctimeout=4.0):
     """Send raw bytes, read until close/timeout. Never raises. Returns (status, raw)."""
     try:
@@ -164,11 +142,7 @@ def wait_up(host, port, timeout=20.0):
         time.sleep(0.3)
     return None
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # /proc
-# ─────────────────────────────────────────────────────────────────────────────
-
 _HAS_PROC = os.path.isdir("/proc")
 
 def children(ppid):
@@ -210,11 +184,7 @@ def proc_alive(pid):
     try: os.kill(pid, 0); return True
     except OSError: return False
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Server context
-# ─────────────────────────────────────────────────────────────────────────────
-
 class Server:
     def __init__(self, cfg):
         self.cfg  = cfg
@@ -277,18 +247,14 @@ class Server:
                     _log("server", _green("stopped (PID %d exited)" % mpid))
                     return
                 time.sleep(0.25)
-            _log("server", _yellow("PID %d still alive — SIGKILL" % mpid))
+            _log("server", _yellow("PID %d still alive, sending SIGKILL" % mpid))
             try: os.kill(mpid, signal.SIGKILL)
             except OSError: pass
         else:
             _log("server", _green("stopped"))
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Payload corpora
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Leak markers — any of these in a response = information leakage finding.
+# Leak markers: any of these in a response = information leakage finding.
 # Pairs: (must_contain_a, must_contain_b_or_None)
 LEAK_MARKERS = [
     (b"root:x:",           None),
@@ -456,11 +422,11 @@ def _build_traversal_hdr():
 TRAVERSAL_URL = _build_traversal_url()
 TRAVERSAL_HDR = _build_traversal_hdr()
 
-# CRLF corpus: check is STRICT — only flags if the marker appears as a parsed
+# CRLF corpus: check is STRICT, only flags if the marker appears as a parsed
 # HEADER NAME (split on \r\n, partitioned at first :). Substrings inside
 # values never count. Zero false positives.
 CRLF_VALUES = [
-    # Real CRLF injection — the only ones that actually split in HTTP/1.1
+    # Real CRLF injection: the only ones that actually split in HTTP/1.1
     b"safe\r\nX-Injected: pwned",
     b"safe\r\n\r\nX-Injected: pwned",
     b"safe\r\nX-Injected: pwned\r\nX-Extra: yes",
@@ -469,11 +435,11 @@ CRLF_VALUES = [
     b"safe\r\nLocation: http://evil.example/",
     b"safe\r\nTransfer-Encoding: chunked",
     b"safe\r\nContent-Length: 0",
-    # Bare LF — some parsers accept as line terminator
+    # Bare LF: some parsers accept as line terminator
     b"safe\nX-Injected: pwned",
-    # Null + CRLF — null-terminated string bypass
+    # Null + CRLF: null-terminated string bypass
     b"safe\x00\r\nX-Injected: pwned",
-    # Double CRLF — response body injection
+    # Double CRLF: response body injection
     b"safe\r\n\r\nHTTP/1.1 200 Injected\r\nX-Injected: pwned\r\n\r\nbody",
     # Non-splitters (verify no false positive):
     b"safe\rX-Injected: pwned",          # bare CR is NOT a header terminator
@@ -481,7 +447,7 @@ CRLF_VALUES = [
     b"\x00X-Injected: pwned",            # null alone is NOT
     b"safe\xe2\x80\xa8X-Injected: pwned",  # U+2028 NOT
     b"safe\xe2\x80\xa9X-Injected: pwned",  # U+2029 NOT
-    # Long values — no injection, just stress the header buffer
+    # Long values: no injection, just stress the header buffer
     b"A" * 8192,
     b"A" * 16384,
     b"A" * 32768,
@@ -491,15 +457,15 @@ CRLF_VALUES = [
 # Test at-limit, one-over, and integer-overflow variants.
 _BODY_LIMIT = 65536
 BODYBOMB_PAYLOADS = [
-    # Exactly at limit — should be accepted (200)
+    # Exactly at limit: should be accepted (200)
     _build("POST", "/echo-body", body=b"B" * _BODY_LIMIT),
-    # One byte over — must be rejected cleanly (400), not crash
+    # One byte over: must be rejected cleanly (400), not crash
     _build("POST", "/echo-body", body=b"B" * (_BODY_LIMIT + 1)),
     # Moderately over
     _build("POST", "/echo-body", body=b"B" * (_BODY_LIMIT * 2)),
     # Body larger than declared CL (extra bytes must be silently ignored)
     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 4\r\n\r\n" + b"C" * (_BODY_LIMIT * 3),
-    # Large CL with empty body — must time out or reject, not spin
+    # Large CL with empty body: must time out or reject, not spin
     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 9999999\r\n\r\n",
     # Integer overflow variants
     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 99999999999999999999\r\n\r\n",
@@ -508,7 +474,7 @@ BODYBOMB_PAYLOADS = [
 ]
 
 HEADER_ABUSE = [
-    # Oversized values — test header size limits
+    # Oversized values: test header size limits
     b"X-Big: "  + b"A" * 16384  + b"\r\n",
     b"X-Big2: " + b"B" * 65535  + b"\r\n",
     b"X-Big3: " + b"C" * 131072 + b"\r\n",
@@ -662,7 +628,7 @@ MALFORMED = [
     b"G\x00ET / HTTP/1.1\r\nHost: x\r\n\r\n",
     b"GET/HTTP/1.1\r\n\r\n",
     b"GET/health HTTP/1.1\r\nHost: x\r\n\r\n",
-    # Absolute URI with credentials — SSRF / proxy confusion
+    # Absolute URI with credentials: SSRF / proxy confusion
     b"GET http://user:pass@127.0.0.1/health HTTP/1.1\r\nHost: x\r\n\r\n",
     b"GET http://evil.example/health HTTP/1.1\r\nHost: x\r\n\r\n",
     b"CONNECT evil.example:443 HTTP/1.1\r\nHost: evil.example\r\n\r\n",
@@ -683,7 +649,7 @@ METHOD_FORMS = [
     b"DELETE /health HTTP/1.1\r\nHost: x\r\n\r\n",
     b"HEAD /health HTTP/1.1\r\nHost: x\r\n\r\n",
     b"GET http://127.0.0.1/health HTTP/1.1\r\nHost: x\r\n\r\n",
-    # Lowercase — method is case-sensitive
+    # Lowercase: method is case-sensitive
     b"get /health HTTP/1.1\r\nHost: x\r\n\r\n",
     b"Get /health HTTP/1.1\r\nHost: x\r\n\r\n",
     # Unknown / custom methods
@@ -707,12 +673,8 @@ METHOD_FORMS = [
 VIOLATE_ROUTES = ["/violate/204body", "/violate/conn", "/violate/recommit"]
 LIGHT_PATHS    = ["/health", "/text", "/api/v1/status", "/chain"]
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Route correctness specification
 # Every route in main.cpp is listed here with exact expected behavior.
-# ─────────────────────────────────────────────────────────────────────────────
-
 ROUTE_CHECKS = [
     # (method, path, headers, body, expected_status, must_contain_in_body, must_have_header)
     # Basic routes
@@ -730,22 +692,22 @@ ROUTE_CHECKS = [
     ("GET",  "/download",         None, b"", 400, b"missing X-File", None),
     # /metrics: valid JSON with known keys
     ("GET",  "/metrics",          None, b"", 200, b'"crashes"', None),
-    # Dynamic segments — uint
+    # Dynamic segments: uint
     ("GET",  "/items/42",         None, b"", 200, b"42",    None),
     ("GET",  "/items/0",          None, b"", 200, b"0",     None),
     ("GET",  "/items/18446744073709551615", None, b"", 200, b"18446744073709551615", None),
-    # Dynamic segments — int (signed)
+    # Dynamic segments: int (signed)
     ("GET",  "/items/signed/-1",  None, b"", 200, b"-1",   None),
     ("GET",  "/items/signed/-999",None, b"", 200, b"-999", None),
     ("GET",  "/items/signed/0",   None, b"", 200, b"0",    None),
-    # Dynamic segments — string
+    # Dynamic segments: string
     ("GET",  "/greet/world",      None, b"", 200, b"world", None),
     ("GET",  "/greet/Alice",      None, b"", 200, b"Alice", None),
     ("GET",  "/greet/hello-world",None, b"", 200, b"hello-world", None),
-    # Dynamic segments — uuid
+    # Dynamic segments: uuid
     ("GET",  "/uuid/550e8400-e29b-41d4-a716-446655440000", None, b"", 200, b"550e8400", None),
     ("GET",  "/uuid/00000000-0000-0000-0000-000000000001", None, b"", 200, b"00000000", None),
-    # Type mismatch — must be 404, not crash
+    # Type mismatch: must be 404, not crash
     ("GET",  "/items/notanumber", None, b"", 404, None, None),
     ("GET",  "/uuid/not-a-uuid",  None, b"", 404, None, None),
     ("GET",  "/uuid/12345",       None, b"", 404, None, None),
@@ -753,9 +715,9 @@ ROUTE_CHECKS = [
     ("GET",  "/api/v1/status",    None, b"", 200, b"ok", None),
     ("GET",  "/api/v1/item/7",    None, b"", 200, b"7",  None),
     ("GET",  "/api/v1/item/42",   None, b"", 200, b"42", None),
-    # Middleware: MwBreak — handler must NOT run
+    # Middleware: MwBreak: handler must NOT run
     ("GET",  "/mw/blocked",       None, b"", 403, b"blocked", None),
-    # Middleware: MwSkipNext — second MW skipped, handler runs
+    # Middleware: MwSkipNext: second MW skipped, handler runs
     ("GET",  "/mw/skipnext",      None, b"", 200, b"handler-ran", None),
     # Context storage: middleware sets uid=42, handler echoes it
     ("GET",  "/ctx",              None, b"", 200, b"42", None),
@@ -771,7 +733,7 @@ ROUTE_CHECKS = [
              b'{"name":"wfx","version":7}',  200, b'"wfx"',   None),
     ("POST", "/parse-json",       {"Content-Type": "application/json"},
              b'{"name":"chaos","version":42}', 200, b'"chaos"', None),
-    # JSON: parse invalid — must return 400
+    # JSON: parse invalid: must return 400
     ("POST", "/parse-json",       {"Content-Type": "application/json"},
              b"not json",   400, None, None),
     ("POST", "/parse-json",       {"Content-Type": "application/json"},
@@ -801,10 +763,7 @@ ROUTE_CHECKS = [
     ("GET",  "/template/inherit", None, b"", 200, b"Child Content", None),
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _probe(host, port, payload, retries=3, delay=0.3):
     """Send payload with retries on CONN_ERR only."""
     for i in range(retries):
@@ -840,7 +799,7 @@ class _Heartbeat:
             with self._lock:
                 phase   = self._phase
                 elapsed = time.time() - self._t0
-            _log("harness", "still running — phase=%s  elapsed=%.0fs" % (phase, elapsed))
+            _log("harness", "still running: phase=%s  elapsed=%.0fs" % (phase, elapsed))
 
     def stop(self):
         self._stop.set()
@@ -857,7 +816,7 @@ def _run_phase_timed(name, fn, cfg, srv, timeout):
     if t.is_alive():
         msg = "phase %s exceeded %ds limit" % (name, timeout)
         _gh_error(msg)
-        _log("harness", _red("TIMEOUT — " + msg))
+        _log("harness", _red("TIMEOUT: " + msg))
         return {"name": name, "rc": 1,
                 "findings": [("TIMEOUT", msg)], "stats": {}}
     return result[0]
@@ -942,18 +901,14 @@ def _light_flood(host, port, n=8):
     for t in ts: t.start()
     return stop, ts
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Phase 1 — SECURITY
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Phase 1: SECURITY
 def phase_security(cfg, srv):
     host, port = cfg.host, cfg.port
     findings = []
     stats = {"trav_url": 0, "trav_hdr": 0, "crlf": 0,
              "violate_ok": 0, "violate_bad": 0, "leak": 0}
 
-    # 16 background threads — representative concurrent load during security probing
+    # 16 background threads: representative concurrent load during security probing
     stop_bg = threading.Event()
     def _bg():
         while not stop_bg.is_set():
@@ -1097,13 +1052,8 @@ def phase_security(cfg, srv):
            else (1 if findings else 0)
     return {"name": "security", "rc": rc, "findings": findings, "stats": stats}
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Phase 2 — PROTOCOL
-# Server must survive every single vector. No assertion on status codes —
-# 400/500/501 are all fine. Crash = fail.
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Phase 2: PROTOCOL
+# Server must survive every single vector. No assertion on status codes: # 400/500/501 are all fine. Crash = fail.
 def phase_protocol(cfg, srv):
     host, port = cfg.host, cfg.port
     findings = []
@@ -1137,20 +1087,16 @@ def phase_protocol(cfg, srv):
         else:
             time.sleep(0.5)
 
-    _log("protocol", "%d vectors — %s" % (sent,
+    _log("protocol", "%d vectors: %s" % (sent,
          _green("survived all") if not findings
          else _red("%d corpus killed server" % len(findings))))
 
     return {"name": "protocol", "rc": 1 if findings else 0,
             "findings": findings, "stats": {"sent": sent}}
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Phase 3 — FEATURES
+# Phase 3: FEATURES
 # Every route verified for correct status, body content, and headers.
 # Additional invariant checks beyond simple status.
-# ─────────────────────────────────────────────────────────────────────────────
-
 def phase_features(cfg, srv):
     host, port = cfg.host, cfg.port
     findings = []
@@ -1171,7 +1117,7 @@ def phase_features(cfg, srv):
         for d in details:
             findings.append(("ROUTE_FAIL", d))
         _log("features", "%d/%d routes correct%s" % (p, p+f,
-             (" — " + _red("%d failed" % f)) if f else ""))
+             (": " + _red("%d failed" % f)) if f else ""))
 
         # ── Additional invariants ─────────────────────────────────────────────
 
@@ -1201,7 +1147,7 @@ def phase_features(cfg, srv):
                 _dot(".")
         _progress_end()
 
-        # template/cond: branch isolation — wrong branches must not appear
+        # template/cond: branch isolation: wrong branches must not appear
         _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "tmpl:cond-isolation")
         for n, expected, forbidden in [
             (2, b"high",   [b"medium", b"low"]),
@@ -1230,7 +1176,7 @@ def phase_features(cfg, srv):
         if b"Base Title" in b:
             _dot("!", "31")
             findings.append(("ROUTE_FAIL",
-                              "/template/inherit: base title leaked — child override failed"))
+                              "/template/inherit: base title leaked: child override failed"))
         else:
             _dot(".")
         _progress_end()
@@ -1271,7 +1217,7 @@ def phase_features(cfg, srv):
                 _dot(".")
         _progress_end()
 
-        # /async/sleep: 20 concurrent requests — tests timer pool
+        # /async/sleep: 20 concurrent requests: tests timer pool
         _log("features", "async/sleep × 20 concurrent …")
         ok20 = fail20 = 0
         lock20 = threading.Lock()
@@ -1301,11 +1247,206 @@ def phase_features(cfg, srv):
     return {"name": "features", "rc": 1 if findings else 0,
             "findings": findings, "stats": {}}
 
+# Phase 4: FORMS
+def _form(host, port, path, content_type, body, rtimeout=3.0):
+    hdrs = {} if content_type is None else {"Content-Type": content_type}
+    return req(host, port, "POST", path, headers=hdrs, body=body, rtimeout=rtimeout)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Phase 4 — CHAOS
-# ─────────────────────────────────────────────────────────────────────────────
+def _form_json(host, port, path, content_type, body, rtimeout=3.0):
+    st, raw = _form(host, port, path, content_type, body, rtimeout=rtimeout)
+    try:
+        return st, json.loads(body_of(raw))
+    except Exception:
+        return st, None
 
+def phase_forms(cfg, srv):
+    host, port = cfg.host, cfg.port
+    findings = []
+    CT = "application/x-www-form-urlencoded"
+
+    def check(name, cond, detail="", tag="FORM_FAIL"):
+        if cond:
+            _dot(".")
+        else:
+            _dot("!", "31")
+            findings.append((tag, "%s: %s" % (name, detail)))
+
+    VALID_BODY = b"username=alice&email=alice%40example.com&age=30&bio=hi"
+
+    _log("forms", "started")
+    _progress_hdr(_cyan("[%s] forms      " % time.strftime("%H:%M:%S")) + "functional         ")
+
+    # ── Happy path ────────────────────────────────────────────────────────────
+    st, j = _form_json(host, port, "/form", CT, VALID_BODY)
+    check("valid submission", st == 200 and j and j.get("username") == "alice"
+          and j.get("email") == "alice@example.com" and j.get("age") == 30
+          and j.get("bio_present") is True and j.get("bio_len") == 2,
+          "status=%s body=%r" % (st, j))
+
+    # ── Content-Type matching ────────────────────────────────────────────────
+    for name, ct, want in [
+        ("wrong type json", "application/json", 415),
+        ("wrong type multipart", "multipart/form-data; boundary=x", 415),
+        ("missing content-type", None, 415),
+        ("uppercase type", CT.upper(), 200),
+        ("type with charset param", CT + "; charset=utf-8", 200),
+        ("type trailing space", CT + " ", 200),
+        ("prefix-junk suffix", CT + "x", 415),
+    ]:
+        st, _ = _form(host, port, "/form", ct, VALID_BODY)
+        check("content-type: %s" % name, st == want, "got %s want %s" % (st, want))
+
+    # ── Structural parsing (field order / count / equals) ───────────────────
+    for name, body in [
+        ("missing field", b"username=alice&email=alice%40example.com&age=30"),
+        ("extra field", b"username=alice&email=alice%40example.com&age=30&bio=hi&extra=1"),
+        ("wrong order", b"email=alice%40example.com&username=alice&age=30&bio=hi"),
+        ("no equals sign", b"username&email=alice%40example.com&age=30&bio=hi"),
+        ("trailing ampersand", VALID_BODY + b"&"),
+        ("empty body", b""),
+        ("duplicate key wrong slot", b"username=alice&username=bob&age=30&bio=hi"),
+    ]:
+        st, _ = _form(host, port, "/form", CT, body)
+        check("structure: %s" % name, st == 400, "got %s, want 400" % st)
+
+    # ── Required-but-empty vs optional-missing ───────────────────────────────
+    st, _ = _form(host, port, "/form", CT, b"username=&email=alice%40example.com&age=30&bio=hi")
+    check("required empty -> 422", st == 422, "got %s" % st)
+
+    # ── Validator boundaries ──────────────────────────────────────────────────
+    def with_username(u):
+        return ("username=%s&email=alice%%40example.com&age=30&bio=hi" % u).encode()
+
+    for name, u, want in [
+        ("username len 3 (min)", "abc", 200),
+        ("username len 2 (under min)", "ab", 422),
+        ("username len 32 (max)", "a" * 32, 200),
+        ("username len 33 (over max)", "a" * 33, 422),
+    ]:
+        st, _ = _form(host, port, "/form", CT, with_username(u))
+        check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
+
+    def with_age(a):
+        return ("username=alice&email=alice%%40example.com&age=%s&bio=hi" % a).encode()
+
+    for name, a, want in [
+        ("age 0 (min)", "0", 200), ("age 120 (max)", "120", 200),
+        ("age 121 (over)", "121", 422), ("age negative", "-1", 422),
+        ("age non-numeric", "abc", 422), ("age overflow u64", "99999999999999999999", 422),
+    ]:
+        st, _ = _form(host, port, "/form", CT, with_age(a))
+        check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
+
+    def with_email(e):
+        return ("username=alice&email=%s&age=30&bio=hi" % e).encode()
+
+    for name, e, want in [
+        ("email valid", "a%40b.co", 200), ("email no at", "nope", 422),
+        ("email trailing at", "a%40", 422), ("email leading at", "%40b.com", 422),
+        ("email double dot local", "a..b%40x.com", 422),
+        ("email double dot domain", "a%40b..com", 422),
+        ("email no dot domain", "a%40b", 422),
+    ]:
+        st, _ = _form(host, port, "/form", CT, with_email(e))
+        check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
+
+    _progress_end()
+
+    # ── Percent-decoding fuzz (via /form/raw, single isolated field) ─────────
+    _progress_hdr(_cyan("[%s] forms      " % time.strftime("%H:%M:%S")) + "percent-decoding   ")
+
+    def raw_decode(v):
+        return _form_json(host, port, "/form/raw", CT, b"v=" + v)
+
+    st, j = raw_decode(b"%00")
+    check("decode NUL byte", st == 200 and j and j.get("len") == 1, "st=%s j=%r" % (st, j))
+
+    st, j = raw_decode(b"%25")
+    check("decode %25 -> literal percent", st == 200 and j and j.get("len") == 1
+          and j.get("value") == "%", "st=%s j=%r" % (st, j))
+
+    st, j = raw_decode(b"%2500")
+    check("no double-decode (%2500)", st == 200 and j and j.get("len") == 3
+          and j.get("value") == "%00", "st=%s j=%r (would be len=1 if double-decoded)" % (st, j),
+          tag="FORM_DECODE_BYPASS")
+
+    st, j = raw_decode(b"%")
+    check("lone trailing percent -> literal", st == 200 and j and j.get("value") == "%", "st=%s j=%r" % (st, j))
+
+    st, j = raw_decode(b"%4")
+    check("one hex digit then end -> literal", st == 200 and j and j.get("value") == "%4", "st=%s j=%r" % (st, j))
+
+    st, j = raw_decode(b"%2")
+    check("%2 at exact end -> literal", st == 200 and j and j.get("value") == "%2", "st=%s j=%r" % (st, j))
+
+    for bad in (b"%ZZ", b"%2G", b"%G2", b"%-1", b"%0G", b"%G0"):
+        st, _ = raw_decode(bad)
+        check("invalid hex escape rejected: %r" % bad, st == 400, "got %s" % st, tag="FORM_DECODE_BYPASS")
+
+    st, j = raw_decode(b"a+b")
+    check("+ decodes to space", st == 200 and j and j.get("value") == "a b", "st=%s j=%r" % (st, j))
+
+    st, j = raw_decode(b"a%2Bb")
+    check("encoded plus stays literal", st == 200 and j and j.get("value") == "a+b", "st=%s j=%r" % (st, j))
+
+    st, j = raw_decode(b"a" * 8192)
+    check("value at max (8192)", st == 200 and j and j.get("len") == 8192, "st=%s len=%s" % (st, j and j.get("len")))
+
+    st, j = raw_decode(b"a" * 8193)
+    check("value over max (8193)", st == 422, "got %s" % st)
+
+    # Raw (pre-decode) body is 3x larger than the decoded result: validator must
+    # bound the DECODED length, not the raw wire length
+    st, j = raw_decode(b"%61" * 8192)
+    check("validated post-decode, not pre-decode", st == 200 and j and j.get("len") == 8192,
+          "st=%s len=%s" % (st, j and j.get("len")))
+
+    _progress_end()
+
+    # ── Decoded-value-into-header injection (response splitting) ────────────
+    _progress_hdr(_cyan("[%s] forms      " % time.strftime("%H:%M:%S")) + "header-injection   ")
+
+    for name, u in [
+        ("crlf + header", "AAA%0d%0aX-Injected%3a%20evil"),
+        ("bare cr", "AAA%0dX-Injected%3a%20evil"),
+        ("bare lf", "AAA%0aX-Injected%3a%20evil"),
+        ("double crlf + line", "AAA%0d%0a%0d%0aGET%20%2fevil%20HTTP%2f1.1"),
+    ]:
+        st, raw = _form(host, port, "/form", CT, with_username(u))
+        _, hdrs, _ = parse_hdrs(raw)
+        leaked = b"x-injected" in hdrs
+        check("no header split: %s" % name, not leaked, "raw=%r" % raw[:200],
+              tag="FORM_HEADER_INJECT")
+
+    _progress_end()
+
+    # ── Structural DoS / hang resistance ─────────────────────────────────────
+    _progress_hdr(_cyan("[%s] forms      " % time.strftime("%H:%M:%S")) + "dos-resistance     ")
+
+    t0 = time.time()
+    many = b"&".join(b"k%d=v" % i for i in range(200))
+    st, _ = _form(host, port, "/form", CT, many, rtimeout=5.0)
+    dt = time.time() - t0
+    check("200 pairs rejected promptly", st == 400 and dt < 3.0, "status=%s elapsed=%.2fs" % (st, dt))
+
+    t0 = time.time()
+    st, _ = _form(host, port, "/form", CT, b"&" * 500, rtimeout=5.0)
+    dt = time.time() - t0
+    check("500 empty segments rejected promptly", st == 400 and dt < 3.0, "status=%s elapsed=%.2fs" % (st, dt))
+
+    _progress_end()
+
+    if not health(host, port, timeout=4.0):
+        findings.append(("SERVER_DEAD", "server unreachable after forms phase"))
+
+    nf = len(findings)
+    _log("forms", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
+
+    rc = 2 if any(f[0] in ("FORM_HEADER_INJECT", "FORM_DECODE_BYPASS") for f in findings) \
+           else (1 if findings else 0)
+    return {"name": "forms", "rc": rc, "findings": findings, "stats": {}}
+
+# Phase 5: CHAOS
 def phase_chaos(cfg, srv):
     host, port = cfg.host, cfg.port
     findings = []
@@ -1313,14 +1454,14 @@ def phase_chaos(cfg, srv):
 
     mpid = srv.pid()
     if not mpid:
-        _log("chaos", _yellow("no master PID — skipped"))
+        _log("chaos", _yellow("no master PID: skipped"))
         return {"name": "chaos", "rc": 0, "findings": [],
                 "stats": {}, "notes": ["master PID unavailable"]}
 
     _log("chaos", "started  (master PID=%d)" % mpid)
 
     # 1. Single worker kills × 3
-    _log("chaos", _bold("1/6 — single worker kill × 3"))
+    _log("chaos", _bold("1/6: single worker kill × 3"))
     for i in range(3):
         stop, ts = _light_flood(host, port, 8)
         _do_kill(mpid, stats, "kill-%d" % (i+1))
@@ -1331,7 +1472,7 @@ def phase_chaos(cfg, srv):
         time.sleep(0.5)
 
     # 2. Kills under sustained load (30s, 1 kill/5s)
-    _log("chaos", _bold("2/6 — kills under sustained load (30s)"))
+    _log("chaos", _bold("2/6: kills under sustained load (30s)"))
     stop, ts = _light_flood(host, port, 16)
     t0 = time.time(); kn = 0
     while time.time() - t0 < 30.0:
@@ -1344,7 +1485,7 @@ def phase_chaos(cfg, srv):
     _log("chaos", "  %d kills under load" % kn)
 
     # 3. Rapid-fire kills (1 kill/2s × 5)
-    _log("chaos", _bold("3/6 — rapid-fire kills (1/2s × 5)"))
+    _log("chaos", _bold("3/6: rapid-fire kills (1/2s × 5)"))
     stop, ts = _light_flood(host, port, 12)
     rk = 0
     for i in range(5):
@@ -1357,7 +1498,7 @@ def phase_chaos(cfg, srv):
     _log("chaos", "  %d rapid kills" % rk)
 
     # 4. Kill both workers simultaneously
-    _log("chaos", _bold("4/6 — simultaneous dual-worker kill"))
+    _log("chaos", _bold("4/6: simultaneous dual-worker kill"))
     ws = children(mpid)
     if len(ws) >= 2:
         for w in ws[:2]:
@@ -1369,10 +1510,10 @@ def phase_chaos(cfg, srv):
                 _log("chaos", _yellow("  dual-kill failed: %s" % e))
         _chaos_recover_and_verify(host, port, findings, "dual-kill", timeout=20.0)
     else:
-        _log("chaos", _yellow("  only %d worker — skipping dual kill" % len(ws)))
+        _log("chaos", _yellow("  only %d worker: skipping dual kill" % len(ws)))
 
     # 5. SIGSTOP → hammer 3s → SIGCONT
-    _log("chaos", _bold("5/6 — SIGSTOP worker for 3s then SIGCONT"))
+    _log("chaos", _bold("5/6: SIGSTOP worker for 3s then SIGCONT"))
     ws = children(mpid)
     if ws:
         v = random.choice(ws)
@@ -1398,7 +1539,7 @@ def phase_chaos(cfg, srv):
     else:
         _log("chaos", _yellow("  no workers for SIGSTOP"))
 
-    # 6. Kill under mixed load — idle connections + concurrent large responses.
+    # 6. Kill under mixed load: idle connections + concurrent large responses.
     #
     # 75 half-open connections sit in read-wait on the server (no harness threads,
     # just held FDs). 12 threads each pull a 1MiB /big response in a loop.
@@ -1406,7 +1547,7 @@ def phase_chaos(cfg, srv):
     # Python's scheduler on a 2-core CI runner without adding real server stress.
     # After 2s of active load a worker is killed. This exercises epoll cleanup of
     # in-progress sends AND idle-fd teardown in a single scenario.
-    _log("chaos", _bold("6/6 — kill under mixed load (75 idle conns + 12 /big threads)"))
+    _log("chaos", _bold("6/6: kill under mixed load (75 idle conns + 12 /big threads)"))
 
     held = []
     for _ in range(75):
@@ -1462,12 +1603,7 @@ def phase_chaos(cfg, srv):
     return {"name": "chaos", "rc": 1 if findings else 0,
             "findings": findings, "stats": stats, "final_metrics": fm}
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ─────────────────────────────────────────────────────────────────────────────
 # Report
-# ─────────────────────────────────────────────────────────────────────────────
-
 def print_report(results):
     print()
     _hdr("WFX TORTURE REPORT")
@@ -1489,7 +1625,7 @@ def print_report(results):
             print("  violate OK/BAD  : %d / %d" % (s["violate_ok"], s["violate_bad"]))
             print("  info leak checks: %d routes" % s["leak"])
             print()
-            print("  CRLF: STRICT — only \\r\\n header-name splitting counts.")
+            print("  CRLF: STRICT, only \\r\\n header-name splitting counts.")
 
         elif name == "PROTOCOL":
             print("  vectors sent: %d" % r["stats"]["sent"])
@@ -1530,24 +1666,21 @@ def print_report(results):
 
     print()
     print("=" * 78)
-    if overall == 0:   print(_bold(_green("  VERDICT: PASS — survived clean")))
+    if overall == 0:   print(_bold(_green("  VERDICT: PASS, survived clean")))
     elif overall == 2: print(_bold(_red("  VERDICT: SECURITY FAILURE")))
     else:              print(_bold(_red("  VERDICT: FAIL")))
     print("=" * 78)
     print()
     return overall
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
-
-PHASES = ["security", "protocol", "features", "chaos"]
+PHASES = ["security", "protocol", "features", "forms", "chaos"]
 
 PHASE_FNS = {
     "security": phase_security,
     "protocol": phase_protocol,
     "features": phase_features,
+    "forms":    phase_forms,
     "chaos":    phase_chaos,
 }
 
@@ -1560,7 +1693,7 @@ def main():
 phases:
   security   path traversal (URL + X-File), CRLF/response-splitting,
              info leakage on all routes, contract violations
-  protocol   malformed/abuse request vectors — server must survive, not crash
+  protocol   malformed/abuse request vectors: server must survive, not crash
              corpora: header-abuse, malformed, methods, smuggling, bodybomb
   features   every route verified: exact status, body, headers, invariants
              branch isolation, header injection absence, Content-Type checks
@@ -1592,10 +1725,8 @@ examples:
 
     cfg = ap.parse_args()
 
-    global _CI, _TTY
     if cfg.ci:
-        _CI  = True
-        _TTY = False  # force colors off; ::group:: etc. are only for GH Actions
+        common.enable_ci_mode()
         if cfg.phase_timeout == 0:
             cfg.phase_timeout = 300  # 5 min per phase in CI
 
@@ -1613,11 +1744,11 @@ examples:
 
     mpid = srv.pid()
     if mpid: _log("harness", "master PID=%d  (%s)" % (mpid, cfg.pid_file))
-    else:    _log("harness", _yellow("warning: no master PID — chaos phase limited"))
+    else:    _log("harness", _yellow("warning: no master PID: chaos phase limited"))
 
     results = []; overall = 0
     phases_to_run = PHASES if cfg.phase == "all" else [cfg.phase]
-    hb = _Heartbeat() if _CI else None
+    hb = _Heartbeat() if common.CI else None
 
     try:
         for name in phases_to_run:
@@ -1632,14 +1763,14 @@ examples:
             results.append(r)
             overall = max(overall, r["rc"])
             if r["rc"] == 2:
-                _gh_error("security finding in phase %s — stopping" % name)
-                _log("harness", _red("security finding — stopping"))
+                _gh_error("security finding in phase %s: stopping" % name)
+                _log("harness", _red("security finding: stopping"))
                 break
             dead = [f for f in r.get("findings", [])
                     if "DEAD" in f[0] or "NO_RECOVERY" in f[0]]
             if dead and name != phases_to_run[-1]:
                 _gh_warning("server appears dead after phase %s" % name)
-                _log("harness", _yellow("server appears dead — skipping remaining phases"))
+                _log("harness", _yellow("server appears dead: skipping remaining phases"))
                 break
 
     except KeyboardInterrupt:

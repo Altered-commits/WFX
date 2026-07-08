@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 //
-// Torture target. Every route exists to give torture.py a surface to attack.
+// Every route exists to give base_audit.py a surface to attack.
 // Covers every user-facing WFX feature: dynamic segments (uint/int/string/uuid),
 // per-route middleware (continue/break), context storage, async handlers,
 // JSON (immediate + retained + parsing), chained headers,
@@ -9,16 +9,15 @@
 
 #include <wfx/http.hpp>
 #include <wfx/telemetry.hpp>
+#include <wfx/form.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Original routes (kept exactly as-is)
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Basic routes
 WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 
 WFX_GET("/text", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
@@ -88,7 +87,7 @@ WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     j.Obj("network");
     j.Write("accepts", net.accepts);
     j.Write("requests", net.requests);
-    j.Write("active_conns", net.activeConns);
+    j.Write("active_conns", net.activeClientConns);
     j.Write("response_2xx", net.response2xx);
     j.Write("response_4xx", net.response4xx);
     j.Write("response_5xx", net.response5xx);
@@ -101,40 +100,36 @@ WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     j.End();
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Dynamic segment routes
 // Segment index 0 is always the first (and only) dynamic capture because
 // static path components are consumed but never pushed to outParams.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// :uint  — unsigned 64-bit integer
+// :uint  -> unsigned 64-bit integer
 WFX_GET("/items/<id:uint>", [](WFX::Request req, WFX::Response res) {
     auto seg = req.GetSegment(0);
     res.Status(200).Write(seg.AsU64()).Commit();
 })
 
-// :int  — signed 64-bit integer (path may include '-')
+// :int  -> signed 64-bit integer (path may include '-')
 WFX_GET("/items/signed/<id:int>", [](WFX::Request req, WFX::Response res) {
     auto seg = req.GetSegment(0);
     res.Status(200).Write(seg.AsI64()).Commit();
 })
 
-// :string — arbitrary path component
+// :string -> arbitrary path component
 WFX_GET("/greet/<name:string>", [](WFX::Request req, WFX::Response res) {
     auto seg = req.GetSegment(0);
     auto sv = seg.AsString();
     res.Status(200).Write("hello ").Write(std::string_view{sv.Data(), sv.Size()}).Commit();
 })
 
-// :uuid — 8-4-4-4-12 UUID
+// :uuid -> 8-4-4-4-12 UUID
 WFX_GET("/uuid/<id:uuid>", [](WFX::Request req, WFX::Response res) {
     auto seg = req.GetSegment(0);
     res.Status(200).Write(seg.AsUUID()).Commit();
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group-prefixed paths (flat, no WFX_GROUP_START — uses literal prefixes)
-// ─────────────────────────────────────────────────────────────────────────────
+
+// Group-prefixed paths (flat)
 
 WFX_GET("/api/v1/status", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 
@@ -143,10 +138,8 @@ WFX_GET("/api/v1/item/<id:uint>", [](WFX::Request req, WFX::Response res) {
     res.Status(200).Write(seg.AsU64()).Commit();
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-route middleware routes
-// ─────────────────────────────────────────────────────────────────────────────
 
+// Per-route middleware routes
 // MwContinue: middleware adds a header, handler runs normally.
 // NOTE: Header() in middleware calls EnsureHeadersOpen() which flushes the
 // status line (default 200) immediately — so the handler must NOT call
@@ -187,10 +180,8 @@ WFX_GET_EX("/mw/skipnext",
                        }),
            [](WFX::Request, WFX::Response res) { res.Status(200).SendText("handler-ran"); })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Async handler — exercises the coroutine + timer path under load
-// ─────────────────────────────────────────────────────────────────────────────
 
+// Async handler — exercises the coroutine + timer path under load
 WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     auto s = co_await WFX::SleepFor(25); // 25 ms
     if(s != WFX::AsyncOk) {
@@ -201,10 +192,8 @@ WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     co_return;
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// JSON routes
-// ─────────────────────────────────────────────────────────────────────────────
 
+// JSON routes
 // Immediate-mode JSON (zero-heap streaming into response buffer)
 WFX_GET("/json/im", [](WFX::Request, WFX::Response res) {
     res.Status(200);
@@ -245,10 +234,8 @@ WFX_POST("/parse-json", [](WFX::Request req, WFX::Response res) {
     w.Write("version", version);
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Chained header test — verifies the chainable Response API
-// ─────────────────────────────────────────────────────────────────────────────
 
+// Chained header test — verifies the chainable Response API
 WFX_GET("/chain", [](WFX::Request, WFX::Response res) {
     res.Status(200)
         .Header("X-Chain-A", "alpha")
@@ -257,17 +244,15 @@ WFX_GET("/chain", [](WFX::Request, WFX::Response res) {
         .SendText("chain");
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Template routes — full coverage of every WFX template feature
-//
-//  /template/static    — static template (no dynamic tags, file-served path)
-//  /template/dynamic   — var tags: simple value, uint, nested attr (meta.version)
-//  /template/cond/<n>  — if / elif / else / endif (existence-based branches)
-//  /template/loop      — for / endfor over a string array
-//  /template/include   — {% include 'frag.html' %} + var
-//  /template/inherit   — {% extends 'base.html' %} + {% block %} override with var
-// ─────────────────────────────────────────────────────────────────────────────
 
+// Template routes
+//
+//  /template/static    -> static template (no dynamic tags, file-served path)
+//  /template/dynamic   -> var tags: simple value, uint, nested attr (meta.version)
+//  /template/cond/<n>  -> if / elif / else / endif (existence-based branches)
+//  /template/loop      -> for / endfor over a string array
+//  /template/include   -> {% include 'frag.html' %} + var
+//  /template/inherit   -> {% extends 'base.html' %} + {% block %} override with var
 WFX_GET("/template/static", [](WFX::Request, WFX::Response res) { res.SendTemplate("index.html", WFX::RmJson()); })
 
 WFX_GET("/template/dynamic", [](WFX::Request, WFX::Response res) {
@@ -309,4 +294,73 @@ WFX_GET("/template/inherit", [](WFX::Request, WFX::Response res) {
     auto ctx = WFX::RmJson();
     ctx["page_title"] = "My Page";
     res.SendTemplate("child.html", std::move(ctx));
+})
+
+// Form routes — surface for the forms security audit (percent-decoding,
+// Content-Type matching, field-order/count structure, validator/sanitizer
+// bounds, and value-into-header injection)
+static const auto AuditForm = WFX::Form::Schema("audit",
+    WFX::Form::Field("username", WFX::Form::Text{{}, true, 3, 32}),
+    WFX::Form::Field("email", WFX::Form::Email{}),
+    WFX::Form::Field("age", WFX::Form::UInt{{}, 0, 120}),
+    WFX::Form::Field("bio", WFX::Form::Text{{false}, false, 0, 500}));
+
+// Single optional field, generous max: isolates percent-decoding / structural
+// edge cases from the multi-field validators above
+static const auto RawForm =
+    WFX::Form::Schema("raw", WFX::Form::Field("v", WFX::Form::Text{{false}, false, 0, 8192}));
+
+static int StatusForFormError(WFX::Form::FormError err)
+{
+    if(err == WFX::Form::BadContentType)
+        return 415;
+    if(err == WFX::Form::Malformed)
+        return 400;
+    return 422; // CleanFailed
+}
+
+WFX_POST("/form", [](WFX::Request req, WFX::Response res) {
+    decltype(AuditForm)::CleanedType data;
+    auto err = AuditForm.Parse(req, data);
+
+    if(err != WFX::Form::Ok) {
+        res.Status(StatusForFormError(err)).SendText("form_error");
+        return;
+    }
+
+    auto& username = std::get<0>(data);
+    auto& email = std::get<1>(data);
+    auto& age = std::get<2>(data);
+    auto& bio = std::get<3>(data);
+
+    // Reflect the decoded value into a header verbatim: proves the pipeline as a
+    // whole (percent-decode -> header write) can't be used for response splitting,
+    // regardless of whether the form module itself defends against it
+    res.Status(200).Header("X-Form-Username", username.value);
+
+    auto j = WFX::ImJson(res);
+    j.Write("ok", true);
+    j.Write("username", username.value);
+    j.Write("email", email.value);
+    j.Write("age", static_cast<std::int64_t>(age.value));
+    j.Write("bio_present", bio.present);
+    j.Write("bio_len", static_cast<std::uint64_t>(bio.present ? bio.value.size() : 0));
+})
+
+WFX_POST("/form/raw", [](WFX::Request req, WFX::Response res) {
+    decltype(RawForm)::CleanedType data;
+    auto err = RawForm.Parse(req, data);
+
+    if(err != WFX::Form::Ok) {
+        res.Status(StatusForFormError(err)).SendText("form_error");
+        return;
+    }
+
+    auto& v = std::get<0>(data);
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("present", v.present);
+    j.Write("len", static_cast<std::uint64_t>(v.present ? v.value.size() : 0));
+    j.Write("value", v.present ? v.value : std::string_view{});
 })

@@ -28,7 +28,6 @@ _lock = threading.Lock()
 _stats = {}   # name -> {"handshakes":int, "hs_fail":int, "requests":int}
 _staged = {}  # id -> (raw_bytes, keep_alive)
 
-
 def _stat(name, key, n=1):
     with _lock:
         s = _stats.setdefault(name, {"handshakes": 0, "hs_fail": 0, "requests": 0})
@@ -48,7 +47,6 @@ def _cl(body, status="HTTP/1.1 200 OK", extra=None, keep_alive=True):
 
 def _raw(blob, keep_alive=True):
     return [("send", _b(blob))], keep_alive
-
 
 def handle(name, method, path, headers, body, conn):
     _stat(name, "requests")
@@ -90,7 +88,7 @@ def handle(name, method, path, headers, body, conn):
         b = "host=%s|xtest=%s" % (headers.get("host", "-"), headers.get("x-test", "-"))
         return _cl(b)
 
-    # ── behavioural attacks ──
+    # Behavioural attacks
     # Truncation: send a body then hard-RST with no TLS close_notify. A secure client
     # must never treat this as a clean, complete response.
     if path == "/truncate":
@@ -99,7 +97,6 @@ def handle(name, method, path, headers, body, conn):
         return [("send", b"HTTP/1.1 200 OK\r\n"), ("sleep", 30.0)], False
 
     return _cl("no such route", status="HTTP/1.1 404 Not Found")
-
 
 def _int(s, d):
     try: return int(s)
@@ -134,7 +131,7 @@ def _hard_reset(sock):
         pass
 
 def serve_conn(raw_sock, ctx, name):
-    # TLS handshake first — the moment of truth for the cert/protocol attacks. A WFX
+    # TLS handshake first: the moment of truth for the cert/protocol attacks. A WFX
     # client that correctly refuses a hostile cert fails HERE (we count it), so the
     # harness can assert refusal instead of insecure progress.
     try:
@@ -181,7 +178,6 @@ def serve_conn(raw_sock, ctx, name):
         try: sock.close()
         except OSError: pass
 
-
 def make_ctx(cert, key, maxver):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=cert, keyfile=key)
@@ -205,7 +201,6 @@ def listener(host, port, ctx, name):
             break
         threading.Thread(target=serve_conn, args=(conn, ctx, name), daemon=True).start()
 
-
 def parse_listen(spec):
     kv = {}
     for part in spec.split(","):
@@ -214,7 +209,7 @@ def parse_listen(spec):
             kv[k.strip()] = v.strip()
     return kv
 
-
+# Main
 def main():
     ap = argparse.ArgumentParser(description="WFX tls_audit hostile TLS mock")
     ap.add_argument("--host", default="127.0.0.1")
@@ -237,7 +232,6 @@ def main():
             time.sleep(3600)
     except KeyboardInterrupt:
         pass
-
 
 if __name__ == "__main__":
     main()

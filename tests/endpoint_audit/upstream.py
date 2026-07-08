@@ -9,13 +9,13 @@
 # include/wfx/endpoint/http.hpp. It speaks exact, hand-built wire bytes so the
 # harness can drive every branch and every boundary of the client.
 #
-# The 150+ attack vectors live in the HARNESS (endpoint_audit.py), not here — this
+# The 150+ attack vectors live in the HARNESS (endpoint_audit.py), not here; this
 # file is deliberately thin. It gets hostile bytes onto the wire two ways:
 #
 #   1. STAGING (/ctl/stage + /raw/<id>): the harness POSTs an arbitrary raw
 #      response blob (id in X-Id, keep-alive in X-Keep); WFX then GETs /raw/<id>
 #      and the mock replays those exact bytes. This is how the status-line, header,
-#      chunk, EOF, and limit fuzz corpora reach the client — one primitive, endless
+#      chunk, EOF, and limit fuzz corpora reach the client: one primitive, endless
 #      vectors, byte-for-byte controlled by the harness.
 #
 #   2. Fixed routes (/ok, /chunked/<k>, /evil/*, /coalesce, /reflect, ...) for the
@@ -39,17 +39,16 @@ _lock = threading.Lock()
 _coalesce_hits = 0          # backend hits on /coalesce* since last reset
 _total_requests = 0         # every request the mock has served
 _total_connections = 0      # every TCP connection the mock has accepted (prewarm proof)
+_proto_connections = 0      # every TCP connection accepted by the proto listener (multiplexing proof)
 _staged = {}                # id -> (raw_bytes, keep_alive, mode, arg)
-
 
 def _bump_total():
     global _total_requests
     with _lock:
         _total_requests += 1
 
-
-# ── Response builders. Each returns (plan, keep_alive). A plan is a list of
-#    actions the connection loop runs in order:
+# Response builders. Each returns (plan, keep_alive). A plan is a list of
+# actions the connection loop runs in order:
 #      ("send", bytes)   write raw bytes
 #      ("sleep", secs)   stall (drives the client's request timeout)
 #      ("shutwr",)       half-close so the client reads EOF
@@ -77,7 +76,7 @@ def _raw(blob, keep_alive=True):
 # multiple sends with tiny stalls so the client's incremental parser has to
 # reassemble lines/bodies across recv() boundaries. This exercises the lineAcc
 # line-join path, the body-resume-across-EpParseIncomplete path, and the
-# accumulating maxHeaderBytes cap — none of which a single write() reaches.
+# accumulating maxHeaderBytes cap, none of which a single write() reaches.
 #   mode "whole" : one send (default)
 #   mode "drip"  : arg-byte pieces, each followed by a short sleep
 #   mode "split" : one split at byte offset `arg` (0 => midpoint), sleep between
@@ -100,7 +99,7 @@ def handle(method, path, headers, body, conn):
     """Return (plan, keep_alive). conn is per-connection mutable state."""
     global _coalesce_hits
 
-    # ── Staging: replay harness-supplied raw bytes verbatim ─────────────────
+    # Staging: replay harness-supplied raw bytes verbatim
     if path.startswith("/raw/"):
         with _lock:
             entry = _staged.get(path[5:])
@@ -109,7 +108,7 @@ def handle(method, path, headers, body, conn):
         blob, keep, mode, arg = entry
         return _raw_frag(blob, keep, mode, arg)
 
-    # ── Desync / smuggling crown jewels (before the HEAD default) ───────────
+    # Desync / smuggling crown jewels (before the HEAD default)
     # Well-formed-looking responses that hide extra body bytes the client must
     # treat as "no body". If the client reads or leaves those bytes on a pooled
     # connection, the NEXT request on it gets a corrupted / smuggled response.
@@ -126,13 +125,13 @@ def handle(method, path, headers, body, conn):
         return _raw(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nAAA"
                     b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBBB", keep_alive=True)
 
-    # ── HEAD default: every server answers HEAD bodyless. Proves the client
-    #    completes HEAD on the blank line and keeps the conn reusable even though
-    #    Content-Length is non-zero. ──────────────────────────────────────────
+    # HEAD default: every server answers HEAD bodyless. Proves the client
+    # completes HEAD on the blank line and keeps the conn reusable even though
+    # Content-Length is non-zero.
     if method == "HEAD":
         return _raw(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", keep_alive=True)
 
-    # ── Control plane (harness hits these directly) ─────────────────────────
+    # Control plane (harness hits these directly)
     if path == "/ctl/ping":
         return _cl("pong")
     if path == "/ctl/coalesce/reset":
@@ -148,9 +147,13 @@ def handle(method, path, headers, body, conn):
     if path == "/ctl/conns":
         with _lock:
             return _cl(str(_total_connections))
+    if path == "/ctl/protoconns":
+        with _lock:
+            return _cl(str(_proto_connections))
+
     # Accepted-connections minus served-requests, computed atomically under one lock
     # in a SINGLE request (this request itself counts as +1 conn and +1 req, netting
-    # zero). Counts connections that were opened but never sent a request — i.e. idle
+    # zero). Counts connections that were opened but never sent a request, i.e. idle
     # prewarmed connections. Reading conns and requests as two separate control calls
     # would skew the diff by 1 (the second call bumps requests once more).
     if path == "/ctl/idleconns":
@@ -166,7 +169,7 @@ def handle(method, path, headers, body, conn):
             )
         return _cl("staged")
 
-    # ── Happy-path framing ──────────────────────────────────────────────────
+    # Happy-path framing
     if path == "/ok":
         return _cl("hello", extra=["X-Mark: alpha"])
     if path == "/empty":
@@ -188,14 +191,14 @@ def handle(method, path, headers, body, conn):
     if path == "/http10":
         return _resp("HTTP/1.0 200 OK", [], "ten", keep_alive=False)
 
-    # ── Status handling ─────────────────────────────────────────────────────
+    # Status handling
     if path.startswith("/status/"):
         code = _int(path[8:], 200)
         if code in (204, 304):
             return _resp("HTTP/1.1 %d X" % code, [], b"", keep_alive=True)
         return _cl("s", status="HTTP/1.1 %d X" % code)
 
-    # ── 1xx informational ───────────────────────────────────────────────────
+    # 1xx informational
     if path == "/continue":
         return _raw(b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nafter", True)
     if path.startswith("/continue/"):
@@ -203,28 +206,28 @@ def handle(method, path, headers, body, conn):
         return _raw(b"HTTP/1.1 100 Continue\r\n\r\n" * k +
                     b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone", True)
 
-    # ── Keep-alive proof: body = this connection's 1-based request number ────
+    # Keep-alive proof: body = this connection's 1-based request number
     if path == "/kacount":
         return _cl(str(conn["n"]))
 
-    # ── Serialize() proof: reflect exactly what the client put on the wire ───
+    # Serialize() proof: reflect exactly what the client put on the wire
     if path == "/reflect":
         b = "host=%s|clen=%s|te=%s|blen=%d|xtest=%s" % (
             headers.get("host", "-"), headers.get("content-length", "-"),
             headers.get("transfer-encoding", "-"), len(body), headers.get("x-test", "-"))
         return _cl(b)
 
-    # ── Serialize() byte oracle: hand back the EXACT request head (request line
-    #    + header block, minus the trailing blank line) the client emitted, with
-    #    every CR/LF turned into a '|' (and one trailing '|') so it round-trips
-    #    cleanly through JSON. Lets the harness assert header order, dedup, CL
-    #    correctness, and the absence of any smuggled line break. ─────────────
+    # Serialize() byte oracle: hand back the EXACT request head (request line
+    # + header block, minus the trailing blank line) the client emitted, with
+    # every CR/LF turned into a '|' (and one trailing '|') so it round-trips
+    # cleanly through JSON. Lets the harness assert header order, dedup, CL
+    # correctness, and the absence of any smuggled line break.
     if path == "/reflectraw":
         h = conn.get("head", b"")
         h = h.replace(b"\r\n", b"|").replace(b"\r", b"|").replace(b"\n", b"|")
         return _cl(h + b"|")
 
-    # ── Coalescing: count backend hits, stall so waiters pile up ────────────
+    # Coalescing: count backend hits, stall so waiters pile up
     if path == "/coalesce":
         with _lock:
             _coalesce_hits += 1
@@ -241,7 +244,7 @@ def handle(method, path, headers, body, conn):
         time.sleep(0.30)
         return _resp("HTTP/1.1 200 OK", ["Content-Length: 5", "Content-Length: 6"], "xxxxx", keep_alive=False)
 
-    # ── Timeouts / connection faults ────────────────────────────────────────
+    # Timeouts / connection faults
     # Stall well past the fast endpoint's 5s request budget (+ up to a 5s timer-tick
     # of slack) so the client's request-timeout, not this response, wins.
     if path == "/slow-headers":
@@ -255,16 +258,13 @@ def handle(method, path, headers, body, conn):
 
     return _cl("no such route", status="HTTP/1.1 404 Not Found")
 
-
 def _int(s, default):
     try:
         return int(s)
     except (ValueError, TypeError):
         return default
 
-
-# ── Connection loop ─────────────────────────────────────────────────────────
-
+# Connection loop
 def _read_headers(sock, buf):
     while b"\r\n\r\n" not in buf:
         try:
@@ -293,8 +293,9 @@ def serve_conn(sock):
     global _total_connections
     with _lock:
         _total_connections += 1
+
     # Keep idle keep-alive connections open long enough that the CLIENT (60s idle
-    # default) is always the one to close first — otherwise the mock closing an idle
+    # default) is always the one to close first; otherwise the mock closing an idle
     # pooled connection first would strand a slot the client still thinks is alive,
     # causing intermittent None on reuse. A peer close still returns EOF instantly,
     # so this only affects genuinely-idle keep-alive sockets.
@@ -351,11 +352,128 @@ def _hard_reset(sock):
     except OSError:
         pass
 
+# Second listener: tiny hand-rolled protocol for onConnect / onDisconnect /
+# multiplexing coverage, spoken by tests/endpoint_audit/app/src/proto.cpp's
+# raw WFX::Endpoint<> instances (HttpEndpoint can't exercise any of this,
+# HTTP/1.1 has no handshake and no concurrent-requests-per-connection).
+#
+# Wire format, newline-delimited ASCII, one connection = one handshake then any
+# number of requests:
+#
+#   Client -> "AUTH <token>\n"        once, right after connecting
+#   Server -> "OK\n"                  token == "good" (or "slow", after a stall)
+#          -> "ERR\n"                 token == "bad" (connection stays open,
+#                                     the client's onConnect decides what to do)
+#          -> (closes, no reply)      token == "reset"
+#
+#   Client -> "REQ <id> <key>\n"      any number of these, id is caller-assigned
+#   Server -> "RES <id> <value>\n"    value == key, unless key is
+#                                     "sleep:<secs>:<value>", in which case the
+#                                     reply is delayed by <secs> and carries
+#                                     <value> instead. Replies are sent from
+#                                     independent per-request threads, so with
+#                                     more than one request in flight they can,
+#                                     and are meant to, come back out of order
+def _serve_proto_conn(sock):
+    global _proto_connections
+    with _lock:
+        _proto_connections += 1
+    sock.settimeout(65.0)
+    write_lock = threading.Lock()
+    buf = b""
+    authed = False
 
+    def send_line(line):
+        with write_lock:
+            try:
+                sock.sendall(line.encode("latin-1"))
+            except OSError:
+                pass
+
+    def reply_after(rid, value, delay):
+        if delay > 0:
+            time.sleep(delay)
+        send_line("RES %s %s\n" % (rid, value))
+
+    try:
+        while True:
+            nl = buf.find(b"\n")
+            while nl == -1:
+                try:
+                    d = sock.recv(4096)
+                except OSError:
+                    return
+                if not d:
+                    return
+                buf += d
+                nl = buf.find(b"\n")
+
+            line = buf[:nl].decode("latin-1", "replace").rstrip("\r")
+            buf = buf[nl + 1:]
+
+            if not authed:
+                parts = line.split(" ", 1)
+                token = parts[1] if len(parts) > 1 else ""
+                if token == "good":
+                    send_line("OK\n")
+                    authed = True
+                elif token == "slow":
+                    # connectTimeoutSeconds=5 + up to one 5s timer tick = up to 10s worst
+                    # case before the engine gives up on its own; stall well past that so
+                    # the client's timeout always wins the race, never this reply
+                    time.sleep(14.0)
+                    send_line("OK\n")
+                    authed = True
+                elif token == "reset":
+                    return  # drop the connection mid-handshake, no reply
+                else:
+                    send_line("ERR\n")  # e.g. "bad", stay open either way
+                continue
+
+            parts = line.split(" ", 2)
+            if len(parts) < 3 or parts[0] != "REQ":
+                continue
+            rid, key = parts[1], parts[2]
+
+            delay, value = 0.0, key
+            if key.startswith("sleep:"):
+                bits = key.split(":", 2)
+                if len(bits) == 3:
+                    delay = _float(bits[1], 0.0)
+                    value = bits[2]
+
+            threading.Thread(target=reply_after, args=(rid, value, delay), daemon=True).start()
+    except OSError:
+        return
+    finally:
+        try: sock.close()
+        except OSError: pass
+
+def _float(s, default):
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return default
+
+def _serve_proto(host, port):
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind((host, port))
+    srv.listen(256)
+    print("mock proto-upstream on %s:%d" % (host, port), flush=True)
+    while True:
+        try:
+            conn, _ = srv.accept()
+        except OSError:
+            break
+        threading.Thread(target=_serve_proto_conn, args=(conn,), daemon=True).start()
+
+# Main
 def main():
     ap = argparse.ArgumentParser(description="WFX endpoint-audit hostile mock upstream")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8091)
+    ap.add_argument("--proto-port", type=int, default=8092)
     args = ap.parse_args()
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -363,6 +481,9 @@ def main():
     srv.bind((args.host, args.port))
     srv.listen(256)
     print("mock upstream on %s:%d" % (args.host, args.port), flush=True)
+
+    threading.Thread(target=_serve_proto, args=(args.host, args.proto_port), daemon=True).start()
+
     try:
         while True:
             try:
@@ -374,7 +495,6 @@ def main():
         pass
     finally:
         srv.close()
-
 
 if __name__ == "__main__":
     main()

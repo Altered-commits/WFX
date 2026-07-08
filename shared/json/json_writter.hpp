@@ -306,6 +306,7 @@ private: // Helper Functions
         const char* p = s.data();
         const char* e = p + s.size();
         const char* start = p;
+        char uBuf[6]; // "\u00XX" fallback for control bytes with no named escape
 
         while(p != e) {
             const char* esc = nullptr;
@@ -340,8 +341,24 @@ private: // Helper Functions
                     esc = "\\f";
                     el = 2;
                     break;
-                default:
+                default: {
+                    // RFC 8259 requires every U+0000-U+001F escaped, not just the 7-
+                    // -above. A raw control byte (e.g. NUL) left as-is produces invalid-
+                    // -JSON that strict parsers reject outright
+                    auto uc = static_cast<unsigned char>(*p);
+                    if(uc < 0x20) {
+                        static constexpr char hex[] = "0123456789abcdef";
+                        uBuf[0] = '\\';
+                        uBuf[1] = 'u';
+                        uBuf[2] = '0';
+                        uBuf[3] = '0';
+                        uBuf[4] = hex[(uc >> 4) & 0xF];
+                        uBuf[5] = hex[uc & 0xF];
+                        esc = uBuf;
+                        el = 6;
+                    }
                     break;
+                }
             }
 
             if(esc) {

@@ -48,7 +48,7 @@ python3 base_audit.py --ci
 | `--ready-timeout N` | `20` | Seconds to wait for `/health` on startup |
 | `--phase-timeout N` | `0` | Max seconds per phase before marking TIMEOUT and continuing (0 = unlimited; auto-set to 300 with `--ci`) |
 | `--ci` | off | CI-friendly output: no inline dot progress, GitHub Actions workflow commands (`::group::`, `::error::`) |
-| `--list-phases` | — | Print available phases and exit |
+| `--list-phases` | n/a | Print available phases and exit |
 
 ---
 
@@ -67,19 +67,18 @@ python3 base_audit.py --ci
 ### SECURITY
 
 Runs with 4 background flood threads so the server is under load.
-All vectors are retried up to 3 times. Findings are collected — no early bail.
+All vectors are retried up to 3 times. Findings are collected: no early bail.
 
-- **Path traversal — URL** (109 vectors): `../../../../etc/passwd` and other
-  sensitive targets across every encoding variant — plain `../`, `%2e%2e%2f`,
+- **Path traversal: URL** (109 vectors): `../../../../etc/passwd` and other
+  sensitive targets across every encoding variant: plain `../`, `%2e%2e%2f`,
   double-percent `%252f`, overlong UTF-8 `%c0%af`, Unicode fullwidth `%ef%bc%8f`,
   backslash `%5c`, null-byte injection, semicolon bypass, dot-segment tricks,
   query/fragment appended, Windows-style paths.
-- **Path traversal — X-File header** (58 vectors): same corpus delivered as the
+- **Path traversal: X-File header** (58 vectors): same corpus delivered as the
   `X-File` header to `/download`. Also includes absolute paths and null-byte-truncated paths.
 - **CRLF / response splitting** (19 vectors): CR, LF, CRLF, null bytes, Unicode
   line terminators, full injected HTTP response blocks, reflected through `/echo`.
-  A finding is recorded only if `X-Injected` appears as a parsed header name —
-  zero false positives.
+  A finding is recorded only if `X-Injected` appears as a parsed header name: zero false positives.
 - **Contract violations**: each `/violate/*` route is hit 10 times; every
   response must be 500 without crashing the worker.
 
@@ -90,7 +89,7 @@ Exit code 2 for traversal or response-splitting findings; 1 for other failures.
 ### PROTOCOL
 
 Zero concurrent load. Payloads sent serially; `/health` polled after each
-corpus. No assertion on status codes — the server just has to stay alive.
+corpus. No assertion on status codes: the server just has to stay alive.
 
 - **Header abuse** (61 vectors): oversized values, header floods, line folding,
   bad header names, control bytes, duplicate `Host`, negative and overflow
@@ -145,13 +144,13 @@ Exit code 1 for any failure.
 ### CHAOS
 
 6 scenarios. Each is followed by a recovery wait and a full 52-route
-correctness check. The master process is never targeted — only worker children.
+correctness check. The master process is never targeted: only worker children.
 
 | # | Scenario | What happens |
 |---|----------|-------------|
 | 1 | **Single worker kill × 3** | SIGKILL a random worker, 8 flood threads during restart, verify recovery |
 | 2 | **Kills under sustained load** | 16 load threads for 30 s; one worker killed every 5 s |
-| 3 | **Rapid-fire kills** | 1 kill every 2 s × 5 — stresses restart/backoff machinery |
+| 3 | **Rapid-fire kills** | 1 kill every 2 s × 5: stresses restart/backoff machinery |
 | 4 | **Dual-worker kill** | Both workers killed simultaneously; both must restart and serve correctly |
 | 5 | **SIGSTOP → SIGCONT** | One worker paused 3 s while 8 threads hammer; unpaused; routes verified |
 | 6 | **Kill under mixed load** | 75 half-open idle connections + 12 concurrent large-response threads; one worker killed mid-flight |
@@ -171,15 +170,15 @@ every user-facing feature.
 | Route | Purpose |
 |-------|---------|
 | `/health` | Liveness probe |
-| `/text` | Minimal 200 — variety for flood workers |
-| `/echo` | Reflects `X-Echo` header — CRLF injection target |
-| `/echo-body` | Echoes POST body — body-bomb and smuggling target |
-| `/big` | 1 MiB of `A` — large-response target |
-| `/stream` | Chunked 512 × 256 B stream — streaming path target |
-| `/download` | Serves `public/<X-File>` — path-traversal target |
-| `/violate/204body` | 204 with body — must return 500 |
-| `/violate/conn` | Sets `Connection` header — engine-owned, must return 500 |
-| `/violate/recommit` | Calls `Commit()` twice — must return 500 |
+| `/text` | Minimal 200: variety for flood workers |
+| `/echo` | Reflects `X-Echo` header: CRLF injection target |
+| `/echo-body` | Echoes POST body: body-bomb and smuggling target |
+| `/big` | 1 MiB of `A`: large-response target |
+| `/stream` | Chunked 512 × 256 B stream: streaming path target |
+| `/download` | Serves `public/<X-File>`: path-traversal target |
+| `/violate/204body` | 204 with body: must return 500 |
+| `/violate/conn` | Sets `Connection` header: engine-owned, must return 500 |
+| `/violate/recommit` | Calls `Commit()` twice: must return 500 |
 | `/metrics` | Live crash / restart / RSS counters as JSON |
 | `/items/<id:uint>` | Dynamic `:uint` segment |
 | `/items/signed/<id:int>` | Dynamic `:int` segment (negative values) |
@@ -187,9 +186,9 @@ every user-facing feature.
 | `/uuid/<id:uuid>` | Dynamic `:uuid` segment |
 | `/api/v1/status` | Group-prefixed flat path |
 | `/api/v1/item/<id:uint>` | Group-prefixed path with dynamic segment |
-| `/mw/injected` | `MwContinue` — adds `X-Route-MW: hit` |
-| `/mw/blocked` | `MwBreak` — returns 403, handler skipped |
-| `/mw/skipnext` | `MwSkipNext` — second middleware skipped |
+| `/mw/injected` | `MwContinue`: adds `X-Route-MW: hit` |
+| `/mw/blocked` | `MwBreak`: returns 403, handler skipped |
+| `/mw/skipnext` | `MwSkipNext`: second middleware skipped |
 | `/ctx` | Context: MW writes `uid=42`, handler echoes it |
 | `/async/sleep` | Async coroutine + `WFX::SleepFor(25ms)` |
 | `/json/im` | `WFX::ImJson` streaming JSON |

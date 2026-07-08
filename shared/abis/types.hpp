@@ -141,17 +141,16 @@ enum class EndpointStatus : std::uint8_t {
     POOL_EXHAUSTED, // All endpoints in use
 
     // Socket errors
-    SOCKET_FAILURE,  // Not created, options not set, etc
-    CONNECT_FAILURE, // Failed to connect to endpoint
+    SOCKET_FAILURE,  // Local socket creation or configuration failed (before ever reaching connect())
+    CONNECT_FAILURE, // connect() itself failed
     SSL_FAILURE,     // Client not created, Handshake failed, etc
 
     // Generic errors
     INTERNAL_ERROR,    // Something went wrong
     SERIALIZE_ERROR,   // desc.serialize returned SerializeResult::ERROR
     EPOLL_ERROR,       // RegisterEpoll(MOD) failed on reused slot
-    HANDSHAKE_TIMEOUT, // onConnect coroutine exceeded connectTimeoutSeconds
+    HANDSHAKE_TIMEOUT, // TCP connect / TLS handshake / onConnect coroutine exceeded connectTimeoutSeconds
     REQUEST_TIMEOUT,   // Did not get response within requestTimeoutSeconds
-    DNS_FAILURE,       // All DNS resolution retries exhausted
 };
 
 enum class EndpointTLSConfig : std::uint8_t {
@@ -167,15 +166,14 @@ enum class ConnectResult : std::uint8_t {
 };
 
 enum class DisconnectReason : std::uint8_t {
-    POOL_DRAIN, // Slot drained intentionally (e.g. DNS refresh, shutdown)
-    TIMEOUT,    // Idle or handshake timeout elapsed
-    ERROR       // I/O or protocol error
+    TIMEOUT,           // Idle or in-flight request timeout elapsed
+    HANDSHAKE_TIMEOUT, // Timeout elapsed while still connecting (TCP connect / TLS handshake / onConnect)
+    ERROR              // I/O or protocol error, or any other close not covered above
 };
 
 enum class SlotSendResult : std::uint8_t {
-    PENDING, // Write queued, awaitable will resume on flush
-    OK,      // Written and flushed immediately
-    ERROR    // Fatal write failure
+    OK,   // Written and flushed immediately
+    ERROR // Fatal write failure
 };
 
 enum class SlotReceiveStatus : std::uint8_t {
@@ -196,28 +194,21 @@ enum class ParseResult : std::uint8_t {
     ERROR                // Unrecoverable parse failure
 };
 
-// Queue-send bytes on the slot from within onConnect (via SlotHandle::Send)
-// onComplete fires once the write is flushed
-using EndpointSlotSendFn = SlotSendResult (*)(void* endpointCtx, const void* data, std::uint32_t size,
-                                              AsyncData onComplete);
-// Request the next chunk of bytes from within onConnect (via SlotHandle::Receive)
-// onComplete fires when data arrives
-using EndpointSlotReceiveFn = void (*)(void* endpointCtx, AsyncData onComplete);
 // Reserved slot-close hook, currently unused (nullptr) by the engine
-// Present for ABI symmetry with Send/Receive
+// Present for ABI symmetry with the rest of EndpointSlotHandle
 using EndpointSlotCloseFn = void (*)(void* endpointCtx);
 // Returns the ALPN protocol negotiated on this slot's TLS connection
 // Empty if not TLS or the handshake hasn't completed yet
 using EndpointNegotiatedProtocolFn = StringView (*)(void* endpointCtx);
 
+// Send/Receive go through the endpoint API (SlotSend/SlotReceive) directly,-
+// -SlotHandle::Send/Receive call those rather than a per-slot function pointer here
 struct EndpointSlotHandle {
     void* impl;
-    EndpointSlotSendFn Send;
-    EndpointSlotReceiveFn Receive;
     EndpointSlotCloseFn Close;
     EndpointNegotiatedProtocolFn NegotiatedProtocol;
 };
-static_assert(sizeof(EndpointSlotHandle) == 40, "'EndpointSlotHandle' must be exactly 40 bytes.");
+static_assert(sizeof(EndpointSlotHandle) == 24, "'EndpointSlotHandle' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<EndpointSlotHandle>, "'EndpointSlotHandle' must be standard layout");
 
 // Writes req's wire encoding into buf; streamKey is only used when hasCapacity is set-
@@ -318,7 +309,8 @@ struct NetworkMetrics {
     std::uint64_t fileCalls = 0;
     std::uint64_t fileFallbacks = 0;
     std::uint64_t fileBytesWritten = 0;
-    std::uint64_t activeConns = 0;
+    std::uint64_t activeClientConns = 0;
+    std::uint64_t activeEndpointConns = 0;
     std::uint64_t requests = 0;
     std::uint64_t response1xx = 0;
     std::uint64_t response2xx = 0;
@@ -326,7 +318,7 @@ struct NetworkMetrics {
     std::uint64_t response4xx = 0;
     std::uint64_t response5xx = 0;
 };
-static_assert(sizeof(NetworkMetrics) == 120, "'NetworkMetrics' must be exactly 120 bytes");
+static_assert(sizeof(NetworkMetrics) == 128, "'NetworkMetrics' must be exactly 128 bytes");
 static_assert(std::is_standard_layout_v<NetworkMetrics>, "'NetworkMetrics' must be standard layout");
 
 // Written by master process, reflects live state of each worker slot

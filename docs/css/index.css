@@ -79,23 +79,6 @@
   margin: 0 !important;
 }
 
-.wfx-card--more {
-  grid-column: 1 / -1;
-  background: var(--md-code-bg-color);
-  padding: 0.8rem 1.25rem;
-  opacity: 0.55;
-}
-
-.wfx-card--more .wfx-card-title,
-.wfx-card--more .wfx-card-body {
-  display: inline;
-}
-
-.wfx-card--more .wfx-card-title::after {
-  content: " — ";
-  font-weight: 400;
-}
-
 .wfx-principles {
   display: grid;
   grid-template-columns: 1fr 1fr;

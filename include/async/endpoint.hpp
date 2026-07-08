@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 
-#ifndef WFX_INC_HTTP_ENDPOINT_HPP
-#define WFX_INC_HTTP_ENDPOINT_HPP
+#ifndef WFX_INC_ASYNC_ENDPOINT_HPP
+#define WFX_INC_ASYNC_ENDPOINT_HPP
 
-#include "async/task.hpp" // EraseOnConnectImpl needs the complete Async::Task<T>, not just the fwd-decl builtins.hpp gets from promise.hpp
-#include "async/builtins.hpp"
+#include "task.hpp" // EraseOnConnectImpl needs the complete Async::Task<T>, not just the fwd-decl builtins.hpp gets from promise.hpp
+#include "builtins.hpp"
 #include "core/core.hpp"
 #include "core/deferred_init_vector.hpp"
 #include "shared/abis/types.hpp"
 
-namespace WFX::Http {
+namespace WFX::Async {
 
 using namespace WFX::Shared;
-using namespace WFX::Async;
 
 // Typed wrapper over EndpointSlotHandle passed into onConnect-
 // -coroutines. Exposes co_await Send(...) and co_await Receive()
@@ -239,6 +238,6 @@ private:
     EndpointDestroyStateFn destroyOutput_ = nullptr;
 };
 
-} // namespace WFX::Http
+} // namespace WFX::Async
 
-#endif // WFX_INC_HTTP_ENDPOINT_HPP
+#endif // WFX_INC_ASYNC_ENDPOINT_HPP

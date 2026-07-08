@@ -23,26 +23,40 @@
 //   X-Want    upstream response header to echo back into "hdr"     (optional)
 //
 // The four endpoint instances differ only in the knobs each test needs:
-//   default  — roomy limits, the everyday client
-//   small    — tiny header/body caps so limit enforcement is cheap to trigger
-//   fast     — 1s request timeout so slow-upstream cases fail fast
-//   coalesce — coalesceKey set, to prove concurrent-request dedup
+//   default  -> roomy limits, the everyday client
+//   small    -> tiny header/body caps so limit enforcement is cheap to trigger
+//   fast     -> 1s request timeout so slow-upstream cases fail fast
+//   coalesce -> coalesceKey set, to prove concurrent-request dedup
+//
+// Further down (search "Raw-protocol endpoint") this file also drives the RAW
+// WFX::Endpoint<> primitive directly against a tiny hand-rolled text protocol
+// (proto_upstream.py's second listener, PROTO_UPSTREAM) to cover onConnect,
+// onDisconnect, and multiplexing — three things HttpEndpoint structurally
+// cannot exercise, since HTTP/1.1 has no connection handshake and no concept
+// of concurrent requests sharing one connection.
 
 #include <wfx/http.hpp>
+#include <wfx/memory.hpp>
 #include <wfx/endpoint/http.hpp>
 
 #include <cstdint>
+#include <cstdio>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // The mock upstream is pinned here at COMPILE time (HttpEndpoint bakes host:port
 // into the instance). The harness MUST launch upstream.py on this exact port; it
 // is also mirrored in endpoint_audit.py as UPSTREAM_PORT.
 #define UPSTREAM "127.0.0.1:8091"
 
-// ─────────────────────────────────────────────────────────────────────────────
+// Second mock listener, a raw hand-rolled protocol (see "Raw-protocol endpoint"
+// below), mirrored in endpoint_audit.py as PROTO_UPSTREAM_PORT.
+#define PROTO_UPSTREAM "127.0.0.1:8092"
+
+
 // Endpoint instances
-// ─────────────────────────────────────────────────────────────────────────────
 
 // Everyday client: roomy limits, plaintext (the mock speaks cleartext HTTP/1.1).
 inline const auto EpDefault = WFX::HttpEndpoint{UPSTREAM, WFX::HttpEndpointConfig{
@@ -85,6 +99,7 @@ inline std::uint64_t CoalesceByPath(const void* reqVoid) noexcept
         h ^= static_cast<unsigned char>(c);
         h *= 1099511628211ull;
     }
+
     return h ? h : 1; // 0 is reserved for "don't coalesce"
 }
 
@@ -104,8 +119,7 @@ inline const auto EpReuse = WFX::HttpEndpoint{UPSTREAM, WFX::HttpEndpointConfig{
     .tlsConfig             = WFX::EpTlsInsecure,
 }};
 
-// ── Connection-lifecycle probes ─────────────────────────────────────────────
-
+// Connection-lifecycle probes
 // Points at a port with nothing listening: connect() is refused (RST) -> the
 // request must fail cleanly and quickly, never hang the worker.
 inline const auto EpDead = WFX::HttpEndpoint{"127.0.0.1:9", WFX::HttpEndpointConfig{
@@ -147,9 +161,296 @@ inline const auto EpPrewarm = WFX::HttpEndpoint{UPSTREAM, WFX::HttpEndpointConfi
     .prewarm               = 3,
 }};
 
-// ─────────────────────────────────────────────────────────────────────────────
+
+// Raw-protocol endpoint: onConnect / onDisconnect / multiplexing coverage
+//
+// HttpEndpoint can't exercise any of this: HTTP/1.1 has no connection handshake
+// and no concept of concurrent requests sharing one connection. This section
+// drives the RAW WFX::Endpoint<> primitive directly against a tiny hand-rolled
+// text protocol spoken by proto_upstream.py (upstream.py's second listener,
+// PROTO_UPSTREAM):
+//
+//   - onConnect: a one-line "AUTH <token>\n" handshake, once per physical
+//     connection. "good" succeeds, "bad" is rejected, "slow" stalls past
+//     connectTimeoutSeconds, "reset" drops the connection mid-handshake.
+//   - onDisconnect: counted per DisconnectReason (idle timeout / handshake
+//     timeout / anything else) so the harness can assert the right reason
+//     fired for the right scenario.
+//   - Multiplexing: every request is tagged with a stream id (REQ <id> <key>),
+//     and the mock deliberately answers out of order (RES <id> <value>, after
+//     a per-request delay baked into the key) so the harness can prove
+//     responses are matched back to the right caller by id, never by arrival
+//     order, all sharing the SAME pooled connection (connLimit = 1).
+//
+// Routes (both header-only, like /call above):
+//   GET /proto/call
+//     X-Proto  good | bad | slow | reset   (which endpoint instance, default good)
+//     X-Key    key to echo back; "sleep:<secs>:<value>" delays the mock's reply
+//   GET  /proto/disconnects        -> {"idle", "handshake", "error"} counters
+//   POST /proto/disconnects/reset  -> zero all three counters
+
+namespace {
+
+struct ProtoReq {
+    std::string key;
+};
+
+struct ProtoRes {
+    std::string value;
+};
+
+struct PendingReply {
+    std::uint64_t id;
+    ProtoRes* res; // owned until takeStreamOutput hands it off
+};
+
+// One per physical connection. token is which handshake this slot sends,
+// injected via userCtx so every instance can share the same onConnect function.
+struct ProtoSlotState {
+    const char* token;
+    std::uint64_t nextId = 1;
+    std::uint32_t inFlight = 0;
+    std::vector<PendingReply> finished;
+};
+
+// Single worker (see wfx.toml, worker_processes = 1), so these are the engine's
+// own event-loop thread only, no locking needed.
+std::uint64_t g_idleDisconnects = 0;
+std::uint64_t g_handshakeTimeouts = 0;
+std::uint64_t g_errorDisconnects = 0;
+
+void* ProtoCreateSlotState(void* userCtx)
+{
+    auto* state = WFX::New<ProtoSlotState>();
+    state->token = static_cast<const char*>(userCtx);
+    return state;
+}
+
+void ProtoDestroySlotState(void* slotState)
+{
+    WFX::Delete(static_cast<ProtoSlotState*>(slotState));
+}
+
+void ProtoOnDisconnect(void* /*slotState*/, WFX::DisconnectReason reason)
+{
+    if(reason == WFX::EpIdleTimeout)
+        g_idleDisconnects++;
+    else if(reason == WFX::EpHandshakeTimeoutReason)
+        g_handshakeTimeouts++;
+    else
+        g_errorDisconnects++;
+}
+
+WFX::EpCoro ProtoAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
+{
+    auto* state = static_cast<ProtoSlotState*>(slotStateVoid);
+
+    std::string line = "AUTH ";
+    line += state->token;
+    line += "\n";
+
+    if(co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size())) == WFX::EpSlotSendError)
+        co_return WFX::EpFatal;
+
+    auto recv = co_await h.Receive();
+    if(recv.status == WFX::EpSlotRecvError)
+        co_return WFX::EpFatal;
+
+    std::string_view reply{recv.buf, recv.len};
+    co_return reply.starts_with("OK") ? WFX::EpReady : WFX::EpFatal;
+}
+
+WFX::Shared::SerializeResult ProtoSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
+                                            std::uint32_t bufLen, std::uint32_t* written,
+                                            std::uint64_t* streamKey)
+{
+    auto* state = static_cast<ProtoSlotState*>(slotStateVoid);
+    auto& req = *static_cast<const ProtoReq*>(reqVoid);
+
+    std::uint64_t id = state->nextId++;
+    int n = std::snprintf(buf, bufLen, "REQ %llu %s\n", static_cast<unsigned long long>(id), req.key.c_str());
+    if(n < 0 || static_cast<std::uint32_t>(n) >= bufLen)
+        return WFX::EpSerBufferTooSmall;
+
+    *written = static_cast<std::uint32_t>(n);
+    *streamKey = id;
+    state->inFlight++;
+    return WFX::EpSerOk;
+}
+
+WFX::Shared::ParseResult ProtoParse(void* slotStateVoid, void* /*parseState, unused*/, const char* buf,
+                                    std::uint32_t len, std::uint32_t* consumed, void* /*outObj, unused here*/,
+                                    bool isEof, std::uint64_t* completedKey)
+{
+    auto* state = static_cast<ProtoSlotState*>(slotStateVoid);
+    std::string_view view{buf, len};
+
+    auto nl = view.find('\n');
+    if(nl == std::string_view::npos) {
+        *consumed = 0;
+        return isEof ? WFX::EpParseError : WFX::EpParseIncomplete;
+    }
+
+    std::string_view line = view.substr(0, nl);
+    *consumed = static_cast<std::uint32_t>(nl + 1);
+
+    // "RES <id> <value>"
+    if(!line.starts_with("RES "))
+        return WFX::EpParseError;
+
+    line.remove_prefix(4);
+    auto sp = line.find(' ');
+    if(sp == std::string_view::npos)
+        return WFX::EpParseError;
+
+    std::uint64_t id = 0;
+    for(char c : line.substr(0, sp)) {
+        if(c < '0' || c > '9')
+            return WFX::EpParseError;
+        id = id * 10 + static_cast<std::uint64_t>(c - '0');
+    }
+
+    auto* res = WFX::New<ProtoRes>();
+    res->value = std::string(line.substr(sp + 1));
+
+    state->finished.push_back({id, res});
+    state->inFlight--;
+    *completedKey = id;
+
+    // The connection stays open for other in-flight streams, so this stream
+    // finishing does not mean there is nothing left to read
+    return WFX::EpParseIncomplete;
+}
+
+// Never actually called on the multiplexed path (the engine only calls
+// destroyOutput here, to free a finished-but-abandoned or delivered response),
+// but createOutput/destroyOutput are validated as a pair at startup regardless
+// of hasCapacity, so this has to exist even though it's dead weight at runtime.
+void* ProtoCreateOutput(void*)
+{
+    return nullptr;
+}
+
+void ProtoDestroyOutput(void* outputPtr)
+{
+    WFX::Delete(static_cast<ProtoRes*>(outputPtr));
+}
+
+bool ProtoHasCapacity(void* slotStateVoid)
+{
+    return static_cast<ProtoSlotState*>(slotStateVoid)->inFlight < 32;
+}
+
+void* ProtoTakeStreamOutput(void* slotStateVoid, std::uint64_t key)
+{
+    auto* state = static_cast<ProtoSlotState*>(slotStateVoid);
+    for(auto it = state->finished.begin(); it != state->finished.end(); ++it) {
+        if(it->id == key) {
+            void* res = it->res;
+            state->finished.erase(it);
+            return res;
+        }
+    }
+
+    return nullptr; // not finished yet
+}
+
+WFX::EndpointDesc ProtoDesc(const char* token)
+{
+    return WFX::EndpointDesc{
+        .serialize        = ProtoSerialize,
+        .parse            = ProtoParse,
+        .onDisconnect     = ProtoOnDisconnect,
+        .createSlotState  = ProtoCreateSlotState,
+        .destroySlotState = ProtoDestroySlotState,
+        .createOutput     = ProtoCreateOutput,
+        .destroyOutput    = ProtoDestroyOutput,
+        .hasCapacity      = ProtoHasCapacity,
+        .takeStreamOutput = ProtoTakeStreamOutput,
+        .userCtx          = const_cast<void*>(static_cast<const void*>(token)),
+    };
+}
+
+using ProtoEp = WFX::Endpoint<ProtoReq, ProtoRes, &ProtoAuthenticate>;
+
+} // namespace
+
+// Handshake succeeds, single slot (connLimit=1) so every concurrent /proto/call
+// against this instance is forced to multiplex onto the SAME connection.
+// idleTimeoutSeconds at the engine's 5s floor to make idle-disconnect observable
+// inside a reasonable test window.
+inline const ProtoEp ProtoGood{
+    PROTO_UPSTREAM, ProtoDesc("good"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+        .maxConcurrentStreams  = 32,
+    }
+};
+
+// Mock replies ERR: onConnect returns EpFatal, the request must fail cleanly.
+inline const ProtoEp ProtoBad{
+    PROTO_UPSTREAM, ProtoDesc("bad"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 5,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .reconnectBackoffBase  = 1,
+        .reconnectBackoffMax   = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// Mock stalls the AUTH reply well past connectTimeoutSeconds (the engine's 5s
+// floor): the connect-phase timeout must surface as EpHandshakeTimeout.
+inline const ProtoEp ProtoSlow{
+    PROTO_UPSTREAM, ProtoDesc("slow"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 5,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .reconnectBackoffBase  = 1,
+        .reconnectBackoffMax   = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// Mock drops the connection mid-handshake without replying: co_await h.Receive()
+// must fail, onConnect returns EpFatal from its own error path.
+inline const ProtoEp ProtoReset{
+    PROTO_UPSTREAM, ProtoDesc("reset"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 5,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .reconnectBackoffBase  = 1,
+        .reconnectBackoffMax   = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+namespace {
+const ProtoEp* ProtoEndpointOf(std::string_view name) noexcept
+{
+    if(name == "bad")   return &ProtoBad;
+    if(name == "slow")  return &ProtoSlow;
+    if(name == "reset") return &ProtoReset;
+    return &ProtoGood;
+}
+} // namespace
+
+
 // Result reflection
-// ─────────────────────────────────────────────────────────────────────────────
 
 template <typename OutT>
 static void Emit(WFX::Request& req, WFX::Response& res, WFX::Shared::EndpointStatus st, OutT& out)
@@ -196,10 +497,7 @@ static const WFX::HttpEndpoint* EndpointOf(std::string_view e) noexcept
     return &EpDefault;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Routes
-// ─────────────────────────────────────────────────────────────────────────────
-
 WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 
 // The one generic proxy route. All outbound behaviour is driven by X-* headers
@@ -316,4 +614,38 @@ WFX_POST("/inject", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     auto pr = co_await ep->Send(std::move(r));
     Emit(req, res, pr.first, pr.second);
     co_return;
+})
+
+// See "Raw-protocol endpoint" above: onConnect / onDisconnect / multiplexing
+// against the raw WFX::Endpoint<> primitive, HttpEndpoint can't reach any of it.
+WFX_GET("/proto/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    std::string_view name = "good", key = "hello";
+    req.GetHeader("X-Proto", name);
+    req.GetHeader("X-Key", key);
+
+    const ProtoEp* ep = ProtoEndpointOf(name);
+    auto [status, out] = co_await ep->SendPayload(ProtoReq{std::string(key)});
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("ep", static_cast<std::uint64_t>(static_cast<unsigned>(status)));
+    if(status == WFX::EpOk)
+        j.Write("value", std::string_view{out->value});
+
+    co_return;
+})
+
+WFX_GET("/proto/disconnects", [](WFX::Request, WFX::Response res) {
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("idle", g_idleDisconnects);
+    j.Write("handshake", g_handshakeTimeouts);
+    j.Write("error", g_errorDisconnects);
+})
+
+WFX_POST("/proto/disconnects/reset", [](WFX::Request, WFX::Response res) {
+    g_idleDisconnects = 0;
+    g_handshakeTimeouts = 0;
+    g_errorDisconnects = 0;
+    res.Status(200).SendText("ok");
 })

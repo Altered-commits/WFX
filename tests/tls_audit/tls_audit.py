@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Altered-commits
 #
-# WFX tls_audit — adversarial TLS client audit.
+# WFX tls_audit: adversarial TLS client audit.
 #
 # The endpoint audit runs WFX's outbound client PLAINTEXT against a literal-IP mock,
 # so the entire TLS client trust decision is untested. This drives WFX's
 # HttpEndpoint with EpTlsRequire against a small, hostile TLS mock: an untrusted
 # cert, a hostname-mismatched cert, an expired cert, and a downgraded server. Each
-# MUST be refused — a client that accepts any of them is a man-in-the-middle hole.
+# must be refused; a client that accepts any of them is a man-in-the-middle hole.
 # Refusal is proven twice: the outbound call errors AND the mock recorded a FAILED
 # handshake (the client bailed at the TLS layer, never completing it). Plus: the
 # HTTP framing/desync/injection corpus replayed THROUGH TLS, request-timeout under
@@ -28,13 +28,16 @@ import sys
 import threading
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _audit_common as common
+
 EP_SUCCESS   = 0
 EP_SERIALIZE = 10
 EP_REQ_TIMEOUT = 13
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# name, port, cert basename, mock opts, expect ("accept"|"refuse")
+# Name, port, cert basename, mock opts, expect ("accept"|"refuse")
 PERSONAS = [
     ("good",       8443, "good",       {},                "accept"),
     ("selfsigned", 8444, "selfsigned", {},                "refuse"),
@@ -43,21 +46,12 @@ PERSONAS = [
     ("tls12",      8447, "good",       {"maxver": "1.2"}, "refuse"),
 ]
 
-# ── terminal ──────────────────────────────────────────────────────────────────
-_TTY = sys.stdout.isatty()
-def _c(code, t): return ("\x1b[%sm%s\x1b[0m" % (code, t)) if _TTY else t
-def _green(t): return _c("32", t)
-def _red(t): return _c("31", t)
-def _yellow(t): return _c("33", t)
-def _cyan(t): return _c("36", t)
-def _bold(t): return _c("1", t)
-def _log(tag, msg="", c=None):
-    print("%s %s" % (_cyan("[%s]" % tag) if c is None else c("[%s]" % tag), msg), flush=True)
-def _hdr(t):
-    print("\n" + _bold("═" * 78)); print(_bold("  " + t)); print(_bold("═" * 78), flush=True)
+# Terminal / logging: shared with the other audits, see _audit_common.py
+_green, _red, _yellow, _cyan, _bold = common.green, common.red, common.yellow, common.cyan, common.bold
+_log, _hdr = common.log, common.hdr
+LogFollower = common.LogFollower
 
-
-# ── TLS client (verification off; we're driving vectors, not validating certs) ─
+# TLS client (verification off, we're driving vectors, not validating certs)
 def tls_send(host, port, payload, rtimeout=6.0, ctimeout=4.0, sni="localhost"):
     ctx = ssl._create_unverified_context()
     try:
@@ -79,27 +73,13 @@ def tls_send(host, port, payload, rtimeout=6.0, ctimeout=4.0, sni="localhost"):
         try: s.close()
         except OSError: pass
 
-def _build(method, path, headers=None, body=b""):
-    if isinstance(body, str): body = body.encode("latin-1")
-    lines = ["%s %s HTTP/1.1" % (method, path), "Host: h", "Connection: close"]
-    if headers:
-        for k, v in headers.items(): lines.append("%s: %s" % (k, v))
-    if body or method in ("POST", "PUT", "PATCH"):
-        lines.append("Content-Length: %d" % len(body))
-    return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + body
-
-def _body_of(raw):
-    i = raw.find(b"\r\n\r\n"); return raw[i + 4:] if i >= 0 else b""
-def _status_of(raw):
-    if not raw or not raw.startswith(b"HTTP/"): return None
-    try: return int(raw.split(b" ", 2)[1])
-    except Exception: return None
-
+_build = common.build_request
+_body_of = common.response_body
+_status_of = common.response_status
 
 class Cfg: pass
 
-
-# ── certs: small and portable, no chain-building, no OpenSSL-3-only flags ─────
+# Certs: small and portable, no chain-building, no OpenSSL-3-only flags
 def _ossl(args): return subprocess.run(["openssl"] + args, capture_output=True, text=True)
 def _mkcert(args): return subprocess.run(["mkcert"] + args, capture_output=True, text=True)
 
@@ -151,7 +131,7 @@ def ensure_certs(cfg):
         else:
             _log("certs", _yellow("expired cert unavailable: %s" % signed.stderr.strip()[:120]))
     else:
-        _log("certs", _yellow("mkcert CA key not found — 'expired' vector skipped"))
+        _log("certs", _yellow("mkcert CA key not found, 'expired' vector skipped"))
 
     if "good" in avail:
         avail.add("tls12")  # reuses the good cert
@@ -167,7 +147,7 @@ def persona_available(cfg, cert):
 def patch_ssl_paths(cfg):
     """Point the server cert at the mkcert 'good' leaf, and pin the outbound
     client's CA trust explicitly at the mkcert root instead of leaving
-    ca_cert_path empty (see ensure_certs). Doesn't weaken any refusal test —
+    ca_cert_path empty (see ensure_certs). Doesn't weaken any refusal test:
     hostname/expiry/downgrade checks are independent of the trust anchor."""
     toml = os.path.join(cfg.app_dir, "wfx.toml")
     with open(toml) as f: s = f.read()
@@ -180,8 +160,7 @@ def patch_ssl_paths(cfg):
     with open(toml, "w") as f: f.write(s)
     _log("patch", "server cert -> %s | client CA trust -> %s" % (good, ca or "(system store)"))
 
-
-# ── processes ─────────────────────────────────────────────────────────────────
+# Mock context
 class Mock:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -218,7 +197,7 @@ class Mock:
                 s = socket.create_connection((self.cfg.host, good_port), timeout=1.0); s.close()
                 _log("mock", _green("TLS mock up")); return
             except OSError: time.sleep(0.1)
-        raise RuntimeError("TLS mock never came up on :%d — see [mock] output above" % good_port)
+        raise RuntimeError("TLS mock never came up on :%d, see [mock] output above" % good_port)
 
     def _drain(self):
         try:
@@ -245,7 +224,7 @@ class Mock:
             try: self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired: self.proc.kill()
 
-
+# Server context
 class Server:
     def __init__(self, cfg): self.cfg = cfg; self._up = False
     def start(self):
@@ -276,58 +255,7 @@ class Server:
         _log("server", "stopping …")
         subprocess.run([self.cfg.wfx, "control", "stop", "app"], capture_output=True, text=True)
 
-
-# ── live WFX log follower ─────────────────────────────────────────────────────
-_IMPORTANT = ("[WRN]", "[ERR]", "[FTL]", "[CRT]")
-_IMPORTANT_KW = ("crash", "signal", "segv", "sigsegv", "abort", "revive", "revival", "fatal", "died")
-def _is_important(line):
-    if any(t in line for t in _IMPORTANT): return True
-    low = line.lower(); return any(k in low for k in _IMPORTANT_KW)
-
-class LogFollower(threading.Thread):
-    def __init__(self, cfg, mode="important", interval=0.1):
-        super().__init__(daemon=True)
-        self.cfg = cfg; self.mode = mode; self.interval = interval
-        self._stop = threading.Event(); self._pos = {}
-    def _dirs(self):
-        root = os.path.join(self.cfg.app_dir, "logs")
-        return [(os.path.join(root, "default_logs"), False), (os.path.join(root, "crash_logs"), True)]
-    def _emit(self, name, line, is_crash):
-        if is_crash: print("%s %s" % (_red("[wfx-crash:%s]" % name), line), flush=True)
-        elif self.mode == "all" or _is_important(line): print("%s %s" % (_cyan("[wfx:%s]" % name), line), flush=True)
-    def _scan_once(self):
-        for d, is_crash in self._dirs():
-            if not os.path.isdir(d): continue
-            for name in sorted(os.listdir(d)):
-                path = os.path.join(d, name)
-                try: st = os.stat(path)
-                except OSError: continue
-                if not os.path.isfile(path): continue
-                ino, off = self._pos.get(path, (None, 0))
-                if ino is None: ino, off = st.st_ino, 0
-                elif st.st_ino != ino or st.st_size < off:
-                    if not is_crash: print(_yellow("[wfx] %s truncated (worker revived?)" % name), flush=True)
-                    ino, off = st.st_ino, 0
-                if st.st_size > off:
-                    try:
-                        with open(path, "r", errors="replace") as f:
-                            f.seek(off); chunk = f.read(); off = f.tell()
-                    except OSError: continue
-                    for line in chunk.splitlines():
-                        if line.strip(): self._emit(name, line, is_crash)
-                self._pos[path] = (ino, off)
-    def run(self):
-        if self.mode == "off": return
-        while not self._stop.is_set():
-            try: self._scan_once()
-            except Exception: pass
-            self._stop.wait(self.interval)
-        try: self._scan_once()
-        except Exception: pass
-    def stop(self): self._stop.set()
-
-
-# ── drive + predicates ────────────────────────────────────────────────────────
+# Drive + Predicates
 def drive(cfg, path="/ok", ep="good", rtimeout=8.0):
     raw = tls_send(cfg.host, cfg.port, _build("GET", "/call", {"X-Ep": ep, "X-Path": path}), rtimeout=rtimeout)
     if not raw or _status_of(raw) != 200: return None
@@ -355,20 +283,11 @@ def drive_staged(cfg, mock, blob, ep="good", keep=True):
     sid = _next_sid(); mock.stage(sid, blob, keep, ep=ep)
     return drive(cfg, "/raw/%s" % sid, ep=ep)
 
+# Results: shared with the other audits, see _audit_common.py
+Results = common.Results
+check = common.check
 
-# ── results ───────────────────────────────────────────────────────────────────
-class Results:
-    def __init__(self): self.phases = []
-    def phase(self, name):
-        b = []; self.phases.append((name, b)); return b
-def check(bucket, name, passed, detail="", security=False):
-    bucket.append((name, bool(passed), security, detail))
-    mark = _green("ok  ") if passed else (_red("SEC ") if security else _red("FAIL"))
-    print("  %s %-46s %s" % (mark, name, "" if passed else _yellow(detail)), flush=True)
-    return passed
-
-
-# ═══════════════════════════ phases ═══════════════════════════════════════════
+# Phases
 def phase_handshake(cfg, mock, results):
     b = results.phase("handshake")
     check(b, "TLS GET /ok round-trips", is_ok(drive(cfg, "/ok"), 200, "hello"), "got %r" % drive(cfg, "/ok"))
@@ -393,11 +312,11 @@ def phase_verify(cfg, mock, results):
             check(b, labels.get(name, name) + " (skipped, no cert)", True); continue
         r = drive(cfg, "/ok", ep=name, rtimeout=12)
         check(b, labels[name], is_err(r),
-              "client ACCEPTED it (ep=%r) — MitM possible" % (r and r.get("ep")), security=True)
+              "client ACCEPTED it (ep=%r), MitM possible" % (r and r.get("ep")), security=True)
         hs, hf, rq = mock.stats(name)
         # mock.stats() itself dials this same port with an UNVERIFIED TLS client to
         # fetch the counters, so `hs` always includes that one successful handshake
-        # regardless of what the WFX client did — it is not evidence the client
+        # regardless of what the WFX client did, it is not evidence the client
         # completed a handshake. Only hs_fail speaks to the client here.
         check(b, name + ": client bailed at TLS layer", hf >= 1,
               "handshakes=%d hs_fail=%d (want at least one failed handshake)" % (hs, hf), security=True)
@@ -493,24 +412,13 @@ def phase_resource(cfg, mock, results):
 PHASES = {"handshake": phase_handshake, "verify": phase_verify, "protocol": phase_protocol,
           "framing": phase_framing, "desync": phase_desync, "inject": phase_inject, "resource": phase_resource}
 
-
-# ── report ────────────────────────────────────────────────────────────────────
+# Report
 def report(results, booted, server_alive):
     _hdr("REPORT")
-    total = passed = sec = fail = 0
-    for phase, bucket in results.phases:
-        p = sum(1 for _, ok, _, _ in bucket if ok); n = len(bucket)
-        total += n; passed += p
-        color = _green if p == n else _red
-        print("  %-12s %s" % (phase, color("%d/%d" % (p, n))))
-        for name, ok, s, detail in bucket:
-            if not ok:
-                if s: sec += 1
-                else: fail += 1
-                print("      %s  %s  %s" % (_red("SECURITY") if s else _red("fail"), name, _yellow(detail)))
+    passed, total, sec, fail = common.format_report(results)
     print()
     if not booted:
-        _log("harness", _red("WFX never reached /health — boot crash. See [wfx-crash:*] above."))
+        _log("harness", _red("WFX never reached /health, boot crash. See [wfx-crash:*] above."))
     _log("harness", "server alive at end: %s" % (_green("yes") if server_alive else _red("NO")))
     print(_bold("  TOTAL  %s   security: %s   other: %s" % (
         _green("%d/%d passed" % (passed, total)),
@@ -520,17 +428,19 @@ def report(results, booted, server_alive):
     if not server_alive or fail: return 1
     return 0
 
-
+# Main
 def main():
     ap = argparse.ArgumentParser(description="WFX adversarial TLS audit")
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8080)
-    ap.add_argument("--wfx", default="wfx")
-    ap.add_argument("--app-dir", default=os.path.join(HERE, "app"))
-    ap.add_argument("--ready-timeout", type=int, default=30)
-    ap.add_argument("--phase", default="all", choices=["all"] + list(PHASES))
-    ap.add_argument("--wfx-logs", default="important", choices=["off", "important", "all"])
+    common.add_common_args(ap, PHASES)
+    ap.set_defaults(app_dir=os.path.join(HERE, "app"))
     args = ap.parse_args()
+
+    if args.ci:
+        common.enable_ci_mode()
+
+    if args.list_phases:
+        for p in PHASES: print(p)
+        return 0
 
     cfg = Cfg()
     cfg.host = args.host; cfg.port = args.port; cfg.wfx = args.wfx
@@ -541,13 +451,13 @@ def main():
     patch_ssl_paths(cfg)
 
     results = Results()
-    mock = Mock(cfg); server = Server(cfg); follower = LogFollower(cfg, mode=args.wfx_logs)
+    mock = Mock(cfg); server = Server(cfg); follower = LogFollower(cfg.app_dir, mode=args.wfx_logs)
     booted = False
     try:
         mock.start(); server.start(); follower.start()
         booted = server.wait_ready()
         if not booted:
-            _log("harness", _red("WFX did not answer /health within %ds — see WFX logs above" % cfg.ready_timeout))
+            _log("harness", _red("WFX did not answer /health within %ds, see WFX logs above" % cfg.ready_timeout))
             time.sleep(0.5)
             return report(results, booted, False)
 
@@ -555,17 +465,18 @@ def main():
         run = list(PHASES) if args.phase == "all" else [args.phase]
         for name in run:
             _hdr("PHASE: " + name)
+            common.gh_group("phase: " + name)
             try: PHASES[name](cfg, mock, results)
             except Exception as e:
                 _log("harness", _red("phase %s crashed: %r" % (name, e)))
                 results.phase(name).append(("phase-exception", False, False, repr(e)))
+            common.gh_endgroup()
             if not server.alive():
-                _log("harness", _red("WFX worker NOT responding after phase '%s' — see WFX logs" % name))
+                _log("harness", _red("WFX worker NOT responding after phase '%s', see WFX logs" % name))
                 time.sleep(1.0)
         return report(results, booted, server.alive())
     finally:
         follower.stop(); server.stop(); mock.stop()
-
 
 if __name__ == "__main__":
     try: sys.exit(main())
