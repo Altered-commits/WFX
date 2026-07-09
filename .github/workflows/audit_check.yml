@@ -1,52 +1,13 @@
 name: WFX Audit Check
 
-# Reusable: invoked by the top-level orchestrator (ci.yml) AFTER the compile-
-# -check, so this file owns ONLY the audit logic.
-#
-# wfx is built once, then handed to three audit jobs (base/endpoint/tls) that
-# run in parallel, each via tests/run_audits.sh --audit <name>. The runner
-# never builds wfx itself, see the comment at the top of that script.
-
+# Reusable: invoked by entry.yml AFTER the compile check, so this file owns-
+# -ONLY the audit logic.
 on:
   workflow_call:
 
 jobs:
-  build:
-    name: Build wfx
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential ninja-build libssl-dev
-
-      - name: Restore build/ cache
-        uses: actions/cache@v3
-        with:
-          path: build
-          key: audit-build-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
-          restore-keys: |
-            audit-build-
-
-      - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build
-
-      - name: Upload wfx binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: wfx-binary
-          path: wfx
-          retention-days: 1
-
   audit:
     name: Audit (${{ matrix.audit }})
-    needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -57,18 +18,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download wfx binary
-        uses: actions/download-artifact@v4
+      # Exact-key restore, no restore-keys fallback: this must be the same-
+      # -commit's binary compile_check.yml just cached.
+      - name: Restore wfx binary
+        uses: actions/cache@v3
         with:
-          name: wfx-binary
-          path: .
+          path: wfx
+          key: wfx-bin-${{ hashFiles('**/CMakeLists.txt', 'cmake/**', 'cli/**', 'config/**', 'engine/**', 'http/**', 'include/**', 'os_specific/**', 'shared/**', 'utils/**') }}
 
-      - name: Make wfx executable
-        run: chmod +x wfx
+      # Lays wfx out the way scripts/install.sh would: binary on PATH under-
+      # -~/.wfx/bin, headers under ~/.wfx/src, since the audit apps' CMakeLists.txt-
+      # -hardcode that HOME/.wfx/src path for their include dirs.
+      - name: Set up ~/.wfx
+        run: |
+          mkdir -p "$HOME/.wfx/bin" "$HOME/.wfx/src"
+          cp wfx "$HOME/.wfx/bin/wfx"
+          chmod +x "$HOME/.wfx/bin/wfx"
+          cp -r include shared "$HOME/.wfx/src/"
+          echo "$HOME/.wfx/bin" >> "$GITHUB_PATH"
 
-      # openssl and mkcert are only actually needed by the tls audit (cert
-      # generation), installed for every entry anyway so the three jobs stay
-      # identical instead of branching on matrix.audit
+      # openssl and mkcert are only actually needed by the tls audit (cert-
+      # -generation), installed for every entry anyway so the three jobs stay-
+      # -identical instead of branching on matrix.audit
       - name: Install audit dependencies
         run: |
           sudo apt-get update
