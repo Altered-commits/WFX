@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include <core/deferred_init_vector.hpp>
 #include <core/core.hpp>
 #include <shared/utils/compiler_macro.hpp>

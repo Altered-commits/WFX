@@ -5,9 +5,7 @@
 #include "config/config.hpp"
 #include "shared/utils/hash.hpp"
 #include "shared/utils/compiler_macro.hpp"
-#include "utils/process/process.hpp"
 #include "utils/string/string.hpp"
-#include <numeric>
 #include <bit>
 
 namespace WFX::Core {
@@ -178,7 +176,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(TranspilationContext& ctx
         case TagType::ENDIF: {
             if(offsetPatchStack.empty()) {
                 logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'endif' without 'if'");
-                return {};
+                return TagResult::FAILURE;
             }
 
             std::uint32_t endState = static_cast<std::uint32_t>(ir.size());
