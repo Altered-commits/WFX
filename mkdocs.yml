@@ -1,5 +1,6 @@
 site_name: WFX Documentation
 site_description: Explicit, low-level C++ web framework
+copyright: Copyright &copy; 2025-2026 Altered-commits
 
 theme:
   name: material
@@ -52,6 +53,10 @@ nav:
     - Forms: api_reference/forms.md
     - Json: api_reference/json.md
     - Telemetry: api_reference/telemetry.md
+    - Memory: api_reference/memory.md
+    - Endpoint:
+      - Overview: api_reference/endpoint/overview.md
+      - HTTP: api_reference/endpoint/http.md
   - Developer Reference:
     - Overview: dev_reference/overview.md
     - Architecture: dev_reference/architecture.md
@@ -59,3 +64,4 @@ nav:
     - Globals & Singletons: dev_reference/globals_and_singletons.md
     - ABI Layer: dev_reference/abi_layer.md
     - Metrics & Observability: dev_reference/metrics_and_observability.md
+    - Testing: dev_reference/testing.md

@@ -1,0 +1,50 @@
+name: WFX Audit Check
+
+# Reusable: invoked by entry.yml AFTER the compile check, so this file owns-
+# -ONLY the audit logic.
+on:
+  workflow_call:
+
+jobs:
+  audit:
+    name: Audit (${{ matrix.audit }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        audit: [base, endpoint, tls]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download wfx binary
+        uses: actions/download-artifact@v8
+        with:
+          name: wfx-binary
+          path: .
+
+      - name: Make wfx executable
+        run: chmod +x wfx
+
+      # Lays wfx out the way scripts/install.sh would: binary on PATH under-
+      # -~/.wfx/bin, headers under ~/.wfx/src, since the audit apps' CMakeLists.txt-
+      # -hardcode that HOME/.wfx/src path for their include dirs.
+      - name: Set up ~/.wfx
+        run: |
+          mkdir -p "$HOME/.wfx/bin" "$HOME/.wfx/src"
+          cp wfx "$HOME/.wfx/bin/wfx"
+          chmod +x "$HOME/.wfx/bin/wfx"
+          cp -r include shared "$HOME/.wfx/src/"
+          echo "$HOME/.wfx/bin" >> "$GITHUB_PATH"
+
+      # openssl and mkcert are only actually needed by the tls audit (cert-
+      # -generation), installed for every entry anyway so the three jobs stay-
+      # -identical instead of branching on matrix.audit
+      - name: Install audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssl mkcert libnss3-tools
+
+      - name: Run ${{ matrix.audit }} audit
+        run: tests/run_audits.sh --audit ${{ matrix.audit }} --ci

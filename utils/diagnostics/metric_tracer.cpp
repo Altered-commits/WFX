@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "utils/diagnostics/metric_tracer.hpp"
 
 #ifdef _WIN32
@@ -84,7 +87,8 @@ Shared::NetworkMetrics AggregateNetwork() noexcept
         out.writes += n.writes;
         out.bytesRead += n.bytesRead;
         out.bytesWritten += n.bytesWritten;
-        out.activeConns += n.activeConns;
+        out.activeClientConns += n.activeClientConns;
+        out.activeEndpointConns += n.activeEndpointConns;
         out.fileCalls += n.fileCalls;
         out.fileFallbacks += n.fileFallbacks;
         out.fileBytesWritten += n.fileBytesWritten;

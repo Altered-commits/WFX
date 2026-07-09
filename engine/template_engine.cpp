@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "template_engine.hpp"
 
 #include "config/config.hpp"
 #include "utils/fileops/filemeta.hpp"
-#include "utils/string/string.hpp"
 #include "utils/string/string.hpp"
 #include <cstring>
 
@@ -32,6 +34,9 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
     const std::string& inputDir = projectConfig.templateDir;
     const std::string staticOutputDir = projectConfig.projectName + STATIC_FOLDER;
     const std::string dynamicCxxOutputDir = projectConfig.projectName + DYNAMIC_FOLDER;
+
+    // If the .so is missing, dynamic templates must recompile regardless of cache state
+    const bool dynamicLibExists = FileSystem::FileExists((projectConfig.projectName + TEMPLATE_LIB_PATH).c_str());
 
     // For partial tag checking. If u see it, don't compile the .html file
     // + 1 is redundant btw, but im still keeping it to cover my paranoia
@@ -95,13 +100,17 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 
         if(FileSystem::GetFileStats(inPath.c_str(), diskStats)) {
             if(cacheStats) {
-                // Basic check, did file modified time change? if not, then no need to compile this file
-                if(diskStats.modifiedNs == cacheStats->modifiedTime) {
-                    std::size_t offset{0};
-                    templates_.emplace(std::move(relPath),
-                                       TemplateMeta{cacheStats->Pop<TemplateType>(offset),
-                                                    cacheStats->Pop<std::size_t>(offset), std::move(outPath)});
+                std::size_t offset{0};
+                TemplateType cachedType = cacheStats->Pop<TemplateType>(offset);
+                std::size_t cachedSize = cacheStats->Pop<std::size_t>(offset);
 
+                // Cache is only trustworthy if the file is unchanged AND, for dynamic-
+                // -templates, the compiled .so it depends on actually still exists
+                bool cacheValid = diskStats.modifiedNs == cacheStats->modifiedTime &&
+                                  (cachedType != TemplateType::DYNAMIC || dynamicLibExists);
+
+                if(cacheValid) {
+                    templates_.emplace(std::move(relPath), TemplateMeta{cachedType, cachedSize, std::move(outPath)});
                     return;
                 }
 
@@ -109,11 +118,13 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                 // Later we check for other cool shit
                 resaveCacheFile = true;
                 setCacheStats = true;
-                logger_.Info("[TemplateEngine]: Template modified, recompiling");
+                logger_.Info("[TemplateEngine]: Template cache invalid, recompiling: ", inPath);
             }
-            // No cache stats available, set it at the end of processing
-            else
+            // New file not in cache, must resave so next startup skips recompilation
+            else {
                 setCacheStats = true;
+                resaveCacheFile = true;
+            }
         }
         else
             logger_.Warn("[TemplateEngine]: Failed to check [disk / cache] stats for file: ", inPath.c_str(),

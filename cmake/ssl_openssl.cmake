@@ -14,6 +14,25 @@ endif()
 # -------------------- LINUX --------------------
 message(STATUS "OpenSSL: Linux detected. Configuring custom OpenSSL build")
 
+# Detect the system CA directory. --openssldir must point here so that
+# SSL_CTX_set_default_verify_paths() finds the system trust store at runtime.
+# Each major distro family keeps its CA bundle in a different location:
+#   /etc/ssl          -> Debian, Ubuntu, Arch, Alpine, Gentoo
+#   /etc/pki/tls      -> RHEL, Fedora, CentOS, Rocky, AlmaLinux
+#   /etc/ssl/openssl  -> some minimal/embedded distros
+if(EXISTS "/etc/pki/tls")
+    set(OPENSSL_SYSDIR "/etc/pki/tls")
+elseif(EXISTS "/etc/ssl")
+    set(OPENSSL_SYSDIR "/etc/ssl")
+else()
+    message(WARNING "OpenSSL: Could not detect system CA directory. Defaulting to /etc/ssl. "
+                    "CA verification for outbound TLS connections may fail. "
+                    "Set OPENSSL_SYSDIR manually if needed.")
+    set(OPENSSL_SYSDIR "/etc/ssl")
+endif()
+
+message(STATUS "OpenSSL: Using system CA directory: ${OPENSSL_SYSDIR}")
+
 # Get the running OS
 string(TOLOWER "${CMAKE_SYSTEM_NAME}" OPENSSL_OS)
 
@@ -42,7 +61,7 @@ set(OPENSSL_INSTALL_DIR ${CMAKE_BINARY_DIR}/openssl_lts-install)
 set(OPENSSL_OPT_FLAGS "-O3 -DOPENSSL_SMALL_FOOTPRINT")
 
 ExternalProject_Add(openssl_lts_build
-    # Using 3.5.4 because it has LTS
+    # Using 3.5.4 because it has LTS support until April 8, 2030
     URL "https://github.com/openssl/openssl/releases/download/openssl-3.5.4/openssl-3.5.4.tar.gz"
     URL_HASH SHA256=967311f84955316969bdb1d8d4b983718ef42338639c621ec4c34fddef355e99
     DOWNLOAD_EXTRACT_TIMESTAMP true
@@ -57,29 +76,29 @@ ExternalProject_Add(openssl_lts_build
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env "CFLAGS=${OPENSSL_OPT_FLAGS}"
         <SOURCE_DIR>/Configure
             # Target platform / core features
-            ${OPENSSL_TARGET}     # Explicitly set the target architecture
-            enable-ktls           # Enable Kernel TLS offloading
-            enable-asm            # Enable hand-optimized assembly routines for performance
-            enable-ec_nistp_64_gcc_128 # Enable specific optimizations for NIST P-curves
+            ${OPENSSL_TARGET}              # Explicitly set the target architecture
+            enable-ktls                    # Enable Kernel TLS offloading
+            enable-asm                     # Enable hand-optimized assembly routines for performance
+            enable-ec_nistp_64_gcc_128     # Enable specific optimizations for NIST P-curves
 
             # Disable legacy features
-            no-ssl3               # Disable obsolete SSL protocols
-            no-weak-ssl-ciphers   # Disable EXPORT, LOW, and other weak ciphers
-            no-comp               # Disable SSL/TLS compression (CRIME attack vector)
-            no-zlib               # Disable zlib compression support
-            no-dtls1              # Disable DTLSv1 (we are a TCP server)
-            no-deprecated         # Remove support for deprecated APIs
+            no-ssl3                        # Disable obsolete SSL protocols
+            no-weak-ssl-ciphers            # Disable EXPORT, LOW, and other weak ciphers
+            no-comp                        # Disable SSL/TLS compression (CRIME attack vector)
+            no-zlib                        # Disable zlib compression support
+            no-dtls1                       # Disable DTLSv1 (we are a TCP server)
+            no-deprecated                  # Remove support for deprecated APIs
 
             # Strip unused algos
             no-async no-aria no-camellia no-idea no-md2 no-md4 no-rc2 no-rc5
             no-whirlpool no-sctp no-gost
 
             # Build and installation options
-            shared                # Make shared libs (.so)
-            no-legacy             # Remove old legacy APIs
-            no-tests              # Don't build the OpenSSL test suite
+            shared                         # Make shared libs (.so)
+            no-legacy                      # Remove old legacy APIs
+            no-tests                       # Don't build the OpenSSL test suite
             --prefix=<INSTALL_DIR>
-            --openssldir=<INSTALL_DIR>
+            --openssldir=${OPENSSL_SYSDIR} # Point at system CA dir so default verify paths work
             --libdir=lib
 
     # NOTE: Use ${MAKE_EXE} instead of ${CMAKE_MAKE_PROGRAM} to prevent Ninja related errors

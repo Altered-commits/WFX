@@ -1,0 +1,3 @@
+CANARY-OK: this file is the only thing /download is allowed to serve from public/.
+If the siege ever reads /etc/passwd or anything outside public/ via /download, that is a
+path-traversal vulnerability, not this file.

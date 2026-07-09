@@ -30,8 +30,15 @@ This page describes the top-level layout of the WFX repository.
 - `shared/`  
     Code shared between the engine and user code. Contains ABI-stable structs and types that cross the boundary between the engine and the loaded user library.
 
-- `test/`  
-    Not in use yet.
+- `tests/`  
+    Adversarial audit suites, each a Python harness driving a real, compiled WFX
+    server (or `HttpEndpoint` client) as a black box. Not unit tests, these boot
+    the server, throw a large corpus of legal and malformed/hostile input at it,
+    and assert on observed behavior (crashes, hangs, mis-framing, smuggling,
+    connection poisoning, and similar).
+    - `base_audit/` - phased correctness and security audit of the inbound server.
+    - `endpoint_audit/` - adversarial audit of the outbound `WFX::HttpEndpoint` client against a hostile upstream.
+    - `tls_audit/` - adversarial audit of the outbound client over TLS (untrusted/hostname-mismatched/expired certs, protocol downgrade).
 
 - `utils/`  
     Internal engine utilities. Not exposed to user code. Contains the logger, buffer pool, file cache, crash tracer, metric tracer, and other engine-side tools.
@@ -54,11 +61,13 @@ This page describes the top-level layout of the WFX repository.
 ## Repository files
 
 - `.github/`  
-    GitHub Actions workflows.
-    - `ci_filter.yml` - Reusable workflow that checks whether a commit should trigger CI based on which files changed.
-    - `docs_build.yml` - Builds and deploys this documentation site.
-    - `compile_check.yml` - Checks for successful compilation of WFX.
-    - `format_check.yml` - Validates code formatting using `scripts/format.sh --dry-run`.
+    GitHub Actions workflows, under `workflows/`.
+    - `entry.yml` - The only workflow actually triggered on push/PR. Orchestrates the four reusable workflows below, linearly: filter, then format, then compile, then audit, gating each on the previous one succeeding. Also reports one collected status for branch protection.
+    - `filter_check.yml` - Reusable, called by `entry.yml`. Decides whether CI should run at all based on which files changed, using `.ciignore`.
+    - `format_check.yml` - Reusable, called by `entry.yml` after the filter passes. Validates code formatting using `scripts/format.sh --dry-run`.
+    - `compile_check.yml` - Reusable, called by `entry.yml` after formatting passes. Checks for successful compilation of WFX.
+    - `audit_check.yml` - Reusable, called by `entry.yml` after compile passes. Never builds `wfx` itself: downloads the binary `compile_check.yml`'s gcc leg already uploaded as an artifact (headers come from its own checkout, they're tracked source), then runs the three test audits (`base`, `endpoint`, `tls`) as parallel matrix jobs via `tests/run_audits.sh`.
+    - `docs_build.yml` - Independent, triggers on push to `main`. Builds and deploys this documentation site.
 
 - `scripts/`  
     Shell scripts for project tooling.
@@ -67,7 +76,10 @@ This page describes the top-level layout of the WFX repository.
     - `format.sh` - Runs clang-format across the codebase. Supports `--dry-run` for CI validation and `--files` for targeted formatting.
 
 - `.ciignore`  
-    Defines file patterns that do not trigger CI when changed. Works together with `ci_filter.yml`. If every file changed in a commit matches a pattern in this file, the build is skipped.
+    Defines file patterns that do not trigger CI when changed. Works together with `filter_check.yml`. If every file changed in a commit matches a pattern in this file, the build is skipped.
+
+- `.clang-format`  
+    clang-format style rules, enforced by `scripts/format.sh` and the `format_check.yml` workflow.
 
 - `.gitignore`  
     Standard git ignore rules.
@@ -81,8 +93,11 @@ This page describes the top-level layout of the WFX repository.
 - `LICENSE`  
     Project license.
 
-- `NOTICES.md`  
-    Third-party library notices. Covers toml++, TLSF, and OpenSSL.
+- `NOTICE`  
+    Top-level copyright notice, points to `THIRD_PARTY_NOTICES.md` for third-party attributions.
+
+- `THIRD_PARTY_NOTICES.md`  
+    Full third-party license texts and attributions. Covers toml++, TLSF, and OpenSSL.
 
 - `README.md`  
     Project readme.

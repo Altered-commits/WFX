@@ -30,9 +30,13 @@ SOURCE_EXTENSIONS=(
 )
 
 IGNORE_DIRECTORIES=(
-    "./build"
-    "./test"
     "./.git"
+    "./.github"
+    "./.venv"
+    "./.vscode"
+    "./build"
+    "./docs"
+    "./tests"
 )
 
 # ---------------------------------------------------------------

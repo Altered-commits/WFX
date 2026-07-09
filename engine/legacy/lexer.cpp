@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 /* Check lexer.hpp first */
 /*
  WELCOME TO THE SLOWEST LEXER WHICH I EVER BUILT, THIS IS SO BAD I WANNA DIE,

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_HTTP_CONNECTION_FACTORY_HPP
 #define WFX_HTTP_CONNECTION_FACTORY_HPP
 

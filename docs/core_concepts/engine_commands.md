@@ -124,3 +124,12 @@ wfx control list
 wfx control stop my-project
 wfx control folder
 ```
+
+`stop` sends `SIGTERM` to the master and blocks until it exits: normally up
+to that project's configured `worker_shutdown_timeout` (see
+[`[Linux]`](wfx_toml.md)), plus a couple of seconds of slack for the master's
+own exit bookkeeping. If the master still hasn't exited by then, `stop`
+force-kills it directly. Under normal conditions this shouldn't happen: the
+master waits on all of its own workers within that same `worker_shutdown_timeout`
+window and force-kills any straggler itself first, so it should always finish
+well within the budget `stop` gives it.

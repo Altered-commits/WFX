@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_INC_WFX_TYPES_HPP
 #define WFX_INC_WFX_TYPES_HPP
 
@@ -145,36 +148,6 @@ inline constexpr auto AsyncTimerFailure = Shared::AsyncStatus::TIMER_FAILURE;
 inline constexpr auto AsyncIoFailure = Shared::AsyncStatus::IO_FAILURE;
 inline constexpr auto AsyncInternalFailure = Shared::AsyncStatus::INTERNAL_FAILURE;
 inline constexpr auto AsyncNone = Shared::AsyncStatus::NONE;
-
-// -----------------------------------------------------------------------
-// Outbound endpoint result codes
-//
-// Returned by co_await Endpoint::SendPayload(...):
-//
-//   auto s = co_await myEndpoint.SendPayload(data);
-//   if (s == WFX::EpOk) { ... }
-//
-//   EpOk                  : dispatched successfully
-//   EpPending             : in progress (engine internal, rarely seen by users)
-//   EpBufferError         : buffer could not be initialised
-//   EpInsufficientBuffer  : buffer too small for this payload
-//   EpInvalidKey          : bad Endpoint object / index out of bounds
-//   EpPoolExhausted       : no free slots, raise pool limit in config
-//   EpSocketFailure       : socket could not be created or configured
-//   EpConnectFailure      : TCP connection refused or timed out
-//   EpSslFailure          : TLS handshake or certificate error
-//   EpInternalError       : unclassified engine fault
-// -----------------------------------------------------------------------
-inline constexpr auto EpOk = Shared::EndpointStatus::SUCCESS;
-inline constexpr auto EpPending = Shared::EndpointStatus::PENDING;
-inline constexpr auto EpBufferError = Shared::EndpointStatus::BUFFER_ERROR;
-inline constexpr auto EpInsufficientBuffer = Shared::EndpointStatus::INSUFFICIENT_BUFFER;
-inline constexpr auto EpInvalidKey = Shared::EndpointStatus::INVALID_KEY;
-inline constexpr auto EpPoolExhausted = Shared::EndpointStatus::POOL_EXHAUSTED;
-inline constexpr auto EpSocketFailure = Shared::EndpointStatus::SOCKET_FAILURE;
-inline constexpr auto EpConnectFailure = Shared::EndpointStatus::CONNECT_FAILURE;
-inline constexpr auto EpSslFailure = Shared::EndpointStatus::SSL_FAILURE;
-inline constexpr auto EpInternalError = Shared::EndpointStatus::INTERNAL_ERROR;
 
 // -----------------------------------------------------------------------
 // Stream flow control

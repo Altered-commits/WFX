@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_UTILS_DAEMON_REGISTRY_HPP
 #define WFX_UTILS_DAEMON_REGISTRY_HPP
 
@@ -17,11 +20,12 @@ struct DaemonInfo {
     std::string project;
     std::string path;
     std::string host;
-    std::uint16_t port = 0;
-    bool https = false;
+    std::int64_t started = 0; // Unix timestamp
     pid_t pid = -1;
     int workers = 0;
-    std::int64_t started = 0; // Unix timestamp
+    int workerShutdownTimeout = 5; // Read back by Stop() to size its own wait budget
+    std::uint16_t port = 0;
+    bool https = false;
 };
 
 enum class ReadResult : std::uint8_t {
@@ -53,7 +57,7 @@ std::vector<DaemonInfo> List() noexcept;
 
 // vvv Process Operations vvv
 bool IsAlive(pid_t pid) noexcept;
-StopResult Stop(const std::string& project, int timeoutSeconds = 5) noexcept;
+StopResult Stop(const std::string& project, int extraGraceSeconds = 2) noexcept;
 
 } // namespace DaemonRegistry
 

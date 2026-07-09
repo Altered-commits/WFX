@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_HTTP_RESPONSE_HPP
 #define WFX_HTTP_RESPONSE_HPP
 
@@ -98,9 +101,14 @@ public: // Queries used by CoreEngine / Serializer
 private:
     void EnsureStatusWritten(); // Auto-default 200 if FRESH
     void EnsureHeadersOpen();   // Auto-default status if needed, switch phase to HEADERS
-    void EnsureBodyOpen();      // Writes CL slot + \r\n separator, switch phase to BODY
+    bool EnsureBodyOpen();      // Writes CL slot + \r\n separator, switch phase to BODY. False if rejected
     void InjectContentLength(); // Writes the fixed-width CL header line, saves 'clOffset_'
-    void FatalIfCommitted(const char* caller);
+
+    // Response-contract enforcement. A handler that violates the build rules (write after commit,-
+    // -body on a bodyless status, header after body, etc.) does not get its bad output forwarded
+    // The response is destroyed and replaced with a 500 naming the violation
+    void AbortContractViolation(const char* what);
+    bool RejectIfCommitted(const char* caller);
 
 private:
     inline void Append(const char* data, std::uint32_t len)
@@ -119,6 +127,7 @@ private:
     Shared::HttpStatus status_ = Shared::HttpStatus::OK;
 
     bool clNeeded_ = false;           // Does this response need CL patch?
+    bool aborted_ = false;            // A contract violation already replaced this with a 500
     std::size_t clOffset_ = 0;        // Offset of CL value field in rwBuffer
     std::size_t bodyStartOffset_ = 0; // Offset where body data begins
 

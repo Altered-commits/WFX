@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_WINDOWS_ACCEPT_EX_MANAGER_HPP
 #define WFX_WINDOWS_ACCEPT_EX_MANAGER_HPP
 

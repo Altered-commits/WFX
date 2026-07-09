@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_SHARED_JSON_WRITER_HPP
 #define WFX_SHARED_JSON_WRITER_HPP
 
@@ -33,38 +36,58 @@ public: // Ctors and Dtors
 public: // Main Functions
     void Obj(std::string_view key)
     {
+        if(over_ || depth_ >= MAX_DEPTH) {
+            ++over_;
+            return;
+        }
+
         Comma();
         WKey(key);
         Raw("{", 1);
-        closes_ &= ~(1u << depth_);
+        closes_ &= ~(1ull << depth_);
         ++depth_;
         ResetComma();
     }
 
     void Arr(std::string_view key)
     {
+        if(over_ || depth_ >= MAX_DEPTH) {
+            ++over_;
+            return;
+        }
+
         Comma();
         WKey(key);
         Raw("[", 1);
-        closes_ |= (1u << depth_);
+        closes_ |= (1ull << depth_);
         ++depth_;
         ResetComma();
     }
 
     void Obj()
     {
+        if(over_ || depth_ >= MAX_DEPTH) {
+            ++over_;
+            return;
+        }
+
         Comma();
         Raw("{", 1);
-        closes_ &= ~(1u << depth_);
+        closes_ &= ~(1ull << depth_);
         ++depth_;
         ResetComma();
     }
 
     void Arr()
     {
+        if(over_ || depth_ >= MAX_DEPTH) {
+            ++over_;
+            return;
+        }
+
         Comma();
         Raw("[", 1);
-        closes_ |= (1u << depth_);
+        closes_ |= (1ull << depth_);
         ++depth_;
         ResetComma();
     }
@@ -206,13 +229,22 @@ public: // Main Functions
 private: // Helper Functions
     void Close()
     {
+        // Unwind an over-cap open first (nothing was ever written for it), then real containers
+        // The depth_ == 0 guard keeps the shift below defined even if Close is ever over-called
+        if(over_) {
+            --over_;
+            return;
+        }
+        if(depth_ == 0)
+            return;
+
         --depth_;
-        Raw((closes_ >> depth_) & 1u ? "]" : "}", 1);
+        Raw((closes_ >> depth_) & 1ull ? "]" : "}", 1);
     }
 
     void Comma()
     {
-        std::uint16_t bit = 1u << depth_;
+        std::uint64_t bit = 1ull << depth_;
         if(commas_ & bit)
             Raw(",", 1);
 
@@ -221,7 +253,7 @@ private: // Helper Functions
 
     void ResetComma()
     {
-        commas_ &= ~(1u << depth_);
+        commas_ &= ~(1ull << depth_);
     }
 
     void WKey(std::string_view k)
@@ -274,6 +306,7 @@ private: // Helper Functions
         const char* p = s.data();
         const char* e = p + s.size();
         const char* start = p;
+        char uBuf[6]; // "\u00XX" fallback for control bytes with no named escape
 
         while(p != e) {
             const char* esc = nullptr;
@@ -308,8 +341,24 @@ private: // Helper Functions
                     esc = "\\f";
                     el = 2;
                     break;
-                default:
+                default: {
+                    // RFC 8259 requires every U+0000-U+001F escaped, not just the 7-
+                    // -above. A raw control byte (e.g. NUL) left as-is produces invalid-
+                    // -JSON that strict parsers reject outright
+                    auto uc = static_cast<unsigned char>(*p);
+                    if(uc < 0x20) {
+                        static constexpr char hex[] = "0123456789abcdef";
+                        uBuf[0] = '\\';
+                        uBuf[1] = 'u';
+                        uBuf[2] = '0';
+                        uBuf[3] = '0';
+                        uBuf[4] = hex[(uc >> 4) & 0xF];
+                        uBuf[5] = hex[uc & 0xF];
+                        esc = uBuf;
+                        el = 6;
+                    }
                     break;
+                }
             }
 
             if(esc) {
@@ -328,9 +377,16 @@ private: // Helper Functions
     }
 
 private: // Storage
+    // 64-bit masks + a hard depth cap keep every '1ull << depth_' shift in range: the bit index-
+    // -never exceeds 63, so no undefined shift and no truncated bracket/comma tracking. Nesting-
+    // -past MAX_DEPTH is counted in over_ (no physical bracket written) and unwound 1:1 by Close,-
+    // -so depth_ stays balanced and can never underflow even in that (practically unreachable) case
+    static constexpr std::uint32_t MAX_DEPTH = 63;
+
     Http::Response& res_;
-    std::uint16_t commas_ = 0;
-    std::uint16_t closes_ = 0;
+    std::uint64_t commas_ = 0;
+    std::uint64_t closes_ = 0;
+    std::uint32_t over_ = 0;
     std::uint8_t depth_ = 1;
     bool done_ = false;
 };

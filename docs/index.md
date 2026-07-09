@@ -5,9 +5,9 @@ hide:
 ---
 
 <div class="wfx-hero">
-<div class="wfx-badge">v0.x - active development</div>
+<div class="wfx-badge">v0.x - active development, Linux only</div>
 <h1 class="wfx-title">WFX</h1>
-<p class="wfx-sub">An explicit, low-level C++ web engine for people who want control and performance without behavior being hidden behind abstractions.</p>
+<p class="wfx-sub">An explicit, low-level C++ web engine for people who want control and performance without behavior hidden behind abstractions.</p>
 <div class="wfx-buttons">
 <a href="getting_started/installation/" class="md-button md-button--primary">Get started</a>
 <a href="api_reference/overview/" class="md-button">API reference</a>
@@ -15,46 +15,58 @@ hide:
 </div>
 
 !!! warning "Active development"
-    Documentation and APIs change frequently. Do not treat anything here as stable until stated otherwise.
+    Documentation and APIs change frequently. Do not treat anything here as stable until stated otherwise. See [what's missing](#whats-missing) below before you commit to anything.
 
 <p class="wfx-section-label">What it includes</p>
 
 <div class="wfx-grid">
 <div class="wfx-card">
 <p class="wfx-card-title">HTTP(S) engine</p>
-<p class="wfx-card-body">Full server with TLS support and a deterministic request-response lifecycle.</p>
+<p class="wfx-card-body">HTTP/1.1 server with TLS and a deterministic request-response lifecycle.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Multi-process workers</p>
+<p class="wfx-card-body">A master process plus independent worker processes. A crash in one worker doesn't take the others down.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Outbound Endpoint client</p>
+<p class="wfx-card-body">Pooled outbound connections with DNS refresh, retry, and request coalescing. Ships with an HTTP client; other protocols are a serialize/parse pair away.</p>
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Middleware</p>
-<p class="wfx-card-body">Global and per-route middleware with strict ordered execution.</p>
-</div>
-<div class="wfx-card">
-<p class="wfx-card-title">Streaming</p>
-<p class="wfx-card-body">Outbound streaming responses with backend-controlled buffer sizing.</p>
-</div>
-<div class="wfx-card">
-<p class="wfx-card-title">SSR engine</p>
-<p class="wfx-card-body">Server-side rendering with a full templating system.</p>
+<p class="wfx-card-body">Global and per-route middleware, including async middleware, with strict ordered execution.</p>
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Async model</p>
-<p class="wfx-card-body">Custom coroutine execution with explicit suspension and resumption.</p>
+<p class="wfx-card-body">C++20 coroutines with explicit suspension and resumption. Async, but still deterministic.</p>
 </div>
 <div class="wfx-card">
-<p class="wfx-card-title">Security primitives</p>
-<p class="wfx-card-body">Connection timeouts, rate limiting, and request-level controls.</p>
+<p class="wfx-card-title">SSR templates (WTX)</p>
+<p class="wfx-card-body">Templates compile to generated C++ and link into the engine: variables, conditionals, loops, includes, inheritance.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Streaming responses</p>
+<p class="wfx-card-body">Outbound streaming with backend-controlled buffer sizing.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">Security controls</p>
+<p class="wfx-card-body">Header/body/idle timeouts and connection/request rate limiting.</p>
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Form handling</p>
 <p class="wfx-card-body">Built-in parsing, validation, sanitization, and field rendering.</p>
 </div>
 <div class="wfx-card">
-<p class="wfx-card-title">TOML configuration</p>
-<p class="wfx-card-body">File-based engine configuration with full runtime control.</p>
+<p class="wfx-card-title">JSON</p>
+<p class="wfx-card-body">A streaming writer for output and a DOM-style parser for input.</p>
 </div>
-<div class="wfx-card wfx-card--more">
-<p class="wfx-card-title">And much more</p>
-<p class="wfx-card-body">Explore the full API reference for everything else.</p>
+<div class="wfx-card">
+<p class="wfx-card-title">Metrics and logging</p>
+<p class="wfx-card-body">Structured logging plus live network, process, and worker-health metrics per worker.</p>
+</div>
+<div class="wfx-card">
+<p class="wfx-card-title">TOML configuration</p>
+<p class="wfx-card-body">File-based engine configuration for timeouts, TLS, workers, and more.</p>
 </div>
 </div>
 
@@ -79,6 +91,18 @@ hide:
 </div>
 </div>
 
+<p class="wfx-section-label" id="whats-missing">What's missing</p>
+
+<div class="wfx-fit-col" style="margin-bottom: 2.5rem;">
+<ul class="wfx-fit-list">
+<li><strong>Linux only.</strong> No Windows or macOS support yet.</li>
+<li><strong>No hot reload.</strong> Changing route code means restarting the server.</li>
+<li><strong>No HTTP/2 or HTTP/3.</strong> The server and outbound client both speak HTTP/1.1.</li>
+<li><strong>No built-in database client.</strong> The outbound connection pool is generic; a driver for a specific database is up to you.</li>
+<li><strong>No stability guarantees.</strong> Both the API and ABI can still change before a first stable release.</li>
+</ul>
+</div>
+
 <p class="wfx-section-label">Who this is for</p>
 
 <div class="wfx-fit">
@@ -89,12 +113,14 @@ hide:
 <li>Care about performance and memory behavior</li>
 <li>Want full visibility into what the engine does</li>
 <li>Prefer reading code over reading magic</li>
+<li>Fine building on Linux, and fine rebuilding when WFX changes underneath you</li>
 </ul>
 </div>
 <div class="wfx-fit-col">
 <p class="wfx-fit-header wfx-fit-header--bad">Not for you</p>
 <ul class="wfx-fit-list">
-<li>Need hot reload or scripting-language iteration</li>
+<li>Need hot reload or scripting-language iteration today</li>
+<li>Need Windows or macOS support today</li>
 <li>Want to serve static files without server logic</li>
 <li>Uncomfortable with pointers or ownership</li>
 <li>Hate C++</li>

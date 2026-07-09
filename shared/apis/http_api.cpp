@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "http_api.hpp"
 
 #include "http/connection/http_connection.hpp"
@@ -15,6 +18,7 @@ using namespace WFX::Http; // For 'Router', 'Middleware', ...
 // '__GlobalHttpDataExt1.data' Can be set via the http api, the reason why this is safe to set even-
 // -with multiple connections is our entire flow of data is single threaded and will remain that way
 static HttpAPIDataExt1 __GlobalHttpDataExt1;
+static EndpointAPIDataExt1 __GlobalEndpointDataExt1;
 
 // vvv Helper functions vvv
 static HttpRequest* ToReq(void* backend)
@@ -30,7 +34,7 @@ static HttpResponse* ToRes(void* backend)
     return static_cast<HttpResponse*>(backend);
 }
 
-// vvv Main Stuff vvv
+// vvv Http API vvv
 const HTTP_API_EXT1* GetHttpAPIExt1()
 {
     // clang-format off
@@ -189,157 +193,6 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             ToRes(backend)->Commit();
         },
 
-        // vvv Endpoint API vvv
-        [](StringView urlView, std::uint32_t cLimit, std::uint32_t ifLimit, EndpointTLSConfig tlsConfig) -> std::uint16_t {
-            /*
-             * NOTE: 'url' allowed only till port number (route and optional parameters are not allowed)
-             * Example:
-             *      https://example.com    is allowed
-             *      example.com:443        is allowed
-             * 
-             *      https://api.xyz.com/v1 is not allowed (/v1 not allowed)
-             *      example.com            is not allowed (no protocol defined)
-             */
-            auto& logger = Utils::GetLogger();
-            if(urlView.Empty())
-                logger.Fatal("[HttpAPI]: Endpoint got empty URL");
-
-            std::string_view protocol{}, host{}, port{}, url{urlView.Data(), urlView.Size()}, urlCpy{url};
-
-            logger.Info("[HttpAPI]: Resolving endpoint: ", url);
-
-            // Detect protocol
-            auto pos = url.find("://");
-            if(pos != std::string_view::npos) {
-                protocol = url.substr(0, pos);
-                url = url.substr(pos + 3);
-                if(protocol.empty())
-                    logger.Fatal("[HttpAPI]: Endpoint got empty protocol");
-            }
-
-            // Reject forbidden chars
-            for(char c : url) {
-                if(c == '/' || c == '?' || c == '#' || c == '@')
-                    logger.Fatal(
-                        "[HttpAPI]: Endpoint forbids usage of (/, ?, #, @) in url"
-                    );
-            }
-
-            // Host + port
-            // IPv6
-            if(!url.empty() && url.front() == '[') {
-                auto end = url.find(']');
-                if(end == std::string_view::npos)
-                    logger.Fatal(
-                        "[HttpAPI]: Endpoint got unclosed IPv6 literal"
-                    );
-
-                host = url.substr(1, end - 1);
-                url  = url.substr(end + 1);
-
-                if(!url.empty()) {
-                    if(url.front() != ':')
-                        logger.Fatal("[HttpAPI]: Unexpected characters in endpoint after IPv6 host");
-                    port = url.substr(1);
-                }
-            }
-            // IPv4 / hostname
-            else {
-                auto colon = url.rfind(':');
-                if(colon != std::string_view::npos) {
-                    host = url.substr(0, colon);
-                    port = url.substr(colon + 1);
-                }
-                else
-                    host = url;
-            }
-
-            if(host.empty())
-                logger.Fatal("[HttpAPI]: Missing host in endpoint");
-
-            // Port rules
-            std::uint32_t nport = 0;
-            if(port.empty()) {
-                if(protocol.empty())
-                    logger.Fatal("[HttpAPI]: Missing port and protocol in endpoint");
-
-                port = Http::PortDetector::DetectFromProtocol(protocol);
-                if(port.empty())
-                    logger.Fatal(
-                        "[HttpAPI]: Endpoint cannot infer port for protocol '", protocol,
-                        "'. Write your own port explicitly "
-                        "(e.g. protocol://host:PORT or host:PORT)."
-                    );
-
-                // Our ports are perfect so directly go to resolving address
-                goto __DirectResolve;
-            }
-
-            // Validate port digits
-            for(char c : port) {
-                if(c < '0' || c > '9')
-                    logger.Fatal("[HttpAPI]: Invalid port in endpoint: '", port, '\'');
-
-                nport = nport * 10 + (c - '0');
-                if(nport > 65535)
-                    logger.Fatal(
-                        "[HttpAPI]: Endpoint received invalid port '", nport,
-                        "'. Port must be in the range [1, 65535]"
-                    );
-            }
-            if(nport == 0)
-                logger.Fatal("[HttpAPI]: Endpoint received port 0, invalid port");
-
-        __DirectResolve:
-            // Sanity checks
-            if(!__GlobalHttpDataExt1.connHandler)
-                logger.Fatal("[HttpAPI]: Connection handler was nullptr for endpoint");
-
-            bool useTLS = false;
-
-            switch(tlsConfig) {
-                // AUTO: TLS only on known secure ports
-                case EndpointTLSConfig::AUTO:
-                    switch(nport) {
-                        case 443:   // HTTPS
-                        case 465:   // SMTPS
-                        case 993:   // IMAPS
-                        case 995:   // POP3S
-                        case 636:   // LDAPS
-                        case 989:   // FTPS (data)
-                        case 990:   // FTPS (control)
-                        case 5671:  // AMQP over TLS
-                        case 8883:  // MQTT over TLS
-                            useTLS = true;
-                            break;
-                    }
-                    break;
-
-                // FORCE_REQUIRE: Always TLS, no matter what
-                case EndpointTLSConfig::FORCE_REQUIRE:
-                    useTLS = true;
-                    break;
-    
-                // FORCE_INSECURE: Never TLS, even on 443
-                case EndpointTLSConfig::FORCE_INSECURE:
-                    useTLS = false;
-                    break;
-            }
-
-            return __GlobalHttpDataExt1.connHandler->AllocateEndpoint(host, port, cLimit, ifLimit, useTLS);
-        },
-        // WriteEndpointFn
-        [](void* ctx, std::uint16_t endpointIndex, const std::byte* ptr, std::uint32_t size) -> EndpointStatus {
-            if(!ctx) {
-                Utils::GetLogger().Error("[HttpAPI]: 'WriteEndpoint' received null context");
-                return EndpointStatus::INTERNAL_ERROR;
-            }
-
-            return __GlobalHttpDataExt1.connHandler->WriteEndpoint(
-                reinterpret_cast<ConnectionContext*>(ctx), endpointIndex, ptr, size
-            );
-        },
-
         // vvv Data API vvv
         [](void* data) { // SetGlobalPtrData
             __GlobalHttpDataExt1.data = data;
@@ -353,11 +206,45 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
     return &__GlobalHttpAPIExt1;
 }
 
-void InitHttpAPIExt1(HttpConnectionHandler* connHandler, Router* extRouter, HttpMiddleware* extMiddleware)
+void InitHttpAPIExt1(Router* extRouter, HttpMiddleware* extMiddleware)
 {
-    __GlobalHttpDataExt1.connHandler = connHandler;
     __GlobalHttpDataExt1.router = extRouter;
     __GlobalHttpDataExt1.middleware = extMiddleware;
+}
+
+// vvv Endpoint API vvv
+const ENDPOINT_API_EXT1* GetEndpointAPIExt1()
+{
+    // clang-format off
+    static ENDPOINT_API_EXT1 __GlobalHttpAPIExt1 = {
+        [](const char* host, EndpointDesc desc, EndpointConfig config) -> std::uint16_t {
+            return __GlobalEndpointDataExt1.connHandler->AllocateEndpoint(host, desc, config);
+        },
+        [](void* clientCtx, std::uint16_t endpointIdx, const void* req, AsyncData asyncData) -> EndpointStatus {
+            auto* ctx = static_cast<ClientCtx*>(clientCtx);
+            return __GlobalEndpointDataExt1.connHandler->SendPayload(ctx, endpointIdx, req, asyncData);
+        },
+        [](void* endpointCtx, const void* data, std::uint32_t size, AsyncData asyncData) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            __GlobalEndpointDataExt1.connHandler->SlotSend(ctx, data, size, asyncData);
+        },
+        [](void* endpointCtx, AsyncData asyncData) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            __GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, asyncData);
+        },
+        [](void* endpointCtx) -> StringView {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            return __GlobalEndpointDataExt1.connHandler->NegotiatedProtocol(ctx);
+        }
+    };
+    // clang-format on
+
+    return &__GlobalHttpAPIExt1;
+}
+
+void InitEndpointAPIExt1(Http::HttpConnectionHandler* connHandler)
+{
+    __GlobalEndpointDataExt1.connHandler = connHandler;
 }
 
 } // namespace WFX::Shared

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "crash_tracer.hpp"
 
 #if defined(WFX_PLATFORM_POSIX)

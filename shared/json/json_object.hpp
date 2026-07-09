@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_SHARED_JSON_OBJECT_HPP
 #define WFX_SHARED_JSON_OBJECT_HPP
 
@@ -1087,6 +1090,54 @@ private:
         if(keyOff == JSON_NIL)
             return Dead();
 
+        std::uint32_t valIdx = s_->AllocNode();
+        if(valIdx == JSON_NIL)
+            return Dead();
+
+        std::uint32_t kvIdx = s_->AllocKV();
+        if(kvIdx == JSON_NIL)
+            return Dead();
+
+        // Re-fetch node after potential reallocs
+        auto& n2 = NMut();
+        JsonKV& kv = s_->kvs[kvIdx];
+        kv.keyOff = keyOff;
+        kv.keyLen = klen;
+        kv.valIdx = valIdx;
+
+        if(!ObjAppendKV(n2, kvIdx, klen))
+            return Dead();
+
+        return JsonRef{s_, valIdx};
+    }
+
+    // Same as GetOrCreate, but for a key whose bytes are ALREADY resident in the store at keyOff-
+    // -(klen bytes), e.g. an escaped key the parser just decoded in place. Crucially it does NOT-
+    // -call AllocStr: handing GetOrCreate a pointer INTO strs would dangle the moment AllocStr-
+    // -reallocs strs to copy that key and then memcpy's from the freed original. Offsets survive-
+    // -reallocs, so inserting by keyOff is safe (and avoids storing the key a second time). On a-
+    // -dedup hit the already-stored key bytes are simply left in the store (a rare-key waste only)
+    JsonRef GetOrCreateStored(std::uint32_t keyOff, std::uint32_t klen) noexcept
+    {
+        if(!Valid())
+            return Dead();
+
+        auto& n = NMut();
+        if(n.tag == JsonTag::EMPTY) {
+            n.tag = JsonTag::OBJECT;
+            n.u64a = 0;
+            n.u64b = 0;
+        }
+        if(n.tag != JsonTag::OBJECT)
+            return Dead();
+
+        // Dedup against existing keys. Reads strs + keyOff now, before any realloc below
+        std::uint32_t existing = HTFind(s_->strs + keyOff, klen);
+        if(existing != JSON_NIL)
+            return JsonRef{s_, s_->kvs[existing].valIdx};
+
+        // New key: bytes already live in strs at keyOff, so no AllocStr/copy is needed. The-
+        // -allocs below only ever move nodes/kvs/the object index buffer, never invalidate keyOff
         std::uint32_t valIdx = s_->AllocNode();
         if(valIdx == JSON_NIL)
             return Dead();

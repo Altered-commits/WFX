@@ -1,10 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "async_api.hpp"
 #include "utils/diagnostics/logger.hpp"
 #include "http/connection/http_connection.hpp"
 
 namespace WFX::Shared {
-
-using WFX::Http::ConnectionContext;
 
 // Important stuff :)
 static AsyncAPIDataExt1 __GlobalAsyncDataExt1;
@@ -22,7 +23,7 @@ const ASYNC_API_EXT1* GetAsyncAPIExt1()
                 return false;
             }
 
-            auto cctx = static_cast<ConnectionContext*>(ctx);
+            auto cctx = static_cast<Http::ClientCtx*>(ctx);
             auto* connHandler = __GlobalAsyncDataExt1.connHandler;
 
             // Shouldn't happen considering we set it in core_engine.cpp

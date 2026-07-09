@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_INC_CXX_ASYNC_TASK_HPP
 #define WFX_INC_CXX_ASYNC_TASK_HPP
 
@@ -51,6 +54,11 @@ inline Task<Shared::MiddlewareAction> Promise<Shared::MiddlewareAction>::get_ret
 {
     return Task<Shared::MiddlewareAction>{
         std::coroutine_handle<Promise<Shared::MiddlewareAction>>::from_promise(*this)};
+}
+
+inline Task<Shared::ConnectResult> Promise<Shared::ConnectResult>::get_return_object()
+{
+    return Task<Shared::ConnectResult>{std::coroutine_handle<Promise<Shared::ConnectResult>>::from_promise(*this)};
 }
 
 } // namespace WFX::Async

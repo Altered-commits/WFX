@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_SHARED_HTTP_API_HPP
 #define WFX_SHARED_HTTP_API_HPP
 
@@ -59,12 +62,6 @@ using WriteStreamFn = void (*)(void* response, StreamGenerator, bool chunked);
 using WriteTemplateFn = void (*)(void* response, StringView path, JsonObject* ctx);
 using CommitFn = void (*)(void* response);
 
-// Endpoint API
-using AllocateEndpointFn = std::uint16_t (*)(StringView url, std::uint32_t cLimit, std::uint32_t ifLimit,
-                                             EndpointTLSConfig tlsConfig);
-using WriteEndpointFn = EndpointStatus (*)(void* ctx, std::uint16_t endpointIndex, const std::byte* ptr,
-                                           std::uint32_t size);
-
 // Data API
 using SetGlobalPtrDataFn = void (*)(void*);
 using GetGlobalPtrDataFn = void* (*)();
@@ -101,19 +98,39 @@ struct HTTP_API_EXT1 {
     WriteTemplateFn WriteTemplate;
     CommitFn Commit;
 
-    // Endpoint API
-    AllocateEndpointFn AllocateEndpoint;
-    WriteEndpointFn WriteEndpoint;
-
     // Data API
     SetGlobalPtrDataFn SetGlobalPtrData;
     GetGlobalPtrDataFn GetGlobalPtrData;
 };
 static_assert(std::is_standard_layout<HTTP_API_EXT1>::value, "'HTTP_API_EXT1' must be standard layout");
 
+// Data internally used by Endpoint API
+struct EndpointAPIDataExt1 {
+    Http::HttpConnectionHandler* connHandler = nullptr;
+};
+
+using AllocateEndpointApiFn = std::uint16_t (*)(const char* host, EndpointDesc, EndpointConfig);
+using SendPayloadApiFn = EndpointStatus (*)(void* clientCtx, std::uint16_t endpointIdx, const void* req,
+                                            AsyncData onComplete);
+using SlotSendApiFn = void (*)(void* endpointCtx, const void* data, std::uint32_t size, AsyncData);
+using SlotReceiveApiFn = void (*)(void* endpointCtx, AsyncData);
+using NegotiatedProtocolApiFn = StringView (*)(void* endpointCtx);
+
+struct ENDPOINT_API_EXT1 {
+    AllocateEndpointApiFn AllocateEndpoint;
+    SendPayloadApiFn SendPayload;
+    SlotSendApiFn SlotSend;
+    SlotReceiveApiFn SlotReceive;
+    NegotiatedProtocolApiFn NegotiatedProtocol;
+};
+static_assert(std::is_standard_layout_v<ENDPOINT_API_EXT1>, "'ENDPOINT_API_EXT1' must be standard layout");
+
 // vvv Getter & Initializers vvv
 const HTTP_API_EXT1* GetHttpAPIExt1();
-void InitHttpAPIExt1(Http::HttpConnectionHandler*, Http::Router*, Http::HttpMiddleware*);
+void InitHttpAPIExt1(Http::Router*, Http::HttpMiddleware*);
+
+const ENDPOINT_API_EXT1* GetEndpointAPIExt1();
+void InitEndpointAPIExt1(Http::HttpConnectionHandler* connHandler);
 
 } // namespace WFX::Shared
 

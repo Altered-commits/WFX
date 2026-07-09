@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "http_middleware.hpp"
 #include "engine/core_engine.hpp"
 #include "http/request.hpp"  // |
@@ -31,8 +34,7 @@ void HttpMiddleware::RegisterPerRouteMiddleware(const TrieNode* node, Middleware
         logger.Fatal("[HttpMiddleware]: Duplicate registration attempt for route node '", (void*)node, '\'');
 }
 
-MiddlewareResult HttpMiddleware::ExecuteMiddleware(ConnectionContext* ctx, const TrieNode* node, Request req,
-                                                   Response res)
+MiddlewareResult HttpMiddleware::ExecuteMiddleware(ClientCtx* ctx, const TrieNode* node, Request req, Response res)
 {
     if(ctx->trackAsync.GetMLevel() == MiddlewareLevel::GLOBAL) {
         // Initially execute the global middleware stack
@@ -90,8 +92,7 @@ void HttpMiddleware::DiscardFactoryMap()
 }
 
 // vvv Helper Functions vvv
-MiddlewareResult HttpMiddleware::ExecuteHelper(ConnectionContext* ctx, Request req, Response res,
-                                               MiddlewareStack& stack)
+MiddlewareResult HttpMiddleware::ExecuteHelper(ClientCtx* ctx, Request req, Response res, MiddlewareStack& stack)
 {
     std::size_t stackSize = stack.size();
     if(stackSize == 0)
@@ -150,8 +151,7 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(ConnectionContext* ctx, Request r
     return {true, false};
 }
 
-MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(ConnectionContext* ctx, Request req, Response res,
-                                                         MwCallback mw)
+MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(ClientCtx* ctx, Request req, Response res, MwCallback mw)
 {
     auto& logger = WFX::Utils::GetLogger();
 

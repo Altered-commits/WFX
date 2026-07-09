@@ -14,9 +14,9 @@ Understanding this structure will help you know where files live, what each dire
 
 A freshly generated WFX project looks like this:
 
-<pre class="code-format">
-&lt;your_workspace&gt;/
-├─ &lt;your_project_name&gt;/
+```text
+<your_workspace>/
+├─ <your_project_name>/
 │  ├─ build/
 │  ├─ intermediate/
 │  ├─ logs/
@@ -39,7 +39,7 @@ A freshly generated WFX project looks like this:
 │  └─ wfx.toml
 │
 └─ ...
-</pre>
+```
 
 Each directory and file has a specific purpose, explained below.
 
@@ -82,7 +82,7 @@ Both directories and their contents can be safely deleted at any time. They will
 
 This folder contains all files that are publicly accessible. This includes CSS, JavaScript, images, and any other static assets. Files placed here are automatically served by WFX when a request hits the **/public/** route, and can be accessed directly via that route regardless of whether they are referenced by any template (`.html`).
 
-!!! warning
+!!! Danger
     Do not place any sensitive or private files in this folder. All content here is publicly visible. This directory is strictly for static assets meant to be accessible by anyone, and the system assumes no responsibility for accidental exposure.
 
 ---

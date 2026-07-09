@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifndef WFX_SHARED_MASTER_API_HPP
 #define WFX_SHARED_MASTER_API_HPP
 
@@ -11,6 +14,7 @@ namespace WFX::Shared {
 // vvv Master table to be injected into user dll vvv
 struct MASTER_API_TABLE {
     const HTTP_API_EXT1* (*GetHttpAPIExt1)();
+    const ENDPOINT_API_EXT1* (*GetEndpointAPIExt1)();
     const ASYNC_API_EXT1* (*GetAsyncAPIExt1)();
     const MEMORY_API_EXT1* (*GetMemoryAPIExt1)();
     const UTILS_API_EXT1* (*GetUtilsAPIExt1)();

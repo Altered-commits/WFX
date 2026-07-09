@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "buffer_pool.hpp"
 
 #include <cstdlib>
@@ -159,8 +162,18 @@ void* BufferPool::AllocateFromShard(std::size_t size)
 
 void* BufferPool::ExpandAndAllocate(std::size_t requestedSize)
 {
+    // TLSF's allocation search (mapping_search in tlsf.c) rounds the request UP to
+    // the next second-level size class before searching, so tlsf_malloc(N) actually
+    // needs a free block of up to N + N/2^SL_INDEX_COUNT_LOG2 bytes. If we size a
+    // fresh segment to exactly the request, that rounded search finds no big-enough
+    // block and fails right after a successful expansion (logged as "possible TLSF
+    // corruption" -> false OOM). Pad the segment by that worst-case round-up so a
+    // single large allocation is actually servable from the new segment.
+    // SL_INDEX_COUNT_LOG2 == 5 in TLSF's default (and TLSF_64BIT) configuration.
+    constexpr std::size_t TLSF_SL_INDEX_COUNT_LOG2 = 5;
     const std::size_t segmentOverhead = tlsf_pool_overhead() + tlsf_block_size_min();
-    const std::size_t minSegment = requestedSize + segmentOverhead;
+    const std::size_t sizeClassRoundup = requestedSize >> TLSF_SL_INDEX_COUNT_LOG2;
+    const std::size_t minSegment = requestedSize + sizeClassRoundup + segmentOverhead;
 
     std::size_t idealSize = resizeCallback_ ? resizeCallback_(shard_.poolSize) : shard_.poolSize * 2;
 

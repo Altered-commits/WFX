@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #ifdef WFX_HTTP_USE_OPENSSL
 
 #ifndef WFX_HTTP_OPENSSL_HPP
@@ -15,7 +18,8 @@ public:
 
 public: // Main functions
     void* Wrap(SSLSocket fd) override;
-    void* WrapClient(SSLSocket fd, const char* host) override;
+    void* WrapClient(SSLSocket fd, const char* host, std::string_view alpnList = {}) override;
+    std::string_view NegotiatedProtocol(void* conn) override;
     SSLReturn Handshake(void* conn) override;
 
     SSLResult Read(void* conn, char* buf, int len) override;
@@ -26,11 +30,14 @@ public: // Main functions
     SSLReturn ForceShutdown(void* conn) override;
 
 private: // Helper functions
+    void InitServerContext();
+    void InitClientContext();
     void GlobalOpenSSLInit();
-    void LogOpenSSLError(const char* message, bool fatal = true);
+    void LogOpenSSLError(const char* message, SSL* ssl = nullptr, bool fatal = true);
 
 private:
-    SSL_CTX* ctx = nullptr;
+    SSL_CTX* serverCtx = nullptr;
+    SSL_CTX* clientCtx = nullptr;
     bool useKtls = false;
 };
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "http_response.hpp"
 
 #include "config/config.hpp"
@@ -26,6 +29,15 @@ static constexpr const char* CL_ZERO = "Content-Length: 0\r\n";
 static constexpr std::uint32_t CL_ZERO_LEN = 19;
 
 // vvv Static helpers vvv
+static bool HasCRLFOrNull(std::string_view s) noexcept
+{
+    for(char c : s)
+        if(c == '\r' || c == '\n' || c == '\0')
+            return true;
+
+    return false;
+}
+
 static void FormatFixed10(std::uint32_t value, char out[CL_FIELD_WIDTH])
 {
     for(int i = CL_FIELD_WIDTH - 1; i >= 0; --i) {
@@ -78,6 +90,7 @@ void HttpResponse::Reset()
     clOffset_ = 0;
     bodyStartOffset_ = 0;
     clNeeded_ = false;
+    aborted_ = false;
 
     if(rwBuffer_)
         rwBuffer_->ClearWriteBuffer();
@@ -92,10 +105,30 @@ void HttpResponse::AbortWithError(HttpStatus status, std::string_view message)
 }
 
 // vvv Private helpers vvv
-void HttpResponse::FatalIfCommitted(const char* caller)
+void HttpResponse::AbortContractViolation(const char* what)
 {
-    if(phase_ == ResponsePhase::COMMITTED)
-        GetLogger().Fatal("[HttpResponse]: '", caller, "()' called after Commit()");
+    // Already punished, swallow any further calls so we neither rebuild nor double-log
+    if(aborted_)
+        return;
+
+    GetLogger().Error("[HttpResponse]: response contract violation: ", what);
+    AbortWithError(HttpStatus::INTERNAL_SERVER_ERROR, "Response contract violation");
+
+    aborted_ = true;
+}
+
+bool HttpResponse::RejectIfCommitted(const char* caller)
+{
+    // Already a contract-violation 500, swallow silently (no second abort/log)
+    if(aborted_)
+        return true;
+
+    if(phase_ != ResponsePhase::COMMITTED)
+        return false;
+
+    std::string what = std::string(caller) + "() called after Commit()";
+    AbortContractViolation(what.c_str());
+    return true;
 }
 
 void HttpResponse::EnsureStatusWritten()
@@ -132,15 +165,17 @@ void HttpResponse::InjectContentLength()
     clNeeded_ = true;
 }
 
-void HttpResponse::EnsureBodyOpen()
+bool HttpResponse::EnsureBodyOpen()
 {
     EnsureHeadersOpen();
 
     if(phase_ >= ResponsePhase::BODY)
-        return;
+        return true; // already open (or aborted to a committed 500)
 
-    if(StatusForbidsBody(status_))
-        GetLogger().Fatal("[HttpResponse]: Body not allowed for this status code [1xx, 204 and 304]");
+    if(StatusForbidsBody(status_)) {
+        AbortContractViolation("body written on a status that forbids one [1xx, 204, 304]");
+        return false;
+    }
 
     InjectContentLength();
     Append("\r\n", 2);
@@ -149,15 +184,19 @@ void HttpResponse::EnsureBodyOpen()
     bodyStartOffset_ = rwBuffer_->GetWriteMeta()->dataLength;
     bodyKind_ = BodyKind::BUFFERED;
     phase_ = ResponsePhase::BODY;
+    return true;
 }
 
 // vvv Public write API vvv
 void HttpResponse::WriteStatus(HttpStatus code)
 {
-    FatalIfCommitted("WriteStatus");
+    if(RejectIfCommitted("WriteStatus"))
+        return;
 
-    if(phase_ != ResponsePhase::FRESH)
-        GetLogger().Fatal("[HttpResponse]: 'WriteStatus()' called after headers already written");
+    if(phase_ != ResponsePhase::FRESH) {
+        AbortContractViolation("WriteStatus() called after the status/headers were already written");
+        return;
+    }
 
     status_ = code;
 
@@ -181,17 +220,28 @@ void HttpResponse::WriteStatus(HttpStatus code)
 
 void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
 {
-    FatalIfCommitted("WriteHeader");
+    if(RejectIfCommitted("WriteHeader"))
+        return;
 
-    auto& logger = GetLogger();
-
-    if(phase_ == ResponsePhase::BODY)
-        logger.Fatal("[HttpResponse]: 'WriteHeader()' called after body already started");
+    if(phase_ == ResponsePhase::BODY) {
+        AbortContractViolation("WriteHeader() called after the body already started");
+        return;
+    }
 
     // Engine-owned header, user must not set this
     // TODO: Think if we should also block Content-Length and Transfer-Encoding key as well
-    if(Utils::StringUtils::InsensitiveStringCompare(key, "connection"))
-        logger.Fatal("[HttpResponse]: 'Connection' header is engine-owned, do not set it manually");
+    if(Utils::StringUtils::InsensitiveStringCompare(key, "connection")) {
+        AbortContractViolation("'Connection' header is engine-owned and must not be set manually");
+        return;
+    }
+
+    // CR/LF/NUL in either the name or value would let a caller smuggle extra-
+    // -headers or split the response (CWE-113). Reject outright rather than-
+    // -writing attacker controlled bytes straight onto the wire
+    if(HasCRLFOrNull(key) || HasCRLFOrNull(value)) {
+        AbortContractViolation("WriteHeader() key/value must not contain CR, LF, or NUL bytes");
+        return;
+    }
 
     EnsureHeadersOpen();
 
@@ -205,8 +255,12 @@ void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
 
 void HttpResponse::WriteBodyData(std::string_view data)
 {
-    FatalIfCommitted("WriteBodyData");
-    EnsureBodyOpen();
+    if(RejectIfCommitted("WriteBodyData"))
+        return;
+
+    // Body could not be opened (e.g. bodyless status) -> already aborted to 500, do not append
+    if(!EnsureBodyOpen())
+        return;
 
     if(data.size() == 0)
         return;
@@ -216,18 +270,23 @@ void HttpResponse::WriteBodyData(std::string_view data)
 
 void HttpResponse::WriteFile(std::string_view path, bool autoHandle404)
 {
-    FatalIfCommitted("WriteFile");
+    if(RejectIfCommitted("WriteFile"))
+        return;
 
-    auto& logger = GetLogger();
+    if(phase_ == ResponsePhase::BODY) {
+        AbortContractViolation("WriteFile() called after the body already started");
+        return;
+    }
 
-    if(phase_ == ResponsePhase::BODY)
-        logger.Fatal("[HttpResponse]: 'WriteFile()' called after body already started");
+    if(bodyKind_ != BodyKind::NONE) {
+        AbortContractViolation("WriteFile() called after the body kind was already set");
+        return;
+    }
 
-    if(bodyKind_ != BodyKind::NONE)
-        logger.Fatal("[HttpResponse]: 'WriteFile()' called after body kind already set");
-
-    if(StatusForbidsBody(status_))
-        logger.Fatal("[HttpResponse]: File body not allowed for this status code [1xx, 204 and 304]");
+    if(StatusForbidsBody(status_)) {
+        AbortContractViolation("file body set on a status that forbids one [1xx, 204, 304]");
+        return;
+    }
 
     if(autoHandle404 && !FileSystem::FileExists(path.data())) {
         AbortWithError(HttpStatus::NOT_FOUND, "File not found");
@@ -261,15 +320,18 @@ void HttpResponse::WriteFile(std::string_view path, bool autoHandle404)
 
 void HttpResponse::WriteStream(StreamGenerator gen, bool chunked)
 {
-    FatalIfCommitted("WriteStream");
+    if(RejectIfCommitted("WriteStream"))
+        return;
 
-    auto& logger = GetLogger();
+    if(bodyKind_ != BodyKind::NONE) {
+        AbortContractViolation("WriteStream() called after the body kind was already set");
+        return;
+    }
 
-    if(bodyKind_ != BodyKind::NONE)
-        logger.Fatal("[HttpResponse]: 'WriteStream()' called after body kind already set");
-
-    if(StatusForbidsBody(status_))
-        logger.Fatal("[HttpResponse]: Stream body not allowed for this status code [1xx, 204 and 304]");
+    if(StatusForbidsBody(status_)) {
+        AbortContractViolation("stream body set on a status that forbids one [1xx, 204, 304]");
+        return;
+    }
 
     EnsureHeadersOpen();
 
@@ -289,7 +351,8 @@ void HttpResponse::WriteStream(StreamGenerator gen, bool chunked)
 
 void HttpResponse::Commit()
 {
-    FatalIfCommitted("Commit");
+    if(RejectIfCommitted("Commit"))
+        return;
 
     // No body written, zero-body response (e.g. 204, HEAD, error with no body)
     if(phase_ < ResponsePhase::BODY) {
@@ -416,7 +479,8 @@ static bool SerializeVal(Shared::JsonRef val, std::string& carry)
 
 void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
 {
-    FatalIfCommitted("SendTemplate");
+    if(RejectIfCommitted("SendTemplate"))
+        return;
 
     auto meta = GetTemplateEngine().GetTemplate(std::move(path));
     if(!meta) {

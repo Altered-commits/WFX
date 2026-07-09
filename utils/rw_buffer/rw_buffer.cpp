@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "rw_buffer.hpp"
 #include "utils/diagnostics/logger.hpp"
 
@@ -131,13 +134,15 @@ bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uin
 
     auto* meta = reinterpret_cast<RWBaseMetadata*>(buffer);
 
-    if(meta->dataLength < meta->bufferSize)
-        return true;
-
+    // Already at the ceiling, cannot hand out any more room
     if(meta->bufferSize >= maxSize)
         return false;
 
-    std::uint32_t newSize = meta->bufferSize + growSize;
+    // Advance one growSize step. growSize == 0 is treated as "jump straight to the ceiling" so a-
+    // -caller looping on this (serialize retry, region-full read) can never spin without making-
+    // -progress. Computed in 64-bit so bufferSize + growSize can't wrap a uint32 and hand back a-
+    // -newSize smaller than the current buffer, which would silently shrink and truncate the data
+    std::uint64_t newSize = growSize ? static_cast<std::uint64_t>(meta->bufferSize) + growSize : maxSize;
     if(newSize > maxSize)
         newSize = maxSize;
 
@@ -152,7 +157,7 @@ bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uin
     buffer = newBuf;
 
     meta = reinterpret_cast<RWBaseMetadata*>(buffer);
-    meta->bufferSize = newSize;
+    meta->bufferSize = static_cast<std::uint32_t>(newSize);
 
     return true;
 }
@@ -165,11 +170,41 @@ bool RWBuffer::GenericAppendData(char*& buffer, std::uint32_t metaSize, const ch
 
     auto* meta = reinterpret_cast<RWBaseMetadata*>(buffer);
 
-    while(size > meta->bufferSize - meta->dataLength) {
-        if(!GenericGrowBuffer(buffer, metaSize, growSize, maxSize))
+    // Total capacity this append needs. 64-bit so dataLength + size can't wrap a uint32
+    std::uint64_t required = static_cast<std::uint64_t>(meta->dataLength) + size;
+
+    if(required > meta->bufferSize) {
+        // Won't fit even fully grown, refuse rather than truncate
+        if(required > maxSize)
             return false;
 
+        // Grow to fit in a SINGLE realloc, rounding the target up to a whole number of growSize-
+        // -steps above the current size so back-to-back appends amortize (growSize == 0 grows to-
+        // -exactly what's needed), then clamp to the ceiling. required <= maxSize checked above-
+        // -guarantees the clamp still leaves room for this append
+        std::uint64_t newSize{0};
+
+        if(growSize == 0)
+            newSize = required;
+        else {
+            std::uint64_t deficit = required - meta->bufferSize;
+            std::uint64_t steps = (deficit + growSize - 1) / growSize;
+            newSize = static_cast<std::uint64_t>(meta->bufferSize) + steps * growSize;
+        }
+
+        if(newSize > maxSize)
+            newSize = maxSize;
+
+        auto& pool = GetBufferPool();
+        std::uint32_t allocSize = static_cast<std::uint32_t>(metaSize + newSize);
+
+        char* newBuf = static_cast<char*>(pool.Realloc(buffer, allocSize));
+        if(!newBuf)
+            return false;
+
+        buffer = newBuf;
         meta = reinterpret_cast<RWBaseMetadata*>(buffer);
+        meta->bufferSize = static_cast<std::uint32_t>(newSize);
     }
 
     char* dest = buffer + metaSize + meta->dataLength;

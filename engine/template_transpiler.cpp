@@ -1,10 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "template_engine.hpp"
 #include "config/config.hpp"
 #include "shared/utils/hash.hpp"
 #include "shared/utils/compiler_macro.hpp"
-#include "utils/process/process.hpp"
 #include "utils/string/string.hpp"
-#include <numeric>
 #include <bit>
 
 namespace WFX::Core {
@@ -81,28 +82,36 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(TranspilationContext& ctx
                 return TagResult::FAILURE;
             }
 
-            // Add a JUMP op (to jump to 'endif' if the previous 'if' was true)
-            // This JUMP also needs patching
+            // Add a JUMP op (end-of-true-branch skip to endif, patched later by endif)
             std::uint32_t jumpOpIndex = static_cast<std::uint32_t>(ir.size());
             ir.push_back({
                 OpType::JUMP, true,
                 std::uint32_t(0) // Payload is jump_state
             });
-            offsetPatchStack.back().push_back(jumpOpIndex);
 
-            // Patch all previous IF/ELIF/JUMP ops in the current frame to jump here
-            for(auto idx : offsetPatchStack.back()) {
+            // elifPos is where the ELIF op will be placed (right after the JUMP)
+            std::uint32_t elifPos = static_cast<std::uint32_t>(ir.size());
+
+            // Patch only IF/ELIF ops in the current frame to jump to elifPos
+            // JUMP ops stay in the patchStack (they must be patched to ENDIF by the ENDIF handler)
+            auto& frame = offsetPatchStack.back();
+            for(auto idx : frame) {
                 auto& prevOp = ir[idx];
-                prevOp.patch = false;
-
                 if(prevOp.type == OpType::IF || prevOp.type == OpType::ELIF) {
-                    auto& cond = std::get<ConditionalValue>(prevOp.payload);
-                    cond.first = static_cast<std::uint32_t>(ir.size());
+                    prevOp.patch = false;
+                    std::get<ConditionalValue>(prevOp.payload).first = elifPos;
                 }
-                else if(prevOp.type == OpType::JUMP)
-                    prevOp.payload = static_cast<std::uint32_t>(ir.size());
             }
-            offsetPatchStack.back().clear();
+
+            // Remove the IF/ELIF entries; keep any surviving JUMPs for ENDIF
+            frame.erase(std::remove_if(frame.begin(), frame.end(),
+                                       [&](std::uint32_t i) {
+                                           return ir[i].type == OpType::IF || ir[i].type == OpType::ELIF;
+                                       }),
+                        frame.end());
+
+            // The new JUMP must also be patched to ENDIF
+            frame.push_back(jumpOpIndex);
 
             // Parse this 'elif's expression
             auto [success, exprIndex] = ParseExpr(ctx, tagArgs);
@@ -137,21 +146,25 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(TranspilationContext& ctx
             // Get the index of the 'else' block
             std::uint32_t elseStateNum = static_cast<std::uint32_t>(ir.size());
 
-            // Patch all previous 'if' and 'elif' ops to jump to this 'else' block
-            for(std::uint32_t idx : offsetPatchStack.back()) {
+            // Patch only IF/ELIF ops in the current frame to jump to the else block
+            // JUMP ops (end-of-branch skips from previous elif bodies) are left for ENDIF
+            auto& elseFrame = offsetPatchStack.back();
+            for(std::uint32_t idx : elseFrame) {
                 auto& op = ir[idx];
-                op.patch = false;
-
-                if(op.type == OpType::IF || op.type == OpType::ELIF)
+                if(op.type == OpType::IF || op.type == OpType::ELIF) {
+                    op.patch = false;
                     std::get<ConditionalValue>(op.payload).first = elseStateNum;
-                else if(op.type == OpType::JUMP)
-                    op.payload = elseStateNum; // Set the std::uint32_t payload
+                }
             }
 
-            // Clear the stack, but add the new JUMP op index-
-            // -as its the only one that needs to be patched by 'endif'
-            offsetPatchStack.back().clear();
-            offsetPatchStack.back().push_back(jumpOpIndex);
+            // Remove IF/ELIF; keep surviving JUMPs and add this new JUMP for ENDIF
+            elseFrame.erase(std::remove_if(elseFrame.begin(), elseFrame.end(),
+                                           [&](std::uint32_t i) {
+                                               return ir[i].type == OpType::IF || ir[i].type == OpType::ELIF;
+                                           }),
+                            elseFrame.end());
+
+            elseFrame.push_back(jumpOpIndex);
 
             // Add the ELSE marker op
             ir.push_back({
@@ -163,7 +176,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTagIR(TranspilationContext& ctx
         case TagType::ENDIF: {
             if(offsetPatchStack.empty()) {
                 logger_.Error("[TemplateEngine].[CodeGen:IR]: Found 'endif' without 'if'");
-                return {};
+                return TagResult::FAILURE;
             }
 
             std::uint32_t endState = static_cast<std::uint32_t>(ir.size());

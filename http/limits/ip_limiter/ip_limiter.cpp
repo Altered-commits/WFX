@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2025-2026 Altered-commits
+
 #include "ip_limiter.hpp"
 
 #include "config/config.hpp"
@@ -71,8 +74,12 @@ void IpLimiter::ReleaseConnection(const WFXIpAddress& ip)
     bool shouldErase = false;
     auto* entry = ipLimits_.Get(key);
 
-    if(entry)
-        shouldErase = --(entry->connectionCount) <= 0;
+    if(entry) {
+        // connectionCount is unsigned: never decrement past zero, or an unbalanced release-
+        // -would wrap it to ~4 billion and permanently ban the IP. Erase once it reaches zero
+        entry->connectionCount -= (entry->connectionCount > 0);
+        shouldErase = (entry->connectionCount == 0);
+    }
 
     if(shouldErase)
         ipLimits_.Erase(key);
