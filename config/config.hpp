@@ -54,6 +54,7 @@ struct ENVConfig {
 struct SSLConfig {
     std::string certPath;
     std::string keyPath;
+    std::string caCertPath;
 
     std::string tls13Ciphers = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
 
@@ -63,11 +64,13 @@ struct SSLConfig {
 
     std::string curves = "X25519:P-256"; // Elliptic curves preference
 
-    bool enableSessionCache = true;
+    bool enableServerSessionCache = true;
+    bool enableClientSessionCache = true;
     bool enableKTLS = false;
     std::uint8_t minProtoVersion = 2; // 1-> TLSv1.1; 2-> TLSv1.2; 3 -> TLSv1.3
     int securityLevel = 2;            // OpenSSL security level (0-5)
-    std::size_t sessionCacheSize = 32 * 1024;
+    std::size_t serverSessionCacheSize = 4 * 1024;
+    std::size_t clientSessionCacheSize = 1 * 1024;
 };
 
 struct OSSpecificConfig {

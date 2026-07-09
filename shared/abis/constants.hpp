@@ -11,12 +11,20 @@ namespace WFX::Shared {
 // Constants used in helper functions
 constexpr StringView SV_GET{"GET", 3};
 constexpr StringView SV_POST{"POST", 4};
+constexpr StringView SV_PUT{"PUT", 3};
+constexpr StringView SV_DELETE{"DELETE", 6};
+constexpr StringView SV_PATCH{"PATCH", 5};
+constexpr StringView SV_HEAD{"HEAD", 4};
+constexpr StringView SV_OPTIONS{"OPTIONS", 7};
+constexpr StringView SV_CONNECT{"CONNECT", 7};
+constexpr StringView SV_TRACE{"TRACE", 5};
 constexpr StringView SV_HTTP10{"HTTP/1.0", 8};
 constexpr StringView SV_HTTP11{"HTTP/1.1", 8};
 constexpr StringView SV_HTTP20{"HTTP/2.0", 8};
 
-// We will keep it quite simple, only GET and POST support for now
-enum class HttpMethod : std::uint8_t { GET = 0, POST, UNKNOWN };
+// GET/POST are the inbound router's supported methods; PUT..TRACE are additive and only-
+// -meaningful to the outbound WFX::HttpEndpoint (Shared::HttpMethodToStringView below)
+enum class HttpMethod : std::uint8_t { GET = 0, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, CONNECT, TRACE, UNKNOWN };
 
 // HTTP Status Codes (common subset)
 enum class HttpStatus : std::uint16_t {
@@ -244,8 +252,49 @@ static inline HttpMethod HttpMethodToEnum(StringView method)
         return HttpMethod::GET;
     if(method.Equals(SV_POST))
         return HttpMethod::POST;
+    if(method.Equals(SV_PUT))
+        return HttpMethod::PUT;
+    if(method.Equals(SV_DELETE))
+        return HttpMethod::DELETE;
+    if(method.Equals(SV_PATCH))
+        return HttpMethod::PATCH;
+    if(method.Equals(SV_HEAD))
+        return HttpMethod::HEAD;
+    if(method.Equals(SV_OPTIONS))
+        return HttpMethod::OPTIONS;
+    if(method.Equals(SV_CONNECT))
+        return HttpMethod::CONNECT;
+    if(method.Equals(SV_TRACE))
+        return HttpMethod::TRACE;
 
     return HttpMethod::UNKNOWN;
+}
+
+// Used by the outbound WFX::HttpClient to write the request line's method token
+static inline StringView HttpMethodToStringView(HttpMethod method)
+{
+    switch(method) {
+        case HttpMethod::GET:
+            return SV_GET;
+        case HttpMethod::POST:
+            return SV_POST;
+        case HttpMethod::PUT:
+            return SV_PUT;
+        case HttpMethod::DELETE:
+            return SV_DELETE;
+        case HttpMethod::PATCH:
+            return SV_PATCH;
+        case HttpMethod::HEAD:
+            return SV_HEAD;
+        case HttpMethod::OPTIONS:
+            return SV_OPTIONS;
+        case HttpMethod::CONNECT:
+            return SV_CONNECT;
+        case HttpMethod::TRACE:
+            return SV_TRACE;
+        default:
+            return SV_GET;
+    }
 }
 
 static inline HttpVersion HttpVersionToEnum(StringView version)

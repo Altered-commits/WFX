@@ -10,8 +10,86 @@
 #include "renders.hpp"
 #include "http/request.hpp"
 #include <array>
+#include <cctype>
+#include <cstdint>
+#include <string_view>
 
 namespace WFX::Form {
+
+// Inline, header-only (user .so builds can't link non-inline engine utils)
+namespace Detail {
+
+constexpr std::uint8_t HexNibble(std::uint8_t c) noexcept
+{
+    std::uint8_t lo = static_cast<std::uint8_t>(c - '0');
+    std::uint8_t hi = static_cast<std::uint8_t>((c | 0x20) - 'a');
+    bool isDigit = lo < 10;
+    bool isHex = hi < 6;
+    return isDigit ? lo : (isHex ? static_cast<std::uint8_t>(hi + 10) : std::uint8_t{0xFF});
+}
+
+inline std::uint8_t ToLowerAscii(std::uint8_t c) noexcept
+{
+    return (c >= 'A' && c <= 'Z') ? static_cast<std::uint8_t>(c | 0x20) : c;
+}
+
+inline bool InsensitiveEquals(std::string_view a, std::string_view b) noexcept
+{
+    if(a.size() != b.size())
+        return false;
+
+    for(std::size_t i = 0; i < a.size(); ++i)
+        if(ToLowerAscii(static_cast<std::uint8_t>(a[i])) != ToLowerAscii(static_cast<std::uint8_t>(b[i])))
+            return false;
+
+    return true;
+}
+
+inline std::string_view TrimAscii(std::string_view sv) noexcept
+{
+    std::size_t start = 0;
+    std::size_t end = sv.size();
+
+    while(start < end && std::isspace(static_cast<unsigned char>(sv[start])))
+        ++start;
+    while(end > start && std::isspace(static_cast<unsigned char>(sv[end - 1])))
+        --end;
+
+    return sv.substr(start, end - start);
+}
+
+// Rejects on a malformed %XX escape instead of silently passing bad bytes through
+inline bool DecodePercentInplace(std::string_view& buf) noexcept
+{
+    if(buf.empty())
+        return true;
+
+    char* data = const_cast<char*>(buf.data());
+    std::size_t len = buf.size();
+    std::size_t out = 0;
+
+    for(std::size_t i = 0; i < len; ++i) {
+        if(data[i] == '%' && i + 2 < len) {
+            std::uint8_t hi = HexNibble(static_cast<std::uint8_t>(data[i + 1]));
+            std::uint8_t lo = HexNibble(static_cast<std::uint8_t>(data[i + 2]));
+
+            if(hi == 0xFF || lo == 0xFF)
+                return false;
+
+            data[out++] = static_cast<char>((hi << 4) | lo);
+            i += 2;
+        }
+        else if(data[i] == '+')
+            data[out++] = ' ';
+        else
+            data[out++] = data[i];
+    }
+
+    buf = std::string_view(data, out);
+    return true;
+}
+
+} // namespace Detail
 
 // vvv Field Builders vvv
 template <typename Rule> class FieldBuilder {
@@ -122,10 +200,10 @@ public: // Main Functions
 
         // Content-Type can contain multiple fields seperated by ';'
         // What we need is the initial one
-        auto ct = Utils::TrimView(contentType.substr(0, contentType.find(';')));
+        auto ct = Detail::TrimAscii(contentType.substr(0, contentType.find(';')));
 
         // In memory simple form
-        if(Utils::StringCanonical::InsensitiveStringCompare(ct, "application/x-www-form-urlencoded"))
+        if(Detail::InsensitiveEquals(ct, "application/x-www-form-urlencoded"))
             return ParseStatic(req.Body(), out);
 
         // Other types of forms are not supported for now
@@ -178,7 +256,7 @@ private: // Helper Functions
                 return false;
 
             // Decode value in place
-            if(!Utils::StringCanonical::DecodePercentInplace(value))
+            if(!Detail::DecodePercentInplace(value))
                 return false;
 
             out[fieldIdx++] = value;

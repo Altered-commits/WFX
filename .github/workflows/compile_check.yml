@@ -1,19 +1,13 @@
 name: WFX Compile Check
 
+# Reusable: invoked by entry.yml AFTER the format check, so this file owns-
+# -ONLY the build logic
 on:
-  push:
-    branches: [dev]
-  pull_request:
-    branches: [dev, main]
+  workflow_call:
 
 jobs:
-  ci_filter:
-    uses: ./.github/workflows/ci_filter.yml
-
   build:
     name: Linux (${{ matrix.compiler }})
-    needs: ci_filter
-    if: needs.ci_filter.outputs.should_run == '1'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -28,7 +22,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install Dependencies
       run: |
@@ -37,7 +31,7 @@ jobs:
 
     # Save the entire build directory cuz i cannot waste github run 'time', i'm poor
     - name: Restore build/ cache
-      uses: actions/cache@v3
+      uses: actions/cache@v6
       with:
         path: build
         key: build-${{ matrix.compiler }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
@@ -54,25 +48,12 @@ jobs:
     - name: Build
       run: cmake --build build
 
-  # Collector
-  ci-success:
-    name: WFX Linux Build Success
-    runs-on: ubuntu-latest
-    if: always()
-    needs: [build, ci_filter] # Wait for the 'build' matrix to finish and 'ci_filter' output
-    steps:
-      - name: Check Status
-        run: |
-          # If filter returned 0, we skipped build, treat as success
-          if [[ "${{ needs.ci_filter.outputs.should_run }}" == "0" ]]; then
-            echo "Build skipped by filter. Marking as success."
-            exit 0
-          fi
-
-          # If we ran, check for failures in the matrix
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
-            echo "Build matrix failed."
-            exit 1
-          fi
-
-          echo "All builds passed!"
+    # Hands the wfx binary to audit_check.yml so it never has to compile. Only the-
+    # -binary, include/ and shared/ are tracked source already in its checkout.
+    - name: Upload wfx binary for the audit stage
+      if: matrix.compiler == 'gcc'
+      uses: actions/upload-artifact@v7
+      with:
+        name: wfx-binary
+        path: wfx
+        retention-days: 1

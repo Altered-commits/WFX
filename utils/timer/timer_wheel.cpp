@@ -8,7 +8,7 @@
 namespace WFX::Utils {
 
 // vvv User Functions vvv
-void TimerWheel::Init(std::uint32_t capacity, std::uint32_t wheelSlots, std::uint32_t tickVal, TimeUnit unit,
+void TimerWheel::Init(std::uint32_t capacity, std::uint16_t wheelSlots, std::uint32_t tickVal, TimeUnit unit,
                       OnExpireCallback onExpire)
 {
     auto& logger = GetLogger();
@@ -41,6 +41,15 @@ void TimerWheel::Reinit(std::uint32_t capacity)
 {
     cap_ = capacity;
     meta_.assign(cap_, SlotMeta{});
+}
+
+void TimerWheel::Expand(std::uint32_t extraCapacity)
+{
+    if(extraCapacity == 0)
+        return;
+
+    cap_ += extraCapacity;
+    meta_.resize(cap_, SlotMeta{});
 }
 
 void TimerWheel::SetTick(std::uint32_t val, TimeUnit unit)

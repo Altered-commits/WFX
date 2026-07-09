@@ -16,6 +16,10 @@ struct Response;
 
 namespace WFX::Shared {
 
+// Forward declare stuff
+enum class ConnectResult : std::uint8_t;
+enum class EndpointStatus : std::uint8_t;
+
 // vvv Middleware Enums vvv
 enum class MiddlewareLevel : std::uint8_t { GLOBAL = 0, PER_ROUTE };
 
@@ -37,7 +41,12 @@ enum class AsyncStatus : std::uint8_t {
 struct AsyncResult {
     void* data;
     std::uint32_t dataLen;
-    MiddlewareAction action; // CONTINUE for non-middleware
+    union {
+        MiddlewareAction action;       // CONTINUE for non-middleware
+        ConnectResult connectResult;   // Set by Promise<ConnectResult> on final_suspend
+        EndpointStatus endpointStatus; // Set by ReleaseEndpoint and HandleEndpointReceive on client failure
+        std::uint8_t unused;           // Filler when none of the above apply (e.g. endpoint success)
+    };
     AsyncStatus status;
 };
 static_assert(sizeof(AsyncResult) == 16, "'AsyncResult' must be exactly 16 bytes.");
@@ -132,20 +141,150 @@ enum class EndpointStatus : std::uint8_t {
     POOL_EXHAUSTED, // All endpoints in use
 
     // Socket errors
-    SOCKET_FAILURE,  // Not created, options not set, etc
-    CONNECT_FAILURE, // Failed to connect to endpoint
+    SOCKET_FAILURE,  // Local socket creation or configuration failed (before ever reaching connect())
+    CONNECT_FAILURE, // connect() itself failed
     SSL_FAILURE,     // Client not created, Handshake failed, etc
 
     // Generic errors
-    INTERNAL_ERROR // Something went wrong
+    INTERNAL_ERROR,    // Something went wrong
+    SERIALIZE_ERROR,   // desc.serialize returned SerializeResult::ERROR
+    EPOLL_ERROR,       // RegisterEpoll(MOD) failed on reused slot
+    HANDSHAKE_TIMEOUT, // TCP connect / TLS handshake / onConnect coroutine exceeded connectTimeoutSeconds
+    REQUEST_TIMEOUT,   // Did not get response within requestTimeoutSeconds
 };
 
-// Endpoint enum
 enum class EndpointTLSConfig : std::uint8_t {
-    AUTO = 0,      // TLS automatically on some preconfigured ports
-    FORCE_REQUIRE, // Force TLS (Port doesn't matter)
-    FORCE_INSECURE // Explicitly allow no TLS even on secure ports
+    AUTO = 0,       // TLS automatically on some preconfigured ports
+    FORCE_REQUIRE,  // Force TLS (port doesn't matter)
+    FORCE_INSECURE, // Explicitly allow no TLS even on secure ports
 };
+
+enum class ConnectResult : std::uint8_t {
+    READY, // Handshake complete, slot may enter pool
+    RETRY, // Transient failure, engine will reconnect with backoff
+    FATAL  // Permanent failure, slot is discarded
+};
+
+enum class DisconnectReason : std::uint8_t {
+    TIMEOUT,           // Idle or in-flight request timeout elapsed
+    HANDSHAKE_TIMEOUT, // Timeout elapsed while still connecting (TCP connect / TLS handshake / onConnect)
+    ERROR              // I/O or protocol error, or any other close not covered above
+};
+
+enum class SlotSendResult : std::uint8_t {
+    OK,   // Written and flushed immediately
+    ERROR // Fatal write failure
+};
+
+enum class SlotReceiveStatus : std::uint8_t {
+    OK,   // Data arrived, buffer pointer and length are valid
+    ERROR // Fatal read failure
+};
+
+enum class SerializeResult : std::uint8_t {
+    OK,               // Serialized successfully
+    BUFFER_TOO_SMALL, // Output buffer insufficient, engine may retry with larger buffer
+    ERROR             // Unrecoverable serialization failure
+};
+
+enum class ParseResult : std::uint8_t {
+    INCOMPLETE,          // Need more bytes, call again when data arrives
+    COMPLETE_KEEP_ALIVE, // Full message received, slot returns to pool
+    COMPLETE_CLOSE,      // Full message received, slot must close after delivery
+    ERROR                // Unrecoverable parse failure
+};
+
+// Reserved slot-close hook, currently unused (nullptr) by the engine
+// Present for ABI symmetry with the rest of EndpointSlotHandle
+using EndpointSlotCloseFn = void (*)(void* endpointCtx);
+// Returns the ALPN protocol negotiated on this slot's TLS connection
+// Empty if not TLS or the handshake hasn't completed yet
+using EndpointNegotiatedProtocolFn = StringView (*)(void* endpointCtx);
+
+// Send/Receive go through the endpoint API (SlotSend/SlotReceive) directly,-
+// -SlotHandle::Send/Receive call those rather than a per-slot function pointer here
+struct EndpointSlotHandle {
+    void* impl;
+    EndpointSlotCloseFn Close;
+    EndpointNegotiatedProtocolFn NegotiatedProtocol;
+};
+static_assert(sizeof(EndpointSlotHandle) == 24, "'EndpointSlotHandle' must be exactly 24 bytes.");
+static_assert(std::is_standard_layout_v<EndpointSlotHandle>, "'EndpointSlotHandle' must be standard layout");
+
+// Writes req's wire encoding into buf; streamKey is only used when hasCapacity is set-
+// -(the key this request should be tracked under, e.g. an HTTP/2 stream id), else left at 0
+using EndpointSerializeFn = SerializeResult (*)(void* slotState, const void* req, char* buf, std::uint32_t bufLen,
+                                                std::uint32_t* written, std::uint64_t* streamKey);
+// Reads arriving bytes for one slot; isEof forbids returning INCOMPLETE (no more bytes coming)
+// completedKey is 0 unless hasCapacity is set, in which case non-zero means that stream is done
+using EndpointParseFn = ParseResult (*)(void* slotState, void* parseState, const char* buf, std::uint32_t len,
+                                        std::uint32_t* consumed, void* outObj, bool isEof, std::uint64_t* completedKey);
+// Runs once per connection before it enters the pool (auth handshakes, etc.)
+// Must eventually call onDone with a ConnectResult via onDoneUd
+using EndpointOnConnectFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone,
+                                     void* onDoneUd);
+// Fires when a slot is torn down, before slotState is destroyed
+// reason distinguishes drain / idle-timeout / error
+using EndpointOnDisconnectFn = void (*)(void* slotState, DisconnectReason reason);
+// Allocates per-slot or per-request state (ctx is userCtx for slots, slotState for requests)
+// Paired with the matching EndpointDestroyStateFn
+using EndpointCreateStateFn = void* (*)(void* ctx);
+// Frees state allocated by the matching EndpointCreateStateFn
+// Called on request completion or slot teardown
+using EndpointDestroyStateFn = void (*)(void* state);
+// Clears parse state for reuse between keep-alive requests on the same slot
+// Only called when non-null; otherwise the engine destroys and recreates it
+using EndpointResetStateFn = void (*)(void* parseState);
+// Computes a dedup key for req; identical keys share one in-flight backend request
+// Return 0 to opt this request out of coalescing
+using EndpointCoalesceKeyFn = std::uint64_t (*)(const void* req);
+// Returns a freshly allocated deep clone of srcOutput, or null on allocation failure
+// Required when coalesceKey is set (each coalesced waiter receives its own owned clone)
+using EndpointCloneOutputFn = void* (*)(void* slotState, const void* srcOutput);
+// Null = slot is exclusively single-request (today's behavior)
+// Non-null = engine may hand this busy slot another request when this returns true
+using EndpointHasCapacityFn = bool (*)(void* slotState);
+// Claims a multiplexed stream's finished output (completed or being abandoned early)
+// Returns null if unfinished; protocol must free any partial internal state for that key
+using EndpointTakeStreamOutputFn = void* (*)(void* slotState, std::uint64_t key);
+
+struct EndpointDesc {
+    EndpointSerializeFn serialize;
+    EndpointParseFn parse;
+    EndpointOnConnectFn onConnect;               // nullable, skipped for simple protocols (Redis, etc)
+    EndpointOnDisconnectFn onDisconnect;         // nullable
+    EndpointCreateStateFn createSlotState;       // nullable
+    EndpointDestroyStateFn destroySlotState;     // nullable
+    EndpointCreateStateFn createParseState;      // nullable, takes slotState as ctx
+    EndpointDestroyStateFn destroyParseState;    // nullable
+    EndpointResetStateFn resetParseState;        // nullable, called between requests if non-null
+    EndpointCreateStateFn createOutput;          // nullable, takes slotState as ctx
+    EndpointDestroyStateFn destroyOutput;        // nullable
+    EndpointCoalesceKeyFn coalesceKey;           // nullable, no coalescing if null
+    EndpointCloneOutputFn cloneOutput;           // nullable, REQUIRED when coalesceKey is set
+    EndpointHasCapacityFn hasCapacity;           // nullable, non-null enables multiplexed slot sharing
+    EndpointTakeStreamOutputFn takeStreamOutput; // nullable, REQUIRED when hasCapacity is set
+    void* userCtx;                               // injected into createSlotState
+};
+static_assert(sizeof(EndpointDesc) == 128, "'EndpointDesc' must be exactly 128 bytes.");
+static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be standard layout");
+
+struct EndpointConfig {
+    std::uint32_t connLimit;             // Max simultaneous connections in the slot pool
+    std::uint32_t dnsRefreshSeconds;     // 0 = respect actual DNS TTL, N = override with N seconds
+    std::uint16_t connectTimeoutSeconds; // TCP+TLS+onConnect must complete within this window
+    std::uint16_t requestTimeoutSeconds; // Send+receive cycle must complete within this window
+    std::uint32_t idleTimeoutSeconds;    // Idle slots are closed after this many seconds
+    std::uint16_t maxReconnectAttempts;  // Max backoff attempts before slot is marked FATAL
+    std::uint16_t reconnectBackoffBase;  // Initial backoff seconds
+    std::uint16_t reconnectBackoffMax;   // Backoff cap seconds
+    EndpointTLSConfig tlsConfig;         // TLS mode for this endpoint
+    std::uint32_t prewarm;               // Slots to connect eagerly on first epoll loop iteration
+    std::uint32_t maxConcurrentStreams;  // Cap on requests sharing one slot; 0/1 = exclusive slot
+    StringView alpnProtocols;            // Wire-encoded ALPN list; empty = offer http/1.1 only
+};
+static_assert(sizeof(EndpointConfig) == 48, "'EndpointConfig' must be exactly 48 bytes.");
+static_assert(std::is_standard_layout_v<EndpointConfig>, "'EndpointConfig' must be standard layout");
 
 // vvv Server Metrics vvv
 // IMPORTANT: DO NOT CHANGE THE ORDER OF THESE METRICS, 'logger.hpp' depends on the order
@@ -170,7 +309,8 @@ struct NetworkMetrics {
     std::uint64_t fileCalls = 0;
     std::uint64_t fileFallbacks = 0;
     std::uint64_t fileBytesWritten = 0;
-    std::uint64_t activeConns = 0;
+    std::uint64_t activeClientConns = 0;
+    std::uint64_t activeEndpointConns = 0;
     std::uint64_t requests = 0;
     std::uint64_t response1xx = 0;
     std::uint64_t response2xx = 0;
@@ -178,7 +318,7 @@ struct NetworkMetrics {
     std::uint64_t response4xx = 0;
     std::uint64_t response5xx = 0;
 };
-static_assert(sizeof(NetworkMetrics) == 120, "'NetworkMetrics' must be exactly 120 bytes");
+static_assert(sizeof(NetworkMetrics) == 128, "'NetworkMetrics' must be exactly 128 bytes");
 static_assert(std::is_standard_layout_v<NetworkMetrics>, "'NetworkMetrics' must be standard layout");
 
 // Written by master process, reflects live state of each worker slot

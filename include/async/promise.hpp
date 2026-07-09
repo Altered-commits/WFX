@@ -140,6 +140,57 @@ public:
     Task<Shared::MiddlewareAction> get_return_object();
 };
 
+// Promise<ConnectResult> specialization (onConnect coroutines)
+template <> struct Promise<Shared::ConnectResult> : BasePromise {
+    AsyncStatus status_ = AsyncStatus::NONE;
+    Shared::ConnectResult value_ = Shared::ConnectResult::FATAL;
+
+public:
+    void return_value(Shared::ConnectResult v) noexcept
+    {
+        value_ = v;
+        status_ = AsyncStatus::COMPLETED;
+    }
+
+    void unhandled_exception() noexcept
+    {
+        status_ = AsyncStatus::INTERNAL_FAILURE;
+    }
+
+    auto final_suspend() noexcept
+    {
+        struct Completion {
+            Promise* p;
+
+            bool await_ready() noexcept
+            {
+                return false;
+            }
+
+            void await_suspend(std::coroutine_handle<> h) noexcept
+            {
+                AsyncResult result{nullptr, 0, {}, p->status_};
+                result.connectResult = p->value_;
+
+                auto cb = p->onDone_;
+                auto ud = p->onDoneUd_;
+
+                h.destroy();
+
+                if(cb)
+                    cb(ud, result);
+            }
+
+            void await_resume() noexcept
+            {}
+        };
+
+        return Completion{this};
+    }
+
+    Task<Shared::ConnectResult> get_return_object();
+};
+
 } // namespace WFX::Async
 
 #endif // WFX_INC_CXX_ASYNC_PROMISE_HPP

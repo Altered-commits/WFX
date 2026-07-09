@@ -20,6 +20,7 @@ using ReturnType = ssize_t;
 #endif // _WIN32
 
 #include <cstdint>
+#include <string_view>
 
 namespace WFX::Http {
 
@@ -32,13 +33,16 @@ struct SSLResult {
 };
 
 // Interface around SSL implementations
-class HttpWFXSSL {
-public:
+struct HttpWFXSSL {
     virtual ~HttpWFXSSL() = default;
 
     // Wrap a socket and return opaque handle
     virtual void* Wrap(SSLSocket fd) = 0;
-    virtual void* WrapClient(SSLSocket fd, const char* host) = 0;
+    // alpnList is a wire-encoded ALPN protocol list (same encoding as the engine's hardcoded-
+    // -default); empty = offer hardcoded default (http/1.1 only)
+    virtual void* WrapClient(SSLSocket fd, const char* host, std::string_view alpnList = {}) = 0;
+    // Empty if the handshake hasn't completed or the peer didn't negotiate ALPN at all
+    virtual std::string_view NegotiatedProtocol(void* conn) = 0;
 
     // Handshake; returns true if done
     virtual SSLReturn Handshake(void* conn) = 0;

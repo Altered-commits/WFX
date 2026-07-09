@@ -87,7 +87,8 @@ Shared::NetworkMetrics AggregateNetwork() noexcept
         out.writes += n.writes;
         out.bytesRead += n.bytesRead;
         out.bytesWritten += n.bytesWritten;
-        out.activeConns += n.activeConns;
+        out.activeClientConns += n.activeClientConns;
+        out.activeEndpointConns += n.activeEndpointConns;
         out.fileCalls += n.fileCalls;
         out.fileFallbacks += n.fileFallbacks;
         out.fileBytesWritten += n.fileBytesWritten;

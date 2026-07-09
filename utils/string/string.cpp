@@ -112,36 +112,6 @@ std::string NormalizePathToIdentifier(std::string_view path, std::string_view pr
     return result;
 }
 
-bool DecodePercentInplace(std::string_view& buf) noexcept
-{
-    if(buf.empty())
-        return true;
-
-    char* data = const_cast<char*>(buf.data());
-    std::size_t len = buf.size();
-    std::size_t out = 0;
-
-    for(std::size_t i = 0; i < len; ++i) {
-        if(data[i] == '%' && i + 2 < len) {
-            std::uint8_t hi = UInt8FromHexChar(static_cast<std::uint8_t>(data[i + 1]));
-            std::uint8_t lo = UInt8FromHexChar(static_cast<std::uint8_t>(data[i + 2]));
-
-            if(hi == 0xFF || lo == 0xFF)
-                return false;
-
-            data[out++] = static_cast<char>((hi << 4) | lo);
-            i += 2;
-        }
-        else if(data[i] == '+')
-            data[out++] = ' ';
-        else
-            data[out++] = data[i];
-    }
-
-    buf = std::string_view(data, out);
-    return true;
-}
-
 // vvv Conversions vvv
 std::uint8_t ToLowerAscii(std::uint8_t c) noexcept
 {

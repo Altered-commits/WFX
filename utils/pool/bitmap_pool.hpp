@@ -111,7 +111,6 @@ public: // vvv Main Functions vvv
                 bitmap_[w] |= 1ULL << bit;
                 lastUsedIndex_ = w;
                 return &pool_[(w << 6) + bit];
-                ;
             }
         }
 
@@ -123,6 +122,13 @@ public: // vvv Main Functions vvv
         std::uint32_t w = idx >> 6;
         std::uint32_t bit = idx & 63;
         bitmap_[w] &= ~(1ULL << bit);
+    }
+
+    bool IsAllocated(std::uint32_t idx) const
+    {
+        std::uint32_t w = idx >> 6;
+        std::uint32_t bit = idx & 63;
+        return (bitmap_[w] & (1ULL << bit)) != 0;
     }
 
     std::uint32_t GetSlots()

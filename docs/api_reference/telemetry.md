@@ -101,7 +101,8 @@ struct NetworkMetrics {
     uint64_t fileCalls;         // total successful file send syscalls
     uint64_t fileFallbacks;     // file sends that fell back to streaming (SSL only, Linux)
     uint64_t fileBytesWritten;  // total bytes sent via file sends
-    uint64_t activeConns;       // connections currently open
+    uint64_t activeClientConns;   // inbound client connections currently open
+    uint64_t activeEndpointConns; // outbound endpoint connections currently open
     uint64_t requests;          // total HTTP requests parsed
     uint64_t response1xx;       // responses with 1xx status
     uint64_t response2xx;       // responses with 2xx status
@@ -150,17 +151,18 @@ WFX_GET("/metrics", [](WFX::Request req, WFX::Response res) {
     j.End();
 
     j.Obj("network");
-        j.Write("accepts",            net.accepts);
-        j.Write("bytes_read",         net.bytesRead);
-        j.Write("bytes_written",      net.bytesWritten);
-        j.Write("file_bytes_written", net.fileBytesWritten);
-        j.Write("active_conns",       net.activeConns);
-        j.Write("requests",           net.requests);
-        j.Write("response_1xx",       net.response1xx);
-        j.Write("response_2xx",       net.response2xx);
-        j.Write("response_3xx",       net.response3xx);
-        j.Write("response_4xx",       net.response4xx);
-        j.Write("response_5xx",       net.response5xx);
+        j.Write("accepts",               net.accepts);
+        j.Write("bytes_read",            net.bytesRead);
+        j.Write("bytes_written",         net.bytesWritten);
+        j.Write("file_bytes_written",    net.fileBytesWritten);
+        j.Write("active_client_conns",   net.activeClientConns);
+        j.Write("active_endpoint_conns", net.activeEndpointConns);
+        j.Write("requests",              net.requests);
+        j.Write("response_1xx",          net.response1xx);
+        j.Write("response_2xx",          net.response2xx);
+        j.Write("response_3xx",          net.response3xx);
+        j.Write("response_4xx",          net.response4xx);
+        j.Write("response_5xx",          net.response5xx);
     j.End();
 
     j.Obj("process");
@@ -188,7 +190,8 @@ WFX_GET("/metrics", [](WFX::Request req, WFX::Response res) {
        .Write("wfx_responses_2xx_total ").Write(net.response2xx).Write("\n")
        .Write("wfx_responses_4xx_total ").Write(net.response4xx).Write("\n")
        .Write("wfx_responses_5xx_total ").Write(net.response5xx).Write("\n")
-       .Write("wfx_active_connections ").Write(net.activeConns).Write("\n")
+       .Write("wfx_active_client_connections ").Write(net.activeClientConns).Write("\n")
+       .Write("wfx_active_endpoint_connections ").Write(net.activeEndpointConns).Write("\n")
        .Write("wfx_bytes_received_total ").Write(net.bytesRead).Write("\n")
        .Write("wfx_bytes_sent_total ").Write(net.bytesWritten + net.fileBytesWritten).Write("\n")
        .Write("wfx_log_errors_total ").Write(log.error).Write("\n")
@@ -198,6 +201,6 @@ WFX_GET("/metrics", [](WFX::Request req, WFX::Response res) {
 ```
 
 !!! note
-    - Metrics are monotonically increasing counters except `activeConns`, which reflects the current live connection count, and `SelfMetrics` fields which are written by the master process and reflect the live state of each worker slot at the last poll interval. Counters reset when the server restarts.
+    - Metrics are monotonically increasing counters except `activeClientConns` and `activeEndpointConns`, which reflect the current live connection counts, and `SelfMetrics` fields which are written by the master process and reflect the live state of each worker slot at the last poll interval. Counters reset when the server restarts.
     - The per-worker functions are useful for per-process dashboards or debugging worker imbalance. For production monitoring, prefer the `All` variants.
     - Total bytes sent is the sum of `bytesWritten` and `fileBytesWritten` since file sends use a separate syscall path.

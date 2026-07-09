@@ -4,6 +4,13 @@ WFX is a C++ web framework focused on performance and simplicity. It handles con
 
 It is still in active development. Things will change.
 
+!!! important
+    WFX currently only supports Linux, and this section of the docs describes
+    that implementation, including OS-specific mechanisms where the current
+    backend relies on them. A future port to another OS is free to implement
+    the same architectural shape (a coordinating process, independent workers,
+    no shared hot-path state) with entirely different primitives underneath.
+
 ---
 
 ## Core idea
@@ -12,24 +19,7 @@ WFX separates engine state from user code. The engine owns connections, buffers,
 
 This separation is what makes hot reload possible. When user code changes, the engine reloads the library without dropping connections or restarting workers.
 
----
-
-## Process model
-
-WFX uses a master/worker fork model.
-
-```
-Master Process
-    fork() x N
-        Worker 0  (event loop)
-        Worker 1  (event loop)
-        Worker 2  (event loop)
-        Worker 3  (event loop)
-```
-
-The master initializes everything then forks N worker processes. Each worker runs its own independent event loop. Workers do not share memory except for the metrics region, which is a shared `mmap` allocated before the fork.
-
-Each worker has its own connection pool, buffer pool, file cache, and logger. There is no synchronization between workers on the hot path.
+The engine itself runs as a coordinating process plus a fixed number of independent workers, each with its own event loop and no shared state on the hot path. See [Architecture](architecture.md) for exactly how that's implemented on the current (Linux) backend.
 
 ---
 

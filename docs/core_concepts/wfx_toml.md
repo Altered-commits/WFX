@@ -18,10 +18,10 @@ This page defines all supported `wfx.toml` configuration options in WFX.
 
 Project-level configuration. This section is **mandatory**.
 
-<pre class="code-format">
+```toml
 [Project]
 middleware_list = [] # Array of strings
-</pre>
+```
 
 - `middleware_list`*: Ordered list of middleware identifiers.
     - Order matters: middleware executes exactly in declaration order
@@ -35,12 +35,12 @@ middleware_list = [] # Array of strings
 This section of the configuration file controls how WFX manages builds for your project.  
 All values are **mandatory**.
 
-<pre class="code-format">
+```toml
 [Build]
 dir_name            = "build"          # String
 preferred_config    = "Debug"          # String
 preferred_generator = "Unix Makefiles" # String
-</pre>
+```
 
 - `dir_name`*  
   The folder where CMake will place all generated build files. This path is relative to the project folder.
@@ -57,7 +57,7 @@ preferred_generator = "Unix Makefiles" # String
 
 Connection-level configuration. All values are **optional**; defaults are applied if omitted.
 
-<pre class="code-format">
+```toml
 [Network]
 send_buffer_max              = 16384   # 32-bit Unsigned Integer (In bytes)
 send_buffer_incr             = 4096    # 32-bit Unsigned Integer (In bytes)
@@ -74,7 +74,7 @@ max_connections              = 2000    # 32-bit Unsigned Integer
 max_connections_per_ip       = 20      # 32-bit Unsigned Integer
 max_request_burst_per_ip     = 10      # 32-bit Unsigned Integer
 max_requests_per_ip_per_sec  = 5       # 32-bit Unsigned Integer
-</pre>
+```
 
 ### Buffers
 
@@ -121,10 +121,10 @@ max_requests_per_ip_per_sec  = 5       # 32-bit Unsigned Integer
 
 Environment variable loading. This section is **optional**.
 
-<pre class="code-format">
+```toml
 [ENV]
 env_path = "..." # String (Path to .env file)
-</pre>
+```
 
 !!! note
     On non-Windows systems, the file must have permission `600` (meaning that only the file's owner has read and write access).
@@ -137,24 +137,31 @@ env_path = "..." # String (Path to .env file)
 TLS configuration. This section is **only used when WFX is running in HTTPS mode**.
 When HTTPS is enabled, certificate paths are **mandatory**; all other settings are **optional**.
 
-<pre class="code-format">
+```toml
 [SSL]
-cert_path            = "..."           # String (Path to certificate)
-key_path             = "..."           # String (Path to private key)
-tls13_ciphers        = "..."           # String
-tls12_ciphers        = "..."           # String
-curves               = "X25519:P-256"  # String
-enable_session_cache = true            # Boolean (true or false)
-enable_ktls          = false           # Boolean (true or false)
-session_cache_size   = 32768           # 64-bit Unsigned Integer (In bytes)
-min_proto_version    = 3               # 8-bit Unsigned Integer (1 - 3 only)
-security_level       = 2               # Integer (0 - 5 only)
-</pre>
+cert_path                   = "..."           # String (Path to server certificate)
+key_path                    = "..."           # String (Path to private key)
+ca_cert_path                = ""              # String (Path to an extra trusted CA, or "" to use the system store)
+tls13_ciphers               = "..."           # String
+tls12_ciphers               = "..."           # String
+curves                      = "X25519:P-256"  # String
+enable_server_session_cache = true            # Boolean (true or false)
+enable_client_session_cache = true            # Boolean (true or false)
+enable_ktls                 = false           # Boolean (true or false)
+server_session_cache_size   = 4096            # 64-bit Unsigned Integer (In bytes)
+client_session_cache_size   = 1024            # 64-bit Unsigned Integer (In bytes)
+min_proto_version           = 3               # 8-bit Unsigned Integer (1 - 3 only)
+security_level              = 2               # Integer (0 - 5 only)
+```
 
 ### Certificates
 
-- `cert_path`*: PEM-encoded server certificate
-- `key_path`*: Private key matching the certificate
+- `cert_path`*  
+  PEM-encoded server certificate, presented to inbound HTTPS clients.
+- `key_path`*  
+  Private key matching `cert_path`.
+- `ca_cert_path`*  
+  Path to an extra CA certificate that WFX should trust when it connects out to other servers, on top of what your operating system already trusts. Use this if a server you are connecting to presents a certificate signed by an internal or self signed CA, for example a certificate used for local testing, since your OS would not already trust it. Leave it empty to rely only on your system trust store, which is the right choice for most public servers. This setting only affects connections WFX makes outward, it does not change how WFX verifies clients connecting to it.
 
 ### Cipher Suites
 
@@ -172,12 +179,20 @@ security_level       = 2               # Integer (0 - 5 only)
 
 ### TLS Behavior
 
-- `enable_session_cache`  
-  When enabled, WFX stores TLS session information on the server so clients can reconnect faster without doing a full handshake.  
-  **Example**: a returning client can skip the expensive key exchange, improving speed at the cost of more RAM usage.
+- `enable_server_session_cache`  
+  When enabled, WFX caches TLS session state for **inbound** HTTPS clients so a
+  returning client can resume a session instead of doing a full handshake.  
+  **Example**: a returning client skips the expensive key exchange, improving speed at the cost of more RAM usage.
 
-- `session_cache_size`  
-  Maximum memory size allocated for caching TLS session data. When this limit is reached, older sessions are evicted, causing returning clients to perform a full TLS handshake again.
+- `enable_client_session_cache`  
+  Same idea, but for the **outbound** `HttpEndpoint` TLS client: lets WFX resume
+  a session when reconnecting to the same upstream (e.g. after an idle-timeout
+  disconnect or a pool reconnect), instead of doing a full handshake every time.
+
+- `server_session_cache_size` / `client_session_cache_size`  
+  Maximum memory allocated for each of the two session caches above. When a
+  limit is reached, older sessions are evicted, and the next reconnect on that
+  side performs a full TLS handshake again.
 
 - `enable_ktls`  
   Uses Kernel TLS, which offloads encryption tasks to the OS kernel for higher performance. Older versions of kernel may not fully support this feature.
@@ -205,19 +220,19 @@ security_level       = 2               # Integer (0 - 5 only)
 
 Socket and worker configuration for **Linux systems only**. All settings in this section are **optional**.
 
-<pre class="code-format">
+```toml
 [Linux]
 worker_processes        = 2     # 32-bit Unsigned Integer
 worker_shutdown_timeout = 5     # 16-bit Unsigned Integer (In seconds)
 backlog                 = 1024  # 32-bit Unsigned Integer
-</pre>
+```
 
 - `worker_processes`  
   Controls how many worker processes WFX starts to handle incoming requests. More workers allow better CPU usage on multi-core systems, but too many can waste memory or cause contention.  
   **Guidance**: Start with significantly fewer workers than total CPU cores, leaving ample headroom for the OS, networking, TLS, and background tasks. Increase gradually only after load testing shows CPU saturation.
 
 - `worker_shutdown_timeout`  
-  Seconds to wait for a worker to exit cleanly after receiving SIGTERM before force-killing it with SIGKILL.
+  Seconds to wait for workers to exit cleanly after receiving SIGTERM before force-killing whichever ones haven't. This is one shared window covering all workers together, not per worker, so shutdown time doesn't grow with `worker_processes`.
 
 - `backlog`  
   Sets the maximum number of incoming connections the OS can queue while workers are busy. If this limit is too low, new connections may be rejected during traffic spikes even if the server is healthy.
@@ -231,10 +246,10 @@ backlog                 = 1024  # 32-bit Unsigned Integer
 
 This is the default Linux networking backend. All settings in this section are **optional**.
 
-<pre class="code-format">
+```toml
 [Linux.Epoll]
 max_events = 1024 # 16-bit Unsigned Integer
-</pre>
+```
 
 - `max_events`  
   Defines how many I/O events `epoll_wait` can return at once. Higher values allow the server to process more ready connections per loop, while lower values reduce per-iteration work but may increase latency under load.
@@ -245,7 +260,7 @@ max_events = 1024 # 16-bit Unsigned Integer
 
 Controls how WFX emits log output. This section is **optional**.
 
-<pre class="code-format">
+```toml
 [Logging]
 min_level         = 2         # 8-bit Unsigned Integer (0 to 5)
 enable_stdout     = true      # Boolean
@@ -254,7 +269,7 @@ enable_timestamps = true      # Boolean
 enable_file       = false     # Boolean
 max_file_size     = 16777216  # 32-bit Unsigned Integer (In bytes)
 max_rotations     = 2         # 16-bit Unsigned Integer
-</pre>
+```
 
 - `min_level`: Minimum log level to emit. `0` = trace, `1` = debug, `2` = info, `3` = warn, `4` = error, `5` = fatal. Lines below this level are discarded entirely.
 - `enable_stdout`: Write log output to stdout.
@@ -270,7 +285,7 @@ max_rotations     = 2         # 16-bit Unsigned Integer
 
 Miscellaneous engine-level settings covering caching, internal I/O, and worker process management. This section is **optional**.
 
-<pre class="code-format">
+```toml
 [Misc]
 file_cache_size      = 20    # 16-bit Unsigned Integer
 cache_chunk_size     = 2048  # 16-bit Unsigned Integer (In bytes)
@@ -279,7 +294,7 @@ master_poll_interval = 2     # 16-bit Unsigned Integer (In seconds)
 max_worker_restarts  = 5     # 16-bit Unsigned Integer
 worker_backoff_base  = 1     # 16-bit Unsigned Integer (In seconds)
 worker_backoff_max   = 16    # 16-bit Unsigned Integer (In seconds)
-</pre>
+```
 
 - `file_cache_size`: Number of files cached in memory (LFU)
 - `template_chunk_size`: Max I/O chunk size during template compilation

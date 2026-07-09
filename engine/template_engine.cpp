@@ -114,9 +114,11 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                 setCacheStats = true;
                 logger_.Info("[TemplateEngine]: Template modified, recompiling");
             }
-            // No cache stats available, set it at the end of processing
-            else
+            // New file not in cache, must resave so next startup skips recompilation
+            else {
                 setCacheStats = true;
+                resaveCacheFile = true;
+            }
         }
         else
             logger_.Warn("[TemplateEngine]: Failed to check [disk / cache] stats for file: ", inPath.c_str(),

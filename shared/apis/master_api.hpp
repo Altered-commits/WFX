@@ -14,6 +14,7 @@ namespace WFX::Shared {
 // vvv Master table to be injected into user dll vvv
 struct MASTER_API_TABLE {
     const HTTP_API_EXT1* (*GetHttpAPIExt1)();
+    const ENDPOINT_API_EXT1* (*GetEndpointAPIExt1)();
     const ASYNC_API_EXT1* (*GetAsyncAPIExt1)();
     const MEMORY_API_EXT1* (*GetMemoryAPIExt1)();
     const UTILS_API_EXT1* (*GetUtilsAPIExt1)();
