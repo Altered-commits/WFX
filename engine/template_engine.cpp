@@ -107,11 +107,10 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                 // Cache is only trustworthy if the file is unchanged AND, for dynamic-
                 // -templates, the compiled .so it depends on actually still exists
                 bool cacheValid = diskStats.modifiedNs == cacheStats->modifiedTime &&
-                                   (cachedType != TemplateType::DYNAMIC || dynamicLibExists);
+                                  (cachedType != TemplateType::DYNAMIC || dynamicLibExists);
 
                 if(cacheValid) {
-                    templates_.emplace(std::move(relPath),
-                                       TemplateMeta{cachedType, cachedSize, std::move(outPath)});
+                    templates_.emplace(std::move(relPath), TemplateMeta{cachedType, cachedSize, std::move(outPath)});
                     return;
                 }
 
