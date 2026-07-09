@@ -22,7 +22,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install Dependencies
       run: |
@@ -31,7 +31,7 @@ jobs:
 
     # Save the entire build directory cuz i cannot waste github run 'time', i'm poor
     - name: Restore build/ cache
-      uses: actions/cache@v3
+      uses: actions/cache@v6
       with:
         path: build
         key: build-${{ matrix.compiler }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
@@ -52,7 +52,7 @@ jobs:
     # -binary, include/ and shared/ are tracked source already in its checkout.
     - name: Upload wfx binary for the audit stage
       if: matrix.compiler == 'gcc'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: wfx-binary
         path: wfx
