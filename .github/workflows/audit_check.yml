@@ -18,13 +18,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Exact-key restore, no restore-keys fallback: this must be the same-
-      # -commit's binary compile_check.yml just cached.
-      - name: Restore wfx binary
-        uses: actions/cache@v3
+      - name: Download wfx binary
+        uses: actions/download-artifact@v4
         with:
-          path: wfx
-          key: wfx-bin-${{ hashFiles('**/CMakeLists.txt', 'cmake/**', 'cli/**', 'config/**', 'engine/**', 'http/**', 'include/**', 'os_specific/**', 'shared/**', 'utils/**') }}
+          name: wfx-binary
+          path: .
+
+      - name: Make wfx executable
+        run: chmod +x wfx
 
       # Lays wfx out the way scripts/install.sh would: binary on PATH under-
       # -~/.wfx/bin, headers under ~/.wfx/src, since the audit apps' CMakeLists.txt-

@@ -66,7 +66,7 @@ This page describes the top-level layout of the WFX repository.
     - `filter_check.yml` - Reusable, called by `entry.yml`. Decides whether CI should run at all based on which files changed, using `.ciignore`.
     - `format_check.yml` - Reusable, called by `entry.yml` after the filter passes. Validates code formatting using `scripts/format.sh --dry-run`.
     - `compile_check.yml` - Reusable, called by `entry.yml` after formatting passes. Checks for successful compilation of WFX.
-    - `audit_check.yml` - Reusable, called by `entry.yml` after compile passes. Never builds `wfx` itself: restores the binary `compile_check.yml`'s gcc leg already cached (headers come from its own checkout, they're tracked source), then runs the three test audits (`base`, `endpoint`, `tls`) as parallel matrix jobs via `tests/run_audits.sh`.
+    - `audit_check.yml` - Reusable, called by `entry.yml` after compile passes. Never builds `wfx` itself: downloads the binary `compile_check.yml`'s gcc leg already uploaded as an artifact (headers come from its own checkout, they're tracked source), then runs the three test audits (`base`, `endpoint`, `tls`) as parallel matrix jobs via `tests/run_audits.sh`.
     - `docs_build.yml` - Independent, triggers on push to `main`. Builds and deploys this documentation site.
 
 - `scripts/`  

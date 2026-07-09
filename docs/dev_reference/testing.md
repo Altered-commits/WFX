@@ -65,10 +65,10 @@ Every audit shares one `--ci` flag (wired through `add_common_args`): it disable
 emits GitHub Actions `::group::`/`::error::` annotations for failing checks so they surface in the
 PR Checks UI, without changing any timeout or process behavior versus a local run.
 
-`.github/workflows/audit_check.yml` never builds `wfx` itself. `compile_check.yml`'s gcc leg caches
-the compiled binary under a source-hash key; `audit_check.yml` restores that same key and runs the
-three audits as parallel matrix jobs, each calling `tests/run_audits.sh --audit <name> --ci`. It's
-wired into `entry.yml` as the fourth linear stage, gated on `compile_check.yml` passing first.
+`.github/workflows/audit_check.yml` never builds `wfx` itself. `compile_check.yml`'s gcc leg uploads
+the compiled binary as a 1-day-retention artifact; `audit_check.yml` downloads it and runs the three
+audits as parallel matrix jobs, each calling `tests/run_audits.sh --audit <name> --ci`. It's wired
+into `entry.yml` as the fourth linear stage, gated on `compile_check.yml` passing first.
 
 ---
 
@@ -84,4 +84,4 @@ wired into `entry.yml` as the fourth linear stage, gated on `compile_check.yml` 
     One audit each: the harness script, its own `README.md`, its `app/` test project, and a mock upstream script (`upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
 
 - `.github/workflows/audit_check.yml`  
-    Restores the cached `wfx` binary from `compile_check.yml` and runs the three audits as a parallel CI matrix.
+    Downloads the `wfx` binary artifact from `compile_check.yml` and runs the three audits as a parallel CI matrix.

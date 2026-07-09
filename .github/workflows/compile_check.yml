@@ -50,11 +50,10 @@ jobs:
 
     # Hands the wfx binary to audit_check.yml so it never has to compile. Only the-
     # -binary, include/ and shared/ are tracked source already in its checkout.
-    # Strict key (unlike build/ above): audit trusts this with no rebuild to-
-    # -re-verify it, so a loose key could freeze in a stale binary.
-    - name: Cache wfx binary for the audit stage
+    - name: Upload wfx binary for the audit stage
       if: matrix.compiler == 'gcc'
-      uses: actions/cache@v3
+      uses: actions/upload-artifact@v4
       with:
+        name: wfx-binary
         path: wfx
-        key: wfx-bin-${{ hashFiles('**/CMakeLists.txt', 'cmake/**', 'cli/**', 'config/**', 'engine/**', 'http/**', 'include/**', 'os_specific/**', 'shared/**', 'utils/**') }}
+        retention-days: 1
