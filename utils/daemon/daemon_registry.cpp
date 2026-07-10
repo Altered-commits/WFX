@@ -7,16 +7,11 @@
 
 #include <cstdio>
 #include <ctime>
-
-#ifdef _WIN32
-// Windows: future work
-#else
 #include <signal.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <thread>
 #include <chrono>
-#endif
 
 namespace WFX::Utils::DaemonRegistry {
 
@@ -26,35 +21,16 @@ inline constexpr int MAX_FILE_SIZE = 1024;
 // vvv Path Helpers vvv
 std::string DaemonsDir() noexcept
 {
-#ifdef _WIN32
-    const char* home = std::getenv("USERPROFILE");
-    if(!home || home[0] == '\0') {
-        // Fallback: combine HOMEDRIVE + HOMEPATH
-        const char* drive = std::getenv("HOMEDRIVE");
-        const char* hpath = std::getenv("HOMEPATH");
-        if(!drive || !hpath)
-            return "";
-
-        return std::string(drive) + hpath + "\\.wfx\\daemons";
-    }
-
-    return std::string(home) + "\\.wfx\\daemons";
-#else
     const char* home = std::getenv("HOME");
     if(!home || home[0] == '\0')
         return "";
 
     return std::string(home) + "/.wfx/daemons";
-#endif
 }
 
 std::string PidFilePath(const std::string& project) noexcept
 {
-#ifdef _WIN32
-    return DaemonsDir() + "\\" + project + ".pid";
-#else
     return DaemonsDir() + "/" + project + ".pid";
-#endif
 }
 
 // vvv File Operations vvv
@@ -220,11 +196,7 @@ bool IsAlive(pid_t pid) noexcept
     if(pid <= 0)
         return false;
 
-#ifdef _WIN32
-        // Windows: future work
-#else
     return kill(pid, 0) == 0;
-#endif
 }
 
 StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
@@ -248,9 +220,6 @@ StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
         return StopResult::NOT_RUNNING;
     }
 
-#ifdef _WIN32
-    // Windows: future work
-#else
     if(kill(info.pid, SIGTERM) != 0) {
         logger.Error("[DaemonRegistry]: Failed to send SIGTERM to '", project, "' (pid=", info.pid,
                      "): ", strerror(errno));
@@ -298,7 +267,6 @@ StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
     logger.Error("[DaemonRegistry]: Process '", project, "' (pid=", info.pid, ") survived SIGKILL, *wfx dies inside*");
 
     return StopResult::FAILED;
-#endif
 }
 
 } // namespace WFX::Utils::DaemonRegistry

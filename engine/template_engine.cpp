@@ -6,9 +6,10 @@
 #include "config/config.hpp"
 #include "utils/fileops/filemeta.hpp"
 #include "utils/string/string.hpp"
+#include "shared/utils/detection_macro.hpp"
 #include <cstring>
 
-#if defined(__linux__)
+#if defined(WFX_PLATFORM_POSIX)
 #include <dlfcn.h>
 #endif
 
@@ -247,10 +248,6 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
     if(!FileSystem::FileExists(dllPath.c_str()))
         return;
 
-#if defined(_WIN32)
-    static_assert(false, "No impl for TemplateEngine.LoadDynamicTemplatesFromLib for Windows");
-#else
-    // POSIX (Linux / macOS / *nix)
     // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed
     void* handle = dlopen(dllPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
     if(!handle) {
@@ -287,7 +284,6 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
             logger_.Fatal("[TemplateEngine]: Failed to create template generator for: ", symbol);
     }
 
-#endif
     logger_.Info("[TemplateEngine]: Successfully initialized dynamic template(s) from: ", dllPath);
 }
 

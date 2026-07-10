@@ -8,25 +8,16 @@
 #include <cstring>
 #include <cerrno>
 
-#if defined(_WIN32) || defined(_WIN64)
-#define WFX_USE_WINDOWS 1
-#include <windows.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#else
-#define WFX_USE_POSIX 1
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <pwd.h>
 #include <sys/mman.h>
-#endif
 
 namespace WFX::Utils {
 
 // vvv Internal Functions vvv
-#if WFX_USE_POSIX
 static bool CheckFileSecurityPosix(int fd, const EnvConfig& opt)
 {
     struct stat st;
@@ -54,24 +45,10 @@ static bool SetEnvVar(const std::string& k, const std::string& v, const EnvConfi
 
     return setenv(k.c_str(), v.c_str(), overwriteExisting ? 1 : 0) == 0;
 }
-#else
-static bool SetEnvVar(const std::string& k, const std::string& v, const EnvConfig& opt)
-{
-    if(!opt.GetFlag(EnvFlag::OVERWRITE_EXISTING)) {
-        size_t required = 0;
-        getenv_s(&required, nullptr, 0, k.c_str());
-        if(required != 0)
-            return true;
-    }
-
-    return _putenv_s(k.c_str(), v.c_str()) == 0;
-}
-#endif
 
 // vvv Main Function vvv
 bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
 {
-#if WFX_USE_POSIX
     int flags = O_RDONLY;
 #ifdef O_NOFOLLOW
     flags |= O_NOFOLLOW;
@@ -144,45 +121,6 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
         munlock(buf.data(), buf.size());
 
     return true;
-
-#elif WFX_USE_WINDOWS
-    WIN32_FILE_ATTRIBUTE_DATA fad;
-    if(!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &fad))
-        return false;
-
-    std::ifstream ifs(path, std::ios::binary);
-    if(!ifs.is_open())
-        return false;
-
-    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    ifs.close();
-
-    std::vector<char> buf(content.begin(), content.end());
-    auto kv = ParseFromBuffer(buf);
-
-    for(const auto& p : kv)
-        (void)SetEnvVar(p.first, p.second, opts);
-
-    if(opts.GetFlag(EnvFlags::UNLINK_AFTER_LOAD))
-        DeleteFileA(path.c_str());
-
-    // Zero out kv strings
-    for(auto& p : kv) {
-        volatile char* kptr = const_cast<volatile char*>(p.first.data());
-        for(std::size_t i = 0; i < p.first.size(); ++i)
-            kptr[i] = 0;
-
-        volatile char* vptr = const_cast<volatile char*>(p.second.data());
-        for(std::size_t i = 0; i < p.second.size(); ++i)
-            vptr[i] = 0;
-    }
-
-    return true;
-#else
-    (void)path;
-    (void)opts;
-    return false;
-#endif
 }
 
 // vvv Helper Function vvv

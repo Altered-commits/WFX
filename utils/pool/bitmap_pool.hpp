@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <bit>
 #include "utils/diagnostics/logger.hpp"
+#include "shared/utils/memory.hpp"
 
 namespace WFX::Utils {
 
@@ -26,8 +27,8 @@ public: // vvv Constructor and Destructor vvv
         slots_ = std::uint32_t(rounded);
         words_ = slots_ >> 6;
 
-        pool_ = new T[slots_]{};
-        bitmap_ = new std::uint64_t[words_]{0};
+        pool_ = Shared::NewArray<T>(slots_);
+        bitmap_ = Shared::NewArray<std::uint64_t>(words_);
 
         if(!pool_ || !bitmap_)
             GetLogger().Fatal("[BitmapPool]: Failed to create pools (Allocation returned nullptr)");
@@ -36,11 +37,11 @@ public: // vvv Constructor and Destructor vvv
     ~BitmapPool()
     {
         if(pool_) {
-            delete[] pool_;
+            Shared::DeleteArray(pool_, slots_);
             pool_ = nullptr;
         }
         if(bitmap_) {
-            delete[] bitmap_;
+            Shared::DeleteArray(bitmap_, words_);
             bitmap_ = nullptr;
         }
     }
@@ -68,8 +69,8 @@ public: // vvv Constructor and Destructor vvv
     BitmapPool& operator=(BitmapPool&& other) noexcept
     {
         if(this != &other) {
-            delete[] pool_;
-            delete[] bitmap_;
+            Shared::DeleteArray(pool_, slots_);
+            Shared::DeleteArray(bitmap_, words_);
 
             pool_ = other.pool_;
             bitmap_ = other.bitmap_;

@@ -9,9 +9,9 @@
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/string/string.hpp"
+#include "shared/utils/detection_macro.hpp"
 
-// Linux
-#ifdef __linux__
+#if defined(WFX_PLATFORM_LINUX)
 #include <wait.h>
 #endif
 
@@ -92,9 +92,6 @@ void HandleUserCxxCompilation(CxxCompilationOption opt)
 }
 
 // vvv OS Specific Stuff vvv
-#ifdef _WIN32
-// Windows: future work
-#else
 void HandleMasterSignal(int)
 {
     auto& globalState = GetMasterState();
@@ -130,6 +127,5 @@ void PinWorkerToCPU(int workerIndex)
 
     GetLogger().Info("[WFX-Master]: Worker ", workerIndex, " pinned to CPU ", cpu);
 }
-#endif
 
 } // namespace WFX::CLI

@@ -41,9 +41,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 function(filter_sources_by_os out_var)
     set(filtered_sources "")
     foreach(src IN LISTS ${out_var})
-        if(NOT src MATCHES "/(windows|linux|macos)/")
+        if(NOT src MATCHES "/(windows|linux|macos|posix)/")
             list(APPEND filtered_sources "${src}")
         elseif(src MATCHES "/${CURRENT_OS}/")
+            list(APPEND filtered_sources "${src}")
+        elseif(src MATCHES "/posix/" AND NOT CURRENT_OS STREQUAL "windows")
+            # 'posix/' sources build for both linux and macos, only excluded on windows
             list(APPEND filtered_sources "${src}")
         endif()
     endforeach()
@@ -55,6 +58,7 @@ endfunction()
 # -----------------------------
 add_compile_definitions(
     $<$<CONFIG:Debug>:WFX_DEBUG>
+    WFX_ENGINE_BUILD
 )
 
 # -----------------------------
@@ -141,20 +145,8 @@ target_link_options(wfx PRIVATE
 # -----------------------------
 # OS-specific system libraries
 # -----------------------------
-if(WIN32)
-    target_link_libraries(wfx PRIVATE
-        Ws2_32
-        Dbghelp
-        mswsock
-        bcrypt
-        Dnsapi
-    )
-elseif(UNIX)
+if(UNIX)
     target_link_libraries(wfx PRIVATE dl pthread resolv)
-
-    if(WFX_LINUX_USE_IO_URING)
-        target_link_libraries(wfx PRIVATE uring)
-    endif()
 endif()
 
 # -----------------------------

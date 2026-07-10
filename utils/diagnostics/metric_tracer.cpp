@@ -3,11 +3,7 @@
 
 #include "utils/diagnostics/metric_tracer.hpp"
 
-#ifdef _WIN32
-// Windows: future work
-#else
 #include <sys/mman.h>
-#endif
 
 namespace WFX::Utils {
 namespace MetricTracer {
@@ -17,9 +13,6 @@ bool Create(int workerCount) noexcept
     if(workerCount <= 0)
         return false;
 
-#ifdef _WIN32
-    return false; // Windows: future work
-#else
     const std::size_t size = static_cast<std::size_t>(workerCount) * sizeof(Shared::WorkerMetrics);
 
     void* mem = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -31,7 +24,6 @@ bool Create(int workerCount) noexcept
     mmapSize_ = size;
 
     return true;
-#endif
 }
 
 void InitWorker(int index) noexcept
@@ -42,9 +34,6 @@ void InitWorker(int index) noexcept
 
 void Destroy() noexcept
 {
-#ifdef _WIN32
-    // Windows: future work
-#else
     if(slots_) {
         ::munmap(slots_, mmapSize_);
         slots_ = nullptr;
@@ -52,7 +41,6 @@ void Destroy() noexcept
         workerIndex_ = -1;
         mmapSize_ = 0;
     }
-#endif
 }
 
 Shared::LogMetrics AggregateLog() noexcept

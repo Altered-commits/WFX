@@ -5,11 +5,12 @@
 #include "http/request/http_request.hpp"
 #include "http/response/http_response.hpp"
 #include "shared/apis/http_api.hpp"
+#include "shared/utils/memory.hpp"
 #include "utils/pool/buffer_pool.hpp"
 
 namespace WFX::Http {
 
-using namespace WFX::Shared; // For every single abi type
+using namespace WFX::Shared; // For stuff, idk
 
 // vvv Ip Address Methods vvv
 WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
@@ -94,11 +95,11 @@ void ClientCtx::Reset()
     rwBuffer.ResetBuffer();
 
     if(requestInfo) {
-        delete requestInfo;
+        Delete(requestInfo);
         requestInfo = nullptr;
     }
     if(responseInfo) {
-        delete responseInfo;
+        Delete(responseInfo);
         responseInfo = nullptr;
     }
 

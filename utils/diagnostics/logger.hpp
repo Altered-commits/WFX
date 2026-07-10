@@ -20,33 +20,17 @@
 #include <string_view>
 #include <type_traits>
 
-#if defined(_WIN32)
-#include <windows.h>
-
-#define WFX_IS_TTY() (GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_CHAR)
-#define WFX_STDOUT_WRITE(data, len)                                                                                    \
-    do {                                                                                                               \
-        DWORD _w;                                                                                                      \
-        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), (data), static_cast<DWORD>(len), &_w, nullptr);                     \
-    } while(0)
-#else
 #include <errno.h>
 #include <unistd.h>
 
 #define WFX_IS_TTY() (::isatty(STDOUT_FILENO) != 0)
 #define WFX_STDOUT_WRITE(data, len) WriteRetry(STDOUT_FILENO, (data), (len))
-#endif
-
-#if defined(_WIN32)
-#define WFX_LOCALTIME(tm_ptr, tt_ptr) localtime_s((tm_ptr), (tt_ptr))
-#else
 #define WFX_LOCALTIME(tm_ptr, tt_ptr) localtime_r((tt_ptr), (tm_ptr))
-#endif
 
 namespace WFX::Utils {
 
 // On Open()   : OpenFileWrite truncates and starts fresh. Size tracked via
-//               file_->Size() which LinuxFile/WinFile maintains internally
+//               file_->Size() which PosixFile maintains internally
 //
 // On rotation : close -> shift .N->.(N+1) down to .1->.2
 //               -> rename current to .1 -> OpenFileWrite on fresh current
@@ -328,9 +312,7 @@ private:
         }
     }
 
-#if !defined(_WIN32)
     static void WriteRetry(int fd, const char* data, std::size_t len) noexcept;
-#endif
 
 private:
     static char* RawCopy(char* p, char* end, const char* s) noexcept

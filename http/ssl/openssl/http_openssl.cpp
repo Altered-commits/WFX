@@ -247,19 +247,10 @@ void* HttpOpenSSL::Wrap(SSLSocket sock)
     if(!ssl)
         return nullptr;
 
-#ifdef _WIN32
-    BIO* bio = BIO_new_socket(sock, BIO_NOCLOSE);
-    if(!bio) {
-        SSL_free(ssl);
-        return nullptr;
-    }
-    SSL_set_bio(ssl, bio, bio);
-#else
     if(!SSL_set_fd(ssl, sock)) {
         SSL_free(ssl);
         return nullptr;
     }
-#endif
 
     // We are the server and we are accepting connections
     // So tell OpenSSL this connection is supposed to be accepted
@@ -274,19 +265,11 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view
     if(!ssl)
         return nullptr;
 
-#ifdef _WIN32
-    BIO* bio = BIO_new_socket(sock, BIO_NOCLOSE);
-    if(!bio) {
-        SSL_free(ssl);
-        return nullptr;
-    }
-    SSL_set_bio(ssl, bio, bio);
-#else
     if(!SSL_set_fd(ssl, sock)) {
         SSL_free(ssl);
         return nullptr;
     }
-#endif
+
     // Instruct OpenSSL to initiate the 'ClientHello'
     SSL_set_connect_state(ssl);
 
@@ -420,10 +403,6 @@ SSLResult HttpOpenSSL::Write(void* conn, const char* buf, int len)
 
 SSLResult HttpOpenSSL::WriteFile(void* conn, SSLSocket fd, FileOffset offset, std::size_t count)
 {
-    // Windows version does not contain SSL_sendfile, we need to use Write to send files
-#ifdef _WIN32
-    return {SSLReturn::NO_IMPL, 0};
-#else
     // SSL_sendfile can only be used with ktls enabled
     // Return 'NO_IMPL' to tell backend to switch to using Write
     if(!useKtls)
@@ -448,7 +427,6 @@ SSLResult HttpOpenSSL::WriteFile(void* conn, SSLSocket fd, FileOffset offset, st
         default:
             return {SSLReturn::FATAL, 0};
     }
-#endif
 }
 
 SSLReturn HttpOpenSSL::Shutdown(void* conn)

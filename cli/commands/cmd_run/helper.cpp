@@ -10,13 +10,9 @@
 #include "utils/diagnostics/crash_tracer.hpp"
 #include "utils/diagnostics/metric_tracer.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#else
 #include <wait.h>
 #include <signal.h>
 #include <fcntl.h>
-#endif
 
 #include <ctime>
 #include <thread>
@@ -28,9 +24,6 @@ using namespace WFX::Http;  // For 'WFXGlobalState', ...
 using namespace WFX::Utils; // For 'Logger', 'BufferPool', 'FileCache', ...
 using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 
-#ifdef _WIN32
-// Windows: future work
-#else
 // vvv Constants vvv
 // Slot state encoding via workerPids:
 //   >= 0  -> live worker PID
@@ -502,7 +495,6 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     logger.Info("[WFX-Master]: Shutdown successfully");
     return 0;
 }
-#endif // _WIN32
 
 void CheckAlreadyRunning(const std::string& projectName)
 {

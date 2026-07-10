@@ -103,7 +103,7 @@ mkdir -p "$WFX_HOME/daemons"
 # ---------------------------------------------------------------
 if [ "$LOCAL" = "1" ]; then
     info "Local mode: copying current directory to $WFX_SRC..."
-    rsync -a --exclude='.git' --exclude='build' --exclude='.venv' . "$WFX_SRC/" \
+    rsync -a --delete --exclude='.git' --exclude='build' --exclude='build_install' --exclude='.venv' --exclude='.vscode' . "$WFX_SRC/" \
         || error "Failed to copy source to $WFX_SRC."
 else
     if [ -d "$WFX_SRC/.git" ]; then

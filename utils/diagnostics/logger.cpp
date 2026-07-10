@@ -50,7 +50,6 @@ bool Logger::OpenFile(const char* path, std::size_t maxBytes, int keepFiles) noe
 
 // vvv Helper Functions vvv
 //  Logger
-#ifndef _WIN32
 void Logger::WriteRetry(int fd, const char* data, std::size_t len) noexcept
 {
     while(len > 0) {
@@ -63,7 +62,6 @@ void Logger::WriteRetry(int fd, const char* data, std::size_t len) noexcept
             break;
     }
 }
-#endif
 
 //  TimestampCache
 void TimestampCache::Sync(std::chrono::steady_clock::time_point now) noexcept

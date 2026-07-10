@@ -15,8 +15,10 @@
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
+#include "shared/utils/detection_macro.hpp"
+#include "shared/utils/memory.hpp"
 
-#if defined(__linux__)
+#if defined(WFX_PLATFORM_POSIX)
 #include <dlfcn.h>
 #endif
 
@@ -42,13 +44,13 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 
     // Initialize API backend before anything else
-    Shared::InitHttpAPIExt1(&router_, &middleware_);
-    Shared::InitEndpointAPIExt1(connHandler_.get());
-    Shared::InitAsyncAPIExt1(connHandler_.get());
+    InitHttpAPIExt1(&router_, &middleware_);
+    InitEndpointAPIExt1(connHandler_.get());
+    InitAsyncAPIExt1(connHandler_.get());
 
     // We set it on our end because each compiled binary has its own copy of '__WFXApi'
     // If we want it to work on our end, we gotta set it here as well
-    SetMasterApi(Shared::GetMasterAPI());
+    SetMasterApi(GetMasterAPI());
 
     // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath);
@@ -79,7 +81,7 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
 
     // Allocate response once per connection, reused across requests via Reset()
     if(!ctx->responseInfo)
-        ctx->responseInfo = new HttpResponse{};
+        ctx->responseInfo = New<HttpResponse>();
 
     auto& res = *ctx->responseInfo;
 
@@ -225,7 +227,7 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
 {
     WFX_TRACE();
 
-    auto* httpApi = Shared::GetHttpAPIExt1();
+    auto* httpApi = GetHttpAPIExt1();
     auto& req = *ctx->requestInfo;
     auto& res = *ctx->responseInfo;
     auto* node = static_cast<const TrieNode*>(req.routeNode_);
@@ -321,7 +323,7 @@ void CoreEngine::FinishRequest(ClientCtx* ctx)
     connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
-void CoreEngine::HandleError(ClientCtx* ctx, Shared::HttpStatus code, std::string_view message)
+void CoreEngine::HandleError(ClientCtx* ctx, HttpStatus code, std::string_view message)
 {
     auto& res = *ctx->responseInfo;
 
@@ -378,26 +380,6 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
 
 void CoreEngine::HandleUserDLLInjection(const char* dllPath)
 {
-#if defined(_WIN32)
-    // Windows
-    HMODULE userModule = LoadLibraryA(dllPath);
-    if(!userModule) {
-        DWORD err = GetLastError();
-        logger_.Fatal("[CoreEngine]: ", dllPath, " was not found. Error: ", err);
-        return;
-    }
-
-    FARPROC rawProc = GetProcAddress(userModule, "RegisterMasterAPI");
-    if(!rawProc) {
-        DWORD err = GetLastError();
-        logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user DLL. Error: ", err);
-        return;
-    }
-
-    // Cast to your function type
-    auto registerFn = reinterpret_cast<Shared::RegisterMasterAPIFn>(rawProc);
-#else
-    // POSIX (Linux / macOS / *nix)
     // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed
     void* handle = dlopen(dllPath, RTLD_NOW | RTLD_GLOBAL);
     if(!handle) {
@@ -413,10 +395,10 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
         logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user SO. Error: ",
                       (dlsymErr ? dlsymErr : "symbol not found"));
 
-    auto registerFn = reinterpret_cast<Shared::RegisterMasterAPIFn>(rawSym);
-#endif
+    auto registerFn = reinterpret_cast<RegisterMasterAPIFn>(rawSym);
+
     // Call into the user module to inject the API
-    registerFn(Shared::GetMasterAPI());
+    registerFn(GetMasterAPI());
     logger_.Info("[CoreEngine]: Successfully injected API and initialized user module: ", dllPath);
 }
 

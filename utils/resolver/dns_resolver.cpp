@@ -5,23 +5,15 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
-
-#ifdef _WIN32
-#error "Windows DNS resolver not implemented"
-#else
 #include <resolv.h>
 #include <arpa/nameser.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#endif // _WIN32
 
 namespace WFX::Utils {
 namespace DNSResolver {
 
-#ifdef _WIN32
-...
-#else
 // Linux / macOS, both use the BSD resolver API
 
 // Builds a single ResolvedAddr from an already-known IP (literal or loopback alias)
@@ -174,8 +166,6 @@ bool Resolve(const char* host, std::uint16_t port, ResolvedAddrs& outAddrs, std:
     outMinTtlSeconds = minTtl;
     return true;
 }
-
-#endif
 
 } // namespace DNSResolver
 } // namespace WFX::Utils

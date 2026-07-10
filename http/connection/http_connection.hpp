@@ -9,21 +9,11 @@
 #include "utils/rw_buffer/rw_buffer.hpp"
 #include "utils/resolver/dns_resolver.hpp"
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <WinSock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "Ws2_32.lib")
-
-using WFXSocket = SOCKET;
-constexpr WFXSocket WFX_INVALID_SOCKET = INVALID_SOCKET;
-#else
 #include <netinet/in.h> // in_addr, in6_addr
 #include <arpa/inet.h>  // inet_ntop, inet_pton
 
 using WFXSocket = int; // On Linux/Unix, sockets are file descriptors (ints)
 constexpr WFXSocket WFX_INVALID_SOCKET = -1;
-#endif
 
 namespace WFX::Http {
 
@@ -100,15 +90,9 @@ struct ClientCtx;
 using ReceiveCallback = std::function<void(ClientCtx*)>;
 
 struct FileInfo {
-#if defined(_WIN32)
-    HANDLE handle{0};          // HANDLE is pointer-sized
-    std::uint64_t fileSize{0}; // 64-bit for large files
-    std::uint64_t offset{0};   // current send offset
-#else
     int fd = -1;        // Linux file descriptor
     off_t fileSize = 0; // File size
     off_t offset = 0;   // current send offset
-#endif
 };
 
 // Used inside of AsyncTrack if needed by 'HandleSuccess'

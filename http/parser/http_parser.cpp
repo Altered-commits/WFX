@@ -8,7 +8,7 @@
 #include "http/headers/http_headers.hpp"
 #include "http/request/http_request.hpp"
 #include "utils/string/string.hpp"
-#include "utils/string/string.hpp"
+#include "shared/utils/memory.hpp"
 
 namespace WFX::Http {
 
@@ -48,7 +48,7 @@ HttpParseState Parse(ClientCtx* ctx)
 
     // Ensure requestInfo is allocated. If not, lazy initialize it
     if(!ctx->requestInfo)
-        ctx->requestInfo = new HttpRequest{};
+        ctx->requestInfo = Shared::New<HttpRequest>();
 
     HttpRequest& request = *ctx->requestInfo;
 

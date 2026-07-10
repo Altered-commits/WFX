@@ -4,10 +4,10 @@
 #ifndef WFX_SHARED_JSON_OBJECT_HPP
 #define WFX_SHARED_JSON_OBJECT_HPP
 
-#include "core/core.hpp"
 #include "http/response.hpp"
 #include "shared/abis/uuid.hpp"
 #include "shared/utils/hash.hpp"
+#include "shared/utils/memory.hpp"
 #include <string_view>
 #include <cstdint>
 #include <cstring>
@@ -19,19 +19,6 @@ namespace WFX::Shared {
 static constexpr std::uint32_t JSON_NIL = 0xFFFFFFFF;
 static constexpr std::uint32_t JSON_TOMB = 0xFFFFFFFE;
 static constexpr std::uint32_t JSON_INIT_CAP = 8;
-
-inline void* Alloc(std::size_t n) noexcept
-{
-    return WFX::Core::MemoryApiExt1()->Alloc(n);
-}
-inline void Free(void* ptr) noexcept
-{
-    WFX::Core::MemoryApiExt1()->Free(ptr);
-}
-inline void* Realloc(void* p, std::size_t n) noexcept
-{
-    return WFX::Core::MemoryApiExt1()->Realloc(p, n);
-}
 
 // vvv JsonTag vvv
 //

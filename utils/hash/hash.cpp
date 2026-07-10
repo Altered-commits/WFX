@@ -8,17 +8,10 @@
 #include <bit>
 
 // Some OS level tools for randomization
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#include <bcrypt.h>
-#pragma comment(lib, "bcrypt.lib")
-#else
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/random.h>
 #include <errno.h>
-#endif
 
 namespace WFX::Utils {
 
@@ -163,10 +156,6 @@ bool RandomPool::GetBytes(std::uint8_t* out, std::size_t len)
 // Main shit
 bool RandomPool::RefillBytes()
 {
-#if defined(_WIN32)
-    if(BCryptGenRandom(nullptr, randomPool_, static_cast<ULONG>(BUFFER_SIZE), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
-        return false;
-#else
     ssize_t totalRead = 0;
 
     while(totalRead < BUFFER_SIZE) {
@@ -201,7 +190,6 @@ bool RandomPool::RefillBytes()
         else
             totalRead += n;
     }
-#endif
     cursor_ = 0;
     return true;
 }

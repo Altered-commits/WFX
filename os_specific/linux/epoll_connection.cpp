@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 
-#ifndef WFX_LINUX_USE_IO_URING
-
 #include "epoll_connection.hpp"
 
 #include "http/common/http_error_msgs.hpp"
 #include "http/ssl/http_ssl_factory.hpp"
 #include "shared/apis/http_api.hpp"
+#include "shared/utils/memory.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
 #include <sys/sendfile.h>
 #include <sys/socket.h>
@@ -940,9 +939,8 @@ EndpointStatus EpollConnectionHandler::SendPayloadMultiplexed(ClientCtx* clientC
             ce.inflight = slotCtx;
         }
 
-        // TODO: This and the parser state, we gotta start using our pool to allocate
         if(!slotCtx->pendingStreams)
-            slotCtx->pendingStreams = new PendingStreamMap();
+            slotCtx->pendingStreams = Shared::New<PendingStreamMap>();
 
         (*slotCtx->pendingStreams)[streamKey] =
             PendingStream{clientCtx, reqParseState, pendingCoalesceKey, clientCtx->generationId};
@@ -2435,7 +2433,7 @@ void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointM
     // -behavior (unordered_map insertion may rehash, invalidating the loop's iterator)
     if(ctx->pendingStreams) {
         PendingStreamMap orphaned = std::move(*ctx->pendingStreams);
-        delete ctx->pendingStreams;
+        Shared::Delete(ctx->pendingStreams);
         ctx->pendingStreams = nullptr;
 
         for(auto& [key, stream] : orphaned) {
@@ -2899,7 +2897,7 @@ bool EpollConnectionHandler::FlushDeferredRequest(EndpointCtx* slotCtx, Endpoint
         meta.coalescePending[coalesceKey].inflight = slotCtx;
 
     if(!slotCtx->pendingStreams)
-        slotCtx->pendingStreams = new PendingStreamMap();
+        slotCtx->pendingStreams = Shared::New<PendingStreamMap>();
 
     (*slotCtx->pendingStreams)[streamKey] = PendingStream{client, parseState, coalesceKey, client->generationId};
     client->streamKey = streamKey;
@@ -3575,5 +3573,3 @@ ssize_t EpollConnectionHandler::WrapFile(ClientCtx* ctx, int fd, off_t* offset, 
 }
 
 } // namespace WFX::OSSpecific
-
-#endif // !WFX_LINUX_USE_IO_URING
