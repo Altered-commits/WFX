@@ -35,6 +35,7 @@ IGNORE_DIRECTORIES=(
     "./.venv"
     "./.vscode"
     "./build"
+    "./build_tidy"
     "./docs"
     "./tests"
 )

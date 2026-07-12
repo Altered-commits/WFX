@@ -15,6 +15,9 @@ using namespace WFX::Shared; // For stuff, idk
 // vvv Ip Address Methods vvv
 WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
 {
+    if(this == &other)
+        return *this;
+
     type = other.type;
     port = other.port;
 
@@ -37,7 +40,7 @@ WFXIpAddress& WFXIpAddress::operator=(const WFXIpAddress& other)
 
 bool WFXIpAddress::operator==(const WFXIpAddress& other) const
 {
-    std::size_t len = (type == AF_INET) ? 4 : 16;
+    const std::size_t len = (type == AF_INET) ? 4 : 16;
     return port == other.port && type == other.type && memcmp(ip.raw, other.ip.raw, len) == 0;
 }
 
@@ -45,13 +48,13 @@ bool WFXIpAddress::operator==(const WFXIpAddress& other) const
 std::string_view WFXIpAddress::GetIpStr() const
 {
     // Use thread-local static buffer to avoid heap allocation
-    thread_local char ipStrBuf[INET6_ADDRSTRLEN] = {};
+    thread_local char GlobalIpStrBuf[INET6_ADDRSTRLEN] = {};
 
     const void* addr = (type == AF_INET) ? static_cast<const void*>(&ip.v4) : static_cast<const void*>(&ip.v6);
 
     // Convert to printable form
-    if(inet_ntop(type, addr, ipStrBuf, sizeof(ipStrBuf)))
-        return std::string_view(ipStrBuf);
+    if(inet_ntop(type, addr, GlobalIpStrBuf, sizeof(GlobalIpStrBuf)))
+        return std::string_view(GlobalIpStrBuf);
 
     return std::string_view("ip-malformed");
 }
@@ -145,12 +148,12 @@ void ClientCtx::Clear()
 
 void ClientCtx::CleanupStreamGenerator()
 {
-    if(streamGenerator.ctx && streamGenerator.Destroy)
-        streamGenerator.Destroy(streamGenerator.ctx);
+    if(streamGenerator.ctx && streamGenerator.destroy)
+        streamGenerator.destroy(streamGenerator.ctx);
 
     streamGenerator.ctx = nullptr;
-    streamGenerator.Next = nullptr;
-    streamGenerator.Destroy = nullptr;
+    streamGenerator.next = nullptr;
+    streamGenerator.destroy = nullptr;
 }
 
 void ClientCtx::SetParseState(HttpParseState newState)
@@ -175,7 +178,7 @@ ConnectionState ClientCtx::GetConnectionState() const
 
 bool ClientCtx::IsAsyncOperation() const
 {
-    return asyncData.AsyncComplete != nullptr;
+    return asyncData.asyncComplete != nullptr;
 }
 
 // vvv Endpoint Context Methods vvv
@@ -222,7 +225,7 @@ EndpointState EndpointCtx::GetEndpointState() const
 
 bool EndpointCtx::IsAsyncOperation() const
 {
-    return asyncData.AsyncComplete != nullptr;
+    return asyncData.asyncComplete != nullptr;
 }
 
 } // namespace WFX::Http

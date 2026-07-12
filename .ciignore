@@ -1,9 +1,10 @@
-# Documentation
+# Documentation & Licensing
 README.md
 CHANGELOG.md
 LICENSE
 NOTICES.md
 CONTRIBUTING.md
+THIRD_PARTY_NOTICES.md
 
 # CI / GitHub workflows
 .ciignore
@@ -29,3 +30,10 @@ tests/
 lib/
 wfx
 wfx.toml
+
+# Helper scripts
+scripts/
+
+# Lint / format config
+.clang-format
+.clang-tidy

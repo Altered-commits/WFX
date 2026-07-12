@@ -56,7 +56,7 @@ public: // vvv Comparison vvv
 
     int Compare(const StringView& other) const noexcept
     {
-        std::uint64_t minLen = (length < other.length) ? length : other.length;
+        const std::uint64_t minLen = (length < other.length) ? length : other.length;
 
         for(std::uint64_t i = 0; i < minLen; ++i)
             if(data[i] != other.data[i])

@@ -36,7 +36,7 @@ void HandleBuildDirectory()
         return;
 
     std::string intDir = projectConfig.projectName + "/intermediate/dynamic";
-    std::string intDummy = intDir + "/_d.cpp";
+    const std::string intDummy = intDir + "/_d.cpp";
 
     // If intermediate directory doesn't exist, handle its creation (to ensure cmake succeeds)
     if(!FileSystem::DirectoryExists(intDir.c_str())) {
@@ -118,7 +118,7 @@ void PinWorkerToCPU(int workerIndex)
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
 
-    int cpu = workerIndex % sysconf(_SC_NPROCESSORS_ONLN); // Round-Robin
+    const int cpu = workerIndex % static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN)); // Round-Robin
 
     CPU_SET(cpu, &cpuset);
 

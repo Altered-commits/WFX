@@ -48,7 +48,7 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
     InitEndpointAPIExt1(connHandler_.get());
     InitAsyncAPIExt1(connHandler_.get());
 
-    // We set it on our end because each compiled binary has its own copy of '__WFXApi'
+    // We set it on our end because each compiled binary has its own copy of 'GlobalWFXApi'
     // If we want it to work on our end, we gotta set it here as well
     SetMasterApi(GetMasterAPI());
 
@@ -86,7 +86,7 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
     auto& res = *ctx->responseInfo;
 
     // Main shit
-    HttpParseState state = HttpParser::Parse(ctx);
+    const HttpParseState state = HttpParser::Parse(ctx);
 
     switch(state) {
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
@@ -124,16 +124,16 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             // RFC violation, close connection
             if(connMask & ConnectionHeader::ERROR) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-                connHandler_->Write(ctx, HttpError::badRequest);
+                connHandler_->Write(ctx, HttpError::BAD_REQUEST);
                 return;
             }
 
             // In this case:
             // HTTP/1.0: Defaults to close
             // HTTP/1.1: Defaults to keep-alive
-            bool shouldClose = (connMask == ConnectionHeader::NONE)
-                                   ? (reqInfo.version == HttpVersion::HTTP_1_0)
-                                   : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
+            const bool shouldClose = (connMask == ConnectionHeader::NONE)
+                                         ? (reqInfo.version == HttpVersion::HTTP_1_0)
+                                         : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
 
             ctx->SetConnectionState(shouldClose ? ConnectionState::CONNECTION_CLOSE
                                                 : ConnectionState::CONNECTION_ALIVE);
@@ -142,7 +142,7 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             // Write buffer allocated once, reused across requests on same connection
             if(!ctx->rwBuffer.IsWriteInitialized() && !ctx->rwBuffer.InitWriteBuffer(networkConfig.maxSendBufferSize)) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-                connHandler_->Write(ctx, HttpError::internalError);
+                connHandler_->Write(ctx, HttpError::INTERNAL_ERROR);
                 return;
             }
 
@@ -153,8 +153,8 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
 
             // Public file shortcut
             if(reqInfo.path.starts_with("/public/")) {
-                std::string_view relativePath = reqInfo.path.substr(7);
-                std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
+                const std::string_view relativePath = reqInfo.path.substr(7);
+                const std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
                 res.SendFile(fullRoute, true);
                 goto __HandleResponse;
@@ -180,13 +180,13 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
 
         case HttpParseState::PARSE_ERROR:
             ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-            connHandler_->Write(ctx, HttpError::badRequest);
+            connHandler_->Write(ctx, HttpError::BAD_REQUEST);
             return;
 
         case HttpParseState::PARSE_STREAMING_BODY:
         default:
             ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-            connHandler_->Write(ctx, HttpError::notImplemented);
+            connHandler_->Write(ctx, HttpError::NOT_IMPLEMENTED);
             return;
     }
 }
@@ -232,10 +232,10 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
     auto& res = *ctx->responseInfo;
     auto* node = static_cast<const TrieNode*>(req.routeNode_);
 
-    Response userRes{&res};
-    Request userReq{&req};
+    const Response userRes{&res};
+    const Request userReq{&req};
 
-    ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
+    const ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
 
     if(eLevel == ExecutionLevel::RESPONSE)
         goto __HandleResponse;
@@ -274,11 +274,11 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
         // Set context (type erased) at http api side before calling async callback
         // And also erase it after callback is done, if the callback hasn't finished, the-
         // -scheduler will set the ptr later on when needed, no need to keep a dangling pointer
-        httpApi->SetGlobalPtrData(static_cast<void*>(ctx));
+        httpApi->setGlobalPtrData(static_cast<void*>(ctx));
 
         node->callback.async(userReq, userRes, CoreEngine::OnCoroutineComplete, ctx);
 
-        httpApi->SetGlobalPtrData(nullptr);
+        httpApi->setGlobalPtrData(nullptr);
 
         // If the coroutine already completed synchronously ('final_suspend' already fired the callback),-
         // -the response is already handled
@@ -336,7 +336,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
 {
     std::uint8_t mask = ConnectionHeader::NONE;
     std::size_t start = 0;
-    std::size_t size = header.size();
+    const std::size_t size = header.size();
 
     while(start < size) {
         // Find comma
@@ -345,7 +345,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
             end = size;
 
         // Extract token substring trimming leading and trailing spaces / tabs
-        std::string_view token = StringUtils::TrimView(header.substr(start, end - start));
+        const std::string_view token = StringUtils::TrimView(header.substr(start, end - start));
 
         // CLOSE
         if(StringUtils::InsensitiveStringCompare(token, "close")) {

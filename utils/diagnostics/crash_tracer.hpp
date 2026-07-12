@@ -16,7 +16,7 @@
 #endif
 
 #define WFX_TRACE()                                                                                                    \
-    WFX::Utils::CrashTracer::ScopedFrame __WFXSF_                                                                      \
+    const WFX::Utils::CrashTracer::ScopedFrame wfxTraceFrame                                                           \
     {                                                                                                                  \
         __func__, __FILE__, __LINE__                                                                                   \
     }
@@ -37,17 +37,17 @@ public:
     struct ScopedFrame {
         ScopedFrame(const char* func, const char* file, int line) noexcept
         {
-            savedDepth_ = depth_;
-            int d = depth_;
+            savedDepth_ = GlobalDepth;
+            const int d = GlobalDepth;
 
             if(d < MAX_DEPTH) {
-                frames_[d] = {func, file, line};
-                depth_ = d + 1;
+                GlobalFrames[d] = {func, file, line};
+                GlobalDepth = d + 1;
             }
         }
         ~ScopedFrame() noexcept
         {
-            depth_ = savedDepth_;
+            GlobalDepth = savedDepth_;
         }
 
     private:
@@ -56,11 +56,11 @@ public:
 
     static void UpdateTop(const char* label, const char* file, int line) noexcept
     {
-        int d = depth_ - 1;
+        const int d = GlobalDepth - 1;
         if(d >= 0) {
-            frames_[d].func = label;
-            frames_[d].file = file;
-            frames_[d].line = line;
+            GlobalFrames[d].func = label;
+            GlobalFrames[d].file = file;
+            GlobalFrames[d].line = line;
         }
     }
 
@@ -68,11 +68,11 @@ public:
     static void SetWorkerName(const char* name) noexcept;
 
 private:
-    inline static Frame frames_[MAX_DEPTH];
-    inline static int depth_;
-    inline static char workerName_[32];
-    inline static char logDir_[256];
-    inline static char altStack_[65536];
+    inline static Frame GlobalFrames[MAX_DEPTH];
+    inline static int GlobalDepth;
+    inline static char GlobalWorkerName[32];
+    inline static char GlobalLogDir[256];
+    inline static char GlobalAltStack[65536];
 
 private:
     struct UTCTime {

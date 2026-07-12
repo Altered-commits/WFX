@@ -101,10 +101,10 @@ public: // vvv Factory vvv
         // 0-7, 9-12, 14-17, 19-22, 24-35
         #define P(dst, i) \
             { \
-                std::uint8_t hi = kDecode[(std::uint8_t)s[i]];      \
-                std::uint8_t lo = kDecode[(std::uint8_t)s[i + 1]];  \
-                if(hi == 0xFF || lo == 0xFF) return false;          \
-                out.bytes[dst] = (hi << 4) | lo;                    \
+                const std::uint8_t hi = kDecode[(std::uint8_t)s[i]];       \
+                const std::uint8_t lo = kDecode[(std::uint8_t)s[(i) + 1]]; \
+                if(hi == 0xFF || lo == 0xFF) return false;                 \
+                out.bytes[dst] = (hi << 4) | lo;                           \
             }
 
         P( 0,  0) P( 1,  2) P( 2,  4) P( 3,  6)                     // 8 chars

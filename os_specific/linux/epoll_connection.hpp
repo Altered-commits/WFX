@@ -112,7 +112,7 @@ private: // Connection management
     void ReturnEndpointToPool(EndpointCtx* ctx);
 
 private: // I/O
-    bool EnsureFileReady(ClientCtx* ctx, std::string path);
+    bool EnsureFileReady(ClientCtx* ctx, const std::string& path);
     void SendFile(ClientCtx* ctx);
     void ResumeStream(ClientCtx* ctx);
 
@@ -230,10 +230,9 @@ private: // Singletons / config
     Config& config_ = GetConfig();
     Logger& logger_ = GetLogger();
     FileCache& fileCache_ = GetFileCache();
-    BufferPool& pool_ = GetBufferPool();
     WorkerMetrics* metrics_ = MetricTracer::Current();
 
-    IpLimiter ipLimiter_ = {pool_};
+    IpLimiter ipLimiter_;
     ReceiveCallback onReceive_ = {};
     std::atomic<bool> running_ = true;
     bool useHttps_ = false;
@@ -290,7 +289,7 @@ private: // Pools
 
 private: // Static
     static void OnSlotConnected(void* ud, AsyncResult result);
-    static EpollConnectionHandler* instance_;
+    static EpollConnectionHandler* GlobalInstance;
 };
 
 } // namespace WFX::OSSpecific

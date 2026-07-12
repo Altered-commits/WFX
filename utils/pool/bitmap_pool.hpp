@@ -94,9 +94,9 @@ public: // vvv Main Functions vvv
 
         // Primary scan: from last index to end
         for(; w < words_; ++w) {
-            std::uint64_t inv = ~bitmap_[w];
+            const std::uint64_t inv = ~bitmap_[w];
             if(inv) {
-                int bit = std::countr_zero(inv);
+                const int bit = std::countr_zero(inv);
                 bitmap_[w] |= 1ULL << bit;
                 lastUsedIndex_ = w;
                 return &pool_[(w << 6) + bit];
@@ -106,9 +106,9 @@ public: // vvv Main Functions vvv
         // Wrap around scan: from start to old index
         w = 0;
         for(; w < lastUsedIndex_; ++w) {
-            std::uint64_t inv = ~bitmap_[w];
+            const std::uint64_t inv = ~bitmap_[w];
             if(inv) {
-                int bit = std::countr_zero(inv);
+                const int bit = std::countr_zero(inv);
                 bitmap_[w] |= 1ULL << bit;
                 lastUsedIndex_ = w;
                 return &pool_[(w << 6) + bit];
@@ -120,15 +120,15 @@ public: // vvv Main Functions vvv
 
     void FreeSlot(std::uint32_t idx)
     {
-        std::uint32_t w = idx >> 6;
-        std::uint32_t bit = idx & 63;
+        const std::uint32_t w = idx >> 6;
+        const std::uint32_t bit = idx & 63;
         bitmap_[w] &= ~(1ULL << bit);
     }
 
     bool IsAllocated(std::uint32_t idx) const
     {
-        std::uint32_t w = idx >> 6;
-        std::uint32_t bit = idx & 63;
+        const std::uint32_t w = idx >> 6;
+        const std::uint32_t bit = idx & 63;
         return (bitmap_[w] & (1ULL << bit)) != 0;
     }
 

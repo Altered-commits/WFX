@@ -87,7 +87,7 @@ static bool TryResolveLocal(const char* host, std::uint16_t port, ResolvedAddrs&
 static bool QueryRecordType(const char* host, int recordType, std::uint16_t port, ResolvedAddrs& outAddrs)
 {
     unsigned char response[NS_PACKETSZ];
-    int len = res_query(host, ns_c_in, recordType, response, sizeof(response));
+    const int len = res_query(host, ns_c_in, recordType, response, sizeof(response));
     if(len < 0)
         return false;
 
@@ -95,7 +95,7 @@ static bool QueryRecordType(const char* host, int recordType, std::uint16_t port
     if(ns_initparse(response, len, &handle) < 0)
         return false;
 
-    int count = ns_msg_count(handle, ns_s_an);
+    const int count = ns_msg_count(handle, ns_s_an);
     bool foundAny = false;
 
     for(int i = 0; i < count; i++) {
@@ -153,8 +153,8 @@ bool Resolve(const char* host, std::uint16_t port, ResolvedAddrs& outAddrs, std:
         return true;
     }
 
-    bool gotA = QueryRecordType(host, ns_t_a, port, outAddrs);
-    bool gotAAAA = QueryRecordType(host, ns_t_aaaa, port, outAddrs);
+    const bool gotA = QueryRecordType(host, ns_t_a, port, outAddrs);
+    const bool gotAAAA = QueryRecordType(host, ns_t_aaaa, port, outAddrs);
 
     if(!gotA && !gotAAAA)
         return false;

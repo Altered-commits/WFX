@@ -8,9 +8,11 @@
 #include "utils/hash/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
 #include "utils/resolver/dns_resolver.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 #include <netinet/in.h> // in_addr, in6_addr
 #include <arpa/inet.h>  // inet_ntop, inet_pton
+#include <functional>
 
 using WFXSocket = int; // On Linux/Unix, sockets are file descriptors (ints)
 constexpr WFXSocket WFX_INVALID_SOCKET = -1;
@@ -334,26 +336,22 @@ struct HttpConnectionHandler {
 
 // Write a std::hash specialization for WFXIpAddress
 namespace std {
-using WFX::Http::WFXIpAddress;
-using WFX::Utils::GetLogger;
-using WFX::Utils::GetRandomPool;
-using WFX::Utils::Hasher::SipHash24;
-
-template <> struct hash<WFXIpAddress> {
-    std::size_t operator()(const WFXIpAddress& addr) const
+template <> struct hash<WFX::Http::WFXIpAddress> {
+    std::size_t operator()(const WFX::Http::WFXIpAddress& addr) const
     {
-        static std::uint8_t sipKey[16];
+        static std::uint8_t GlobalSipKey[16];
 
         // Run only once
         static const struct InitKeyOnce {
             InitKeyOnce()
             {
-                if(!GetRandomPool().GetBytes(sipKey, sizeof(sipKey)))
-                    GetLogger().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
+                if(!WFX::Utils::GetRandomPool().GetBytes(GlobalSipKey, sizeof(GlobalSipKey)))
+                    WFX::Utils::GetLogger().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
             }
-        } _initOnce;
+        } INIT_ONCE;
 
-        return SipHash24(addr.ip.raw, addr.type == AF_INET ? sizeof(in_addr) : sizeof(in6_addr), sipKey);
+        return WFX::Utils::Hasher::SipHash24(addr.ip.raw, addr.type == AF_INET ? sizeof(in_addr) : sizeof(in6_addr),
+                                             GlobalSipKey);
     }
 };
 } // namespace std

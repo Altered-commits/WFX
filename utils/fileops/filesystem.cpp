@@ -11,7 +11,7 @@ namespace FileSystem {
 
 bool CreateFile(const char* path)
 {
-    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    const int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
     if(fd >= 0) {
         close(fd);
         return true; // Created
@@ -168,7 +168,7 @@ bool CreateDirectory(std::string path, bool recurseParentDir)
 
     bool ok = true;
     const char* data = path.c_str();
-    std::size_t len = path.size();
+    const std::size_t len = path.size();
 
     // Reusable buffer
     std::string tmp;

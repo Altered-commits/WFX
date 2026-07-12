@@ -43,7 +43,7 @@ namespace Detail {
 
 // -----------------------------------------------------------------------
 // Stack buffer size for formatted log lines
-// Matches engine-side 'kMsgBufSize' (lines longer than this are truncated)
+// Matches engine-side 'K_MSG_BUF_SIZE' (lines longer than this are truncated)
 // -----------------------------------------------------------------------
 static constexpr std::size_t kLogBufSize = 1024;
 
@@ -136,22 +136,22 @@ template <typename... Args> inline void LogEmit(int lvl, Args&&... args) noexcep
 
     switch(lvl) {
         case 0:
-            api->LogTrace(buf);
+            api->logTrace(buf);
             break;
         case 1:
-            api->LogDebug(buf);
+            api->logDebug(buf);
             break;
         case 2:
-            api->LogInfo(buf);
+            api->logInfo(buf);
             break;
         case 3:
-            api->LogWarn(buf);
+            api->logWarn(buf);
             break;
         case 4:
-            api->LogError(buf);
+            api->logError(buf);
             break;
         case 5:
-            api->LogFatal(buf);
+            api->logFatal(buf);
             break;
     }
 }
@@ -197,7 +197,7 @@ inline Shared::LogMetrics GetLogMetrics() noexcept
     if(!api)
         return {};
 
-    return api->GetLogMetricsWorker();
+    return api->getLogMetricsWorker();
 }
 
 inline Shared::NetworkMetrics GetNetworkMetrics() noexcept
@@ -206,7 +206,7 @@ inline Shared::NetworkMetrics GetNetworkMetrics() noexcept
     if(!api)
         return {};
 
-    return api->GetNetMetricsWorker();
+    return api->getNetMetricsWorker();
 }
 
 inline Shared::SelfMetrics GetProcessMetrics() noexcept
@@ -215,7 +215,7 @@ inline Shared::SelfMetrics GetProcessMetrics() noexcept
     if(!api)
         return {};
 
-    return api->GetSelfMetricsWorker();
+    return api->getSelfMetricsWorker();
 }
 
 inline Shared::LogMetrics GetLogMetricsAll() noexcept
@@ -224,7 +224,7 @@ inline Shared::LogMetrics GetLogMetricsAll() noexcept
     if(!api)
         return {};
 
-    return api->GetLogMetricsAggregate();
+    return api->getLogMetricsAggregate();
 }
 
 inline Shared::NetworkMetrics GetNetworkMetricsAll() noexcept
@@ -233,7 +233,7 @@ inline Shared::NetworkMetrics GetNetworkMetricsAll() noexcept
     if(!api)
         return {};
 
-    return api->GetNetMetricsAggregate();
+    return api->getNetMetricsAggregate();
 }
 
 inline Shared::SelfMetrics GetProcessMetricsAll() noexcept
@@ -242,7 +242,7 @@ inline Shared::SelfMetrics GetProcessMetricsAll() noexcept
     if(!api)
         return {};
 
-    return api->GetSelfMetricsAggregate();
+    return api->getSelfMetricsAggregate();
 }
 
 } // namespace WFX

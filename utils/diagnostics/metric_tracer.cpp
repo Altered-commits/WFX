@@ -19,38 +19,38 @@ bool Create(int workerCount) noexcept
     if(mem == MAP_FAILED)
         return false;
 
-    slots_ = static_cast<Shared::WorkerMetrics*>(mem);
-    workerCount_ = workerCount;
-    mmapSize_ = size;
+    GlobalSlots = static_cast<Shared::WorkerMetrics*>(mem);
+    GlobalWorkerCount = workerCount;
+    GlobalMmapSize = size;
 
     return true;
 }
 
 void InitWorker(int index) noexcept
 {
-    if(slots_ && index >= 0 && index < workerCount_)
-        workerIndex_ = index;
+    if(GlobalSlots && index >= 0 && index < GlobalWorkerCount)
+        GlobalWorkerIndex = index;
 }
 
 void Destroy() noexcept
 {
-    if(slots_) {
-        ::munmap(slots_, mmapSize_);
-        slots_ = nullptr;
-        workerCount_ = 0;
-        workerIndex_ = -1;
-        mmapSize_ = 0;
+    if(GlobalSlots) {
+        ::munmap(GlobalSlots, GlobalMmapSize);
+        GlobalSlots = nullptr;
+        GlobalWorkerCount = 0;
+        GlobalWorkerIndex = -1;
+        GlobalMmapSize = 0;
     }
 }
 
 Shared::LogMetrics AggregateLog() noexcept
 {
     Shared::LogMetrics out{};
-    if(!slots_)
+    if(!GlobalSlots)
         return out;
 
-    for(int i = 0; i < workerCount_; ++i) {
-        const Shared::LogMetrics& l = slots_[i].log;
+    for(int i = 0; i < GlobalWorkerCount; ++i) {
+        const Shared::LogMetrics& l = GlobalSlots[i].log;
         out.trace += l.trace;
         out.debug += l.debug;
         out.info += l.info;
@@ -65,11 +65,11 @@ Shared::LogMetrics AggregateLog() noexcept
 Shared::NetworkMetrics AggregateNetwork() noexcept
 {
     Shared::NetworkMetrics out{};
-    if(!slots_)
+    if(!GlobalSlots)
         return out;
 
-    for(int i = 0; i < workerCount_; ++i) {
-        const Shared::NetworkMetrics& n = slots_[i].network;
+    for(int i = 0; i < GlobalWorkerCount; ++i) {
+        const Shared::NetworkMetrics& n = GlobalSlots[i].network;
         out.accepts += n.accepts;
         out.reads += n.reads;
         out.writes += n.writes;
@@ -94,11 +94,11 @@ Shared::NetworkMetrics AggregateNetwork() noexcept
 Shared::SelfMetrics AggregateSelf() noexcept
 {
     Shared::SelfMetrics out{};
-    if(!slots_)
+    if(!GlobalSlots)
         return out;
 
-    for(int i = 0; i < workerCount_; ++i) {
-        const Shared::SelfMetrics& s = slots_[i].self;
+    for(int i = 0; i < GlobalWorkerCount; ++i) {
+        const Shared::SelfMetrics& s = GlobalSlots[i].self;
         out.rssBytes += s.rssBytes;
         out.vmBytes += s.vmBytes;
         out.restarts += s.restarts;

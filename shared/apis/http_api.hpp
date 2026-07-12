@@ -67,42 +67,42 @@ using SetGlobalPtrDataFn = void (*)(void*);
 using GetGlobalPtrDataFn = void* (*)();
 
 // vvv API declarations vvv
-struct HTTP_API_EXT1 {
+struct HttpAPIExt1 {
     // Routing
-    RegisterRouteFn RegisterRoute;
-    RegisterRouteExFn RegisterRouteEx;
-    PushRoutePrefixFn PushRoutePrefix;
-    PopRoutePrefixFn PopRoutePrefix;
+    RegisterRouteFn registerRoute;
+    RegisterRouteExFn registerRouteEx;
+    PushRoutePrefixFn pushRoutePrefix;
+    PopRoutePrefixFn popRoutePrefix;
 
     // Middleware
-    RegisterMiddlewareFn RegisterMiddleware;
+    RegisterMiddlewareFn registerMiddleware;
 
     // Request Control
-    GetMethodFn GetMethod;
-    GetVersionFn GetVersion;
-    GetPathFn GetPath;
-    GetBodyFn GetBody;
-    GetHeaderFn GetHeader;
-    GetSegmentCountFn GetSegmentCount;
-    GetSegmentFn GetSegment;
-    SetContextFn SetContext;
-    GetContextFn GetContext;
-    EraseContextFn EraseContext;
+    GetMethodFn getMethod;
+    GetVersionFn getVersion;
+    GetPathFn getPath;
+    GetBodyFn getBody;
+    GetHeaderFn getHeader;
+    GetSegmentCountFn getSegmentCount;
+    GetSegmentFn getSegment;
+    SetContextFn setContext;
+    GetContextFn getContext;
+    EraseContextFn eraseContext;
 
     // Response Control
-    SetStatusFn SetStatus;
-    SetHeaderFn SetHeader;
-    WriteBodyFn WriteBody;
-    WriteFileFn WriteFile;
-    WriteStreamFn WriteStream;
-    WriteTemplateFn WriteTemplate;
-    CommitFn Commit;
+    SetStatusFn setStatus;
+    SetHeaderFn setHeader;
+    WriteBodyFn writeBody;
+    WriteFileFn writeFile;
+    WriteStreamFn writeStream;
+    WriteTemplateFn writeTemplate;
+    CommitFn commit;
 
     // Data API
-    SetGlobalPtrDataFn SetGlobalPtrData;
-    GetGlobalPtrDataFn GetGlobalPtrData;
+    SetGlobalPtrDataFn setGlobalPtrData;
+    GetGlobalPtrDataFn getGlobalPtrData;
 };
-static_assert(std::is_standard_layout<HTTP_API_EXT1>::value, "'HTTP_API_EXT1' must be standard layout");
+static_assert(std::is_standard_layout<HttpAPIExt1>::value, "'HTTP_API_EXT1' must be standard layout");
 
 // Data internally used by Endpoint API
 struct EndpointAPIDataExt1 {
@@ -116,20 +116,20 @@ using SlotSendApiFn = void (*)(void* endpointCtx, const void* data, std::uint32_
 using SlotReceiveApiFn = void (*)(void* endpointCtx, AsyncData);
 using NegotiatedProtocolApiFn = StringView (*)(void* endpointCtx);
 
-struct ENDPOINT_API_EXT1 {
-    AllocateEndpointApiFn AllocateEndpoint;
-    SendPayloadApiFn SendPayload;
-    SlotSendApiFn SlotSend;
-    SlotReceiveApiFn SlotReceive;
-    NegotiatedProtocolApiFn NegotiatedProtocol;
+struct EndpointAPIExt1 {
+    AllocateEndpointApiFn allocateEndpoint;
+    SendPayloadApiFn sendPayload;
+    SlotSendApiFn slotSend;
+    SlotReceiveApiFn slotReceive;
+    NegotiatedProtocolApiFn negotiatedProtocol;
 };
-static_assert(std::is_standard_layout_v<ENDPOINT_API_EXT1>, "'ENDPOINT_API_EXT1' must be standard layout");
+static_assert(std::is_standard_layout_v<EndpointAPIExt1>, "'ENDPOINT_API_EXT1' must be standard layout");
 
 // vvv Getter & Initializers vvv
-const HTTP_API_EXT1* GetHttpAPIExt1();
+const HttpAPIExt1* GetHttpAPIExt1();
 void InitHttpAPIExt1(Http::Router*, Http::HttpMiddleware*);
 
-const ENDPOINT_API_EXT1* GetEndpointAPIExt1();
+const EndpointAPIExt1* GetEndpointAPIExt1();
 void InitEndpointAPIExt1(Http::HttpConnectionHandler* connHandler);
 
 } // namespace WFX::Shared

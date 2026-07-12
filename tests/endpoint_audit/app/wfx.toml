@@ -53,8 +53,8 @@ request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
 worker_processes        = 1      # ENDPOINT TEST: single worker so the outbound connection pool
-                                 # (and coalescing dedup) is a single shared instance — makes
-                                 # keep-alive reuse and coalesce hit-counts deterministic.
+                                 # (and coalescing dedup) is a single shared instance (makes
+                                 # keep-alive reuse and coalesce hit-counts deterministic).
 worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
 backlog                 = 1024   # Max pending connections in OS listen queue
 

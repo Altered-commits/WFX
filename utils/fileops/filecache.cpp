@@ -9,25 +9,25 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#define CloseFile(fd) close(fd)
+#define CLOSE_FILE(fd) close(fd)
 
 #include <cassert>
 
 namespace WFX::Utils {
 
 // Global cache instance
-static FileCache __GlobalFileCache;
+static FileCache GlobalFileCache;
 
 FileCache& GetFileCache() noexcept
 {
-    return __GlobalFileCache;
+    return GlobalFileCache;
 }
 
 // vvv Constructor & Destructor vvvv
 FileCache::~FileCache()
 {
     for(auto& pair : entries_)
-        CloseFile(pair.second.fd);
+        CLOSE_FILE(pair.second.fd);
 
     if(!entries_.empty())
         GetLogger().Info("[FileCache]: Closed all cached file descriptors successfully");
@@ -78,8 +78,8 @@ std::pair<WFXFileDescriptor, WFXFileSize> FileCache::GetFileDesc(const std::stri
 void FileCache::Touch(const std::string& key)
 {
     auto& entry = entries_[key];
-    int oldFreq = entry.freq;
-    int newFreq = oldFreq + 1;
+    const std::uint64_t oldFreq = entry.freq;
+    const std::uint64_t newFreq = oldFreq + 1;
 
     entry.freq = newFreq;
 
@@ -113,11 +113,11 @@ void FileCache::Evict()
 
     // Evict from minFreq bucket, oldest entry (back of list)
     auto& bucket = freqBuckets_[minFreq_];
-    std::string keyToEvict = bucket.back();
+    const std::string keyToEvict = bucket.back();
     bucket.pop_back();
 
-    WFXFileDescriptor fd = entries_[keyToEvict].fd;
-    CloseFile(fd); // Close FD
+    const WFXFileDescriptor fd = entries_[keyToEvict].fd;
+    CLOSE_FILE(fd); // Close FD
 
     entries_.erase(keyToEvict);
 

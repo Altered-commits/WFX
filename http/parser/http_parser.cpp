@@ -38,13 +38,13 @@ HttpParseState Parse(ClientCtx* ctx)
         return HttpParseState::PARSE_ERROR;
 
     // Config variables
-    std::uint32_t maxBufferSize = GetConfig().networkConfig.maxReadBufferSize;
-    std::uint32_t maxBodyTotalSize = GetConfig().networkConfig.maxBodyTotalSize;
-    std::uint32_t maxHeaderTotalSize = GetConfig().networkConfig.maxHeaderTotalSize;
+    const std::uint32_t maxBufferSize = GetConfig().networkConfig.maxReadBufferSize;
+    const std::uint32_t maxBodyTotalSize = GetConfig().networkConfig.maxBodyTotalSize;
+    const std::uint32_t maxHeaderTotalSize = GetConfig().networkConfig.maxHeaderTotalSize;
 
     // Connection Context variables
     std::uint32_t& trackBytes = ctx->trackBytes;
-    std::size_t size = readMeta->dataLength;
+    const std::size_t size = readMeta->dataLength;
 
     // Ensure requestInfo is allocated. If not, lazy initialize it
     if(!ctx->requestInfo)
@@ -95,10 +95,10 @@ HttpParseState Parse(ClientCtx* ctx)
             auto contentLengthHeader = request.headers.GetHeader("Content-Length");
             auto encodingHeader = request.headers.GetHeader("Transfer-Encoding");
 
-            bool hasExpectHeader =
+            const bool hasExpectHeader =
                 !expectHeader.empty() && StringUtils::InsensitiveStringCompare(expectHeader, "100-continue");
-            bool hasContentLengthHeader = !contentLengthHeader.empty();
-            bool hasEncodingHeader = !encodingHeader.empty();
+            const bool hasContentLengthHeader = !contentLengthHeader.empty();
+            const bool hasEncodingHeader = !encodingHeader.empty();
 
             // RFC Spec Violation: Both headers cannot be present at the same time
             if(hasEncodingHeader && hasContentLengthHeader)
@@ -135,7 +135,7 @@ HttpParseState Parse(ClientCtx* ctx)
                 // Body exists
                 if(contentLen > 0) {
                     // Calc total body which recv got till now
-                    std::size_t availableBody = size - trackBytes;
+                    const std::size_t availableBody = size - trackBytes;
 
                     // Still waiting for more body data
                     if(availableBody < contentLen) {
@@ -216,17 +216,17 @@ bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequ
 
     pos = nextPos;
 
-    std::size_t mEnd = line.find(' ');
+    const std::size_t mEnd = line.find(' ');
     if(mEnd == std::string_view::npos)
         return false;
 
-    std::string_view methodStr = line.substr(0, mEnd);
+    const std::string_view methodStr = line.substr(0, mEnd);
     outRequest.method = HttpMethodToEnum(Shared::StringView{methodStr.data(), methodStr.size()});
     if(outRequest.method == Shared::HttpMethod::UNKNOWN)
         return false;
 
-    std::size_t pathStart = mEnd + 1;
-    std::size_t pathEnd = line.find(' ', pathStart);
+    const std::size_t pathStart = mEnd + 1;
+    const std::size_t pathEnd = line.find(' ', pathStart);
     if(pathEnd == std::string_view::npos || pathEnd == pathStart)
         return false;
 
@@ -236,7 +236,7 @@ bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequ
     if(!StringUtils::NormalizeURIPathInplace(outRequest.path))
         return false;
 
-    std::string_view versionStr = line.substr(pathEnd + 1);
+    const std::string_view versionStr = line.substr(pathEnd + 1);
     outRequest.version = HttpVersionToEnum(Shared::StringView{versionStr.data(), versionStr.size()});
     if(outRequest.version == Shared::HttpVersion::UNKNOWN)
         return false;
@@ -256,18 +256,17 @@ bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestH
         if(!SafeFindCRLF(data, size, pos, nextPos, line))
             return false;
 
-        std::size_t lineBytes = nextPos - pos;
         pos = nextPos;
 
         if(line.empty())
             break;
 
-        std::size_t colon = line.find(':');
+        const std::size_t colon = line.find(':');
         if(colon == std::string_view::npos || colon == 0)
             return false;
 
-        std::string_view key = line.substr(0, colon);
-        std::string_view val = Trim(line.substr(colon + 1));
+        const std::string_view key = line.substr(0, colon);
+        const std::string_view val = Trim(line.substr(colon + 1));
 
         // Null-terminate key and value in-place, so even if we use pointer as is, its harmless
         char* writableKey = const_cast<char*>(data + (key.data() - data));

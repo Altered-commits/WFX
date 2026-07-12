@@ -19,27 +19,27 @@ using GetNetMetricsAggregateFn = NetworkMetrics (*)();
 using GetSelfMetricsAggregateFn = SelfMetrics (*)();
 
 // vvv API declarations vvv
-struct UTILS_API_EXT1 {
+struct UtilsAPIExt1 {
     // Logging
-    LogFn LogTrace;
-    LogFn LogDebug;
-    LogFn LogInfo;
-    LogFn LogWarn;
-    LogFn LogError;
-    LogFn LogFatal;
+    LogFn logTrace;
+    LogFn logDebug;
+    LogFn logInfo;
+    LogFn logWarn;
+    LogFn logError;
+    LogFn logFatal;
 
     // Metrics
-    GetLogMetricsWorkerFn GetLogMetricsWorker;
-    GetNetMetricsWorkerFn GetNetMetricsWorker;
-    GetSelfMetricsWorkerFn GetSelfMetricsWorker;
-    GetLogMetricsAggregateFn GetLogMetricsAggregate;
-    GetNetMetricsAggregateFn GetNetMetricsAggregate;
-    GetSelfMetricsAggregateFn GetSelfMetricsAggregate;
+    GetLogMetricsWorkerFn getLogMetricsWorker;
+    GetNetMetricsWorkerFn getNetMetricsWorker;
+    GetSelfMetricsWorkerFn getSelfMetricsWorker;
+    GetLogMetricsAggregateFn getLogMetricsAggregate;
+    GetNetMetricsAggregateFn getNetMetricsAggregate;
+    GetSelfMetricsAggregateFn getSelfMetricsAggregate;
 };
-static_assert(std::is_standard_layout<UTILS_API_EXT1>::value, "'UTILS_API_EXT1' must be standard layout");
+static_assert(std::is_standard_layout<UtilsAPIExt1>::value, "'UTILS_API_EXT1' must be standard layout");
 
 // vvv Getter vvv
-const UTILS_API_EXT1* GetUtilsAPIExt1();
+const UtilsAPIExt1* GetUtilsAPIExt1();
 
 } // namespace WFX::Shared
 

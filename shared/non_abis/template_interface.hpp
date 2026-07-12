@@ -28,7 +28,7 @@ struct VariableChunk {
 using TemplateChunk = std::variant<std::monostate, FileChunk, VariableChunk>;
 
 // Enum representation of variant types
-enum class TemplateChunkType { MONOSTATE, FILE, VARIABLE };
+enum class TemplateChunkType : std::uint8_t { MONOSTATE, FILE, VARIABLE };
 
 // Actual return type of the function 'GetState'
 // Returns the next state and the result of current state

@@ -13,7 +13,7 @@ namespace WFX::Http {
 using namespace WFX::Core; // For 'Config'
 using namespace std::chrono;
 
-IpLimiter::IpLimiter(Utils::BufferPool& poolRef) : ipLimits_(poolRef)
+IpLimiter::IpLimiter()
 {
     ipLimits_.Init(512);
 }
@@ -70,7 +70,7 @@ bool IpLimiter::AllowRequest(const WFXIpAddress& ip)
 
 void IpLimiter::ReleaseConnection(const WFXIpAddress& ip)
 {
-    WFXIpAddress key = NormalizeIp(ip);
+    const WFXIpAddress key = NormalizeIp(ip);
     bool shouldErase = false;
     auto* entry = ipLimits_.Get(key);
 

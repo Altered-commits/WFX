@@ -24,11 +24,11 @@ struct BasePromise {
 public:
     void* operator new(std::size_t size)
     {
-        return Core::MemoryApiExt1()->Alloc(size);
+        return Core::MemoryApiExt1()->alloc(size);
     }
     void operator delete(void* ptr)
     {
-        Core::MemoryApiExt1()->Free(ptr);
+        Core::MemoryApiExt1()->free(ptr);
     }
 
 public:

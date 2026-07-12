@@ -116,7 +116,7 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
     auto& rwBuffer = ctx->rwBuffer;
     bool gotData = false;
 
-    constexpr EventType recvState =
+    constexpr EventType RECV_STATE =
         std::is_same_v<Ctx, ClientCtx> ? EventType::EVENT_RECV : EventType::EVENT_ENDPOINT_RECV;
 
     // Drain loop (ET mode: must read until EAGAIN)
@@ -133,7 +133,7 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
             region = rwBuffer.GetWritableReadRegion();
         }
 
-        ssize_t n = WrapRead(ctx->socket, ctx->sslConn, region.ptr, region.len);
+        const ssize_t n = WrapRead(ctx->socket, ctx->sslConn, region.ptr, region.len);
 
         // Fully handle SSL + TCP edge-triggered
         if(n > 0) {
@@ -160,7 +160,7 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
                 // Endpoint and client use different receive states so HandleWriteReady-
                 // -and HandleEpollIn can route without an IsEndpoint() check
-                ctx->eventType = recvState;
+                ctx->eventType = RECV_STATE;
                 break;
             }
 
@@ -214,12 +214,12 @@ template <typename Ctx> bool EpollConnectionHandler::CloseCommon(Ctx* ctx, bool 
 // ^^^ Shared ClientCtx/EndpointCtx templates ^^^
 
 // Used by 'OnSlotConnected' to call back into the engine without a capture
-EpollConnectionHandler* EpollConnectionHandler::instance_ = nullptr;
+EpollConnectionHandler* EpollConnectionHandler::GlobalInstance = nullptr;
 
 // vvv Constructor & Destructor vvv
 EpollConnectionHandler::EpollConnectionHandler(bool useHttps) : useHttps_(useHttps)
 {
-    instance_ = this;
+    GlobalInstance = this;
 
     // Decorrelate backoff jitter across worker processes. Without per-process entropy every worker-
     // -would share the same xorshift sequence and reconnect in lockstep, re-creating the thundering-
@@ -341,7 +341,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
     if(bind(listenFd_, (sockaddr*)&addr, addrLen) < 0)
         logger_.Fatal("[Epoll]: Failed to bind socket: ", strerror(errno));
 
-    if(listen(listenFd_, osConfig.backlog) < 0)
+    if(listen(listenFd_, static_cast<int>(osConfig.backlog)) < 0)
         logger_.Fatal("[Epoll]: Failed to listen: ", strerror(errno));
 
     epollFd_ = epoll_create1(0);
@@ -376,17 +376,17 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
                              // connId is an absolute timer wheel index, recover pool index by-
                              // -subtracting timerBase
                              auto& entry = endpoints_[extra];
-                             std::uint32_t slotIdx = connId - entry.meta.timerBase;
+                             const std::uint32_t slotIdx = connId - entry.meta.timerBase;
                              EndpointCtx* ctx = entry.pool.GetPtr(slotIdx);
 
                              // A timeout during the connect phase (TCP connect / TLS handshake /-
                              // -onConnect) is a transient connect failure: route it through the funnel-
                              // -so a background slot reconnects with backoff and a client-waiting slot-
                              // -fails fast. A timeout during request/idle just closes as before
-                             EventType et = ctx->eventType;
-                             bool connectPhase = et == EventType::EVENT_CONNECT ||
-                                                 et == EventType::EVENT_ENDPOINT_HANDSHAKE ||
-                                                 et == EventType::EVENT_ENDPOINT_ONCONNECT;
+                             const EventType et = ctx->eventType;
+                             const bool connectPhase = et == EventType::EVENT_CONNECT ||
+                                                       et == EventType::EVENT_ENDPOINT_HANDSHAKE ||
+                                                       et == EventType::EVENT_ENDPOINT_ONCONNECT;
 
                              if(connectPhase)
                                  HandleConnectFailure(ctx, entry, false, DisconnectReason::HANDSHAKE_TIMEOUT);
@@ -457,7 +457,7 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
 
     // Scheme prefixes are not allowed. Use FORCE_REQUIRE or FORCE_INSECURE for-
     // -non-standard ports, or rely on port heuristics with AUTO
-    std::string_view hostView{host};
+    const std::string_view hostView{host};
 
     if(hostView.find("://") != std::string_view::npos)
         logger_.Fatal("[Epoll]: Endpoint host must not contain a scheme prefix, got: ", host,
@@ -476,7 +476,7 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
     if(ec != std::errc{})
         logger_.Fatal("[Epoll]: Failed to parse port from endpoint host: ", host);
 
-    std::uint16_t endpointIdx = static_cast<std::uint16_t>(endpoints_.size());
+    const std::uint16_t endpointIdx = static_cast<std::uint16_t>(endpoints_.size());
     std::uint32_t timerBase = connections_.GetSlots();
 
     // 'timerBase' used in RefreshExpiry(EndpointCtx*) overload, do check it out for info
@@ -562,9 +562,9 @@ void EpollConnectionHandler::Write(ClientCtx* ctx, std::string_view msg)
 
         while(writeMeta->writtenLength < writeMeta->dataLength) {
             const char* buf = ctx->rwBuffer.GetWriteData() + writeMeta->writtenLength;
-            std::size_t remaining = writeMeta->dataLength - writeMeta->writtenLength;
+            const std::size_t remaining = writeMeta->dataLength - writeMeta->writtenLength;
 
-            ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, buf, remaining);
+            const ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, buf, remaining);
 
             if(n > 0)
                 writeMeta->writtenLength += n;
@@ -607,9 +607,9 @@ __CleanupOrRearm:
 void EpollConnectionHandler::WriteFile(ClientCtx* ctx, std::string path)
 {
     // Before we proceed, ensure stuffs ready for file operation
-    if(!EnsureFileReady(ctx, std::move(path))) {
+    if(!EnsureFileReady(ctx, path)) {
         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-        Write(ctx, HttpError::internalError);
+        Write(ctx, HttpError::INTERNAL_ERROR);
         return;
     }
 
@@ -622,7 +622,7 @@ void EpollConnectionHandler::WriteFile(ClientCtx* ctx, std::string path)
 void EpollConnectionHandler::Stream(ClientCtx* ctx, StreamGenerator generator, bool streamChunked)
 {
     // Sanity checks
-    if(!generator.ctx || !generator.Next) {
+    if(!generator.ctx || !generator.next) {
         logger_.Warn("[Epoll]: 'Stream()' called but received empty generator");
         Close(ctx);
         return;
@@ -678,8 +678,8 @@ EndpointStatus EpollConnectionHandler::SerializeSingleSlot(EndpointCtx* slotCtx,
         std::uint32_t written = 0;
         std::uint64_t unusedStreamKey = 0; // desc.hasCapacity is null on this path, always ignored
 
-        SerializeResult sr = desc.serialize(slotCtx->slotState, req, rwBuf.GetWriteData(), writeMeta->bufferSize,
-                                            &written, &unusedStreamKey);
+        const SerializeResult sr = desc.serialize(slotCtx->slotState, req, rwBuf.GetWriteData(), writeMeta->bufferSize,
+                                                  &written, &unusedStreamKey);
 
         if(sr == SerializeResult::OK) {
             writeMeta->dataLength = written;
@@ -715,8 +715,8 @@ EndpointStatus EpollConnectionHandler::SerializeMultiplexed(EndpointCtx* slotCtx
         auto region = rwBuf.GetWritableWriteRegion();
         std::uint32_t written = 0;
 
-        SerializeResult sr = desc.serialize(slotCtx->slotState, req, region.ptr, static_cast<std::uint32_t>(region.len),
-                                            &written, streamKey);
+        const SerializeResult sr = desc.serialize(slotCtx->slotState, req, region.ptr,
+                                                  static_cast<std::uint32_t>(region.len), &written, streamKey);
 
         if(sr == SerializeResult::OK) {
             if(*streamKey == 0) {
@@ -795,7 +795,7 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
     // -would let FireOnConnect's own Send() append the handshake bytes AFTER the request-
     // -bytes already queued here, so the request would reach the wire before the handshake
     // Defer: stash req and let FlushDeferredRequest serialize it once onConnect is READY
-    bool freshConnect = slotCtx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE;
+    const bool freshConnect = slotCtx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE;
 
     if(desc.onConnect && freshConnect) {
         slotCtx->pendingConnectReq = req;
@@ -809,7 +809,7 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
             return EndpointStatus::BUFFER_ERROR;
         }
 
-        EndpointStatus sr = SerializeSingleSlot(slotCtx, meta, req);
+        const EndpointStatus sr = SerializeSingleSlot(slotCtx, meta, req);
         if(sr != EndpointStatus::SUCCESS) {
             FinalizeEndpointRequest(slotCtx, meta, false);
             ReleaseEndpoint(slotCtx);
@@ -904,7 +904,7 @@ EndpointStatus EpollConnectionHandler::SendPayloadMultiplexed(ClientCtx* clientC
     // -coalesceKey, parseStateObj) are unused here otherwise, so they double as storage-
     // -for this stream's pending bits until FlushDeferredRequest moves them into a real-
     // -PendingStream entry
-    bool freshConnect = slotCtx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE;
+    const bool freshConnect = slotCtx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE;
 
     if(desc.onConnect && freshConnect) {
         slotCtx->pendingConnectReq = req;
@@ -922,7 +922,7 @@ EndpointStatus EpollConnectionHandler::SendPayloadMultiplexed(ClientCtx* clientC
             return EndpointStatus::BUFFER_ERROR;
         }
 
-        EndpointStatus sr = SerializeMultiplexed(slotCtx, meta, req, &streamKey);
+        const EndpointStatus sr = SerializeMultiplexed(slotCtx, meta, req, &streamKey);
         if(sr != EndpointStatus::SUCCESS) {
             cleanupReqParseState();
             if(freshSlot)
@@ -1014,9 +1014,9 @@ void EpollConnectionHandler::SlotSend(EndpointCtx* slotCtx, const void* data, st
     auto& rwBuf = slotCtx->rwBuffer;
 
     auto fireFailure = [&]() {
-        AsyncResult fail{nullptr, 0, {.unused = 0}, AsyncStatus::IO_FAILURE};
-        if(asyncData.AsyncComplete)
-            asyncData.AsyncComplete(asyncData.userData, fail);
+        const AsyncResult fail{nullptr, 0, {.unused = 0}, AsyncStatus::IO_FAILURE};
+        if(asyncData.asyncComplete)
+            asyncData.asyncComplete(asyncData.userData, fail);
     };
 
     if(!rwBuf.IsWriteInitialized() && !rwBuf.InitWriteBuffer(config_.networkConfig.maxSendBufferSize)) {
@@ -1058,9 +1058,9 @@ void EpollConnectionHandler::SlotReceive(EndpointCtx* slotCtx, AsyncData asyncDa
     if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
         logger_.Error("[Epoll]: 'SlotReceive -> RegisterEpoll(MOD)' failed: ", strerror(errno));
 
-        AsyncResult fail{nullptr, 0, {.unused = 0}, AsyncStatus::IO_FAILURE};
-        if(asyncData.AsyncComplete)
-            asyncData.AsyncComplete(asyncData.userData, fail);
+        const AsyncResult fail{nullptr, 0, {.unused = 0}, AsyncStatus::IO_FAILURE};
+        if(asyncData.asyncComplete)
+            asyncData.asyncComplete(asyncData.userData, fail);
     }
 }
 
@@ -1069,7 +1069,7 @@ StringView EpollConnectionHandler::NegotiatedProtocol(EndpointCtx* slotCtx)
     if(!slotCtx->sslConn)
         return {};
 
-    std::string_view proto = sslHandler_->NegotiatedProtocol(slotCtx->sslConn);
+    const std::string_view proto = sslHandler_->NegotiatedProtocol(slotCtx->sslConn);
     return StringView{proto.data(), proto.size()};
 }
 
@@ -1088,7 +1088,7 @@ void EpollConnectionHandler::Run()
     int sfd = 0;
 
     while(running_) {
-        int nfds = epoll_wait(epollFd_, events_.get(), maxEvents_, -1);
+        const int nfds = epoll_wait(epollFd_, events_.get(), maxEvents_, -1);
         if(nfds < 0) {
             // Interrupted by signal
             if(errno == EINTR)
@@ -1097,9 +1097,9 @@ void EpollConnectionHandler::Run()
         }
 
         for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(nfds); i++) {
-            std::uint32_t ev = events_[i].events;
-            std::uint64_t meta = events_[i].data.u64;
-            std::uint16_t gen = (meta >> 32) & 0xFFFF; // First half's lower 16 bits
+            const std::uint32_t ev = events_[i].events;
+            const std::uint64_t meta = events_[i].data.u64;
+            const std::uint16_t gen = (meta >> 32) & 0xFFFF; // First half's lower 16 bits
 
             // Existing connection, handle it
             if(gen > 0)
@@ -1126,7 +1126,7 @@ void EpollConnectionHandler::Run()
                     sockaddr_storage addr{};
                     socklen_t len = sizeof(addr);
 
-                    int clientFd = accept4(listenFd_, (sockaddr*)&addr, &len, SOCK_NONBLOCK);
+                    const int clientFd = accept4(listenFd_, (sockaddr*)&addr, &len, SOCK_NONBLOCK);
                     if(clientFd < 0) {
                         // Queue drained, stop
                         if(errno == EAGAIN || errno == EWOULDBLOCK)
@@ -1167,8 +1167,8 @@ void EpollConnectionHandler::Run()
             // Get connection context
             // Also if you are confused with the below hardcoded numbers, check 'PackEpollData'-
             // -function, you can see how data is packed in event.u64 member field
-            std::uint16_t endpointIdx = meta >> 48;
-            std::uint32_t poolIdx = meta & 0xFFFFFFFF;
+            const std::uint16_t endpointIdx = meta >> 48;
+            const std::uint32_t poolIdx = meta & 0xFFFFFFFF;
 
             if(endpointIdx == CLIENT_CONNECTION_TAG) {
                 ClientCtx* ctx = connections_.GetPtr(poolIdx);
@@ -1193,7 +1193,7 @@ void EpollConnectionHandler::Run()
         }
 
         // DNS refresh check, cheap time comparison, runs once per epoll wakeup
-        std::uint64_t nowSeconds = NowMs() / 1000;
+        const std::uint64_t nowSeconds = NowMs() / 1000;
         for(std::uint16_t i = 0; i < static_cast<std::uint16_t>(endpoints_.size()); i++) {
             auto& m = endpoints_[i].meta;
             if(nowSeconds >= m.dnsNextRefreshSeconds)
@@ -1204,7 +1204,7 @@ void EpollConnectionHandler::Run()
 
 void EpollConnectionHandler::RefreshExpiry(ClientCtx* ctx, std::uint16_t timeoutSeconds)
 {
-    std::uint32_t idx = connections_.GetIndex(ctx);
+    const std::uint32_t idx = connections_.GetIndex(ctx);
     timerWheel_.Schedule(idx, CLIENT_CONNECTION_TAG, timeoutSeconds);
 }
 
@@ -1213,14 +1213,14 @@ void EpollConnectionHandler::RefreshExpiry(EndpointCtx* ctx, std::uint16_t timeo
     // 'timerBase' offsets endpoint indices past all client slots and all preceding endpoint pools-
     // -so client slot N and endpoint slot N never collide in the timer wheel's meta_ array
     auto& entry = endpoints_[ctx->endpointIdx];
-    std::uint32_t idx = entry.meta.timerBase + entry.pool.GetIndex(ctx);
+    const std::uint32_t idx = entry.meta.timerBase + entry.pool.GetIndex(ctx);
     timerWheel_.Schedule(idx, ctx->endpointIdx, timeoutSeconds);
 }
 
 bool EpollConnectionHandler::RefreshAsyncTimer(ClientCtx* ctx, std::uint32_t delayMs, AsyncData asyncData)
 {
-    std::uint32_t idx = connections_.GetIndex(ctx);
-    std::uint64_t expire = NowMs() + delayMs;
+    const std::uint32_t idx = connections_.GetIndex(ctx);
+    const std::uint64_t expire = NowMs() + delayMs;
 
     // Timers are coalesced if they fall within +-10ms of each other
     if(!timerHeap_.Insert(idx, expire, 10)) {
@@ -1285,7 +1285,7 @@ EndpointCtx* EpollConnectionHandler::FindMultiplexableSlot(std::uint16_t endpoin
     WFX_TRACE();
 
     auto& pool = endpoints_[endpointIdx].pool;
-    std::uint32_t slots = pool.GetSlots();
+    const std::uint32_t slots = pool.GetSlots();
     if(slots == 0)
         return nullptr;
 
@@ -1305,7 +1305,7 @@ EndpointCtx* EpollConnectionHandler::FindMultiplexableSlot(std::uint16_t endpoin
         // -SendPayload (e.g. from a coroutine resumed by this very teardown's waiter callbacks)-
         // -could attach a brand new client to a slot that's about to be Reset() and recycled for-
         // -an unrelated connection
-        bool ready =
+        const bool ready =
             !ctx->isShuttingDown && ctx->GetConnectionState() == ConnectionState::CONNECTION_ALIVE &&
             (ctx->eventType == EventType::EVENT_ENDPOINT_RECV || ctx->eventType == EventType::EVENT_ENDPOINT_SEND);
 
@@ -1339,7 +1339,7 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
 
     metrics_->network.activeClientConns--;
 
-    std::uint32_t idx = connections_.GetIndex(ctx);
+    const std::uint32_t idx = connections_.GetIndex(ctx);
 
     // Cancelling timer in 'Close' kinda sucks cuz during async shutdown-
     // -the client might bail, never finish it, and we just be stuck in-
@@ -1373,7 +1373,7 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
                 // -and the coalesce-waiter callbacks can synchronously reenter SendPayloadMultiplexed-
                 // -(e.g. an app-level retry), which may insert into this same pendingStreams map and-
                 // -trigger a rehash (using `it` afterward would then be undefined behavior)
-                PendingStream stream = it->second;
+                const PendingStream stream = it->second;
                 epCtx->pendingStreams->erase(it);
 
                 // Same coalesce-waiter failure this key's master death already gets on the-
@@ -1382,7 +1382,7 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
                 if(stream.coalesceKey != 0) {
                     auto cit = meta.coalescePending.find(stream.coalesceKey);
                     if(cit != meta.coalescePending.end()) {
-                        std::vector<CoalesceWaiter> waiters = std::move(cit->second.waiters);
+                        const std::vector<CoalesceWaiter> waiters = std::move(cit->second.waiters);
                         meta.coalescePending.erase(cit);
 
                         for(auto& w : waiters) {
@@ -1455,10 +1455,10 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
     auto& meta = entry.meta;
     auto& desc = meta.desc;
 
-    std::uint32_t idx = entry.pool.GetIndex(ctx);
+    const std::uint32_t idx = entry.pool.GetIndex(ctx);
 
     // SAME LOGIC PRETTY MUCH
-    std::uint32_t timerIdx = meta.timerBase + idx;
+    const std::uint32_t timerIdx = meta.timerBase + idx;
     timerWheel_.Cancel(timerIdx);
 
     // 'onDisconnect' fires before any state is destroyed so the user still has valid pointers
@@ -1539,11 +1539,11 @@ void EpollConnectionHandler::ReturnEndpointToPool(EndpointCtx* slotCtx)
     // Only the bitmap bit is cleared so GetEndpointConnection can lease the slot again for the next request
 
     auto& entry = endpoints_[slotCtx->endpointIdx];
-    std::uint32_t idx = entry.pool.GetIndex(slotCtx);
+    const std::uint32_t idx = entry.pool.GetIndex(slotCtx);
 
     // CRITICAL: cancel any leftover timer schedule first (e.g. a stale request-timeout-
     // -from a previous lease cycle) before arming the fresh idle timeout below
-    std::uint32_t timerIdx = entry.meta.timerBase + idx;
+    const std::uint32_t timerIdx = entry.meta.timerBase + idx;
     timerWheel_.Cancel(timerIdx);
 
     entry.pool.FreeSlot(idx);
@@ -1570,7 +1570,7 @@ std::uint64_t EpollConnectionHandler::NowMs()
 
 bool EpollConnectionHandler::SetNonBlocking(int fd)
 {
-    int flags = fcntl(fd, F_GETFL, 0);
+    const int flags = fcntl(fd, F_GETFL, 0);
     if(flags < 0)
         return false;
 
@@ -1606,7 +1606,7 @@ bool EpollConnectionHandler::ResolveTLSFromAuto(std::uint16_t port)
     // Port binary search
     std::size_t lo = 0, hi = std::size(TLS_PORTS);
     while(lo < hi) {
-        std::size_t mid = lo + (hi - lo) / 2;
+        const std::size_t mid = lo + (hi - lo) / 2;
         if(TLS_PORTS[mid] == port)
             return true;
         if(TLS_PORTS[mid] < port)
@@ -1618,9 +1618,9 @@ bool EpollConnectionHandler::ResolveTLSFromAuto(std::uint16_t port)
     return false;
 }
 
-bool EpollConnectionHandler::EnsureFileReady(ClientCtx* ctx, std::string path)
+bool EpollConnectionHandler::EnsureFileReady(ClientCtx* ctx, const std::string& path)
 {
-    auto [fd, size] = fileCache_.GetFileDesc(std::move(path));
+    auto [fd, size] = fileCache_.GetFileDesc(path);
     if(fd < 0)
         return false;
 
@@ -1691,10 +1691,10 @@ void EpollConnectionHandler::SendFile(ClientCtx* ctx)
     }
 
     auto& fileInfo = ctx->fileInfo;
-    int fd = fileInfo.fd;
+    const int fd = fileInfo.fd;
 
     while(fileInfo.offset < fileInfo.fileSize) {
-        ssize_t n = WrapFile(ctx, fd, &fileInfo.offset, fileInfo.fileSize - fileInfo.offset);
+        const ssize_t n = WrapFile(ctx, fd, &fileInfo.offset, fileInfo.fileSize - fileInfo.offset);
 
         // Try to send more of file
         if(n > 0)
@@ -1734,7 +1734,7 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
     WFX_TRACE();
 
     // Paranoia check
-    if(!ctx->streamGenerator.ctx || !ctx->streamGenerator.Next) {
+    if(!ctx->streamGenerator.ctx || !ctx->streamGenerator.next) {
         logger_.Warn("[Epoll]: 'ResumeStream' function called but received empty generator");
         Close(ctx);
         return;
@@ -1766,9 +1766,9 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
 
         // Reserve header + trailer space upfront so chunkPtr points at payload start
         char* chunkPtr = writeRegion.ptr + (chunked ? HDR_RESERVE : 0);
-        std::size_t chunkCap = writeRegion.len - (chunked ? HDR_RESERVE + 2 : 0);
+        const std::size_t chunkCap = writeRegion.len - (chunked ? HDR_RESERVE + 2 : 0);
 
-        auto result = ctx->streamGenerator.Next(ctx->streamGenerator.ctx, {chunkPtr, chunkCap});
+        auto result = ctx->streamGenerator.next(ctx->streamGenerator.ctx, {chunkPtr, chunkCap});
         RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 
         if(result.action != StreamAction::CONTINUE) {
@@ -1787,7 +1787,7 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
             writeMeta->dataLength = result.writtenBytes;
         else {
             char hdr[HDR_RESERVE + 1];
-            int hdrLen = snprintf(hdr, HDR_RESERVE, "%zX\r\n", result.writtenBytes);
+            const int hdrLen = snprintf(hdr, HDR_RESERVE, "%zX\r\n", result.writtenBytes);
             if(hdrLen <= 0 || hdrLen >= static_cast<int>(HDR_RESERVE)) {
                 Close(ctx);
                 return;
@@ -1804,8 +1804,8 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
 
         const char* base = rwBuffer.GetWriteData();
         while(writeMeta->writtenLength < writeMeta->dataLength) {
-            ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, base + writeMeta->writtenLength,
-                                  writeMeta->dataLength - writeMeta->writtenLength);
+            const ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, base + writeMeta->writtenLength,
+                                        writeMeta->dataLength - writeMeta->writtenLength);
             if(n > 0)
                 writeMeta->writtenLength += static_cast<std::uint32_t>(n);
             else if(errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -1820,10 +1820,10 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
         // Chunk fully sent, next iteration
     }
 
-    if(ctx->streamGenerator.Destroy)
-        ctx->streamGenerator.Destroy(ctx->streamGenerator.ctx);
+    if(ctx->streamGenerator.destroy)
+        ctx->streamGenerator.destroy(ctx->streamGenerator.ctx);
 
-    bool wasChunked = chunked; // ctx->streamChunked cleared below
+    const bool wasChunked = chunked; // ctx->streamChunked cleared below
 
     // Only STOP_AND_... states can reach here
     rwBuffer.ClearWriteBuffer();
@@ -1852,19 +1852,19 @@ void EpollConnectionHandler::AsyncCallbackImpl(void* ctxPtr, AsyncData& async, A
     auto& asyncRef = async;
 
     // Sanity checks, 'userData' in some edge cases maybe null, these shouldn't be
-    if(!asyncRef.AsyncComplete && !asyncRef.AsyncDestroy)
+    if(!asyncRef.asyncComplete && !asyncRef.asyncDestroy)
         return;
 
-    auto complete = asyncRef.AsyncComplete;
-    auto kill = asyncRef.AsyncDestroy;
+    auto complete = asyncRef.asyncComplete;
+    auto kill = asyncRef.asyncDestroy;
     auto ud = asyncRef.userData;
 
-    asyncRef.AsyncComplete = nullptr;
-    asyncRef.AsyncDestroy = nullptr;
+    asyncRef.asyncComplete = nullptr;
+    asyncRef.asyncDestroy = nullptr;
     asyncRef.userData = nullptr;
 
     // Like all coroutines, this one would also require us to set type-erased 'ctx' at Http API
-    Shared::GetHttpAPIExt1()->SetGlobalPtrData(ctxPtr);
+    Shared::GetHttpAPIExt1()->setGlobalPtrData(ctxPtr);
 
     if(destroy) {
         if(kill)
@@ -1876,7 +1876,7 @@ void EpollConnectionHandler::AsyncCallbackImpl(void* ctxPtr, AsyncData& async, A
     }
 
     // And at the end, erase it
-    Shared::GetHttpAPIExt1()->SetGlobalPtrData(nullptr);
+    Shared::GetHttpAPIExt1()->setGlobalPtrData(nullptr);
 }
 
 void EpollConnectionHandler::HandleClientAsyncCallback(ClientCtx* ctx, AsyncResult res, bool destroy)
@@ -1892,7 +1892,7 @@ void EpollConnectionHandler::HandleEndpointAsyncCallback(EndpointCtx* ctx, Async
 void EpollConnectionHandler::HandleTimeoutTimer(int sfd)
 {
     std::uint64_t expirations = 0;
-    ssize_t n = RetryOnEintr([&] { return read(sfd, &expirations, sizeof(expirations)); });
+    const ssize_t n = RetryOnEintr([&] { return read(sfd, &expirations, sizeof(expirations)); });
 
     if(n < 0) {
         // EAGAIN here would mean epoll reported readiness but the count was already-
@@ -1921,7 +1921,7 @@ void EpollConnectionHandler::HandleTimeoutTimer(int sfd)
 void EpollConnectionHandler::HandleAsyncTimer(int sfd)
 {
     std::uint64_t expirations = 0;
-    ssize_t n = RetryOnEintr([&] { return read(sfd, &expirations, sizeof(expirations)); });
+    const ssize_t n = RetryOnEintr([&] { return read(sfd, &expirations, sizeof(expirations)); });
 
     if(n < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK)
@@ -1933,7 +1933,7 @@ void EpollConnectionHandler::HandleAsyncTimer(int sfd)
         logger_.Fatal("[Epoll]: Async timer fd read failed: ", strerror(errno));
     }
 
-    std::uint64_t newTick = NowMs();
+    const std::uint64_t newTick = NowMs();
     std::uint64_t connId = 0;
 
     while(timerHeap_.PopExpired(newTick, connId)) {
@@ -1968,14 +1968,15 @@ void EpollConnectionHandler::HandleClientHandshake(ClientCtx* ctx, std::uint32_t
         HandleClientEpollIn(ctx);
 }
 
-void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx, std::uint32_t ev)
+void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx, std::uint32_t /*ev*/)
 {
     WFX_TRACE();
 
     // SSL handshake for outbound endpoint connections
     // On success: EVENT_ENDPOINT_ONCONNECT if onConnect hook exists, else EVENT_ENDPOINT_SEND
     auto& meta = endpoints_[ctx->endpointIdx].meta;
-    EventType onSuccess = meta.desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND;
+    const EventType onSuccess =
+        meta.desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND;
 
     if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE)) {
         logger_.Error("[Epoll]: TLS handshake failed for endpoint '", meta.hostname, "'");
@@ -2117,7 +2118,7 @@ void EpollConnectionHandler::HandleClientEpollIn(ClientCtx* ctx)
             // Rate-limit inbound client requests
             if(!ipLimiter_.AllowRequest(ctx->connInfo)) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-                Write(ctx, HttpError::tooManyRequests);
+                Write(ctx, HttpError::TOO_MANY_REQUESTS);
                 return;
             }
 
@@ -2141,7 +2142,7 @@ void EpollConnectionHandler::HandleEndpointEpollIn(EndpointCtx* ctx)
         case EventType::EVENT_ENDPOINT_RECV: {
             // Data arrived from backend, run the parse loop
             bool eof = false;
-            bool gotData = Receive(ctx, &eof);
+            const bool gotData = Receive(ctx, &eof);
 
             // Nothing to act on: EAGAIN with no new bytes, or Receive already closed on a fatal-
             // -error (ctx may be released, must not touch it)
@@ -2293,18 +2294,18 @@ void EpollConnectionHandler::UpdateAsyncTimer()
 
     // Base check, nothing is pending so disarm the timer
     if(!min) {
-        itimerspec disarm{};
+        const itimerspec disarm{};
         timerfd_settime(asyncTimerFd_, 0, &disarm, nullptr);
         return;
     }
 
-    std::uint64_t now = NowMs();
-    std::uint64_t expire = min->delay;
-    std::uint64_t remain = (expire <= now) ? 1 : (expire - now);
+    const std::uint64_t now = NowMs();
+    const std::uint64_t expire = min->delay;
+    const std::uint64_t remain = (expire <= now) ? 1 : (expire - now);
 
     itimerspec ts{};
-    ts.it_value.tv_sec = remain / 1000;
-    ts.it_value.tv_nsec = (remain % 1000) * 1'000'000;
+    ts.it_value.tv_sec = static_cast<decltype(ts.it_value.tv_sec)>(remain / 1000);
+    ts.it_value.tv_nsec = static_cast<decltype(ts.it_value.tv_nsec)>((remain % 1000) * 1'000'000);
     ts.it_interval = {0, 0};
 
     if(RetryOnEintr([&] { return timerfd_settime(asyncTimerFd_, 0, &ts, nullptr); }) < 0)
@@ -2390,9 +2391,9 @@ std::uint64_t EpollConnectionHandler::ComputeNextDnsRefresh(std::uint32_t minTtl
 
     // Jitter range is 10% of interval, minimum 5 seconds regardless of interval size
     // Ensures meaningful spread even at MIN_REFRESH_SECONDS where 10% would be < 1s
-    std::uint32_t jitterRange = std::max(MIN_REFRESH_SECONDS, interval / 10);
-    std::uint32_t hash32 = static_cast<std::uint32_t>(std::hash<std::string>{}(hostname));
-    std::uint32_t jitter = static_cast<std::uint32_t>((static_cast<std::uint64_t>(hash32) * jitterRange) >> 32);
+    const std::uint32_t jitterRange = std::max(MIN_REFRESH_SECONDS, interval / 10);
+    const std::uint32_t hash32 = static_cast<std::uint32_t>(std::hash<std::string>{}(hostname));
+    const std::uint32_t jitter = static_cast<std::uint32_t>((static_cast<std::uint64_t>(hash32) * jitterRange) >> 32);
 
     return (NowMs() / 1000) + interval + jitter;
 }
@@ -2432,7 +2433,7 @@ void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointM
     // -reentrant insert into *ctx->pendingStreams while this range-for is executing is undefined-
     // -behavior (unordered_map insertion may rehash, invalidating the loop's iterator)
     if(ctx->pendingStreams) {
-        PendingStreamMap orphaned = std::move(*ctx->pendingStreams);
+        const PendingStreamMap orphaned = std::move(*ctx->pendingStreams);
         Shared::Delete(ctx->pendingStreams);
         ctx->pendingStreams = nullptr;
 
@@ -2447,7 +2448,7 @@ void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointM
             if(stream.coalesceKey != 0) {
                 auto it = meta.coalescePending.find(stream.coalesceKey);
                 if(it != meta.coalescePending.end()) {
-                    std::vector<CoalesceWaiter> waiters = std::move(it->second.waiters);
+                    const std::vector<CoalesceWaiter> waiters = std::move(it->second.waiters);
                     meta.coalescePending.erase(it);
 
                     for(auto& w : waiters) {
@@ -2496,7 +2497,7 @@ void EpollConnectionHandler::HandleEndpointWriteComplete(EndpointCtx* slotCtx)
 
     // If asyncData is set, this write was initiated by SlotSend from inside onConnect
     // Fire the SlotSend completion and stay in the onConnect phase
-    if(slotCtx->asyncData.AsyncComplete) {
+    if(slotCtx->asyncData.asyncComplete) {
         HandleEndpointAsyncCallback(slotCtx, {nullptr, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
         return;
     }
@@ -2518,9 +2519,9 @@ void EpollConnectionHandler::Write(EndpointCtx* ctx)
 
     while(writeMeta->writtenLength < writeMeta->dataLength) {
         const char* buf = ctx->rwBuffer.GetWriteData() + writeMeta->writtenLength;
-        std::size_t remaining = writeMeta->dataLength - writeMeta->writtenLength;
+        const std::size_t remaining = writeMeta->dataLength - writeMeta->writtenLength;
 
-        ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, buf, remaining);
+        const ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, buf, remaining);
 
         if(n > 0)
             writeMeta->writtenLength += n;
@@ -2549,7 +2550,7 @@ void EpollConnectionHandler::ResolveMultiplexedStream(EndpointCtx* slotCtx, Endp
     if(it == slotCtx->pendingStreams->end())
         return;
 
-    PendingStream stream = it->second;
+    const PendingStream stream = it->second;
     slotCtx->pendingStreams->erase(it);
 
     // The protocol owned this stream's output internally up to now; hand ownership to the-
@@ -2640,7 +2641,7 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx, bool is
     while(true) {
         std::uint32_t consumed = 0;
         std::uint64_t completedKey = 0;
-        ParseResult pr =
+        const ParseResult pr =
             desc.parse(slotCtx->slotState, slotCtx->parseStateObj, rwBuf.GetReadData(), rwBuf.GetReadMeta()->dataLength,
                        &consumed, slotCtx->outputObj, isEof, &completedKey);
 
@@ -2655,7 +2656,7 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx, bool is
                 return;
             }
 
-            std::uint32_t remaining = readMeta->dataLength - consumed;
+            const std::uint32_t remaining = readMeta->dataLength - consumed;
             if(remaining > 0)
                 std::memmove(rwBuf.GetReadData(), rwBuf.GetReadData() + consumed, remaining);
 
@@ -2832,19 +2833,19 @@ void EpollConnectionHandler::FireOnConnect(EndpointCtx* slotCtx, EndpointEntry& 
     // Close is nullptr. Slot lifetime is managed by the engine via ConnectResult
     EndpointSlotHandle handle{};
     handle.impl = slotCtx;
-    handle.NegotiatedProtocol = Shared::GetEndpointAPIExt1()->NegotiatedProtocol;
-    handle.Close = nullptr;
+    handle.negotiatedProtocol = Shared::GetEndpointAPIExt1()->negotiatedProtocol;
+    handle.close = nullptr;
 
     AsyncData onDone{};
     onDone.userData = slotCtx;
-    onDone.AsyncComplete = OnSlotConnected;
-    onDone.AsyncDestroy = nullptr;
+    onDone.asyncComplete = OnSlotConnected;
+    onDone.asyncDestroy = nullptr;
 
     slotCtx->asyncData = onDone;
     slotCtx->eventType = EventType::EVENT_ENDPOINT_ONCONNECT;
     slotCtx->inOnConnectPhase = 1;
 
-    desc.onConnect(handle, slotCtx->slotState, onDone.AsyncComplete, onDone.userData);
+    desc.onConnect(handle, slotCtx->slotState, onDone.asyncComplete, onDone.userData);
 }
 
 bool EpollConnectionHandler::FlushDeferredRequest(EndpointCtx* slotCtx, EndpointEntry& entry)
@@ -2863,7 +2864,7 @@ bool EpollConnectionHandler::FlushDeferredRequest(EndpointCtx* slotCtx, Endpoint
 
     // Non-multiplexed: same serialize step SendPayload uses
     if(!desc.hasCapacity) {
-        EndpointStatus sr = SerializeSingleSlot(slotCtx, meta, req);
+        const EndpointStatus sr = SerializeSingleSlot(slotCtx, meta, req);
         if(sr != EndpointStatus::SUCCESS) {
             FailDeferredRequest(slotCtx, sr);
             return false;
@@ -2879,7 +2880,7 @@ bool EpollConnectionHandler::FlushDeferredRequest(EndpointCtx* slotCtx, Endpoint
     // -and coalesceKey were stashed on the slot in place of a real PendingStream entry (which-
     // -needs a streamKey that only exists once serialize() actually runs)
     std::uint64_t streamKey = 0;
-    EndpointStatus sr = SerializeMultiplexed(slotCtx, meta, req, &streamKey);
+    const EndpointStatus sr = SerializeMultiplexed(slotCtx, meta, req, &streamKey);
     if(sr != EndpointStatus::SUCCESS) {
         FailDeferredRequest(slotCtx, sr);
         return false;
@@ -2887,7 +2888,7 @@ bool EpollConnectionHandler::FlushDeferredRequest(EndpointCtx* slotCtx, Endpoint
 
     ClientCtx* client = slotCtx->clientCtx;
     void* parseState = slotCtx->parseStateObj;
-    std::uint64_t coalesceKey = slotCtx->coalesceKey;
+    const std::uint64_t coalesceKey = slotCtx->coalesceKey;
 
     slotCtx->clientCtx = nullptr;
     slotCtx->parseStateObj = nullptr;
@@ -2933,7 +2934,7 @@ void EpollConnectionHandler::FailDeferredRequest(EndpointCtx* slotCtx, EndpointS
 void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
 {
     auto* slotCtx = static_cast<EndpointCtx*>(ud);
-    auto& entry = instance_->endpoints_[slotCtx->endpointIdx];
+    auto& entry = GlobalInstance->endpoints_[slotCtx->endpointIdx];
 
     slotCtx->inOnConnectPhase = 0;
 
@@ -2942,8 +2943,8 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
     // -out) reconnects with backoff. connectResult is only meaningful when the coroutine completed
     if(result.status != AsyncStatus::COMPLETED || result.connectResult == ConnectResult::FATAL ||
        result.connectResult == ConnectResult::RETRY) {
-        bool fatal = (result.status == AsyncStatus::COMPLETED && result.connectResult == ConnectResult::FATAL);
-        instance_->HandleConnectFailure(slotCtx, entry, fatal);
+        const bool fatal = (result.status == AsyncStatus::COMPLETED && result.connectResult == ConnectResult::FATAL);
+        GlobalInstance->HandleConnectFailure(slotCtx, entry, fatal);
         return;
     }
 
@@ -2956,7 +2957,7 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
     // A request deferred by SendPayload/SendPayloadMultiplexed only serializes now, so the-
     // -handshake's own writes always precede it on the wire. On failure the client is already-
     // -notified and the slot already torn down, so just stop here
-    if(slotCtx->pendingConnectReq && !instance_->FlushDeferredRequest(slotCtx, entry))
+    if(slotCtx->pendingConnectReq && !GlobalInstance->FlushDeferredRequest(slotCtx, entry))
         return;
 
     // ConnectResult::READY, slot is pooled and ready. A real request is waiting either via the-
@@ -2969,7 +2970,7 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
         // -for EPOLLOUT, because in ET mode the EPOLLOUT edge was consumed when EVENT_CONNECT-
         // -fired and a MOD on an already-writable fd does not generate a new edge
         slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
-        instance_->Write(slotCtx);
+        GlobalInstance->Write(slotCtx);
     }
     else {
         // Prewarm: no client waiting. Return this slot to the free list so-
@@ -2977,12 +2978,12 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
         // Without this, prewarmed slots stay permanently marked allocated and-
         // -are never reused, silently shrinking the effective pool by 'prewarm' count
         slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
-        instance_->ReturnEndpointToPool(slotCtx);
+        GlobalInstance->ReturnEndpointToPool(slotCtx);
 
-        if(!instance_->RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
-            instance_->logger_.Error("[Epoll]: 'RegisterEpoll(MOD)' failed for endpoint after onConnect prewarm: ",
-                                     strerror(errno));
-            instance_->Close(slotCtx, true);
+        if(!GlobalInstance->RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
+            GlobalInstance->logger_.Error("[Epoll]: 'RegisterEpoll(MOD)' failed for endpoint after onConnect prewarm: ",
+                                          strerror(errno));
+            GlobalInstance->Close(slotCtx, true);
         }
     }
 }
@@ -2994,7 +2995,7 @@ std::uint32_t EpollConnectionHandler::ComputeBackoffSeconds(const EndpointConfig
     for(std::uint16_t i = 0; i < attempt && exp < config.reconnectBackoffMax; i++)
         exp <<= 1;
 
-    std::uint32_t cap = static_cast<std::uint32_t>(std::min<std::uint64_t>(exp, config.reconnectBackoffMax));
+    const std::uint32_t cap = static_cast<std::uint32_t>(std::min<std::uint64_t>(exp, config.reconnectBackoffMax));
 
     // Pick uniformly in [0, cap] so a whole pool never reconnects in lockstep and re-DDoSes a-
     // -recovering upstream. xorshift64 is plenty for jitter
@@ -3002,7 +3003,7 @@ std::uint32_t EpollConnectionHandler::ComputeBackoffSeconds(const EndpointConfig
     reconnectRngState_ ^= reconnectRngState_ >> 7;
     reconnectRngState_ ^= reconnectRngState_ << 17;
 
-    std::uint32_t jittered = (cap == 0) ? 0 : static_cast<std::uint32_t>(reconnectRngState_ % (cap + 1ULL));
+    const std::uint32_t jittered = (cap == 0) ? 0 : static_cast<std::uint32_t>(reconnectRngState_ % (cap + 1ULL));
 
     // Clamp to at least 1s so we never busy-retry at a 0s delay
     return jittered < 1 ? 1 : jittered;
@@ -3013,7 +3014,7 @@ void EpollConnectionHandler::ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& 
     WFX_TRACE();
 
     auto& meta = entry.meta;
-    std::uint32_t idx = entry.pool.GetIndex(ctx);
+    const std::uint32_t idx = entry.pool.GetIndex(ctx);
 
     // Soft close: drop the socket + TLS + per-request objects, but KEEP the slot reserved in the-
     // -pool and KEEP slotState alive (the slot persists across retry attempts; onConnect re-runs-
@@ -3042,7 +3043,7 @@ void EpollConnectionHandler::ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& 
     ctx->clientCtx = nullptr; // background slot, no waiting client (already failed/never had one)
     ctx->isAwaitingReconnect = 1;
 
-    std::uint32_t backoff = ComputeBackoffSeconds(meta.config, ctx->reconnectAttempts);
+    const std::uint32_t backoff = ComputeBackoffSeconds(meta.config, ctx->reconnectAttempts);
     ctx->reconnectAttempts++;
 
     pendingReconnects_.push_back(
@@ -3064,7 +3065,7 @@ void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntr
     // -layer rather than block on backoff), the failure is fatal, or retries are exhausted. Close ->-
     // -ReleaseEndpoint fires onDisconnect once, notifies any waiting client (with reason so the-
     // -status code is accurate), and frees the slot
-    bool exhausted = ctx->reconnectAttempts >= meta.config.maxReconnectAttempts;
+    const bool exhausted = ctx->reconnectAttempts >= meta.config.maxReconnectAttempts;
     if(ctx->clientCtx || fatal || exhausted) {
         // A background slot (no waiting client) being permanently discarded is the operationally-
         // -significant event worth alerting on. Client-driven failures already surface to the caller-
@@ -3088,17 +3089,17 @@ void EpollConnectionHandler::HandleReconnects()
     if(pendingReconnects_.empty())
         return;
 
-    std::uint64_t now = NowMs();
+    const std::uint64_t now = NowMs();
 
     for(std::size_t i = 0; i < pendingReconnects_.size();) {
-        PendingReconnect& pr = pendingReconnects_[i];
+        const PendingReconnect& pr = pendingReconnects_[i];
         if(pr.wakeAtMs > now) {
             i++;
             continue;
         }
 
         // Due: remove the entry (order doesn't matter, swap-erase)
-        PendingReconnect due = pr;
+        const PendingReconnect due = pr;
         pendingReconnects_[i] = pendingReconnects_.back();
         pendingReconnects_.pop_back();
 
@@ -3114,7 +3115,7 @@ void EpollConnectionHandler::HandleReconnects()
 
         // Re-attempt. CreateAndConnect advances nextAddrIdx, so this naturally rotates to the next-
         // -resolved IP. WrapConnect re-registers epoll and re-arms the connect timeout
-        EndpointStatus s = WrapConnect(ctx, entry);
+        const EndpointStatus s = WrapConnect(ctx, entry);
         if(s != EndpointStatus::PENDING)
             HandleConnectFailure(ctx, entry, false); // immediate failure: reschedule or eject
     }
@@ -3127,7 +3128,7 @@ void EpollConnectionHandler::HandlePrewarm()
         auto& desc = entry.meta.desc;
         auto& cfg = entry.meta.config;
 
-        std::uint32_t prewarmCount = std::min(cfg.prewarm, cfg.connLimit);
+        const std::uint32_t prewarmCount = std::min(cfg.prewarm, cfg.connLimit);
 
         for(std::uint32_t j = 0; j < prewarmCount; j++) {
             EndpointCtx* slotCtx = GetEndpointConnection(i);
@@ -3138,7 +3139,7 @@ void EpollConnectionHandler::HandlePrewarm()
             if(!slotCtx->slotState && desc.createSlotState)
                 slotCtx->slotState = desc.createSlotState(desc.userCtx);
 
-            EndpointStatus result = WrapConnect(slotCtx, entry);
+            const EndpointStatus result = WrapConnect(slotCtx, entry);
 
             // An immediate (synchronous) failure goes through the same funnel as async ones, so a
             // prewarm slot retries with backoff instead of being silently abandoned. The teardown
@@ -3157,14 +3158,14 @@ void EpollConnectionHandler::HandleDnsRefresh(std::uint16_t endpointIdx)
     // -MAX_DNS_RESULT_QUEUE_SIZE if eventfd writes are persistently failing and-
     // -HandleDnsResultReady is never draining it
     {
-        std::lock_guard<std::mutex> lock(dnsResultMutex_);
+        const std::lock_guard<std::mutex> lock(dnsResultMutex_);
         if(dnsResultQueue_.size() >= MAX_DNS_RESULT_QUEUE_SIZE)
             logger_.Fatal("[Epoll]: DNS result queue exceeded ", MAX_DNS_RESULT_QUEUE_SIZE,
                           " entries. Event signaling has persistently failed, DNS refresh dead engine wide");
     }
 
     // Computed once and reused across all failure paths (semaphore busy, write fail, spawn fail)
-    std::uint64_t retrySchedule = ComputeNextDnsRefresh(MIN_REFRESH_SECONDS, 0, meta.hostname);
+    const std::uint64_t retrySchedule = ComputeNextDnsRefresh(MIN_REFRESH_SECONDS, 0, meta.hostname);
 
     // All resolver slots busy. Reschedule with jitter so waiting endpoints don't-
     // -all reconverge at the same instant when slots free up
@@ -3188,11 +3189,12 @@ void EpollConnectionHandler::HandleDnsRefresh(std::uint16_t endpointIdx)
                 {
                     sem.release();
                 }
-            } guard{dnsThreadSemaphore_};
+            };
+            const SemGuard guard{dnsThreadSemaphore_};
 
             Utils::ResolvedAddrs newAddrs;
             std::uint32_t minTtl = 0;
-            bool ok = DNSResolver::Resolve(meta.hostname.c_str(), meta.port, newAddrs, minTtl);
+            const bool ok = DNSResolver::Resolve(meta.hostname.c_str(), meta.port, newAddrs, minTtl);
 
             // Push AND signal under a single lock. The loop's drain (HandleDnsResultReady) also-
             // -takes this mutex, so keeping the write() inside the same critical section guarantees-
@@ -3202,11 +3204,11 @@ void EpollConnectionHandler::HandleDnsRefresh(std::uint16_t endpointIdx)
             // The reader read()s the eventfd before taking this lock, so it can still unblock a-
             // -writer that stalls inside write() while holding the mutex
             {
-                std::lock_guard<std::mutex> lock(dnsResultMutex_);
+                const std::lock_guard<std::mutex> lock(dnsResultMutex_);
                 dnsResultQueue_.push_back({ok, endpointIdx, minTtl, std::move(newAddrs)});
 
-                std::uint64_t one = 1;
-                ssize_t written = RetryOnEintr([&] { return write(dnsResultEventFd_, &one, sizeof(one)); });
+                const std::uint64_t one = 1;
+                const ssize_t written = RetryOnEintr([&] { return write(dnsResultEventFd_, &one, sizeof(one)); });
 
                 // On write error, tag the just-pushed node. If future writes succeed, the errors-
                 // -will be logged. If future writes keep failing, the queue fills rapidly and-
@@ -3229,7 +3231,7 @@ void EpollConnectionHandler::HandleDnsRefresh(std::uint16_t endpointIdx)
 void EpollConnectionHandler::HandleDnsResultReady(int sfd)
 {
     std::uint64_t val = 0;
-    ssize_t n = RetryOnEintr([&] { return read(sfd, &val, sizeof(val)); });
+    const ssize_t n = RetryOnEintr([&] { return read(sfd, &val, sizeof(val)); });
 
     if(n < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK)
@@ -3242,11 +3244,9 @@ void EpollConnectionHandler::HandleDnsResultReady(int sfd)
 
     std::vector<DnsResult> results;
     {
-        std::lock_guard<std::mutex> lock(dnsResultMutex_);
+        const std::lock_guard<std::mutex> lock(dnsResultMutex_);
         results.swap(dnsResultQueue_);
     }
-
-    std::uint64_t nowSeconds = NowMs() / 1000;
 
     for(auto& r : results) {
         // Just sanity checks
@@ -3274,7 +3274,7 @@ void EpollConnectionHandler::HandleDnsResultReady(int sfd)
 std::uint64_t EpollConnectionHandler::PackEpollData(ClientCtx* ctx)
 {
     // For a client connection, 'EndpointIdx' will always be 'CLIENT_CONNECTION_TAG'
-    std::uint32_t idx = connections_.GetIndex(ctx);
+    const std::uint32_t idx = connections_.GetIndex(ctx);
 
     // Pack => [( EndpointIdx (16) | GenerationID (16) ) and PoolIdx (Low 32)]
     return (static_cast<std::uint64_t>(CLIENT_CONNECTION_TAG) << 48) |
@@ -3283,7 +3283,7 @@ std::uint64_t EpollConnectionHandler::PackEpollData(ClientCtx* ctx)
 
 std::uint64_t EpollConnectionHandler::PackEpollData(EndpointCtx* ctx)
 {
-    std::uint32_t idx = endpoints_[ctx->endpointIdx].pool.GetIndex(ctx);
+    const std::uint32_t idx = endpoints_[ctx->endpointIdx].pool.GetIndex(ctx);
 
     // Pack => [( EndpointIdx (16) | GenerationID (16) ) and PoolIdx (Low 32)]
     return (static_cast<std::uint64_t>(ctx->endpointIdx) << 48) |
@@ -3300,7 +3300,7 @@ EndpointStatus EpollConnectionHandler::CreateAndConnect(EndpointCtx* ctx, Endpoi
     // Round-robin pick. nextAddrIdx keeps counting up across the uint16_t range and-
     // -wraps naturally. We only ever use it modulo the current list size, so the-
     // -stored cursor never needs to know or care about addrs.size() directly
-    std::uint16_t idx = epMeta.nextAddrIdx % static_cast<std::uint16_t>(epMeta.addrs.size());
+    const std::uint16_t idx = epMeta.nextAddrIdx % static_cast<std::uint16_t>(epMeta.addrs.size());
     epMeta.nextAddrIdx++;
 
     ResolvedAddr& chosen = epMeta.addrs[idx];
@@ -3313,7 +3313,7 @@ EndpointStatus EpollConnectionHandler::CreateAndConnect(EndpointCtx* ctx, Endpoi
         return EndpointStatus::SOCKET_FAILURE;
 
     while(true) {
-        int ret = connect(ctx->socket, reinterpret_cast<const sockaddr*>(&chosen.addr), chosen.addrLen);
+        const int ret = connect(ctx->socket, reinterpret_cast<const sockaddr*>(&chosen.addr), chosen.addrLen);
         if(ret == 0)
             return EndpointStatus::PENDING;
 
@@ -3370,7 +3370,7 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
     auto& meta = entry.meta;
     auto& desc = meta.desc;
 
-    EndpointStatus ccResult = CreateAndConnect(ctx, meta);
+    const EndpointStatus ccResult = CreateAndConnect(ctx, meta);
     if(ccResult != EndpointStatus::PENDING)
         return ccResult;
 
@@ -3394,7 +3394,8 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
             if(!ctx->sslConn)
                 return EndpointStatus::SSL_FAILURE;
 
-            EventType onSuccess = desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_RECV;
+            const EventType onSuccess =
+                desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_RECV;
             if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE))
                 return EndpointStatus::SSL_FAILURE;
         }
@@ -3427,7 +3428,7 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
     // -(multiplexed, see SendPayloadMultiplexed). Missing the second case here returns a-
     // -slot to the free pool while it's still mid-handshake with a real stream pending,
     // letting a concurrent SendPayload lease the same slot out from under it
-    bool hasWaitingClient = ctx->clientCtx || (ctx->pendingStreams && !ctx->pendingStreams->empty());
+    const bool hasWaitingClient = ctx->clientCtx || (ctx->pendingStreams && !ctx->pendingStreams->empty());
 
     if(ctx->eventType == EventType::EVENT_CONNECT || ctx->eventType == EventType::EVENT_ENDPOINT_HANDSHAKE)
         RefreshExpiry(ctx, meta.config.connectTimeoutSeconds);
@@ -3442,7 +3443,7 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
 ssize_t EpollConnectionHandler::WrapRead(WFXSocket socket, void* sslConn, char* buf, std::size_t len)
 {
     if(!sslConn) {
-        ssize_t n = ::recv(socket, buf, len, 0);
+        const ssize_t n = ::recv(socket, buf, len, 0);
 
         const bool ok = (n > 0);
         metrics_->network.reads += ok;
@@ -3451,7 +3452,7 @@ ssize_t EpollConnectionHandler::WrapRead(WFXSocket socket, void* sslConn, char* 
         return n;
     }
 
-    SSLResult result = sslHandler_->Read(sslConn, buf, static_cast<int>(len));
+    const SSLResult result = sslHandler_->Read(sslConn, buf, static_cast<int>(len));
 
     switch(result.error) {
         case SSLReturn::SUCCESS:
@@ -3476,7 +3477,7 @@ ssize_t EpollConnectionHandler::WrapRead(WFXSocket socket, void* sslConn, char* 
 ssize_t EpollConnectionHandler::WrapWrite(WFXSocket socket, void* sslConn, const char* buf, std::size_t len)
 {
     if(!sslConn) {
-        ssize_t n = ::send(socket, buf, len, MSG_NOSIGNAL);
+        const ssize_t n = ::send(socket, buf, len, MSG_NOSIGNAL);
 
         const bool ok = (n > 0);
         metrics_->network.writes += ok;
@@ -3485,7 +3486,7 @@ ssize_t EpollConnectionHandler::WrapWrite(WFXSocket socket, void* sslConn, const
         return n;
     }
 
-    SSLResult result = sslHandler_->Write(sslConn, buf, static_cast<int>(len));
+    const SSLResult result = sslHandler_->Write(sslConn, buf, static_cast<int>(len));
 
     switch(result.error) {
         case SSLReturn::SUCCESS:
@@ -3510,7 +3511,7 @@ ssize_t EpollConnectionHandler::WrapWrite(WFXSocket socket, void* sslConn, const
 ssize_t EpollConnectionHandler::WrapFile(ClientCtx* ctx, int fd, off_t* offset, std::size_t count)
 {
     if(!ctx->sslConn) {
-        ssize_t n = ::sendfile(ctx->socket, fd, offset, count);
+        const ssize_t n = ::sendfile(ctx->socket, fd, offset, count);
 
         const bool ok = (n > 0);
         metrics_->network.fileCalls += ok;
@@ -3519,7 +3520,7 @@ ssize_t EpollConnectionHandler::WrapFile(ClientCtx* ctx, int fd, off_t* offset, 
         return n;
     }
 
-    SSLResult result = sslHandler_->WriteFile(ctx->sslConn, fd, offset ? *offset : 0, count);
+    const SSLResult result = sslHandler_->WriteFile(ctx->sslConn, fd, offset ? *offset : 0, count);
 
     switch(result.error) {
         // Switch to streaming mode with Write instead
@@ -3534,7 +3535,7 @@ ssize_t EpollConnectionHandler::WrapFile(ClientCtx* ctx, int fd, off_t* offset, 
             ctx->streamGenerator = {&ctx->fileInfo,
                                     [](void* c, StreamBuffer buffer) -> StreamResult {
                                         auto* fi = static_cast<FileInfo*>(c);
-                                        ssize_t r = pread(fi->fd, buffer.buffer, buffer.size, fi->offset);
+                                        const ssize_t r = pread(fi->fd, buffer.buffer, buffer.size, fi->offset);
 
                                         // Error or EOF
                                         if(r <= 0) {

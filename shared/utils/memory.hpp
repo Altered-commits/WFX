@@ -38,18 +38,18 @@ inline void Free(void* ptr) noexcept
 #else
 inline void* Alloc(std::size_t size) noexcept
 {
-    return Core::MemoryApiExt1()->Alloc(size);
+    return Core::MemoryApiExt1()->alloc(size);
 }
 
 inline void* Realloc(void* ptr, std::size_t newSize) noexcept
 {
-    return Core::MemoryApiExt1()->Realloc(ptr, newSize);
+    return Core::MemoryApiExt1()->realloc(ptr, newSize);
 }
 
 inline void Free(void* ptr) noexcept
 {
     if(ptr)
-        Core::MemoryApiExt1()->Free(ptr);
+        Core::MemoryApiExt1()->free(ptr);
 }
 #endif
 
@@ -110,6 +110,9 @@ public:
     {}
 
 public: // Functions
+    // Name is dictated by the standard's Allocator named requirement -> std::allocator_traits-
+    // -and every container that takes this as a template arg call it by this exact name
+    // NOLINTNEXTLINE(readability-identifier-naming)
     T* allocate(std::size_t n)
     {
         void* p = Alloc(n * sizeof(T));
@@ -119,6 +122,8 @@ public: // Functions
         return static_cast<T*>(p);
     }
 
+    // Same as allocate() above, name fixed by the Allocator named requirement
+    // NOLINTNEXTLINE(readability-identifier-naming)
     void deallocate(T* p, std::size_t) noexcept
     {
         Free(p);

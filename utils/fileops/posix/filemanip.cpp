@@ -9,6 +9,7 @@ namespace WFX::Utils {
 //  --- Cleanup Functions ---
 PosixFile::~PosixFile()
 {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall) - PosixFile is a leaf class, no further overrides
     Close();
 }
 
@@ -30,7 +31,7 @@ std::int64_t PosixFile::Read(void* buffer, std::size_t bytes)
     if(cached_ || fd_ < 0)
         return -1;
 
-    ssize_t n = ::read(fd_, buffer, bytes);
+    const ssize_t n = ::read(fd_, buffer, bytes);
     return n < 0 ? -1 : static_cast<std::int64_t>(n);
 }
 
@@ -39,7 +40,7 @@ std::int64_t PosixFile::Write(const void* buffer, std::size_t bytes)
     if(cached_ || fd_ < 0)
         return -1;
 
-    ssize_t n = ::write(fd_, buffer, bytes);
+    const ssize_t n = ::write(fd_, buffer, bytes);
     if(n > 0)
         size_ += n;
 
@@ -51,7 +52,7 @@ std::int64_t PosixFile::ReadAt(void* buffer, std::size_t bytes, std::size_t offs
     if(fd_ < 0)
         return -1;
 
-    ssize_t n = ::pread(fd_, buffer, bytes, static_cast<off_t>(offset));
+    const ssize_t n = ::pread(fd_, buffer, bytes, static_cast<off_t>(offset));
     return n < 0 ? -1 : static_cast<std::int64_t>(n);
 }
 
@@ -60,7 +61,7 @@ std::int64_t PosixFile::WriteAt(const void* buffer, std::size_t bytes, std::size
     if(cached_ || fd_ < 0)
         return -1;
 
-    ssize_t n = ::pwrite(fd_, buffer, bytes, static_cast<off_t>(offset));
+    const ssize_t n = ::pwrite(fd_, buffer, bytes, static_cast<off_t>(offset));
     if(n > 0 && (offset + n > size_))
         size_ = offset + n; // Update file size if we wrote past previous end
 
@@ -72,7 +73,7 @@ bool PosixFile::Seek(std::size_t offset)
     if(cached_ || fd_ < 0)
         return false;
 
-    off_t ret = ::lseek(fd_, static_cast<off_t>(offset), SEEK_SET);
+    const off_t ret = ::lseek(fd_, static_cast<off_t>(offset), SEEK_SET);
     return ret != static_cast<off_t>(-1);
 }
 
@@ -81,7 +82,7 @@ std::int64_t PosixFile::Tell() const
     if(fd_ < 0)
         return 0;
 
-    off_t ret = ::lseek(fd_, 0, SEEK_CUR);
+    const off_t ret = ::lseek(fd_, 0, SEEK_CUR);
     return ret < 0 ? -1 : static_cast<std::int64_t>(ret);
 }
 

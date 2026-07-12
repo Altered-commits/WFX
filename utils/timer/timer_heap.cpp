@@ -16,7 +16,7 @@ bool TimerHeap::Insert(std::uint64_t data, std::uint64_t delay, std::uint64_t de
     // Bucket coalesce
     delay = RoundToBucket(delay, delta);
 
-    std::size_t idx = heap_.size();
+    const std::size_t idx = heap_.size();
     heap_.emplace_back(TimerNode{data, delay, idx});
 
     // Insert into map, rollback if fails
@@ -32,8 +32,8 @@ bool TimerHeap::Remove(std::uint64_t data) noexcept
     if(it == idMap_.end())
         return false;
 
-    std::size_t idx = it->second;
-    std::size_t lastIdx = heap_.size() - 1;
+    const std::size_t idx = it->second;
+    const std::size_t lastIdx = heap_.size() - 1;
 
     idMap_.erase(data);
 
@@ -57,7 +57,7 @@ bool TimerHeap::PopExpired(std::uint64_t now, std::uint64_t& outData) noexcept
     if(heap_.empty())
         return false;
 
-    TimerNode& min = heap_[0];
+    const TimerNode& min = heap_[0];
 
     if(min.delay > now)
         return false;
@@ -81,7 +81,7 @@ void TimerHeap::FixHeap(std::size_t idx) noexcept
 {
     // Try sift-up
     while(idx > 0) {
-        std::size_t parent = (idx - 1) / 2;
+        const std::size_t parent = (idx - 1) / 2;
         if(heap_[idx].delay >= heap_[parent].delay)
             break;
         SwapNodes(heap_[idx], heap_[parent]);
@@ -89,11 +89,11 @@ void TimerHeap::FixHeap(std::size_t idx) noexcept
     }
 
     // Then sift-down
-    std::size_t n = heap_.size();
+    const std::size_t n = heap_.size();
     while(true) {
         std::size_t smallest = idx;
-        std::size_t l = 2 * idx + 1;
-        std::size_t r = 2 * idx + 2;
+        const std::size_t l = 2 * idx + 1;
+        const std::size_t r = 2 * idx + 2;
 
         if(l < n && heap_[l].delay < heap_[smallest].delay)
             smallest = l;
@@ -126,7 +126,7 @@ std::uint64_t TimerHeap::RoundToBucket(std::uint64_t expire, std::uint64_t delta
     if(!delta)
         return expire;
 
-    std::uint64_t half = delta >> 1;
+    const std::uint64_t half = delta >> 1;
     return (expire + half) / delta * delta;
 }
 

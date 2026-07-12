@@ -11,11 +11,11 @@ using namespace WFX::Utils;               // For 'Logger', 'Filesystem'
 using namespace WFX::Core::ConfigHelpers; // I mean, its quite obvious
 
 // Global configuration instance
-static Config __GlobalConfig;
+static Config GlobalConfig;
 
 Config& GetConfig() noexcept
 {
-    return __GlobalConfig;
+    return GlobalConfig;
 }
 
 // vvv Public Functions vvv
@@ -105,7 +105,7 @@ void Config::LoadCoreSettings(std::string_view path)
 
 void Config::LoadFinalSettings(const std::string& projectDir)
 {
-    std::string cwd = FileSystem::GetCurrentPath();
+    const std::string cwd = FileSystem::GetCurrentPath();
     if(cwd.empty())
         GetLogger().Fatal("[Config]: Failed to resolve current working directory");
 

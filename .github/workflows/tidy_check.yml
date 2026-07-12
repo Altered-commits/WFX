@@ -1,0 +1,40 @@
+name: WFX Tidy Check
+
+# Reusable: invoked by entry.yml AFTER the compile check, so this file owns-
+# -ONLY the clang-tidy logic. Reuses compile_check.yml's clang build cache-
+# -so nothing gets rebuilt from scratch
+on:
+  workflow_call:
+
+jobs:
+  tidy:
+    name: Clang-Tidy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential clang clang-tidy ninja-build
+
+      - name: Restore build/ cache
+        uses: actions/cache@v6
+        with:
+          path: build
+          key: build-clang-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: |
+            build-clang-
+
+      # Same flags as compile_check.yml's clang leg, cache hit means no-op
+      - name: Ensure compile database is up to date
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Run clang-tidy
+        run: bash scripts/tidy.sh --ci

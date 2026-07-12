@@ -32,6 +32,7 @@ namespace WFX::Core::Legacy {
 // The core 'token' still uses string
 class Lexer {
 public:
+    // NOLINTNEXTLINE(readability-identifier-naming) - trailing underscore disambiguates param from member 'text'
     Lexer(std::string_view text_) : text(text_), text_length(text.length()), cur_pos(0)
     {
         if(text.empty())
@@ -75,7 +76,7 @@ private:
     static std::size_t line;
 
 private:
-    Utils::Logger& logger_ = Utils::GetLogger();
+    Utils::Logger& logger = Utils::GetLogger();
 
     // For Differentiation of keyword and identifier
     const std::unordered_map<std::string_view, TokenType> identifier_map = {

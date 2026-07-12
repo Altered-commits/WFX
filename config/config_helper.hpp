@@ -12,19 +12,19 @@
 namespace WFX::Core::ConfigHelpers {
 
 // vvv Helper Helper Functions vvv
-toml::node_view<const toml::node> ResolveTomlPath(const toml::table& tbl, const char* section)
+inline toml::node_view<const toml::node> ResolveTomlPath(const toml::table& tbl, const char* section)
 {
     toml::node_view<const toml::node> node{tbl};
 
     const char* p = section;
-    const char* segment_start = p;
+    const char* segmentStart = p;
 
     while(true) {
         // Find the next '.' or '\0'
         while(*p != '\0' && *p != '.')
             ++p;
 
-        std::string_view key(segment_start, static_cast<size_t>(p - segment_start));
+        const std::string_view key(segmentStart, static_cast<size_t>(p - segmentStart));
 
         node = node[key];
         if(!node || !node.is_table())
@@ -35,7 +35,7 @@ toml::node_view<const toml::node> ResolveTomlPath(const toml::table& tbl, const 
 
         // Skip '.', next segment starts after it
         ++p;
-        segment_start = p;
+        segmentStart = p;
     }
 
     return node;
@@ -79,8 +79,8 @@ inline void ExtractStringArrayOrFatal(const toml::table& tbl, const char* sectio
     if(auto arr = tbl[section][field].as_array()) {
         target.clear();
         for(const auto& val : *arr) {
-            if(val.is_string())
-                target.emplace_back(*val.value<std::string>());
+            if(auto s = val.value<std::string>())
+                target.emplace_back(*s);
             else
                 logger.Fatal("[Config]: Non-string value in [", section, "] ", field, " array");
         }

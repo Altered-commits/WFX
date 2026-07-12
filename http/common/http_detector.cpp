@@ -8,7 +8,7 @@
 namespace WFX::Http {
 
 // THIS IS GOING TO BE FUN AMIRITE
-inline const std::unordered_map<std::string_view, std::string_view> MimeFromExt = {
+inline const std::unordered_map<std::string_view, std::string_view> MIME_FROM_EXT = {
     // ───── General Archive / Package Formats ─────
     {"epub", "application/epub+zip"},
     {"gz", "application/gzip"},
@@ -298,7 +298,7 @@ inline const std::unordered_map<std::string_view, std::string_view> MimeFromExt 
 };
 
 // vvv Minimal version of above ^^^
-inline const std::unordered_map<std::string_view, std::string_view> ExtFromMime = {
+inline const std::unordered_map<std::string_view, std::string_view> EXT_FROM_MIME = {
     // ───── Archive / Package ─────
     {"application/epub+zip", "epub"},
     {"application/gzip", "gz"},
@@ -402,7 +402,7 @@ inline const std::unordered_map<std::string_view, std::string_view> ExtFromMime 
     {"video/x-msvideo", "avi"},
     {"video/x-flv", "flv"}};
 
-inline const std::unordered_map<std::string_view, std::string_view> PortFromProtocol =
+inline const std::unordered_map<std::string_view, std::string_view> PORT_FROM_PROTOCOL =
     {{"http", "80"},       {"https", "443"},  {"ws", "80"},       {"wss", "443"},    {"ftp", "21"},
      {"ftps", "990"},      {"sftp", "22"},    {"ssh", "22"},      {"telnet", "23"},  {"smtp", "25"},
      {"smtps", "465"},     {"imap", "143"},   {"imaps", "993"},   {"pop3", "110"},   {"pop3s", "995"},
@@ -415,7 +415,7 @@ inline const std::unordered_map<std::string_view, std::string_view> PortFromProt
 // vvv Helper function vvv
 static inline std::string_view ExtractExtension(std::string_view path)
 {
-    size_t pos = path.rfind('.');
+    const size_t pos = path.rfind('.');
     if(pos == std::string_view::npos || pos + 1 >= path.size())
         return {};
 
@@ -425,25 +425,25 @@ static inline std::string_view ExtractExtension(std::string_view path)
 // vvv MimeDetector vvvv
 std::string_view MimeDetector::DetectMimeFromExt(std::string_view path)
 {
-    std::string_view ext = ExtractExtension(path);
+    const std::string_view ext = ExtractExtension(path);
     if(ext.empty())
         return "application/octet-stream";
 
-    auto it = MimeFromExt.find(ext);
-    return (it != MimeFromExt.end()) ? it->second : "application/octet-stream";
+    auto it = MIME_FROM_EXT.find(ext);
+    return (it != MIME_FROM_EXT.end()) ? it->second : "application/octet-stream";
 }
 
 std::string_view MimeDetector::DetectExtFromMime(std::string_view mime)
 {
-    auto it = ExtFromMime.find(mime);
-    return (it != ExtFromMime.end()) ? it->second : std::string_view{};
+    auto it = EXT_FROM_MIME.find(mime);
+    return (it != EXT_FROM_MIME.end()) ? it->second : std::string_view{};
 }
 
 // vvv PortDetector vvv
 std::string_view PortDetector::DetectFromProtocol(std::string_view protocol)
 {
-    auto it = PortFromProtocol.find(protocol);
-    return (it != PortFromProtocol.end()) ? it->second : std::string_view{};
+    auto it = PORT_FROM_PROTOCOL.find(protocol);
+    return (it != PORT_FROM_PROTOCOL.end()) ? it->second : std::string_view{};
 }
 
 } // namespace WFX::Http

@@ -4,7 +4,8 @@
 #ifndef WFX_UTILS_RW_BUFFER_HPP
 #define WFX_UTILS_RW_BUFFER_HPP
 
-#include "utils/pool/buffer_pool.hpp"
+#include <cstdint>
+#include <cstddef>
 
 // Layout:
 //
@@ -36,7 +37,7 @@ struct ReadMetadata : public RWBaseMetadata {};
 
 class alignas(8) RWBuffer {
 public:
-    RWBuffer();
+    RWBuffer() = default;
     ~RWBuffer();
 
 public: // Init / Reset

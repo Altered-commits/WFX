@@ -32,7 +32,7 @@ ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory)
 
     // Execute via shell
     const char* argv[] = {"/bin/sh", "-c", cmd.c_str(), nullptr};
-    int spawnRes = posix_spawn(&pid, "/bin/sh", &actions, nullptr, const_cast<char* const*>(argv), environ);
+    const int spawnRes = posix_spawn(&pid, "/bin/sh", &actions, nullptr, const_cast<char* const*>(argv), environ);
     posix_spawn_file_actions_destroy(&actions);
 
     if(spawnRes != 0)
@@ -43,7 +43,7 @@ ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory)
     if(waitpid(pid, &status, 0) == -1)
         return ProcessResult{-1, (std::uint32_t)errno};
 
-    int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    const int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     return ProcessResult{exitCode, 0};
 }
 

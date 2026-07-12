@@ -78,6 +78,13 @@ PointerAlignment: Left
 ReferenceAlignment: Left
 
 # ---------------------------------------------------------------
+# Qualifier style: always 'const Type'/'volatile Type', never trailing-
+# -('Type const'). Keeps clang-tidy's misc-const-correctness auto-fixes-
+# -(which insert east-const) consistent with the rest of the codebase
+# ---------------------------------------------------------------
+QualifierAlignment: Left
+
+# ---------------------------------------------------------------
 # Namespace formatting
 # ---------------------------------------------------------------
 NamespaceIndentation: None

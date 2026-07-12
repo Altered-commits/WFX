@@ -269,7 +269,7 @@ struct HttpEndpointOptions {
     // Two reasons it must be a plain string_view here:
     //   1. A HttpEndpoint is declared at namespace scope (`inline const auto Api =
     //      -WFX::HttpEndpoint{"host:443"}`), so this is populated during the user-
-    //      -.so's STATIC INITIALIZATION — before the worker runs GetBufferPool().Init().
+    //      -.so's STATIC INITIALIZATION, before the worker runs GetBufferPool().Init().
     //      A pool-backed WFX::String whose value exceeds the small-string buffer (a-
     //      -long hostname) would allocate from an uninitialized pool and SIGSEGV.
     //   2. hostPort is required to be a static / long-lived string anyway (the-

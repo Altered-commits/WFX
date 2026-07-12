@@ -18,11 +18,11 @@ static constexpr std::size_t MAX_EXPANSION_ATTEMPTS = 4;
 
 // vvv Main stuff vvv
 // Global pool instance
-static BufferPool __GlobalBufferPool;
+static BufferPool GlobalBufferPool;
 
 BufferPool& GetBufferPool() noexcept
 {
-    return __GlobalBufferPool;
+    return GlobalBufferPool;
 }
 
 BufferPool::~BufferPool()

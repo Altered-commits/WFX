@@ -248,7 +248,7 @@ private: // Storage
     Config& config_ = GetConfig();
 
     // For simplification of conditional checking in ProcessTag.. functions
-    const std::unordered_map<std::string_view, TagType> tagViewToType =
+    const std::unordered_map<std::string_view, TagType> tagViewToType_ =
         {{"include", TagType::INCLUDE},   {"extends", TagType::EXTENDS}, {"block", TagType::BLOCK},
          {"endblock", TagType::ENDBLOCK}, {"var", TagType::VAR},         {"if", TagType::IF},
          {"elif", TagType::ELIF},         {"else", TagType::ELSE},       {"endif", TagType::ENDIF},

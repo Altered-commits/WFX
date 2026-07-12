@@ -25,7 +25,7 @@ static bool CheckFileSecurityPosix(int fd, const EnvConfig& opt)
         return false;
 
     if(opt.GetFlag(EnvFlags::REQUIRE_OWNER_UID)) {
-        uid_t euid = geteuid();
+        const uid_t euid = geteuid();
         if(st.st_uid != euid)
             return false;
     }
@@ -38,7 +38,7 @@ static bool CheckFileSecurityPosix(int fd, const EnvConfig& opt)
 
 static bool SetEnvVar(const std::string& k, const std::string& v, const EnvConfig& opt)
 {
-    bool overwriteExisting = opt.GetFlag(EnvFlags::OVERWRITE_EXISTING);
+    const bool overwriteExisting = opt.GetFlag(EnvFlags::OVERWRITE_EXISTING);
 
     if(!overwriteExisting && (getenv(k.c_str()) != nullptr))
         return true;
@@ -53,7 +53,7 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
 #ifdef O_NOFOLLOW
     flags |= O_NOFOLLOW;
 #endif
-    int fd = open(path.c_str(), flags);
+    const int fd = open(path.c_str(), flags);
     if(fd < 0)
         return false;
 
@@ -68,7 +68,7 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
         return false;
     }
 
-    std::size_t sz = static_cast<std::size_t>(st.st_size);
+    const std::size_t sz = static_cast<std::size_t>(st.st_size);
     if(sz == 0) {
         close(fd);
         return true;
@@ -124,19 +124,17 @@ bool Dotenv::LoadFromFile(const std::string& path, const EnvConfig& opts)
 }
 
 // vvv Helper Function vvv
-StringMap Dotenv::ParseFromBuffer(const std::vector<char>& buf_)
+StringMap Dotenv::ParseFromBuffer(std::vector<char>& buf)
 {
-    // Work on a copy because we will inspect content
-    std::vector<char> buf = buf_;
     StringMap out;
 
     std::string line;
     line.reserve(256);
 
-    std::size_t n = buf.size();
+    const std::size_t n = buf.size();
 
     for(std::size_t i = 0; i <= n; ++i) {
-        char c = (i < n) ? buf[i] : '\n';
+        const char c = (i < n) ? buf[i] : '\n';
 
         if(c == '\r')
             continue;
@@ -145,7 +143,7 @@ StringMap Dotenv::ParseFromBuffer(const std::vector<char>& buf_)
             StringUtils::TrimInline(line);
 
             if(!line.empty() && line[0] != '#') {
-                std::size_t eq = line.find('=');
+                const std::size_t eq = line.find('=');
 
                 if(eq != std::string::npos) {
                     std::string key = line.substr(0, eq);
@@ -170,7 +168,7 @@ StringMap Dotenv::ParseFromBuffer(const std::vector<char>& buf_)
         line.push_back(c);
     }
 
-    // Attempt to zero internal buffer copy
+    // Zero the buffer now that parsing is done
     if(!buf.empty()) {
         volatile char* p = buf.data();
         for(std::size_t i = 0; i < buf.size(); ++i)

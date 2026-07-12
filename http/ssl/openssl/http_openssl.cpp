@@ -34,13 +34,13 @@ HttpOpenSSL::HttpOpenSSL()
 
 HttpOpenSSL::~HttpOpenSSL()
 {
-    if(serverCtx) {
-        SSL_CTX_free(serverCtx);
-        serverCtx = nullptr;
+    if(serverCtx_) {
+        SSL_CTX_free(serverCtx_);
+        serverCtx_ = nullptr;
     }
-    if(clientCtx) {
-        SSL_CTX_free(clientCtx);
-        clientCtx = nullptr;
+    if(clientCtx_) {
+        SSL_CTX_free(clientCtx_);
+        clientCtx_ = nullptr;
     }
 
     GetLogger().Info("[HttpOpenSSL]: Successfully cleaned up SSL context");
@@ -51,11 +51,11 @@ void HttpOpenSSL::InitServerContext()
     auto& logger = GetLogger();
     auto& sslConfig = GetConfig().sslConfig;
 
-    serverCtx = SSL_CTX_new(TLS_method());
-    if(!serverCtx)
+    serverCtx_ = SSL_CTX_new(TLS_method());
+    if(!serverCtx_)
         logger.Fatal("[HttpOpenSSL]: Failed to create server SSL_CTX");
 
-    SSL_CTX_set_security_level(serverCtx, std::clamp(sslConfig.securityLevel, 0, 5));
+    SSL_CTX_set_security_level(serverCtx_, std::clamp(sslConfig.securityLevel, 0, 5));
 
     // Minimum protocol version
     int protoVersion = TLS1_2_VERSION;
@@ -73,47 +73,47 @@ void HttpOpenSSL::InitServerContext()
             protoVersion = TLS1_2_VERSION;
             break;
     }
-    if(SSL_CTX_set_min_proto_version(serverCtx, protoVersion) != 1)
+    if(SSL_CTX_set_min_proto_version(serverCtx_, protoVersion) != 1)
         LogOpenSSLError("Failed to set minimum TLS protocol version for server ctx");
 
-    // Server cert and key. ONLY on serverCtx, loading this on clientCtx would-
+    // Server cert and key. ONLY on serverCtx_, loading this on clientCtx_ would-
     // -pollute the verify store and break outbound client certificate verification
-    if(SSL_CTX_use_certificate_chain_file(serverCtx, sslConfig.certPath.c_str()) <= 0)
+    if(SSL_CTX_use_certificate_chain_file(serverCtx_, sslConfig.certPath.c_str()) <= 0)
         LogOpenSSLError("Failed to load certificate chain file");
 
-    if(SSL_CTX_use_PrivateKey_file(serverCtx, sslConfig.keyPath.c_str(), SSL_FILETYPE_PEM) <= 0)
+    if(SSL_CTX_use_PrivateKey_file(serverCtx_, sslConfig.keyPath.c_str(), SSL_FILETYPE_PEM) <= 0)
         LogOpenSSLError("Failed to load private key");
 
-    if(!SSL_CTX_check_private_key(serverCtx))
+    if(!SSL_CTX_check_private_key(serverCtx_))
         LogOpenSSLError("Private key does not match certificate");
 
     // Server-side session cache: server automatically stores and looks up sessions
     // SSL_SESS_CACHE_SERVER is the correct mode for inbound connections
     if(sslConfig.enableServerSessionCache) {
-        SSL_CTX_set_session_cache_mode(serverCtx, SSL_SESS_CACHE_SERVER);
-        SSL_CTX_sess_set_cache_size(serverCtx, sslConfig.serverSessionCacheSize);
+        SSL_CTX_set_session_cache_mode(serverCtx_, SSL_SESS_CACHE_SERVER);
+        SSL_CTX_sess_set_cache_size(serverCtx_, sslConfig.serverSessionCacheSize);
     }
     else
-        SSL_CTX_set_session_cache_mode(serverCtx, SSL_SESS_CACHE_OFF);
+        SSL_CTX_set_session_cache_mode(serverCtx_, SSL_SESS_CACHE_OFF);
 
     // Session tickets: server-side only, server encrypts the ticket blob sent to client
     // Client just stores and presents it back. Client has no ticket key to configure
     auto& ticketKey = GetRandomPool().GetSSLKey();
-    if(SSL_CTX_set_tlsext_ticket_keys(serverCtx, ticketKey.data(), ticketKey.size()) != 1)
+    if(SSL_CTX_set_tlsext_ticket_keys(serverCtx_, ticketKey.data(), ticketKey.size()) != 1)
         LogOpenSSLError("Failed to set session ticket keys");
 
     // Cipher preferences
-    if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(serverCtx, sslConfig.tls13Ciphers.c_str()) != 1)
+    if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(serverCtx_, sslConfig.tls13Ciphers.c_str()) != 1)
         LogOpenSSLError("Failed to set TLSv1.3 ciphersuites for server ctx");
 
-    if(!sslConfig.tls12Ciphers.empty() && SSL_CTX_set_cipher_list(serverCtx, sslConfig.tls12Ciphers.c_str()) != 1)
+    if(!sslConfig.tls12Ciphers.empty() && SSL_CTX_set_cipher_list(serverCtx_, sslConfig.tls12Ciphers.c_str()) != 1)
         LogOpenSSLError("Failed to set TLSv1.2 cipher list for server ctx");
 
     if(!sslConfig.curves.empty())
-        SSL_CTX_set1_curves_list(serverCtx, sslConfig.curves.c_str());
+        SSL_CTX_set1_curves_list(serverCtx_, sslConfig.curves.c_str());
 
-    SSL_CTX_set_read_ahead(serverCtx, 0);
-    SSL_CTX_set_mode(serverCtx,
+    SSL_CTX_set_read_ahead(serverCtx_, 0);
+    SSL_CTX_set_mode(serverCtx_,
                      SSL_MODE_RELEASE_BUFFERS | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
     // SSL_OP_CIPHER_SERVER_PREFERENCE: server-side only, meaningless on client
@@ -129,11 +129,11 @@ void HttpOpenSSL::InitServerContext()
         logger.Warn("[HttpOpenSSL]: KTLS requested but not supported by this OpenSSL build");
 #endif
 
-    std::uint64_t appliedOptions = SSL_CTX_set_options(serverCtx, options);
+    const std::uint64_t appliedOptions = SSL_CTX_set_options(serverCtx_, options);
 
 #ifdef SSL_OP_ENABLE_KTLS
     if(appliedOptions & SSL_OP_ENABLE_KTLS) {
-        useKtls = true;
+        useKtls_ = true;
         logger.Info("[HttpOpenSSL]: KTLS enabled for server SSL_CTX");
     }
     else if(sslConfig.enableKTLS)
@@ -146,7 +146,7 @@ void HttpOpenSSL::InitServerContext()
     // SSL_CTX_set_alpn_select_cb is called when server needs to pick from client's offered list
     // SSL_CTX_set_alpn_protos is client-side only (advertises to server, no effect on server)
     SSL_CTX_set_alpn_select_cb(
-        serverCtx,
+        serverCtx_,
         [](SSL*, const unsigned char** out, unsigned char* outlen, const unsigned char* in, unsigned int inlen,
            void*) -> int {
             if(SSL_select_next_proto(const_cast<unsigned char**>(out), outlen, DEFAULT_PROTOS, sizeof(DEFAULT_PROTOS),
@@ -167,23 +167,23 @@ void HttpOpenSSL::InitClientContext()
     auto& logger = GetLogger();
     auto& sslConfig = GetConfig().sslConfig;
 
-    clientCtx = SSL_CTX_new(TLS_method());
-    if(!clientCtx)
+    clientCtx_ = SSL_CTX_new(TLS_method());
+    if(!clientCtx_)
         logger.Fatal("[HttpOpenSSL]: Failed to create client SSL_CTX");
 
     // Always load system CAs so public internet endpoints verify correctly
     // If user also specifies ca_cert_path (for internal/self-signed CAs like mkcert),-
     // -it is added on top
-    if(SSL_CTX_set_default_verify_paths(clientCtx) != 1)
+    if(SSL_CTX_set_default_verify_paths(clientCtx_) != 1)
         LogOpenSSLError("Failed to load default system CA certificates for client ctx");
 
     if(!sslConfig.caCertPath.empty()) {
-        if(SSL_CTX_load_verify_locations(clientCtx, sslConfig.caCertPath.c_str(), nullptr) != 1)
+        if(SSL_CTX_load_verify_locations(clientCtx_, sslConfig.caCertPath.c_str(), nullptr) != 1)
             LogOpenSSLError("Failed to load configured CA certificate for client ctx");
     }
 
     // Minimum security version
-    SSL_CTX_set_security_level(clientCtx, std::clamp(sslConfig.securityLevel, 0, 5));
+    SSL_CTX_set_security_level(clientCtx_, std::clamp(sslConfig.securityLevel, 0, 5));
 
     // Minimum protocol version
     int protoVersion = TLS1_2_VERSION;
@@ -201,33 +201,33 @@ void HttpOpenSSL::InitClientContext()
             protoVersion = TLS1_2_VERSION;
             break;
     }
-    if(SSL_CTX_set_min_proto_version(clientCtx, protoVersion) != 1)
+    if(SSL_CTX_set_min_proto_version(clientCtx_, protoVersion) != 1)
         LogOpenSSLError("Failed to set minimum TLS protocol version for client ctx");
 
     // Client-side session cache: SSL_SESS_CACHE_CLIENT stores sessions for reuse
     // Unlike server cache, client must explicitly call SSL_set_session() to reuse
     // The engine does not do automatic reuse, but having the cache ready is correct
     if(sslConfig.enableClientSessionCache) {
-        SSL_CTX_set_session_cache_mode(clientCtx, SSL_SESS_CACHE_CLIENT);
-        SSL_CTX_sess_set_cache_size(clientCtx, sslConfig.clientSessionCacheSize);
+        SSL_CTX_set_session_cache_mode(clientCtx_, SSL_SESS_CACHE_CLIENT);
+        SSL_CTX_sess_set_cache_size(clientCtx_, sslConfig.clientSessionCacheSize);
     }
     else
-        SSL_CTX_set_session_cache_mode(clientCtx, SSL_SESS_CACHE_OFF);
+        SSL_CTX_set_session_cache_mode(clientCtx_, SSL_SESS_CACHE_OFF);
 
     // Client advertises these to the server as supported suites
     // Server's SSL_OP_CIPHER_SERVER_PREFERENCE will override order on the server side-
     // -but we still want to advertise only strong suites
-    if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(clientCtx, sslConfig.tls13Ciphers.c_str()) != 1)
+    if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(clientCtx_, sslConfig.tls13Ciphers.c_str()) != 1)
         LogOpenSSLError("Failed to set TLSv1.3 ciphersuites for client ctx");
 
-    if(!sslConfig.tls12Ciphers.empty() && SSL_CTX_set_cipher_list(clientCtx, sslConfig.tls12Ciphers.c_str()) != 1)
+    if(!sslConfig.tls12Ciphers.empty() && SSL_CTX_set_cipher_list(clientCtx_, sslConfig.tls12Ciphers.c_str()) != 1)
         LogOpenSSLError("Failed to set TLSv1.2 cipher list for client ctx");
 
     if(!sslConfig.curves.empty())
-        SSL_CTX_set1_curves_list(clientCtx, sslConfig.curves.c_str());
+        SSL_CTX_set1_curves_list(clientCtx_, sslConfig.curves.c_str());
 
-    SSL_CTX_set_read_ahead(clientCtx, 0);
-    SSL_CTX_set_mode(clientCtx,
+    SSL_CTX_set_read_ahead(clientCtx_, 0);
+    SSL_CTX_set_mode(clientCtx_,
                      SSL_MODE_RELEASE_BUFFERS | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
     // SSL_OP_NO_COMPRESSION: applies to both sides, client enforcing prevents
@@ -235,7 +235,7 @@ void HttpOpenSSL::InitClientContext()
     // SSL_OP_CIPHER_SERVER_PREFERENCE: NOT set, meaningless on client side,-
     // -only the server uses this to override the negotiated cipher order
     // SSL_OP_ENABLE_KTLS: NOT set, KTLS is for SSL_sendfile which is server-side only
-    SSL_CTX_set_options(clientCtx, SSL_OP_NO_COMPRESSION);
+    SSL_CTX_set_options(clientCtx_, SSL_OP_NO_COMPRESSION);
 
     logger.Info("[HttpOpenSSL]: Client SSL context initialized successfully");
 }
@@ -243,7 +243,7 @@ void HttpOpenSSL::InitClientContext()
 // vvv Main Functions vvv
 void* HttpOpenSSL::Wrap(SSLSocket sock)
 {
-    SSL* ssl = SSL_new(serverCtx);
+    SSL* ssl = SSL_new(serverCtx_);
     if(!ssl)
         return nullptr;
 
@@ -261,7 +261,7 @@ void* HttpOpenSSL::Wrap(SSLSocket sock)
 
 void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view alpnList)
 {
-    SSL* ssl = SSL_new(clientCtx);
+    SSL* ssl = SSL_new(clientCtx_);
     if(!ssl)
         return nullptr;
 
@@ -306,7 +306,7 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view
     // ALPN: SSL_set_alpn_protos is client side per-connection advertisement
     const unsigned char* alpnData =
         alpnList.empty() ? DEFAULT_PROTOS : reinterpret_cast<const unsigned char*>(alpnList.data());
-    unsigned int alpnLen = alpnList.empty() ? sizeof(DEFAULT_PROTOS) : static_cast<unsigned int>(alpnList.size());
+    const unsigned int alpnLen = alpnList.empty() ? sizeof(DEFAULT_PROTOS) : static_cast<unsigned int>(alpnList.size());
 
     if(SSL_set_alpn_protos(ssl, alpnData, alpnLen) != 0) {
         SSL_free(ssl);
@@ -334,13 +334,13 @@ std::string_view HttpOpenSSL::NegotiatedProtocol(void* conn)
 SSLReturn HttpOpenSSL::Handshake(void* conn)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int ret = SSL_do_handshake(ssl);
+    const int ret = SSL_do_handshake(ssl);
 
     // Handshake complete
     if(ret == 1)
         return SSLReturn::SUCCESS;
 
-    int err = SSL_get_error(ssl, ret);
+    const int err = SSL_get_error(ssl, ret);
     switch(err) {
         case SSL_ERROR_WANT_READ:
             return SSLReturn::WANT_READ;
@@ -358,12 +358,12 @@ SSLReturn HttpOpenSSL::Handshake(void* conn)
 SSLResult HttpOpenSSL::Read(void* conn, char* buf, int len)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int ret = SSL_read(ssl, buf, len);
+    const int ret = SSL_read(ssl, buf, len);
 
     if(ret > 0)
         return {SSLReturn::SUCCESS, ret};
 
-    int err = SSL_get_error(ssl, ret);
+    const int err = SSL_get_error(ssl, ret);
     switch(err) {
         case SSL_ERROR_WANT_READ:
             return {SSLReturn::WANT_READ, 0};
@@ -381,12 +381,12 @@ SSLResult HttpOpenSSL::Read(void* conn, char* buf, int len)
 SSLResult HttpOpenSSL::Write(void* conn, const char* buf, int len)
 {
     SSL* ssl = static_cast<SSL*>(conn);
-    int ret = SSL_write(ssl, buf, len);
+    const int ret = SSL_write(ssl, buf, len);
 
     if(ret > 0)
         return {SSLReturn::SUCCESS, ret};
 
-    int err = SSL_get_error(ssl, ret);
+    const int err = SSL_get_error(ssl, ret);
     switch(err) {
         case SSL_ERROR_WANT_READ:
             return {SSLReturn::WANT_READ, 0};
@@ -405,16 +405,16 @@ SSLResult HttpOpenSSL::WriteFile(void* conn, SSLSocket fd, FileOffset offset, st
 {
     // SSL_sendfile can only be used with ktls enabled
     // Return 'NO_IMPL' to tell backend to switch to using Write
-    if(!useKtls)
+    if(!useKtls_)
         return {SSLReturn::NO_IMPL, 0};
 
     SSL* ssl = static_cast<SSL*>(conn);
-    ssize_t ret = SSL_sendfile(ssl, fd, offset, count, 0);
+    const ssize_t ret = SSL_sendfile(ssl, fd, offset, count, 0);
 
     if(ret > 0)
         return {SSLReturn::SUCCESS, ret};
 
-    int err = SSL_get_error(ssl, static_cast<int>(ret));
+    const int err = SSL_get_error(ssl, static_cast<int>(ret));
     switch(err) {
         case SSL_ERROR_WANT_READ:
             return {SSLReturn::WANT_READ, 0};
@@ -435,7 +435,7 @@ SSLReturn HttpOpenSSL::Shutdown(void* conn)
     if(!ssl)
         return SSLReturn::SUCCESS;
 
-    int ret = SSL_shutdown(ssl);
+    const int ret = SSL_shutdown(ssl);
 
     // SSL_shutdown return values:
     // 1  = success (both sides notified)
@@ -449,7 +449,7 @@ SSLReturn HttpOpenSSL::Shutdown(void* conn)
     if(ret == 0)
         return SSLReturn::WANT_READ;
 
-    int err = SSL_get_error(ssl, ret);
+    const int err = SSL_get_error(ssl, ret);
     if(err == SSL_ERROR_WANT_READ)
         return SSLReturn::WANT_READ;
     if(err == SSL_ERROR_WANT_WRITE)
@@ -477,14 +477,14 @@ SSLReturn HttpOpenSSL::ForceShutdown(void* conn)
 // vvv Helper functions vvv
 void HttpOpenSSL::GlobalOpenSSLInit()
 {
-    static bool initialized = false;
-    if(initialized)
+    static bool GlobalInitialized = false;
+    if(GlobalInitialized)
         return;
 
     if(OPENSSL_init_ssl(OPENSSL_INIT_LOAD_CONFIG, nullptr) != 1)
         GetLogger().Fatal("[HttpOpenSSL]: Initialization failed");
 
-    initialized = true;
+    GlobalInitialized = true;
 }
 
 void HttpOpenSSL::LogOpenSSLError(const char* message, SSL* ssl, bool fatal)
@@ -503,7 +503,7 @@ void HttpOpenSSL::LogOpenSSLError(const char* message, SSL* ssl, bool fatal)
 
     // Fall back to OpenSSL error queue if no verification issue exists
     if(details.empty()) {
-        if(unsigned long err = ERR_peek_last_error(); err != 0) {
+        if(const unsigned long err = ERR_peek_last_error(); err != 0) {
             if(const char* reason = ERR_reason_error_string(err))
                 details = reason;
             else

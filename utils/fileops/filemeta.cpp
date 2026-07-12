@@ -20,7 +20,7 @@ FileMetaStatus FileMeta::Load()
     if(!metaFile)
         return FileMetaStatus::NOT_FOUND;
 
-    std::size_t fileSize = metaFile->Size();
+    const std::size_t fileSize = metaFile->Size();
     if(fileSize > ALLOC_THRESHOLD)
         return FileMetaStatus::TOO_LARGE;
 
@@ -67,8 +67,8 @@ FileMetaStatus FileMeta::Load()
         if(!StringUtils::StrToUInt64({&buffer[sidx + 1], didx - sidx - 1}, udSize))
             return FileMetaStatus::CORRUPTED;
 
-        std::size_t dataStart = didx + 1;
-        std::size_t dataEnd = dataStart + udSize;
+        const std::size_t dataStart = didx + 1;
+        const std::size_t dataEnd = dataStart + udSize;
 
         if(dataEnd >= fileSize || buffer[dataEnd] != '\n')
             return FileMetaStatus::CORRUPTED;
@@ -125,7 +125,7 @@ FileMetaStatus FileMeta::Save() const
         buffer.push_back(FIELD_SEPARATOR);
 
         // User data size
-        std::uint64_t udSize = meta.userData.size();
+        const std::uint64_t udSize = meta.userData.size();
         {
             auto [ptr, ec] = std::to_chars(numBuf, numBuf + sizeof(numBuf), udSize);
             if(ec != std::errc{})
