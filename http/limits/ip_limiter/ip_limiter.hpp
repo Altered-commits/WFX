@@ -9,9 +9,19 @@
 
 namespace WFX::Http {
 
+struct TokenBucket {
+    std::uint64_t tokens = 0;
+    std::chrono::steady_clock::time_point lastRefill = std::chrono::steady_clock::now();
+};
+
+struct IpLimiterEntry {
+    std::uint32_t connectionCount = 0;
+    TokenBucket bucket;
+};
+
 class IpLimiter : BaseLimiter {
 public:
-    IpLimiter(Utils::BufferPool& poolRef);
+    IpLimiter();
     ~IpLimiter() = default;
 
 public:
@@ -31,16 +41,6 @@ private:
     IpLimiter& operator=(IpLimiter&&) = delete;
 
 private:
-    struct TokenBucket {
-        std::uint64_t tokens = 0;
-        std::chrono::steady_clock::time_point lastRefill = std::chrono::steady_clock::now();
-    };
-
-    struct IpLimiterEntry {
-        std::uint32_t connectionCount = 0;
-        TokenBucket bucket;
-    };
-
     Utils::HashShard<WFXIpAddress, IpLimiterEntry> ipLimits_;
 };
 

@@ -309,8 +309,8 @@ public: // vvv String parsing vvv
         s->strLen = strOff + outLen + 1; // patch strLen, capacity may be larger
 
         n.tag = JsonTag::STR_OWN;
-        n.u32a() = strOff;
-        n.u32c() = outLen;
+        n.U32a() = strOff;
+        n.U32c() = outLen;
         return true;
     }
 
@@ -336,12 +336,12 @@ public: // vvv String parsing vvv
         std::uint32_t slen = static_cast<std::uint32_t>(end - pos);
 
         if(isView) {
-            // Zero-copy: pack pointer into u64a, store length in u32c
+            // Zero-copy: pack pointer into u64a, store length in U32c
             // Must memcpy from a const char* local, &src[pos] is the char's address
             n.tag = JsonTag::STR_VIEW;
             const char* ptr = src + pos;
             std::memcpy(&n.u64a, &ptr, 8);
-            n.u32c() = slen;
+            n.U32c() = slen;
         }
         else {
             std::uint32_t off = s->AllocStr(src + pos, slen);
@@ -352,8 +352,8 @@ public: // vvv String parsing vvv
             }
 
             n.tag = JsonTag::STR_OWN;
-            n.u32a() = off;
-            n.u32c() = slen;
+            n.U32a() = off;
+            n.U32c() = slen;
         }
 
         pos = end + 1; // skip closing "
@@ -579,7 +579,7 @@ public: // vvv Object and Array vvv
                 // Insert it by offset, NOT by pointer: GetOrCreate would feed that strs-interior-
                 // -pointer to AllocStr, which reallocs strs and then memcpy's from the freed-
                 // -original (use-after-free), on top of storing the key a second time
-                valRef = r.GetOrCreateStored(tmp.u32a(), tmp.u32c());
+                valRef = r.GetOrCreateStored(tmp.U32a(), tmp.U32c());
             }
 
             if(!valRef.Valid()) {

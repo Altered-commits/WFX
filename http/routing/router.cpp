@@ -32,7 +32,7 @@ const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, 
 const TrieNode* Router::MatchRoute(HttpMethod method, std::string_view path, PathSegments& outSegments) const
 {
     // Strip query string before matching
-    std::string_view queryStrippedPath = path.substr(0, path.find('?'));
+    const std::string_view queryStrippedPath = path.substr(0, path.find('?'));
 
     switch(method) {
         case HttpMethod::GET:

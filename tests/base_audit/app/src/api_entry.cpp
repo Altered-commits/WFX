@@ -7,7 +7,7 @@
 
 // To prevent name mangling
 extern "C" {
-WFX_EXPORT void RegisterMasterAPI(const WFX::Shared::MASTER_API_TABLE* api)
+WFX_EXPORT void RegisterMasterAPI(const WFX::Shared::MasterAPITable* api)
 {
     static bool registered = false;
     if(registered)

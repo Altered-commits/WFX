@@ -103,7 +103,7 @@ mkdir -p "$WFX_HOME/daemons"
 # ---------------------------------------------------------------
 if [ "$LOCAL" = "1" ]; then
     info "Local mode: copying current directory to $WFX_SRC..."
-    rsync -a --exclude='.git' --exclude='build' --exclude='.venv' . "$WFX_SRC/" \
+    rsync -a --delete --exclude='.git' --exclude='build' --exclude='build_install' --exclude='.venv' --exclude='.vscode' . "$WFX_SRC/" \
         || error "Failed to copy source to $WFX_SRC."
 else
     if [ -d "$WFX_SRC/.git" ]; then
@@ -141,6 +141,7 @@ chmod +x "$WFX_BINARY"
 # Add to PATH
 # ---------------------------------------------------------------
 PATH_LINE='export PATH="$HOME/.wfx/bin:$PATH"'
+PATH_JUST_ADDED=0
 
 add_to_path() {
     local file="$1"
@@ -150,6 +151,7 @@ add_to_path() {
         fi
         printf '\n# WFX\n%s\n' "$PATH_LINE" >> "$file"
         info "Added WFX to PATH in $file"
+        PATH_JUST_ADDED=1
     fi
 }
 
@@ -169,12 +171,15 @@ success "Details:"
 success "    Root   -> $WFX_HOME"
 success "    Binary -> $WFX_BINARY"
 echo ""
-info "Restart your terminal or run:"
 
-if [ "$OS" = "macos" ]; then
-    printf "    source ~/.zshrc\n\n"
-else
-    printf "    source ~/.bashrc\n\n"
+if [ "$PATH_JUST_ADDED" = "1" ]; then
+    info "Restart your terminal or run this once:"
+
+    if [ "$OS" = "macos" ]; then
+        printf "    source ~/.zshrc\n\n"
+    else
+        printf "    source ~/.bashrc\n\n"
+    fi
 fi
 
 info "Then try:"

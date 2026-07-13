@@ -23,8 +23,8 @@ public:
         handle_ = h;
 
         // Passed by engine, guaranteed
-        void* connCtx = Core::HttpApiExt1()->GetGlobalPtrData();
-        bool scheduled = Core::AsyncApiExt1()->RegisterAsyncTimer(connCtx, delayMs, {this, OnComplete, OnDestroy});
+        void* connCtx = Core::HttpApiExt1()->getGlobalPtrData();
+        bool scheduled = Core::AsyncApiExt1()->registerAsyncTimer(connCtx, delayMs, {this, OnComplete, OnDestroy});
 
         // On failure, resume the coroutine so user can handle the error
         if(!scheduled) {
@@ -63,7 +63,7 @@ public:
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         handle_ = h;
-        Core::EndpointApiExt1()->SlotSend(slotInternal, data, size, {this, OnComplete, OnDestroy});
+        Core::EndpointApiExt1()->slotSend(slotInternal, data, size, {this, OnComplete, OnDestroy});
         return true;
     }
 
@@ -95,7 +95,7 @@ public:
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         handle_ = h;
-        Core::EndpointApiExt1()->SlotReceive(slotInternal, {this, OnComplete, OnDestroy});
+        Core::EndpointApiExt1()->slotReceive(slotInternal, {this, OnComplete, OnDestroy});
         return true;
     }
 

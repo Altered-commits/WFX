@@ -15,15 +15,15 @@ using ReallocFn = void* (*)(void* ptr, std::uint64_t newSize);
 using FreeFn = void (*)(void* ptr);
 
 // vvv API declarations vvv
-struct MEMORY_API_EXT1 {
-    AllocFn Alloc;
-    ReallocFn Realloc;
-    FreeFn Free;
+struct MemoryAPIExt1 {
+    AllocFn alloc;
+    ReallocFn realloc;
+    FreeFn free;
 };
-static_assert(std::is_standard_layout<MEMORY_API_EXT1>::value, "'MEMORY_API_EXT1' must be standard layout");
+static_assert(std::is_standard_layout<MemoryAPIExt1>::value, "'MEMORY_API_EXT1' must be standard layout");
 
 // vvv Getter vvv
-const MEMORY_API_EXT1* GetMemoryAPIExt1();
+const MemoryAPIExt1* GetMemoryAPIExt1();
 
 } // namespace WFX::Shared
 

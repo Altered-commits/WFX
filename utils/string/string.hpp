@@ -34,11 +34,11 @@ std::string_view TrimView(std::string_view sv) noexcept;
 // vvv constexpr functions vvv
 inline constexpr std::uint8_t UInt8FromHexChar(std::uint8_t uc) noexcept
 {
-    std::uint8_t lo = uc - '0';
-    std::uint8_t hi = (uc | 0x20) - 'a';
+    const std::uint8_t lo = uc - '0';
+    const std::uint8_t hi = (uc | 0x20) - 'a';
 
-    std::uint8_t isDigit = (lo < 10);
-    std::uint8_t isHex = (hi < 6);
+    const std::uint8_t isDigit = (lo < 10);
+    const std::uint8_t isHex = (hi < 6);
 
     return (isDigit * lo) | (isHex * (hi + 10)) | ((isDigit | isHex) ? 0 : 0xFF);
 }

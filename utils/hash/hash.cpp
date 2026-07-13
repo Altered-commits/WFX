@@ -8,17 +8,10 @@
 #include <bit>
 
 // Some OS level tools for randomization
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#include <bcrypt.h>
-#pragma comment(lib, "bcrypt.lib")
-#else
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/random.h>
 #include <errno.h>
-#endif
 
 namespace WFX::Utils {
 
@@ -65,7 +58,7 @@ std::uint64_t Hasher::SipHash24(const std::uint8_t* data, std::uint64_t len, con
     }
 
     std::uint64_t last = static_cast<std::uint64_t>(len) << 56;
-    std::uint64_t rem = len & 7;
+    const std::uint64_t rem = len & 7;
     for(std::uint64_t i = 0; i < rem; ++i)
         last |= static_cast<std::uint64_t>(ptr[i]) << (i * 8);
 
@@ -116,11 +109,11 @@ std::uint64_t Hasher::SipHash24(std::string_view str, const std::uint8_t key[16]
 
 // vvv RANDOM POOL vvv
 // Global pool instance
-static RandomPool __GlobalRandomPool;
+static RandomPool GlobalRandomPool;
 
 RandomPool& GetRandomPool() noexcept
 {
-    return __GlobalRandomPool;
+    return GlobalRandomPool;
 }
 
 RandomPool::RandomPool()
@@ -163,18 +156,14 @@ bool RandomPool::GetBytes(std::uint8_t* out, std::size_t len)
 // Main shit
 bool RandomPool::RefillBytes()
 {
-#if defined(_WIN32)
-    if(BCryptGenRandom(nullptr, randomPool_, static_cast<ULONG>(BUFFER_SIZE), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
-        return false;
-#else
     ssize_t totalRead = 0;
 
     while(totalRead < BUFFER_SIZE) {
-        ssize_t n = getrandom(randomPool_ + totalRead, BUFFER_SIZE - totalRead, 0);
+        const ssize_t n = getrandom(randomPool_ + totalRead, BUFFER_SIZE - totalRead, 0);
         if(n < 0) {
             if(errno == ENOSYS) {
                 // Fallback to /dev/urandom
-                int fd = open("/dev/urandom", O_RDONLY);
+                const int fd = open("/dev/urandom", O_RDONLY);
                 if(fd < 0)
                     return false;
 
@@ -201,7 +190,6 @@ bool RandomPool::RefillBytes()
         else
             totalRead += n;
     }
-#endif
     cursor_ = 0;
     return true;
 }

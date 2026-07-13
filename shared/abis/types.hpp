@@ -57,8 +57,8 @@ using AsyncDestroyFn = void (*)(void* userData);
 
 struct AsyncData {
     void* userData;                // |
-    AsyncCompleteFn AsyncComplete; // | -> For cleaner storage on engine side i suppose
-    AsyncDestroyFn AsyncDestroy;   // |
+    AsyncCompleteFn asyncComplete; // | -> For cleaner storage on engine side i suppose
+    AsyncDestroyFn asyncDestroy;   // |
 };
 static_assert(sizeof(AsyncData) == 24, "'AsyncData' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<AsyncData>, "'AsyncData' must be standard layout");
@@ -120,8 +120,8 @@ static_assert(std::is_standard_layout_v<StreamBuffer>, "'StreamBuffer' must be s
 
 struct StreamGenerator {
     void* ctx;
-    StreamResult (*Next)(void* ctx, StreamBuffer buffer);
-    void (*Destroy)(void* ctx);
+    StreamResult (*next)(void* ctx, StreamBuffer buffer);
+    void (*destroy)(void* ctx);
 };
 static_assert(sizeof(StreamGenerator) == 24, "'StreamGenerator' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<StreamGenerator>, "'StreamGenerator' must be standard layout");
@@ -205,8 +205,8 @@ using EndpointNegotiatedProtocolFn = StringView (*)(void* endpointCtx);
 // -SlotHandle::Send/Receive call those rather than a per-slot function pointer here
 struct EndpointSlotHandle {
     void* impl;
-    EndpointSlotCloseFn Close;
-    EndpointNegotiatedProtocolFn NegotiatedProtocol;
+    EndpointSlotCloseFn close;
+    EndpointNegotiatedProtocolFn negotiatedProtocol;
 };
 static_assert(sizeof(EndpointSlotHandle) == 24, "'EndpointSlotHandle' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<EndpointSlotHandle>, "'EndpointSlotHandle' must be standard layout");

@@ -8,22 +8,14 @@
 #include "utils/hash/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
 #include "utils/resolver/dns_resolver.hpp"
+#include "utils/diagnostics/logger.hpp"
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <WinSock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "Ws2_32.lib")
-
-using WFXSocket = SOCKET;
-constexpr WFXSocket WFX_INVALID_SOCKET = INVALID_SOCKET;
-#else
 #include <netinet/in.h> // in_addr, in6_addr
 #include <arpa/inet.h>  // inet_ntop, inet_pton
+#include <functional>
 
 using WFXSocket = int; // On Linux/Unix, sockets are file descriptors (ints)
 constexpr WFXSocket WFX_INVALID_SOCKET = -1;
-#endif
 
 namespace WFX::Http {
 
@@ -100,15 +92,9 @@ struct ClientCtx;
 using ReceiveCallback = std::function<void(ClientCtx*)>;
 
 struct FileInfo {
-#if defined(_WIN32)
-    HANDLE handle{0};          // HANDLE is pointer-sized
-    std::uint64_t fileSize{0}; // 64-bit for large files
-    std::uint64_t offset{0};   // current send offset
-#else
     int fd = -1;        // Linux file descriptor
     off_t fileSize = 0; // File size
     off_t offset = 0;   // current send offset
-#endif
 };
 
 // Used inside of AsyncTrack if needed by 'HandleSuccess'
@@ -350,26 +336,22 @@ struct HttpConnectionHandler {
 
 // Write a std::hash specialization for WFXIpAddress
 namespace std {
-using WFX::Http::WFXIpAddress;
-using WFX::Utils::GetLogger;
-using WFX::Utils::GetRandomPool;
-using WFX::Utils::Hasher::SipHash24;
-
-template <> struct hash<WFXIpAddress> {
-    std::size_t operator()(const WFXIpAddress& addr) const
+template <> struct hash<WFX::Http::WFXIpAddress> {
+    std::size_t operator()(const WFX::Http::WFXIpAddress& addr) const
     {
-        static std::uint8_t sipKey[16];
+        static std::uint8_t GlobalSipKey[16];
 
         // Run only once
         static const struct InitKeyOnce {
             InitKeyOnce()
             {
-                if(!GetRandomPool().GetBytes(sipKey, sizeof(sipKey)))
-                    GetLogger().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
+                if(!WFX::Utils::GetRandomPool().GetBytes(GlobalSipKey, sizeof(GlobalSipKey)))
+                    WFX::Utils::GetLogger().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
             }
-        } _initOnce;
+        } INIT_ONCE;
 
-        return SipHash24(addr.ip.raw, addr.type == AF_INET ? sizeof(in_addr) : sizeof(in6_addr), sipKey);
+        return WFX::Utils::Hasher::SipHash24(addr.ip.raw, addr.type == AF_INET ? sizeof(in_addr) : sizeof(in6_addr),
+                                             GlobalSipKey);
     }
 };
 } // namespace std

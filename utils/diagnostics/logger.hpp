@@ -20,33 +20,17 @@
 #include <string_view>
 #include <type_traits>
 
-#if defined(_WIN32)
-#include <windows.h>
-
-#define WFX_IS_TTY() (GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_CHAR)
-#define WFX_STDOUT_WRITE(data, len)                                                                                    \
-    do {                                                                                                               \
-        DWORD _w;                                                                                                      \
-        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), (data), static_cast<DWORD>(len), &_w, nullptr);                     \
-    } while(0)
-#else
 #include <errno.h>
 #include <unistd.h>
 
 #define WFX_IS_TTY() (::isatty(STDOUT_FILENO) != 0)
 #define WFX_STDOUT_WRITE(data, len) WriteRetry(STDOUT_FILENO, (data), (len))
-#endif
-
-#if defined(_WIN32)
-#define WFX_LOCALTIME(tm_ptr, tt_ptr) localtime_s((tm_ptr), (tt_ptr))
-#else
 #define WFX_LOCALTIME(tm_ptr, tt_ptr) localtime_r((tt_ptr), (tm_ptr))
-#endif
 
 namespace WFX::Utils {
 
 // On Open()   : OpenFileWrite truncates and starts fresh. Size tracked via
-//               file_->Size() which LinuxFile/WinFile maintains internally
+//               file_->Size() which PosixFile maintains internally
 //
 // On rotation : close -> shift .N->.(N+1) down to .1->.2
 //               -> rename current to .1 -> OpenFileWrite on fresh current
@@ -55,9 +39,9 @@ namespace WFX::Utils {
 // Rotated copies (.1 .. .N) survive across restarts
 class CircularFileSink {
 public:
-    static constexpr std::size_t kDefaultMaxBytes = 16 * 1024 * 1024;
-    static constexpr int kDefaultKeepFiles = 4;
-    static constexpr int kMaxKeep = 32;
+    static constexpr std::size_t K_DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
+    static constexpr int K_DEFAULT_KEEP_FILES = 4;
+    static constexpr int K_MAX_KEEP = 32;
 
 public:
     CircularFileSink() = default;
@@ -72,7 +56,8 @@ public:
         return file_ && file_->IsOpen();
     }
 
-    bool Open(const char* path, std::size_t maxBytes = kDefaultMaxBytes, int keepFiles = kDefaultKeepFiles) noexcept;
+    bool Open(const char* path, std::size_t maxBytes = K_DEFAULT_MAX_BYTES,
+              int keepFiles = K_DEFAULT_KEEP_FILES) noexcept;
     void Write(const char* data, std::size_t len) noexcept;
 
 private:
@@ -82,8 +67,8 @@ private:
 
 private:
     char path_[512] = {};
-    std::size_t maxBytes_ = kDefaultMaxBytes;
-    int keepFiles_ = kDefaultKeepFiles;
+    std::size_t maxBytes_ = K_DEFAULT_MAX_BYTES;
+    int keepFiles_ = K_DEFAULT_KEEP_FILES;
     BaseFilePtr file_ = nullptr;
 };
 
@@ -151,7 +136,7 @@ private:
 // Total: ~1.1 KiB per worker instance
 class Logger final {
 public:
-    using LevelMask = std::uint32_t;
+    using LevelMask = std::uint8_t;
 
     enum class Level : std::uint8_t { TRACE = 0, DEBUG, INFO, WARN, ERROR, FATAL, NONE };
 
@@ -183,8 +168,8 @@ public:
     void EnableColors(bool v) noexcept;
     void EnableStdout(bool v) noexcept;
 
-    bool OpenFile(const char* path, std::size_t maxBytes = CircularFileSink::kDefaultMaxBytes,
-                  int keepFiles = CircularFileSink::kDefaultKeepFiles) noexcept;
+    bool OpenFile(const char* path, std::size_t maxBytes = CircularFileSink::K_DEFAULT_MAX_BYTES,
+                  int keepFiles = CircularFileSink::K_DEFAULT_KEEP_FILES) noexcept;
 
 public:
     template <typename... Args> void Trace(Args&&... args) noexcept
@@ -222,7 +207,7 @@ public:
     template <typename... Args> void Print(Args&&... args) noexcept
     {
         char* p = msgBuf_.data();
-        char* end = p + kMsgBufSize - 1;
+        char* end = p + K_MSG_BUF_SIZE - 1;
 
         ((p = Fmt(p, end, std::forward<Args>(args))), ...);
         *p++ = '\n';
@@ -236,25 +221,25 @@ private:
         const char* ansi;
     };
 
-    static constexpr std::array<LevelMeta, 6> kMeta{{{"[TRC]", "\033[90m"},
-                                                     {"[DBG]", "\033[36m"},
-                                                     {"[INF]", "\033[32m"},
-                                                     {"[WRN]", "\033[33m"},
-                                                     {"[ERR]", "\033[31m"},
-                                                     {"[FTL]", "\033[35;1m"}}};
+    static constexpr std::array<LevelMeta, 6> K_META{{{"[TRC]", "\033[90m"},
+                                                      {"[DBG]", "\033[36m"},
+                                                      {"[INF]", "\033[32m"},
+                                                      {"[WRN]", "\033[33m"},
+                                                      {"[ERR]", "\033[31m"},
+                                                      {"[FTL]", "\033[35;1m"}}};
 
-    static constexpr const char* kColorGray = "\033[90m";
-    static constexpr const char* kColorReset = "\033[0m";
+    static constexpr const char* K_COLOR_GRAY = "\033[90m";
+    static constexpr const char* K_COLOR_RESET = "\033[0m";
 
     // prefixBuf_ : colored prefix for stdout (timestamp + tag with ANSI)
     //              max: gray(5) + [HH:MM:SS.mmm](14) + reset(4) + sp(1)
     //                 + color(7) + [XYZ](5) + reset(4) + sp(1) = 41 bytes
     //              64 gives comfortable headroom
-    static constexpr std::size_t kPrefixBufSize = 64;
+    static constexpr std::size_t K_PREFIX_BUF_SIZE = 64;
 
     // msgBuf_ : full plain line (timestamp + tag + message + newline)
     //           user message budget = 1024, prefix overhead = 32
-    static constexpr std::size_t kMsgBufSize = 1024 + 32;
+    static constexpr std::size_t K_MSG_BUF_SIZE = 1024 + 32;
 
 private:
     template <typename... Args> void Emit(Level lvl, Args&&... args) noexcept
@@ -264,10 +249,10 @@ private:
         if((levelMask_ & bit) == 0)
             return;
 
-        const auto& meta = kMeta[static_cast<std::uint8_t>(lvl)];
+        const auto& meta = K_META[static_cast<std::uint8_t>(lvl)];
 
         char* mp = msgBuf_.data();
-        char* end = mp + kMsgBufSize - 1;
+        char* end = mp + K_MSG_BUF_SIZE - 1;
 
         if(timestamps_) {
             mp = tsCache_.Format(mp);
@@ -292,19 +277,19 @@ private:
         if(stdout_) {
             if(colors_) {
                 char* cp = prefixBuf_.data();
-                char* cend = cp + kPrefixBufSize;
+                char* cend = cp + K_PREFIX_BUF_SIZE;
 
                 if(timestamps_) {
-                    cp = RawCopy(cp, cend, kColorGray);
+                    cp = RawCopy(cp, cend, K_COLOR_GRAY);
                     cp = tsCache_.Format(cp);
-                    cp = RawCopy(cp, cend, kColorReset);
+                    cp = RawCopy(cp, cend, K_COLOR_RESET);
                     if(cp < cend)
                         *cp++ = ' ';
                 }
 
                 cp = RawCopy(cp, cend, meta.ansi);
                 cp = RawCopy(cp, cend, meta.tag);
-                cp = RawCopy(cp, cend, kColorReset);
+                cp = RawCopy(cp, cend, K_COLOR_RESET);
                 if(cp < cend)
                     *cp++ = ' ';
 
@@ -328,9 +313,7 @@ private:
         }
     }
 
-#if !defined(_WIN32)
     static void WriteRetry(int fd, const char* data, std::size_t len) noexcept;
-#endif
 
 private:
     static char* RawCopy(char* p, char* end, const char* s) noexcept
@@ -407,8 +390,8 @@ private:
     bool colors_ = true;
     bool stdout_ = true;
 
-    std::array<char, kMsgBufSize> msgBuf_{};
-    std::array<char, kPrefixBufSize> prefixBuf_{};
+    std::array<char, K_MSG_BUF_SIZE> msgBuf_{};
+    std::array<char, K_PREFIX_BUF_SIZE> prefixBuf_{};
 
     TimestampCache tsCache_;
     CircularFileSink fileSink_;

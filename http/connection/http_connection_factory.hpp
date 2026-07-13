@@ -7,16 +7,13 @@
 // This is simply a helper thingy which will abstract the 'selecting'-
 // -of OS specific functionality for connection handling
 #include "http_connection.hpp"
+#include "shared/utils/detection_macro.hpp"
 #include <memory>
 
-#ifdef _WIN32
-#include "os_specific/windows/iocp_connection.hpp"
-#else
-#ifdef WFX_LINUX_USE_IO_URING
-#include "os_specific/linux/io_uring_connection.hpp"
-#else
+#if defined(WFX_PLATFORM_LINUX)
 #include "os_specific/linux/epoll_connection.hpp"
-#endif
+#else
+#error "Unsupported platform - add a WFX_PLATFORM_<X> branch in HTTP factory and a new os_specific/<x>/ backend"
 #endif
 
 namespace WFX::Http {
@@ -24,15 +21,11 @@ namespace WFX::Http {
 // Factory function that returns the correct handler
 inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler(bool useHttps)
 {
-#ifdef _WIN32
-    return std::make_unique<OSSpecific::IocpConnectionHandler>();
-#else
-#ifdef WFX_LINUX_USE_IO_URING
-    return std::make_unique<OSSpecific::IoUringConnectionHandler>();
-#else
+#if defined(WFX_PLATFORM_LINUX)
     return std::make_unique<OSSpecific::EpollConnectionHandler>(useHttps);
-#endif // WFX_LINUX_USE_IO_URING
-#endif // _WIN32
+#else
+#error "Unsupported platform - add a WFX_PLATFORM_<X> branch in HTTP factory and a new os_specific/<x>/ backend"
+#endif
 }
 
 } // namespace WFX::Http

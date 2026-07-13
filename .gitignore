@@ -3,12 +3,7 @@
 
 # Build files
 build/
-BuildMinGW/
-BuildGCC/
-BuildGCCDebug/
-BuildMSVC/
-Debug/
-Release/
+build_tidy/
 
 # Internal
 ignore/

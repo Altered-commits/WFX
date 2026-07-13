@@ -8,10 +8,11 @@
 namespace WFX::Shared {
 
 // vvv Main Shit vvv
-const UTILS_API_EXT1* GetUtilsAPIExt1()
+const UtilsAPIExt1* GetUtilsAPIExt1()
 {
     // clang-format off
-    static UTILS_API_EXT1 __GlobalUtilsAPIExt1 = {
+    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    static const UtilsAPIExt1 GlobalUtilsAPIExt1 = {
         // vvv Logging vvv
         [](const char* m) { Utils::GetLogger().Trace(m); },
         [](const char* m) { Utils::GetLogger().Debug(m); },
@@ -39,7 +40,7 @@ const UTILS_API_EXT1* GetUtilsAPIExt1()
     };
     // clang-format on
 
-    return &__GlobalUtilsAPIExt1;
+    return &GlobalUtilsAPIExt1;
 }
 
 } // namespace WFX::Shared

@@ -69,7 +69,7 @@ void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareConfigOrder order)
     std::unordered_set<std::string_view> loadedNames;
 
     for(const auto& nameStr : order) {
-        std::string_view name = nameStr;
+        const std::string_view name = nameStr;
 
         // Duplicate middleware name from config
         if(!loadedNames.insert(name).second)
@@ -77,7 +77,7 @@ void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareConfigOrder order)
 
         auto it = middlewareFactories_.find(name);
         if(it != middlewareFactories_.end())
-            middlewareGlobalCallbacks_.push_back(std::move(it->second));
+            middlewareGlobalCallbacks_.push_back(it->second);
         else
             logger.Fatal("[HttpMiddleware]: Middleware '", name,
                          "' was listed in config but has not been registered."
@@ -94,7 +94,7 @@ void HttpMiddleware::DiscardFactoryMap()
 // vvv Helper Functions vvv
 MiddlewareResult HttpMiddleware::ExecuteHelper(ClientCtx* ctx, Request req, Response res, MiddlewareStack& stack)
 {
-    std::size_t stackSize = stack.size();
+    const std::size_t stackSize = stack.size();
     if(stackSize == 0)
         return {true, false};
 
@@ -119,7 +119,7 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(ClientCtx* ctx, Request req, Resp
         }
     }
 
-    for(std::uint16_t i = mIndex; i < stackSize; i++) {
+    for(std::size_t i = mIndex; i < stackSize; i++) {
         auto& mw = stack[i];
 
         // Execute
@@ -129,7 +129,7 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(ClientCtx* ctx, Request req, Resp
         // -will run in scheduler seperate from this middleware chain, after it completes we need to invoke-
         // -the next valid scheduler
         if(isAsync) {
-            trackAsync.SetMIndex(i + 1);
+            trackAsync.SetMIndex(static_cast<std::uint16_t>(i + 1));
             return {false, true};
         }
 
@@ -161,13 +161,13 @@ MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(ClientCtx* ctx, Request
 
     // Async path, call through C boundary
     auto* httpApi = WFX::Shared::GetHttpAPIExt1();
-    httpApi->SetGlobalPtrData(static_cast<void*>(ctx));
+    httpApi->setGlobalPtrData(static_cast<void*>(ctx));
 
     // Engine passes its own callback into the async middleware
     // The middleware coroutine's 'final_suspend' will fire this when done
     mw.async(req, res, WFX::Core::CoreEngine::OnCoroutineComplete, ctx);
 
-    httpApi->SetGlobalPtrData(nullptr);
+    httpApi->setGlobalPtrData(nullptr);
 
     return {MiddlewareAction::CONTINUE, true};
 }

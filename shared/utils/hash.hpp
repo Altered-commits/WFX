@@ -29,7 +29,7 @@ inline std::uint64_t Mix(std::uint64_t a, std::uint64_t b) noexcept
     std::uint64_t lo = _umul128(a, b, &hi);
     return lo ^ hi;
 #elif defined(__SIZEOF_INT128__)
-    __uint128_t r = static_cast<__uint128_t>(a) * b;
+    const __uint128_t r = static_cast<__uint128_t>(a) * b;
     return static_cast<std::uint64_t>(r) ^ static_cast<std::uint64_t>(r >> 64);
 #else
     // Split into 32-bit halves and reconstruct the full 128-bit product manually
@@ -130,15 +130,15 @@ inline std::uint64_t WyHash(StringView str, std::uint64_t seed = 0) noexcept
 
 inline constexpr std::uint64_t Fnv1a(const char* data, std::uint64_t len) noexcept
 {
-    constexpr std::uint64_t prime = 1099511628211ULL;
-    constexpr std::uint64_t offset = 14695981039346656037ULL;
+    constexpr std::uint64_t PRIME = 1099511628211ULL;
+    constexpr std::uint64_t OFFSET = 14695981039346656037ULL;
 
-    std::uint64_t hash = offset;
+    std::uint64_t hash = OFFSET;
     const char* end = data + len;
 
     while(data < end) {
         hash ^= *data++;
-        hash *= prime;
+        hash *= PRIME;
     }
 
     return hash;
@@ -151,16 +151,16 @@ inline std::uint64_t Fnv1a(StringView str) noexcept
 
 inline constexpr std::uint64_t Fnv1aCaseInsensitive(const char* data, std::uint64_t len) noexcept
 {
-    constexpr std::uint64_t prime = 1099511628211ULL;
-    constexpr std::uint64_t offset = 14695981039346656037ULL;
+    constexpr std::uint64_t PRIME = 1099511628211ULL;
+    constexpr std::uint64_t OFFSET = 14695981039346656037ULL;
 
-    std::uint64_t hash = offset;
+    std::uint64_t hash = OFFSET;
     const char* end = data + len;
 
     while(data < end) {
-        std::uint8_t c = *data++;
+        const std::uint8_t c = *data++;
         hash ^= static_cast<std::uint8_t>((c >= 'A' && c <= 'Z') ? (c | 0x20) : c);
-        hash *= prime;
+        hash *= PRIME;
     }
 
     return hash;

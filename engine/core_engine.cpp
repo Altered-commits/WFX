@@ -15,8 +15,10 @@
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
+#include "shared/utils/detection_macro.hpp"
+#include "shared/utils/memory.hpp"
 
-#if defined(__linux__)
+#if defined(WFX_PLATFORM_POSIX)
 #include <dlfcn.h>
 #endif
 
@@ -42,13 +44,13 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 
     // Initialize API backend before anything else
-    Shared::InitHttpAPIExt1(&router_, &middleware_);
-    Shared::InitEndpointAPIExt1(connHandler_.get());
-    Shared::InitAsyncAPIExt1(connHandler_.get());
+    InitHttpAPIExt1(&router_, &middleware_);
+    InitEndpointAPIExt1(connHandler_.get());
+    InitAsyncAPIExt1(connHandler_.get());
 
-    // We set it on our end because each compiled binary has its own copy of '__WFXApi'
+    // We set it on our end because each compiled binary has its own copy of 'GlobalWFXApi'
     // If we want it to work on our end, we gotta set it here as well
-    SetMasterApi(Shared::GetMasterAPI());
+    SetMasterApi(GetMasterAPI());
 
     // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath);
@@ -79,12 +81,12 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
 
     // Allocate response once per connection, reused across requests via Reset()
     if(!ctx->responseInfo)
-        ctx->responseInfo = new HttpResponse{};
+        ctx->responseInfo = New<HttpResponse>();
 
     auto& res = *ctx->responseInfo;
 
     // Main shit
-    HttpParseState state = HttpParser::Parse(ctx);
+    const HttpParseState state = HttpParser::Parse(ctx);
 
     switch(state) {
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
@@ -122,16 +124,16 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             // RFC violation, close connection
             if(connMask & ConnectionHeader::ERROR) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-                connHandler_->Write(ctx, HttpError::badRequest);
+                connHandler_->Write(ctx, HttpError::BAD_REQUEST);
                 return;
             }
 
             // In this case:
             // HTTP/1.0: Defaults to close
             // HTTP/1.1: Defaults to keep-alive
-            bool shouldClose = (connMask == ConnectionHeader::NONE)
-                                   ? (reqInfo.version == HttpVersion::HTTP_1_0)
-                                   : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
+            const bool shouldClose = (connMask == ConnectionHeader::NONE)
+                                         ? (reqInfo.version == HttpVersion::HTTP_1_0)
+                                         : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
 
             ctx->SetConnectionState(shouldClose ? ConnectionState::CONNECTION_CLOSE
                                                 : ConnectionState::CONNECTION_ALIVE);
@@ -140,7 +142,7 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             // Write buffer allocated once, reused across requests on same connection
             if(!ctx->rwBuffer.IsWriteInitialized() && !ctx->rwBuffer.InitWriteBuffer(networkConfig.maxSendBufferSize)) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-                connHandler_->Write(ctx, HttpError::internalError);
+                connHandler_->Write(ctx, HttpError::INTERNAL_ERROR);
                 return;
             }
 
@@ -151,8 +153,8 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
 
             // Public file shortcut
             if(reqInfo.path.starts_with("/public/")) {
-                std::string_view relativePath = reqInfo.path.substr(7);
-                std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
+                const std::string_view relativePath = reqInfo.path.substr(7);
+                const std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
                 res.SendFile(fullRoute, true);
                 goto __HandleResponse;
@@ -178,13 +180,13 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
 
         case HttpParseState::PARSE_ERROR:
             ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-            connHandler_->Write(ctx, HttpError::badRequest);
+            connHandler_->Write(ctx, HttpError::BAD_REQUEST);
             return;
 
         case HttpParseState::PARSE_STREAMING_BODY:
         default:
             ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-            connHandler_->Write(ctx, HttpError::notImplemented);
+            connHandler_->Write(ctx, HttpError::NOT_IMPLEMENTED);
             return;
     }
 }
@@ -225,15 +227,15 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
 {
     WFX_TRACE();
 
-    auto* httpApi = Shared::GetHttpAPIExt1();
+    auto* httpApi = GetHttpAPIExt1();
     auto& req = *ctx->requestInfo;
     auto& res = *ctx->responseInfo;
     auto* node = static_cast<const TrieNode*>(req.routeNode_);
 
-    Response userRes{&res};
-    Request userReq{&req};
+    const Response userRes{&res};
+    const Request userReq{&req};
 
-    ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
+    const ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
 
     if(eLevel == ExecutionLevel::RESPONSE)
         goto __HandleResponse;
@@ -272,11 +274,11 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
         // Set context (type erased) at http api side before calling async callback
         // And also erase it after callback is done, if the callback hasn't finished, the-
         // -scheduler will set the ptr later on when needed, no need to keep a dangling pointer
-        httpApi->SetGlobalPtrData(static_cast<void*>(ctx));
+        httpApi->setGlobalPtrData(static_cast<void*>(ctx));
 
         node->callback.async(userReq, userRes, CoreEngine::OnCoroutineComplete, ctx);
 
-        httpApi->SetGlobalPtrData(nullptr);
+        httpApi->setGlobalPtrData(nullptr);
 
         // If the coroutine already completed synchronously ('final_suspend' already fired the callback),-
         // -the response is already handled
@@ -321,7 +323,7 @@ void CoreEngine::FinishRequest(ClientCtx* ctx)
     connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
-void CoreEngine::HandleError(ClientCtx* ctx, Shared::HttpStatus code, std::string_view message)
+void CoreEngine::HandleError(ClientCtx* ctx, HttpStatus code, std::string_view message)
 {
     auto& res = *ctx->responseInfo;
 
@@ -334,7 +336,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
 {
     std::uint8_t mask = ConnectionHeader::NONE;
     std::size_t start = 0;
-    std::size_t size = header.size();
+    const std::size_t size = header.size();
 
     while(start < size) {
         // Find comma
@@ -343,7 +345,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
             end = size;
 
         // Extract token substring trimming leading and trailing spaces / tabs
-        std::string_view token = StringUtils::TrimView(header.substr(start, end - start));
+        const std::string_view token = StringUtils::TrimView(header.substr(start, end - start));
 
         // CLOSE
         if(StringUtils::InsensitiveStringCompare(token, "close")) {
@@ -378,26 +380,6 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
 
 void CoreEngine::HandleUserDLLInjection(const char* dllPath)
 {
-#if defined(_WIN32)
-    // Windows
-    HMODULE userModule = LoadLibraryA(dllPath);
-    if(!userModule) {
-        DWORD err = GetLastError();
-        logger_.Fatal("[CoreEngine]: ", dllPath, " was not found. Error: ", err);
-        return;
-    }
-
-    FARPROC rawProc = GetProcAddress(userModule, "RegisterMasterAPI");
-    if(!rawProc) {
-        DWORD err = GetLastError();
-        logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user DLL. Error: ", err);
-        return;
-    }
-
-    // Cast to your function type
-    auto registerFn = reinterpret_cast<Shared::RegisterMasterAPIFn>(rawProc);
-#else
-    // POSIX (Linux / macOS / *nix)
     // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed
     void* handle = dlopen(dllPath, RTLD_NOW | RTLD_GLOBAL);
     if(!handle) {
@@ -413,10 +395,10 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
         logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user SO. Error: ",
                       (dlsymErr ? dlsymErr : "symbol not found"));
 
-    auto registerFn = reinterpret_cast<Shared::RegisterMasterAPIFn>(rawSym);
-#endif
+    auto registerFn = reinterpret_cast<RegisterMasterAPIFn>(rawSym);
+
     // Call into the user module to inject the API
-    registerFn(Shared::GetMasterAPI());
+    registerFn(GetMasterAPI());
     logger_.Info("[CoreEngine]: Successfully injected API and initialized user module: ", dllPath);
 }
 

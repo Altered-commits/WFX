@@ -4,6 +4,7 @@
 #ifndef WFX_CONFIG_HPP
 #define WFX_CONFIG_HPP
 
+#include "shared/utils/detection_macro.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -74,24 +75,14 @@ struct SSLConfig {
 };
 
 struct OSSpecificConfig {
-#ifdef _WIN32
-    std::uint32_t maxAcceptSlots = 1024;
-    std::uint16_t workerThreadCount = 2;
-    std::uint16_t callbackThreadCount = 4;
-#else
+#if defined(WFX_PLATFORM_LINUX)
     std::uint32_t workerProcesses = 4;
     std::uint32_t backlog = 1024;
     std::uint16_t workerShutdownTimeout = 5; // In seconds
-
-#ifdef WFX_LINUX_USE_IO_URING
-    std::uint16_t batchSize = 64;
-    std::uint16_t acceptSlots = 64;
-    std::uint32_t queueDepth = 4096;
-    std::uint32_t fileChunkSize = 64 * 1024;
-#else
     std::uint16_t maxEvents = 1 * 1024;
-#endif // WFX_LINUX_USE_IO_URING
-#endif // _WIN32
+#else
+#error "Unsupported platform - add a WFX_PLATFORM_<X> branch in config with its respective fields"
+#endif
 };
 
 struct LoggingConfig {

@@ -35,7 +35,7 @@ public:
     // -ALPN-aware protocol can call this to decide how to speak on this connection
     StringView NegotiatedProtocol() const noexcept
     {
-        return raw.NegotiatedProtocol(raw.impl);
+        return raw.negotiatedProtocol(raw.impl);
     }
 };
 
@@ -129,7 +129,7 @@ public:
         this->handle_ = h;
 
         EndpointStatus s =
-            Core::EndpointApiExt1()->SendPayload(Core::HttpApiExt1()->GetGlobalPtrData(), endpointIdx,
+            Core::EndpointApiExt1()->sendPayload(Core::HttpApiExt1()->getGlobalPtrData(), endpointIdx,
                                                  static_cast<const void*>(&req),
                                                  {this, AwaitableBase<SendPayloadAwaitable<TReq, TRes>>::OnComplete,
                                                   AwaitableBase<SendPayloadAwaitable<TReq, TRes>>::OnDestroy});
@@ -214,7 +214,7 @@ public:
         Core::__WFXDeferred.emplace_back([=, this] {
             EndpointDesc d = desc;
             d.onConnect = GetErasedOnConnect<OnConnect>();
-            endpointIdx_ = Core::EndpointApiExt1()->AllocateEndpoint(host, d, config);
+            endpointIdx_ = Core::EndpointApiExt1()->allocateEndpoint(host, d, config);
         });
     }
 

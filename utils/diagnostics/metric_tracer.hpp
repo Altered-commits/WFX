@@ -32,10 +32,10 @@ namespace WFX::Utils {
 namespace MetricTracer {
 
 // vvv Process-local state vvv
-inline Shared::WorkerMetrics* slots_ = nullptr;
-inline int workerCount_ = 0;
-inline int workerIndex_ = -1;
-inline std::size_t mmapSize_ = 0;
+inline Shared::WorkerMetrics* GlobalSlots = nullptr;
+inline int GlobalWorkerCount = 0;
+inline int GlobalWorkerIndex = -1;
+inline std::size_t GlobalMmapSize = 0;
 
 // vvv Lifecycle vvv
 bool Create(int workerCount) noexcept; // Call once in master before fork
@@ -46,32 +46,32 @@ void Destroy() noexcept;               // Call in master on shutdown
 // Returns this worker's own slot. nullptr if not initialized
 inline Shared::WorkerMetrics* Current() noexcept
 {
-    if(!slots_ || workerIndex_ < 0)
+    if(!GlobalSlots || GlobalWorkerIndex < 0)
         return nullptr;
 
-    return &slots_[workerIndex_];
+    return &GlobalSlots[GlobalWorkerIndex];
 }
 
 // Returns a specific worker's slot. nullptr if out of range
 inline Shared::WorkerMetrics* Slot(int index) noexcept
 {
-    if(!slots_ || index < 0 || index >= workerCount_)
+    if(!GlobalSlots || index < 0 || index >= GlobalWorkerCount)
         return nullptr;
 
-    return &slots_[index];
+    return &GlobalSlots[index];
 }
 
 inline int WorkerCount() noexcept
 {
-    return workerCount_;
+    return GlobalWorkerCount;
 }
 inline int WorkerIndex() noexcept
 {
-    return workerIndex_;
+    return GlobalWorkerIndex;
 }
 inline bool IsReady() noexcept
 {
-    return slots_ != nullptr;
+    return GlobalSlots != nullptr;
 }
 
 // vvv Aggregation vvv

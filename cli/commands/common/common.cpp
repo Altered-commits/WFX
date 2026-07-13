@@ -9,9 +9,9 @@
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/string/string.hpp"
+#include "shared/utils/detection_macro.hpp"
 
-// Linux
-#ifdef __linux__
+#if defined(WFX_PLATFORM_LINUX)
 #include <wait.h>
 #endif
 
@@ -36,7 +36,7 @@ void HandleBuildDirectory()
         return;
 
     std::string intDir = projectConfig.projectName + "/intermediate/dynamic";
-    std::string intDummy = intDir + "/_d.cpp";
+    const std::string intDummy = intDir + "/_d.cpp";
 
     // If intermediate directory doesn't exist, handle its creation (to ensure cmake succeeds)
     if(!FileSystem::DirectoryExists(intDir.c_str())) {
@@ -92,9 +92,6 @@ void HandleUserCxxCompilation(CxxCompilationOption opt)
 }
 
 // vvv OS Specific Stuff vvv
-#ifdef _WIN32
-// Windows: future work
-#else
 void HandleMasterSignal(int)
 {
     auto& globalState = GetMasterState();
@@ -121,7 +118,7 @@ void PinWorkerToCPU(int workerIndex)
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
 
-    int cpu = workerIndex % sysconf(_SC_NPROCESSORS_ONLN); // Round-Robin
+    const int cpu = workerIndex % static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN)); // Round-Robin
 
     CPU_SET(cpu, &cpuset);
 
@@ -130,6 +127,5 @@ void PinWorkerToCPU(int workerIndex)
 
     GetLogger().Info("[WFX-Master]: Worker ", workerIndex, " pinned to CPU ", cpu);
 }
-#endif
 
 } // namespace WFX::CLI

@@ -36,13 +36,13 @@ int BeginAwesomeness(int argc, char* argv[])
 
     // --- Command: doctor ---
     parser.AddCommand("doctor", "Verify system requirements (Deprecated)",
-        [](auto&& _, auto&& __) -> int {
+        [](auto&&, auto&&) -> int {
             return CLI::WFXDoctor();
         });
 
     // --- Command: build ---
     parser.AddCommand("build", "Pre-Build various parts of WFX",
-        [](const std::unordered_map<std::string, std::string>& options,
+        [](const std::unordered_map<std::string, std::string>&,
            const std::vector<std::string>& positionalArgs) -> int {
             if(positionalArgs.size() != 2)
                 GetLogger().Fatal(
@@ -100,8 +100,8 @@ int BeginAwesomeness(int argc, char* argv[])
                     "[WFX]: Subcommand required. Usage: wfx control <list|folder|stop> [project-folder-name]"
                 );
 
-            std::string subcommand = positionalArgs[0];
-            std::string project    = positionalArgs.size() > 1 ? positionalArgs[1] : "";
+            const std::string& subcommand = positionalArgs[0];
+            const std::string project     = positionalArgs.size() > 1 ? positionalArgs[1] : "";
 
             return CLI::ControlCommand(subcommand, project);
         });

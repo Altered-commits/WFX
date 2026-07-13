@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 
-#if defined(_WIN32)
-#include "windows/filemanip.hpp"
-#else
-#include "linux/filemanip.hpp"
+#include "posix/filemanip.hpp"
 #include "filesystem.hpp"
-#endif
+#include "shared/utils/detection_macro.hpp"
 
 namespace WFX::Utils {
 
@@ -14,10 +11,7 @@ namespace FileSystem {
 
 bool CreateFile(const char* path)
 {
-#ifdef _WIN32
-    ...
-#else
-    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    const int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
     if(fd >= 0) {
         close(fd);
         return true; // Created
@@ -27,79 +21,54 @@ bool CreateFile(const char* path)
         return true; // Already exists
 
     return false;
-#endif
 }
 
 bool FileExists(const char* path)
 {
     if(!path)
         return false;
-#ifdef _WIN32
-    DWORD attrib = GetFileAttributesA(path.data());
-    return (attrib != INVALID_FILE_ATTRIBUTES) && !(attrib & FILE_ATTRIBUTE_DIRECTORY);
-#else
+
     struct stat st {};
     return (stat(path, &st) == 0) && S_ISREG(st.st_mode);
-#endif
 }
 
 bool DeleteFile(const char* path)
 {
     if(!path)
         return false;
-#ifdef _WIN32
-    return DeleteFileA(path.data()) != 0;
-#else
+
     return unlink(path) == 0;
-#endif
 }
 
 bool RenameFile(const char* from, const char* to)
 {
     if(!from || !to)
         return false;
-#ifdef _WIN32
-    return MoveFileA(from.data(), to.data()) != 0;
-#else
+
     return rename(from, to) == 0;
-#endif
 }
 
 std::size_t GetFileSize(const char* path)
 {
     if(!path)
         return 0;
-#ifdef _WIN32
-    WIN32_FILE_ATTRIBUTE_DATA fileInfo;
-    if(!GetFileAttributesExA(path.data(), GetFileExInfoStandard, &fileInfo))
-        return 0;
 
-    LARGE_INTEGER size;
-    size.HighPart = fileInfo.nFileSizeHigh;
-    size.LowPart = fileInfo.nFileSizeLow;
-
-    return static_cast<std::size_t>(size.QuadPart);
-#else
     struct stat st {};
     if(stat(path, &st) == 0 && S_ISREG(st.st_mode))
         return static_cast<std::size_t>(st.st_size);
 
     return 0;
-#endif
 }
 
 bool GetFileStats(const char* path, FileStats& out)
 {
-#ifdef _WIN32
-    ...
-#else
     struct stat st {};
     if(stat(path, &st) != 0)
         return false;
 
     out.size = st.st_size;
 
-#if defined(__APPLE__)
+#if defined(WFX_PLATFORM_MACOS)
     auto sec = st.st_mtimespec.tv_sec;
     auto nsec = st.st_mtimespec.tv_nsec;
 #else
@@ -119,47 +88,35 @@ bool GetFileStats(const char* path, FileStats& out)
         out.type = FileType::OTHER;
 
     return true;
-#endif
 }
 
 // vvv File Handling vvv
 BaseFilePtr OpenFileRead(const char* path, bool inBinaryMode)
 {
-#ifdef _WIN32
-    ...
-#else
-    // Ignored in linux
+    // Ignored on posix
     (void)inBinaryMode;
 
-    auto file = std::make_unique<LinuxFile>();
+    auto file = std::make_unique<PosixFile>();
     if(!file->OpenRead(path))
         return nullptr;
 
     return file;
-#endif
 }
 
 BaseFilePtr OpenFileWrite(const char* path, bool inBinaryMode)
 {
-#ifdef _WIN32
-    ...
-#else
-    // Ignored in linux
+    // Ignored on posix
     (void)inBinaryMode;
 
-    auto file = std::make_unique<LinuxFile>();
+    auto file = std::make_unique<PosixFile>();
     if(!file->OpenWrite(path))
         return nullptr;
 
     return file;
-#endif
 }
 
 BaseFilePtr OpenFileExisting(WFXFileDescriptor fd, bool fromCache)
 {
-#ifdef _WIN32
-    ...
-#else
     if(fd < 0)
         return nullptr;
 
@@ -167,26 +124,21 @@ BaseFilePtr OpenFileExisting(WFXFileDescriptor fd, bool fromCache)
     if(fstat(fd, &st) != 0)
         return nullptr;
 
-    auto file = std::make_unique<LinuxFile>();
+    auto file = std::make_unique<PosixFile>();
     file->OpenExisting(fd, st.st_size, fromCache);
 
     return file;
-#endif
 }
 
 BaseFilePtr OpenFileExisting(WFXFileDescriptor fd, std::size_t size, bool fromCache)
 {
-#ifdef _WIN32
-    ...
-#else
     if(fd < 0 || size == 0)
         return nullptr;
 
-    auto file = std::make_unique<LinuxFile>();
+    auto file = std::make_unique<PosixFile>();
     file->OpenExisting(fd, size, fromCache);
 
     return file;
-#endif
 }
 
 // vvv Directory Manipulation vvv
@@ -194,20 +146,13 @@ bool DirectoryExists(const char* path)
 {
     if(!path)
         return false;
-#ifdef _WIN32
-    DWORD attrib = GetFileAttributesA(path.data());
-    return (attrib != INVALID_FILE_ATTRIBUTES) && (attrib & FILE_ATTRIBUTE_DIRECTORY);
-#else
+
     struct stat st {};
     return (stat(path, &st) == 0) && S_ISDIR(st.st_mode);
-#endif
 }
 
 bool CreateDirectory(std::string path, bool recurseParentDir)
 {
-#ifdef _WIN32
-    ...
-#else
     if(path.empty())
         return false;
 
@@ -223,7 +168,7 @@ bool CreateDirectory(std::string path, bool recurseParentDir)
 
     bool ok = true;
     const char* data = path.c_str();
-    std::size_t len = path.size();
+    const std::size_t len = path.size();
 
     // Reusable buffer
     std::string tmp;
@@ -257,18 +202,14 @@ bool CreateDirectory(std::string path, bool recurseParentDir)
     }
 
     return ok;
-#endif
 }
 
 bool DeleteDirectory(const char* path)
 {
     if(!path)
         return false;
-#ifdef _WIN32
-    return RemoveDirectoryA(path.data()) != 0;
-#else
+
     return rmdir(path) == 0;
-#endif
 }
 
 // --- Forward declare helper function
@@ -289,9 +230,6 @@ void ListDirectory(std::string path, bool shouldRecurse, const FileCallback& cal
 // vvv Helper Functions vvv
 void ListDirectoryImpl(std::string& path, bool shouldRecurse, const FileCallback& callback)
 {
-#ifdef _WIN32
-    ...
-#else
     DIR* dir = opendir(path.data());
     if(!dir)
         return;
@@ -315,28 +253,17 @@ void ListDirectoryImpl(std::string& path, bool shouldRecurse, const FileCallback
             ListDirectoryImpl(fullPath, true, callback);
     }
     closedir(dir);
-#endif
 }
 
 // vvv Path Queries vvv
 std::string GetCurrentPath()
 {
-#ifdef _WIN32
-    char buf[MAX_PATH];
-
-    DWORD len = GetCurrentDirectoryA(MAX_PATH, buf);
-    if(len == 0 || len >= MAX_PATH)
-        return "";
-
-    return std::string(buf, len);
-#else
     char buf[PATH_MAX];
 
     if(!getcwd(buf, sizeof(buf)))
         return "";
 
     return std::string(buf);
-#endif
 }
 
 } // namespace FileSystem

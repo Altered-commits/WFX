@@ -22,13 +22,8 @@ namespace WFX::Http {
 struct WFXMasterState {
     Core::CoreEngine* enginePtr = nullptr;
     std::atomic<bool> shouldStop = false;
-
-#ifdef _WIN32
-    // Nothing in Windows for now...
-#else
     pid_t workerPGID{0};
     std::vector<pid_t> workerPids;
-#endif
 };
 
 // Free function declaration (defined in 'http_master_state.cpp')

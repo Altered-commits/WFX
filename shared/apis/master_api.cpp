@@ -5,9 +5,10 @@
 
 namespace WFX::Shared {
 
-const MASTER_API_TABLE* GetMasterAPI()
+const MasterAPITable* GetMasterAPI()
 {
-    static MASTER_API_TABLE api = {
+    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    static const MasterAPITable GlobalApi = {
         GetHttpAPIExt1,     // From http_api.hpp
         GetEndpointAPIExt1, // From http_api.hpp
         GetAsyncAPIExt1,    // From async_api.hpp
@@ -15,7 +16,7 @@ const MASTER_API_TABLE* GetMasterAPI()
         GetUtilsAPIExt1,    // From utils_api.hpp
     };
 
-    return &api;
+    return &GlobalApi;
 }
 
 } // namespace WFX::Shared

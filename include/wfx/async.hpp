@@ -47,7 +47,7 @@ using Coro = WFX::Async::Task<void>;
 using MwCoro = WFX::Async::Task<Shared::MiddlewareAction>;
 
 // -----------------------------------------------------------------------
-// SleepFor(ms) — suspend for `ms` milliseconds, then resume.
+// SleepFor(ms) - suspend for `ms` milliseconds, then resume.
 //
 //   auto s = co_await WFX::SleepFor(500);
 //   if (s != WFX::AsyncOk) { /* WFX::AsyncTimerFailure */ }

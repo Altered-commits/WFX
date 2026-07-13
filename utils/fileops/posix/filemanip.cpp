@@ -7,12 +7,13 @@ namespace WFX::Utils {
 
 // vvv File Wrapper vvv
 //  --- Cleanup Functions ---
-LinuxFile::~LinuxFile()
+PosixFile::~PosixFile()
 {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall) - PosixFile is a leaf class, no further overrides
     Close();
 }
 
-void LinuxFile::Close()
+void PosixFile::Close()
 {
     // If u open from existing, u cannot close it like this
     if(fd_ >= 0 && !existing_) {
@@ -25,79 +26,79 @@ void LinuxFile::Close()
 }
 
 //  --- File Operations ---
-std::int64_t LinuxFile::Read(void* buffer, std::size_t bytes)
+std::int64_t PosixFile::Read(void* buffer, std::size_t bytes)
 {
     if(cached_ || fd_ < 0)
         return -1;
 
-    ssize_t n = ::read(fd_, buffer, bytes);
+    const ssize_t n = ::read(fd_, buffer, bytes);
     return n < 0 ? -1 : static_cast<std::int64_t>(n);
 }
 
-std::int64_t LinuxFile::Write(const void* buffer, std::size_t bytes)
+std::int64_t PosixFile::Write(const void* buffer, std::size_t bytes)
 {
     if(cached_ || fd_ < 0)
         return -1;
 
-    ssize_t n = ::write(fd_, buffer, bytes);
+    const ssize_t n = ::write(fd_, buffer, bytes);
     if(n > 0)
         size_ += n;
 
     return n < 0 ? -1 : static_cast<std::int64_t>(n);
 }
 
-std::int64_t LinuxFile::ReadAt(void* buffer, std::size_t bytes, std::size_t offset)
+std::int64_t PosixFile::ReadAt(void* buffer, std::size_t bytes, std::size_t offset)
 {
     if(fd_ < 0)
         return -1;
 
-    ssize_t n = ::pread(fd_, buffer, bytes, static_cast<off_t>(offset));
+    const ssize_t n = ::pread(fd_, buffer, bytes, static_cast<off_t>(offset));
     return n < 0 ? -1 : static_cast<std::int64_t>(n);
 }
 
-std::int64_t LinuxFile::WriteAt(const void* buffer, std::size_t bytes, std::size_t offset)
+std::int64_t PosixFile::WriteAt(const void* buffer, std::size_t bytes, std::size_t offset)
 {
     if(cached_ || fd_ < 0)
         return -1;
 
-    ssize_t n = ::pwrite(fd_, buffer, bytes, static_cast<off_t>(offset));
+    const ssize_t n = ::pwrite(fd_, buffer, bytes, static_cast<off_t>(offset));
     if(n > 0 && (offset + n > size_))
         size_ = offset + n; // Update file size if we wrote past previous end
 
     return n < 0 ? -1 : static_cast<std::int64_t>(n);
 }
 
-bool LinuxFile::Seek(std::size_t offset)
+bool PosixFile::Seek(std::size_t offset)
 {
     if(cached_ || fd_ < 0)
         return false;
 
-    off_t ret = ::lseek(fd_, static_cast<off_t>(offset), SEEK_SET);
+    const off_t ret = ::lseek(fd_, static_cast<off_t>(offset), SEEK_SET);
     return ret != static_cast<off_t>(-1);
 }
 
-std::int64_t LinuxFile::Tell() const
+std::int64_t PosixFile::Tell() const
 {
     if(fd_ < 0)
         return 0;
 
-    off_t ret = ::lseek(fd_, 0, SEEK_CUR);
+    const off_t ret = ::lseek(fd_, 0, SEEK_CUR);
     return ret < 0 ? -1 : static_cast<std::int64_t>(ret);
 }
 
 //  --- Utility Functions ---
-std::size_t LinuxFile::Size() const
+std::size_t PosixFile::Size() const
 {
     return size_;
 }
 
-bool LinuxFile::IsOpen() const
+bool PosixFile::IsOpen() const
 {
     return fd_ >= 0;
 }
 
 //  --- Helper Functions ---
-bool LinuxFile::OpenRead(const char* path)
+bool PosixFile::OpenRead(const char* path)
 {
     Close();
     fd_ = ::open(path, O_RDONLY | O_CLOEXEC);
@@ -114,7 +115,7 @@ bool LinuxFile::OpenRead(const char* path)
     return true;
 }
 
-bool LinuxFile::OpenWrite(const char* path)
+bool PosixFile::OpenWrite(const char* path)
 {
     Close();
 
@@ -126,7 +127,7 @@ bool LinuxFile::OpenWrite(const char* path)
     return true;
 }
 
-void LinuxFile::OpenExisting(int fd, std::size_t size, bool cached)
+void PosixFile::OpenExisting(int fd, std::size_t size, bool cached)
 {
     fd_ = fd;
     existing_ = true;

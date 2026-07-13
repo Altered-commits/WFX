@@ -5,11 +5,6 @@
 
 #include <cstdlib>
 #include <cstring>
-
-#if defined(_WIN32)
-#include <malloc.h>
-#endif
-
 #include <tlsf.h>
 
 /*
@@ -23,11 +18,11 @@ static constexpr std::size_t MAX_EXPANSION_ATTEMPTS = 4;
 
 // vvv Main stuff vvv
 // Global pool instance
-static BufferPool __GlobalBufferPool;
+static BufferPool GlobalBufferPool;
 
 BufferPool& GetBufferPool() noexcept
 {
-    return __GlobalBufferPool;
+    return GlobalBufferPool;
 }
 
 BufferPool::~BufferPool()
@@ -234,21 +229,13 @@ void* BufferPool::AlignedMalloc(std::size_t size, std::size_t alignment)
     if(alignment < sizeof(void*))
         alignment = sizeof(void*);
 
-#if defined(_WIN32)
-    return _aligned_malloc(size, alignment);
-#else
     void* ptr = nullptr;
     return (posix_memalign(&ptr, alignment, size) == 0) ? ptr : nullptr;
-#endif
 }
 
 void BufferPool::AlignedFree(void* ptr)
 {
-#if defined(_WIN32)
-    _aligned_free(ptr);
-#else
     free(ptr);
-#endif
 }
 
 } // namespace WFX::Utils

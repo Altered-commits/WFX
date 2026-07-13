@@ -23,8 +23,9 @@ const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& out
     requestPath = StripRoute(requestPath);
 
     while(!requestPath.empty()) {
-        std::size_t slashPos = requestPath.find('/');
-        std::string_view segment = (slashPos == std::string_view::npos) ? requestPath : requestPath.substr(0, slashPos);
+        const std::size_t slashPos = requestPath.find('/');
+        const std::string_view segment =
+            (slashPos == std::string_view::npos) ? requestPath : requestPath.substr(0, slashPos);
 
         requestPath = (slashPos == std::string_view::npos) ? std::string_view{} : requestPath.substr(slashPos + 1);
 
@@ -133,8 +134,8 @@ TrieNode* RouteTrie::InsertRoute(std::string_view route)
     route = StripRoute(route);
 
     while(!route.empty()) {
-        std::size_t slashPos = route.find('/');
-        std::string_view segment = (slashPos == std::string_view::npos) ? route : route.substr(0, slashPos);
+        const std::size_t slashPos = route.find('/');
+        const std::string_view segment = (slashPos == std::string_view::npos) ? route : route.substr(0, slashPos);
 
         route = (slashPos == std::string_view::npos) ? std::string_view{} : route.substr(slashPos + 1);
 
@@ -146,7 +147,7 @@ TrieNode* RouteTrie::InsertRoute(std::string_view route)
                 logger.Fatal("[Route-Formatter]: Empty parameter segment: ", segment, ". Example: <id:int> or <int>");
 
             auto inner = segment.substr(1, segment.size() - 2);
-            std::size_t colon = inner.find(':');
+            const std::size_t colon = inner.find(':');
 
             std::string_view type;
 

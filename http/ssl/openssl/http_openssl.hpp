@@ -36,9 +36,9 @@ private: // Helper functions
     void LogOpenSSLError(const char* message, SSL* ssl = nullptr, bool fatal = true);
 
 private:
-    SSL_CTX* serverCtx = nullptr;
-    SSL_CTX* clientCtx = nullptr;
-    bool useKtls = false;
+    SSL_CTX* serverCtx_ = nullptr;
+    SSL_CTX* clientCtx_ = nullptr;
+    bool useKtls_ = false;
 };
 
 } // namespace WFX::Http

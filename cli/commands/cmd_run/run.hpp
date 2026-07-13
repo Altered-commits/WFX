@@ -10,11 +10,11 @@
 namespace WFX::CLI {
 
 // Just to keep stuff tidy
-enum class ServerFlags : std::uint64_t {
-    PIN_TO_CPU = 1ull << 1,
-    USE_HTTPS = 1ull << 2,
-    OVERRIDE_HTTPS_PORT = 1ull << 3,
-    USE_DAEMON = 1ull << 4,
+enum class ServerFlags : std::uint8_t {
+    PIN_TO_CPU = 1u << 1,
+    USE_HTTPS = 1u << 2,
+    OVERRIDE_HTTPS_PORT = 1u << 3,
+    USE_DAEMON = 1u << 4,
 };
 
 struct ServerConfig {

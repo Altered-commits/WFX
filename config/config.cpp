@@ -5,21 +5,17 @@
 #include "config_helper.hpp"
 #include "utils/fileops/filesystem.hpp"
 
-#ifdef _WIN32
-#include <thread>
-#endif
-
 namespace WFX::Core {
 
 using namespace WFX::Utils;               // For 'Logger', 'Filesystem'
 using namespace WFX::Core::ConfigHelpers; // I mean, its quite obvious
 
 // Global configuration instance
-static Config __GlobalConfig;
+static Config GlobalConfig;
 
 Config& GetConfig() noexcept
 {
-    return __GlobalConfig;
+    return GlobalConfig;
 }
 
 // vvv Public Functions vvv
@@ -75,41 +71,14 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Network", "max_requests_per_ip_per_sec", networkConfig.maxTokensPerSecond);
 
         // vvv OS Specific vvv
-#ifdef _WIN32
-        unsigned int cores = std::thread::hardware_concurrency();
-
-        // Sanity checks
-        if(cores == 0 || cores > std::numeric_limits<std::uint16_t>::max()) {
-            // Fallback
-            cores = 2;
-            logger.Warn("[Config]: Invalid hardware_concurrency() result. Using fallback = ", cores);
-        }
-
-        std::uint16_t threadCount = static_cast<std::uint16_t>(cores);
-        logger.Info("[Config]: Detected hardware concurrency = ", threadCount);
-
-        std::uint16_t defaultIOCP = std::max(2, threadCount / 2);
-        std::uint16_t defaultUser = std::max(2, threadCount - defaultIOCP);
-
-        ExtractValue(tbl, "Windows", "accept_slots", osSpecificConfig.maxAcceptSlots);
-        ExtractAutoOrAll(tbl, "Windows", "connection_threads", osSpecificConfig.workerThreadCount, defaultIOCP,
-                         threadCount);
-        ExtractAutoOrAll(tbl, "Windows", "request_threads", osSpecificConfig.callbackThreadCount, defaultUser,
-                         threadCount);
-#else
+#if defined(WFX_PLATFORM_LINUX)
         ExtractValue(tbl, "Linux", "worker_processes", osSpecificConfig.workerProcesses);
         ExtractValue(tbl, "Linux", "worker_shutdown_timeout", osSpecificConfig.workerShutdownTimeout);
         ExtractValue(tbl, "Linux", "backlog", osSpecificConfig.backlog);
-
-#ifdef WFX_LINUX_USE_IO_URING
-        ExtractValue(tbl, "Linux.IoUring", "accept_slots", osSpecificConfig.acceptSlots);
-        ExtractValue(tbl, "Linux.IoUring", "queue_depth", osSpecificConfig.queueDepth);
-        ExtractValue(tbl, "Linux.IoUring", "batch_size", osSpecificConfig.batchSize);
-        ExtractValue(tbl, "Linux.IoUring", "file_chunk_size", osSpecificConfig.fileChunkSize);
-#else
         ExtractValue(tbl, "Linux.Epoll", "max_events", osSpecificConfig.maxEvents);
-#endif // WFX_LINUX_USE_IO_URING
-#endif // _WIN32
+#else
+#error "Unsupported platform - add a WFX_PLATFORM_<X> branch here to load that platform's fields"
+#endif
 
         // vvv Logging vvv
         ExtractValue(tbl, "Logging", "min_level", loggingConfig.minLevel);
@@ -136,7 +105,7 @@ void Config::LoadCoreSettings(std::string_view path)
 
 void Config::LoadFinalSettings(const std::string& projectDir)
 {
-    std::string cwd = FileSystem::GetCurrentPath();
+    const std::string cwd = FileSystem::GetCurrentPath();
     if(cwd.empty())
         GetLogger().Fatal("[Config]: Failed to resolve current working directory");
 

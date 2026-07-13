@@ -12,20 +12,20 @@
 namespace WFX::Shared {
 
 // vvv Master table to be injected into user dll vvv
-struct MASTER_API_TABLE {
-    const HTTP_API_EXT1* (*GetHttpAPIExt1)();
-    const ENDPOINT_API_EXT1* (*GetEndpointAPIExt1)();
-    const ASYNC_API_EXT1* (*GetAsyncAPIExt1)();
-    const MEMORY_API_EXT1* (*GetMemoryAPIExt1)();
-    const UTILS_API_EXT1* (*GetUtilsAPIExt1)();
+struct MasterAPITable {
+    const HttpAPIExt1* (*getHttpAPIExt1)();
+    const EndpointAPIExt1* (*getEndpointAPIExt1)();
+    const AsyncAPIExt1* (*getAsyncAPIExt1)();
+    const MemoryAPIExt1* (*getMemoryAPIExt1)();
+    const UtilsAPIExt1* (*getUtilsAPIExt1)();
 };
-static_assert(std::is_standard_layout<MASTER_API_TABLE>::value, "'MASTER_API_TABLE' must be standard layout");
+static_assert(std::is_standard_layout<MasterAPITable>::value, "'MASTER_API_TABLE' must be standard layout");
 
 // vvv Hardcoded signature to inject API table to user side vvv
-using RegisterMasterAPIFn = void (*)(const MASTER_API_TABLE*);
+using RegisterMasterAPIFn = void (*)(const MasterAPITable*);
 
 // vvv Getter vvv
-const MASTER_API_TABLE* GetMasterAPI();
+const MasterAPITable* GetMasterAPI();
 
 } // namespace WFX::Shared
 

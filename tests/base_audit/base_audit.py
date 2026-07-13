@@ -838,8 +838,14 @@ def _verify_all_routes(host, port):
     lock = threading.Lock()
 
     def _check(method, path, hdrs, body, expect_st, needle, hdr_check):
-        st, raw = req(host, port, method, path, headers=hdrs, body=body,
-                      rtimeout=5.0, ctimeout=3.0)
+        # /health back up only means the master accepted a connection again, not that every-
+        # -respawned worker slot has finished re-listening yet. Retry on CONN_ERR only, same-
+        # -as _probe(), so a route landing on a still-starting worker isn't a false failure
+        for attempt in range(3):
+            st, raw = req(host, port, method, path, headers=hdrs, body=body,
+                          rtimeout=5.0, ctimeout=3.0)
+            if st != "CONN_ERR": break
+            if attempt < 2: time.sleep(0.3)
         b = body_of(raw)
         ok = (st == expect_st)
         if ok and needle is not None: ok = needle in b

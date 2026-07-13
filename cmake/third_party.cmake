@@ -17,7 +17,7 @@ message(STATUS "TLSF ready")
 
 if (NOT TARGET tlsf)
   add_library(tlsf STATIC ${tlsf_SOURCE_DIR}/tlsf.c)
-  target_include_directories(tlsf PUBLIC ${tlsf_SOURCE_DIR})
+  target_include_directories(tlsf SYSTEM PUBLIC ${tlsf_SOURCE_DIR})
   message(STATUS "TLSF library created")
 endif()
 
@@ -33,6 +33,6 @@ message(STATUS "tomlplusplus ready")
 
 if (NOT TARGET tomlplusplus)
   add_library(tomlplusplus INTERFACE)
-  target_include_directories(tomlplusplus INTERFACE ${tomlplusplus_SOURCE_DIR}/include)
+  target_include_directories(tomlplusplus SYSTEM INTERFACE ${tomlplusplus_SOURCE_DIR}/include)
   message(STATUS "tomlplusplus INTERFACE target created")
 endif()

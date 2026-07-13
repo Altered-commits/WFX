@@ -5,7 +5,10 @@
 #define WFX_UTILS_HASH_SHARD_IPP
 
 #include "utils/diagnostics/logger.hpp"
+#include "shared/utils/memory.hpp"
 #include <cstring>
+#include <limits>
+#include <algorithm>
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -20,20 +23,78 @@
 
 namespace WFX::Utils {
 
-template <typename K, typename V> HashShard<K, V>::HashShard(BufferPool& pool) : pool_(pool)
-{}
+template <typename K, typename V> void HashShard<K, V>::DestroySlots(Entry* slots, std::size_t count) noexcept
+{
+    for(std::size_t i = 0; i < count; ++i)
+        slots[i].~Entry();
+}
+
+template <typename K, typename V> std::size_t HashShard<K, V>::SafeByteSize(std::size_t count)
+{
+    constexpr std::size_t MAX_COUNT = std::numeric_limits<std::size_t>::max() / sizeof(Entry);
+
+    if(count > MAX_COUNT)
+        GetLogger().Fatal("[HashShard]: Requested capacity of ", count, " entries overflows allocation size");
+
+    return count * sizeof(Entry);
+}
 
 template <typename K, typename V> HashShard<K, V>::~HashShard()
 {
-    if(entries_)
-        pool_.Free(entries_);
+    if(!entries_)
+        return;
+
+    DestroySlots(entries_, capacity_);
+    Shared::Free(entries_);
+}
+
+template <typename K, typename V>
+HashShard<K, V>::HashShard(HashShard&& other) noexcept
+    : entries_(other.entries_), capacity_(other.capacity_), initialBucketCapacity_(other.initialBucketCapacity_),
+      size_(other.size_)
+{
+    other.entries_ = nullptr;
+    other.capacity_ = 0;
+    other.initialBucketCapacity_ = 0;
+    other.size_ = 0;
+}
+
+template <typename K, typename V> HashShard<K, V>& HashShard<K, V>::operator=(HashShard&& other) noexcept
+{
+    if(this == &other)
+        return *this;
+
+    if(entries_) {
+        DestroySlots(entries_, capacity_);
+        Shared::Free(entries_);
+    }
+
+    entries_ = other.entries_;
+    capacity_ = other.capacity_;
+    initialBucketCapacity_ = other.initialBucketCapacity_;
+    size_ = other.size_;
+
+    other.entries_ = nullptr;
+    other.capacity_ = 0;
+    other.initialBucketCapacity_ = 0;
+    other.size_ = 0;
+
+    return *this;
 }
 
 template <typename K, typename V> void HashShard<K, V>::Init(std::size_t cap)
 {
+    // One-time init only
+    if(entries_)
+        GetLogger().Fatal("[HashShard]: Init() called twice");
+
+    // Masking (capacity_ - 1) everywhere below requires a power-of-2 capacity. bit_ceil(0) == 1,-
+    // -so a 0 request still yields a valid (if degenerate) 1-slot table rather than UB
+    cap = std::bit_ceil(cap == 0 ? std::size_t{1} : cap);
+
     initialBucketCapacity_ = cap;
     capacity_ = cap;
-    entries_ = reinterpret_cast<Entry*>(pool_.Alloc(cap * sizeof(Entry)));
+    entries_ = reinterpret_cast<Entry*>(Shared::Alloc(SafeByteSize(cap)));
 
     if(!entries_)
         GetLogger().Fatal("[HashShard]: Failed to get memory for entries");
@@ -44,25 +105,75 @@ template <typename K, typename V> void HashShard<K, V>::Init(std::size_t cap)
 
 template <typename K, typename V> inline bool HashShard<K, V>::KeysEqual(const K& a, const K& b) const
 {
-    if constexpr(std::is_trivially_copyable_v<K> && (sizeof(K) == 8 || sizeof(K) == 4))
+    // 'has_unique_object_representations_v' (unlike a raw sizeof/is_trivially_copyable check) also-
+    // -guarantees no padding bytes, so there's no risk of two logically-equal keys comparing unequal-
+    // -because of uninitialized padding garbage
+    if constexpr(std::has_unique_object_representations_v<K> && (sizeof(K) == 4 || sizeof(K) == 8))
         return std::memcmp(&a, &b, sizeof(K)) == 0;
     else
         return a == b;
 }
 
-template <typename K, typename V> void HashShard<K, V>::Resize(std::size_t newCapacity)
+template <typename K, typename V> bool HashShard<K, V>::Resize(std::size_t newCapacity)
 {
-    if(newCapacity == 0)
-        newCapacity = capacity_ * 2;
-    if(newCapacity < initialBucketCapacity_)
-        return;
+    if(!entries_) {
+        GetLogger().Error("[HashShard]: Resize() called before Init()");
+        return false;
+    }
 
-    // Just to keep everything in check
+    if(newCapacity == 0) {
+        constexpr std::size_t MAX_CAPACITY = std::size_t{1} << (std::numeric_limits<std::size_t>::digits - 1);
+        if(capacity_ > MAX_CAPACITY) {
+            GetLogger().Error("[HashShard]: Capacity doubling overflow guard triggered at ", capacity_, " entries");
+            return false;
+        }
+
+        newCapacity = capacity_ * 2;
+    }
+
+    // No-op, current table already satisfies the (shrink) request
+    if(newCapacity < initialBucketCapacity_)
+        return true;
+
+    // Never shrink via the growth path
+    if(newCapacity < capacity_)
+        newCapacity = capacity_;
+
     newCapacity = std::bit_ceil(newCapacity);
 
-    Entry* newEntries = reinterpret_cast<Entry*>(pool_.Alloc(newCapacity * sizeof(Entry)));
-    if(!newEntries)
-        GetLogger().Fatal("[HashShard]: Failed to resize entries");
+    // No-op, already at the requested size
+    if(newCapacity == capacity_)
+        return true;
+
+    // Allocation is opportunistic: back off toward 'capacity_' a few times before giving up-
+    // -entirely, mirroring BufferPool's expansion-retry approach rather than crashing the-
+    // -process over what may just be transient memory pressure
+    Entry* newEntries = nullptr;
+    std::size_t triedCapacity = newCapacity;
+
+    for(std::size_t attempt = 0; attempt < MAX_RESIZE_BACKOFF_ATTEMPTS; ++attempt) {
+        newEntries = reinterpret_cast<Entry*>(Shared::Alloc(SafeByteSize(triedCapacity)));
+        if(newEntries)
+            break;
+
+        GetLogger().Warn("[HashShard]: Resize allocation of ", triedCapacity, " entries failed, backing off");
+
+        std::size_t halfway = capacity_ + (triedCapacity - capacity_) / 2;
+        halfway = std::bit_ceil(std::max(halfway, capacity_ + 1));
+
+        // No more room to back off
+        if(halfway >= triedCapacity)
+            break;
+
+        triedCapacity = halfway;
+    }
+
+    if(!newEntries) {
+        GetLogger().Error("[HashShard]: All resize attempts failed, staying at capacity=", capacity_);
+        return false;
+    }
+
+    newCapacity = triedCapacity;
 
     for(std::size_t i = 0; i < newCapacity; ++i)
         new (&newEntries[i]) Entry{};
@@ -72,12 +183,12 @@ template <typename K, typename V> void HashShard<K, V>::Resize(std::size_t newCa
         if(!currentEntry.occupied)
             continue;
 
-        std::size_t hash = WFXHash(currentEntry.key);
-        std::size_t idx = hash & (newCapacity - 1);
+        const std::size_t hash = WFXHash(currentEntry.key);
+        const std::size_t idx = hash & (newCapacity - 1);
         std::size_t probe = 0;
 
         while(probe < MAX_PROBE_LIMIT) {
-            std::size_t pos = (idx + probe) & (newCapacity - 1);
+            const std::size_t pos = (idx + probe) & (newCapacity - 1);
             Entry& target = newEntries[pos];
             PREFETCH_T3(reinterpret_cast<const char*>(&newEntries[(pos + 1) & (newCapacity - 1)]));
 
@@ -92,18 +203,24 @@ template <typename K, typename V> void HashShard<K, V>::Resize(std::size_t newCa
                 currentEntry.probeLength = static_cast<std::uint8_t>(probe);
                 probe = target.probeLength;
             }
+
             ++probe;
         }
     }
 
-    pool_.Free(entries_);
+    // Every old slot (moved-from occupied ones and never-occupied default-constructed ones alike)-
+    // -is still a live object and must be destroyed before the backing buffer is freed
+    DestroySlots(entries_, capacity_);
+    Shared::Free(entries_);
     entries_ = newEntries;
     capacity_ = newCapacity;
+
+    return true;
 }
 
-template <typename K, typename V> bool HashShard<K, V>::BackwardShiftErase(std::size_t pos)
+template <typename K, typename V> void HashShard<K, V>::BackwardShiftErase(std::size_t pos)
 {
-    std::size_t mask = capacity_ - 1;
+    const std::size_t mask = capacity_ - 1;
     std::size_t j = pos;
     std::size_t next = (j + 1) & mask;
 
@@ -120,60 +237,65 @@ template <typename K, typename V> bool HashShard<K, V>::BackwardShiftErase(std::
         next = (j + 1) & mask;
     }
 
-    // Explicitly destroy old key/value
-    entries_[j].key.~K();
-    entries_[j].value.~V();
+    // Reset the vacated slot back to a fresh, default-constructed entry
+    entries_[j].~Entry();
+    new (&entries_[j]) Entry{};
 
-    // Reconstruct in-place (default-constructed)
-    new (&entries_[j].key) K{};
-    new (&entries_[j].value) V{};
-
-    entries_[j].occupied = false;
-    entries_[j].probeLength = 0;
-
-    // True if it needs to be down sized, false if it doesn't
     --size_;
-    float currentLoad = static_cast<float>(size_) / capacity_;
-    return (currentLoad < KLOAD_FACTOR_SHRINK) && (capacity_ > initialBucketCapacity_);
 }
 
 template <typename K, typename V> bool HashShard<K, V>::Emplace(const K& key, V&& value)
 {
-    if(static_cast<float>(size_) / capacity_ >= KLOAD_FACTOR_GROW)
-        Resize();
-
-    std::size_t mask = capacity_ - 1;
-    std::size_t hash = WFXHash(key);
-    std::size_t idx = hash & mask;
-    std::size_t probe = 0;
+    if(!entries_) {
+        GetLogger().Error("[HashShard]: Emplace() called before Init()");
+        return false;
+    }
 
     Entry newEntry{key, std::move(value), 0, true};
 
-    while(probe < MAX_PROBE_LIMIT) {
-        std::size_t pos = (idx + probe) & mask;
-        Entry& entry = entries_[pos];
+    for(std::size_t growthAttempt = 0; growthAttempt < MAX_GROWTH_RETRIES; ++growthAttempt) {
+        if(static_cast<float>(size_) / capacity_ >= KLOAD_FACTOR_GROW)
+            (void)Resize();
 
-        PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
+        std::size_t mask = capacity_ - 1;
+        std::size_t hash = WFXHash(key);
+        const std::size_t idx = hash & mask;
+        std::size_t probe = 0;
 
-        if(!entry.occupied) {
-            newEntry.probeLength = static_cast<std::uint8_t>(probe);
-            entry = std::move(newEntry);
-            size_++;
-            return true;
+        while(probe < MAX_PROBE_LIMIT) {
+            const std::size_t pos = (idx + probe) & mask;
+            Entry& entry = entries_[pos];
+
+            PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
+
+            if(!entry.occupied) {
+                newEntry.probeLength = static_cast<std::uint8_t>(probe);
+                entry = std::move(newEntry);
+                size_++;
+                return true;
+            }
+
+            if(KeysEqual(entry.key, key)) {
+                entry.value = std::move(newEntry.value); // overwrite
+                return true;
+            }
+
+            if(entry.probeLength < probe) {
+                std::swap(entry, newEntry);
+                newEntry.probeLength = static_cast<std::uint8_t>(probe);
+                probe = entry.probeLength;
+            }
+
+            ++probe;
         }
 
-        if(KeysEqual(entry.key, key)) {
-            entry.value = std::move(newEntry.value); // overwrite
-            return true;
-        }
-
-        if(entry.probeLength < probe) {
-            std::swap(entry, newEntry);
-            newEntry.probeLength = static_cast<std::uint8_t>(probe);
-            probe = entry.probeLength;
-        }
-
-        ++probe;
+        // Probe limit exceeded. 'newEntry' at this point may hold a robin-hood-displaced entry-
+        // -that was already present in the table (not necessarily the caller's key), so we can't-
+        // -just return false here without silently dropping it. Force growth and retry the-
+        // -insertion of whatever 'newEntry' currently holds. If growth itself fails, give up-
+        // -gracefully after a bounded number of attempts rather than looping forever
+        if(!Resize())
+            break;
     }
 
     return false;
@@ -181,41 +303,52 @@ template <typename K, typename V> bool HashShard<K, V>::Emplace(const K& key, V&
 
 template <typename K, typename V> bool HashShard<K, V>::Insert(const K& key, const V& value)
 {
-    if(static_cast<float>(size_) / capacity_ >= KLOAD_FACTOR_GROW)
-        Resize();
-
-    std::size_t mask = capacity_ - 1;
-    std::size_t hash = WFXHash(key);
-    std::size_t idx = hash & mask;
-    std::size_t probe = 0;
+    if(!entries_) {
+        GetLogger().Error("[HashShard]: Insert() called before Init()");
+        return false;
+    }
 
     Entry newEntry{key, value, 0, true};
 
-    while(probe < MAX_PROBE_LIMIT) {
-        std::size_t pos = (idx + probe) & mask;
-        Entry& entry = entries_[pos];
+    for(std::size_t growthAttempt = 0; growthAttempt < MAX_GROWTH_RETRIES; ++growthAttempt) {
+        if(static_cast<float>(size_) / capacity_ >= KLOAD_FACTOR_GROW)
+            (void)Resize();
 
-        PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
+        std::size_t mask = capacity_ - 1;
+        std::size_t hash = WFXHash(key);
+        const std::size_t idx = hash & mask;
+        std::size_t probe = 0;
 
-        if(!entry.occupied) {
-            newEntry.probeLength = static_cast<std::uint8_t>(probe);
-            entry = std::move(newEntry);
-            size_++;
-            return true;
+        while(probe < MAX_PROBE_LIMIT) {
+            const std::size_t pos = (idx + probe) & mask;
+            Entry& entry = entries_[pos];
+
+            PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
+
+            if(!entry.occupied) {
+                newEntry.probeLength = static_cast<std::uint8_t>(probe);
+                entry = std::move(newEntry);
+                size_++;
+                return true;
+            }
+
+            if(KeysEqual(entry.key, key)) {
+                entry.value = value;
+                return true;
+            }
+
+            if(entry.probeLength < probe) {
+                std::swap(entry, newEntry);
+                newEntry.probeLength = static_cast<std::uint8_t>(probe);
+                probe = entry.probeLength;
+            }
+
+            ++probe;
         }
 
-        if(KeysEqual(entry.key, key)) {
-            entry.value = value;
-            return true;
-        }
-
-        if(entry.probeLength < probe) {
-            std::swap(entry, newEntry);
-            newEntry.probeLength = static_cast<std::uint8_t>(probe);
-            probe = entry.probeLength;
-        }
-
-        ++probe;
+        // See Emplace() for why this can't just return false
+        if(!Resize())
+            break;
     }
 
     return false;
@@ -223,12 +356,15 @@ template <typename K, typename V> bool HashShard<K, V>::Insert(const K& key, con
 
 template <typename K, typename V> V* HashShard<K, V>::Get(const K& key) const
 {
-    std::size_t mask = capacity_ - 1;
-    std::size_t hash = WFXHash(key);
-    std::size_t idx = hash & mask;
+    if(!entries_)
+        return nullptr;
+
+    const std::size_t mask = capacity_ - 1;
+    const std::size_t hash = WFXHash(key);
+    const std::size_t idx = hash & mask;
 
     for(std::size_t i = 0; i < capacity_; ++i) {
-        std::size_t pos = (idx + i) & mask;
+        const std::size_t pos = (idx + i) & mask;
         Entry& entry = entries_[pos];
 
         if(!entry.occupied)
@@ -246,40 +382,51 @@ template <typename K, typename V> V* HashShard<K, V>::Get(const K& key) const
 
 template <typename K, typename V> V* HashShard<K, V>::GetOrInsert(const K& inputKey, const V& defaultValue)
 {
-    if(static_cast<float>(size_) / capacity_ >= KLOAD_FACTOR_GROW)
-        Resize();
+    if(!entries_) {
+        GetLogger().Error("[HashShard]: GetOrInsert() called before Init()");
+        return nullptr;
+    }
 
-    Entry newEntry{inputKey, std::move(defaultValue), 0, true};
+    Entry newEntry{inputKey, defaultValue, 0, true};
 
-    std::size_t mask = capacity_ - 1;
-    std::size_t hash = WFXHash(inputKey);
-    std::size_t idx = hash & mask;
-    std::size_t probe = 0;
+    for(std::size_t growthAttempt = 0; growthAttempt < MAX_GROWTH_RETRIES; ++growthAttempt) {
+        if(static_cast<float>(size_) / capacity_ >= KLOAD_FACTOR_GROW)
+            (void)Resize();
 
-    while(probe < MAX_PROBE_LIMIT) {
-        std::size_t pos = (idx + probe) & mask;
-        Entry& entry = entries_[pos];
+        const std::size_t mask = capacity_ - 1;
+        const std::size_t hash = WFXHash(inputKey);
+        const std::size_t idx = hash & mask;
+        std::size_t probe = 0;
 
-        PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
+        while(probe < MAX_PROBE_LIMIT) {
+            const std::size_t pos = (idx + probe) & mask;
+            Entry& entry = entries_[pos];
 
-        if(!entry.occupied) {
-            newEntry.probeLength = static_cast<std::uint8_t>(probe);
-            entry = std::move(newEntry);
+            PREFETCH_T3(reinterpret_cast<const char*>(&entries_[(pos + 1) & mask]));
 
-            size_++;
-            return &entry.value;
+            if(!entry.occupied) {
+                newEntry.probeLength = static_cast<std::uint8_t>(probe);
+                entry = std::move(newEntry);
+
+                size_++;
+                return &entry.value;
+            }
+
+            if(KeysEqual(entry.key, newEntry.key))
+                return &entry.value;
+
+            if(entry.probeLength < probe) {
+                std::swap(entry, newEntry);
+                newEntry.probeLength = static_cast<std::uint8_t>(probe);
+                probe = entry.probeLength;
+            }
+
+            ++probe;
         }
 
-        if(KeysEqual(entry.key, newEntry.key))
-            return &entry.value;
-
-        if(entry.probeLength < probe) {
-            std::swap(entry, newEntry);
-            newEntry.probeLength = static_cast<std::uint8_t>(probe);
-            probe = entry.probeLength;
-        }
-
-        ++probe;
+        // See Emplace() for why this can't just return nullptr
+        if(!Resize())
+            break;
     }
 
     return nullptr;
@@ -287,13 +434,16 @@ template <typename K, typename V> V* HashShard<K, V>::GetOrInsert(const K& input
 
 template <typename K, typename V> bool HashShard<K, V>::Erase(const K& key)
 {
-    std::size_t mask = capacity_ - 1;
-    std::size_t hash = WFXHash(key);
-    std::size_t idx = hash & mask;
+    if(!entries_)
+        return false;
+
+    const std::size_t mask = capacity_ - 1;
+    const std::size_t hash = WFXHash(key);
+    const std::size_t idx = hash & mask;
 
     for(std::size_t i = 0; i < capacity_; ++i) {
-        std::size_t pos = (idx + i) & mask;
-        Entry& entry = entries_[pos];
+        const std::size_t pos = (idx + i) & mask;
+        const Entry& entry = entries_[pos];
 
         if(!entry.occupied && entry.probeLength == 0)
             return false;
@@ -307,68 +457,6 @@ template <typename K, typename V> bool HashShard<K, V>::Erase(const K& key)
             return false;
     }
     return false;
-}
-
-// Looping
-template <typename K, typename V> template <typename Fn> void HashShard<K, V>::ForEach(Fn&& cb) const
-{
-    if(!entries_ || capacity_ <= 0 || size_ == 0)
-        return;
-
-    std::size_t i = 0;
-
-    while(i < capacity_) {
-        Entry& entry = entries_[i];
-
-        if(entry.occupied)
-            cb(entry.key, entry.value);
-
-        ++i;
-    }
-}
-
-template <typename K, typename V> template <typename Fn> void HashShard<K, V>::ForEachEraseIf(Fn&& cb)
-{
-    if(!entries_ || capacity_ <= 0 || size_ == 0)
-        return;
-
-    std::size_t i = 0;
-
-    // I tried using _mm_prefetch thinking it would increase performance
-    // It didn't :(, anyways so it works perfectly fine without any such instruction
-    // Cool
-    while(i < capacity_) {
-        Entry& entry = entries_[i];
-
-        if(!entry.occupied) {
-            ++i;
-            continue;
-        }
-
-        // Right now i'm doing a naive erase, in future this can be changed
-        // Hopefully this gets changed lmao
-        if(cb(entry.key, entry.value)) {
-            BackwardShiftErase(i);
-            continue;
-        }
-
-        ++i;
-    }
-}
-
-template <typename K, typename V> std::unique_lock<std::shared_mutex> HashShard<K, V>::UniqueLock() const
-{
-    return std::unique_lock<std::shared_mutex>(mutex_);
-}
-
-template <typename K, typename V> std::shared_lock<std::shared_mutex> HashShard<K, V>::SharedLock() const
-{
-    return std::shared_lock<std::shared_mutex>(mutex_);
-}
-
-template <typename K, typename V> std::shared_mutex& HashShard<K, V>::Mutex() const
-{
-    return mutex_;
 }
 
 } // namespace WFX::Utils
