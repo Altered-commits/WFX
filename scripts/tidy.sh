@@ -35,6 +35,16 @@ CLANG_TIDY="${CLANG_TIDY:-clang-tidy}"
 LOCAL_BUILD_DIR="build_tidy"
 CI_BUILD_DIR="build"
 
+# scripts/tidy_cache.py: skips re-running clang-tidy on a file whose preprocessed-
+# -content + resolved config + args are unchanged, replaying the exact prior-
+# -stdout/exit code instead. Zero effect on which checks run or what they find,-
+# -only on whether an unchanged file gets re-analyzed.
+# Disabled for --fix: a cache hit skips invoking real clang-tidy entirely, which-
+# -would skip the in-place edit too, so --fix must always run for real.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TIDY_CACHE_PY="$SCRIPT_DIR/tidy_cache.py"
+CTCACHE_ENABLE="${CTCACHE_ENABLE:-1}"
+
 SOURCE_EXTENSIONS=(
     "cpp"
 )
@@ -110,8 +120,22 @@ info "Checking dependencies..."
 check_dep "$CLANG_TIDY"
 check_dep git
 
+if [ "$CTCACHE_ENABLE" = "1" ] && [ "$MODE" != "fix" ]; then
+    if command -v python3 > /dev/null 2>&1; then
+        USE_CACHE=1
+    else
+        warn "python3 not found, disabling clang-tidy result cache for this run"
+        USE_CACHE=0
+    fi
+else
+    USE_CACHE=0
+fi
+
 TIDY_VERSION=$("$CLANG_TIDY" --version | head -n1)
 info "Tidy          : $TIDY_VERSION"
+if [ "$USE_CACHE" = "1" ]; then
+    info "Result cache  : enabled ($TIDY_CACHE_PY)"
+fi
 
 if [ -f ".clang-tidy" ]; then
     info "Config file   : $(pwd)/.clang-tidy"
@@ -224,24 +248,80 @@ if [ "$MODE" = "fix" ]; then
     TIDY_ARGS+=(--fix --fix-errors)
 fi
 
-FAILURES=0
-PROCESSED=0
+# Each file is an independent clang-tidy invocation (own process, own AST, no-
+# -shared state), so running them one at a time wastes wall-clock time for no-
+# -reason. --fix stays sequential (JOBS=1): concurrent in-place '--fix' runs-
+# -could corrupt a header shared by multiple TUs.
+NPROC=$(command -v nproc > /dev/null 2>&1 && nproc || echo 4)
+if [ "$MODE" = "fix" ]; then
+    JOBS=1
+elif [ "$CI" = "1" ]; then
+    # GitHub-hosted runners are small (commonly 4 vCPU) and shared/throttled.
+    # clang-analyzer checks are heavy enough per-process that matching nproc-
+    # -exactly causes memory/scheduler thrashing instead of speeding things up.
+    JOBS="${TIDY_JOBS:-$((NPROC > 3 ? 3 : NPROC))}"
+else
+    # Same reasoning applies locally: clang-analyzer is heavy enough per-file-
+    # -that matching nproc exactly tends to thrash rather than help. Cap it,-
+    # -override with TIDY_JOBS=<n> for something different.
+    JOBS="${TIDY_JOBS:-$((NPROC > 8 ? 8 : NPROC))}"
+fi
+info "Jobs          : $JOBS"
+echo ""
 
-for file in "${FILES[@]}"; do
-    printf "[%d/%d] %s\n" "$((PROCESSED + 1))" "$FILE_COUNT" "$file"
+RESULT_DIR=$(mktemp -d)
+trap 'rm -rf "$RESULT_DIR"' EXIT
+
+run_one() {
+    local idx="$1" file="$2"
+    local status=0
+    local output
 
     # 'clang-tidy' exits 0 even with findings unless WarningsAsErrors matched, so-
     # -detect findings from output content, not just the exit code. '-p' looks up-
     # -flags for '$file' itself from the compile database (headers fall back to-
     # -the flags of a .cpp in the same directory automatically)
-    STATUS=0
-    OUTPUT=$("$CLANG_TIDY" "${TIDY_ARGS[@]}" "$file" 2>&1) || STATUS=$?
-
-    if [ -n "$OUTPUT" ]; then
-        echo "$OUTPUT"
+    if [ "$USE_CACHE" = "1" ]; then
+        output=$(python3 "$TIDY_CACHE_PY" "$CLANG_TIDY" "${TIDY_ARGS[@]}" "$file" 2>&1) || status=$?
+    else
+        output=$("$CLANG_TIDY" "${TIDY_ARGS[@]}" "$file" 2>&1) || status=$?
     fi
 
-    if [ "$STATUS" -ne 0 ] || printf '%s' "$OUTPUT" | grep -qE '(warning|error): '; then
+    printf '%s' "$output" > "$RESULT_DIR/$idx.out"
+    if [ "$status" -ne 0 ] || printf '%s' "$output" | grep -qE '(warning|error): '; then
+        : > "$RESULT_DIR/$idx.fail"
+    fi
+}
+
+RUNNING=0
+IDX=0
+for file in "${FILES[@]}"; do
+    # Printed as each file is handed to a worker, not when it finishes, so-
+    # -local runs still show live progress instead of going quiet until the-
+    # -whole batch completes.
+    printf "[%d/%d] %s\n" "$((IDX + 1))" "$FILE_COUNT" "$file"
+    run_one "$IDX" "$file" &
+    RUNNING=$((RUNNING + 1))
+    IDX=$((IDX + 1))
+    if [ "$RUNNING" -ge "$JOBS" ]; then
+        wait -n
+        RUNNING=$((RUNNING - 1))
+    fi
+done
+wait
+echo ""
+
+FAILURES=0
+PROCESSED=0
+for file in "${FILES[@]}"; do
+    printf "[%d/%d] %s\n" "$((PROCESSED + 1))" "$FILE_COUNT" "$file"
+
+    if [ -s "$RESULT_DIR/$PROCESSED.out" ]; then
+        cat "$RESULT_DIR/$PROCESSED.out"
+        echo ""
+    fi
+
+    if [ -f "$RESULT_DIR/$PROCESSED.fail" ]; then
         FAILURES=$((FAILURES + 1))
     fi
 

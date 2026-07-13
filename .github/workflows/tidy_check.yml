@@ -13,11 +13,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history needed to restore mtimes below
 
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake build-essential clang clang-tidy ninja-build
+
+      # See compile_check.yml: checkout resets mtimes, which defeats Ninja's-
+      # -cache-hit detection on the restored build/ dir below.
+      - name: Restore file mtimes from git history
+        run: |
+          git ls-files -z | while IFS= read -r -d '' f; do
+            touch -d "$(git log -1 --format=%cI -- "$f")" "$f"
+          done
 
       - name: Restore build/ cache
         uses: actions/cache@v6
@@ -35,6 +45,17 @@ jobs:
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build
+
+      # scripts/tidy_cache.py skips re-analyzing files unchanged since a prior-
+      # -run (see the script's docstring for how it keys results). This is what-
+      # -actually persists across CI runs, so restore/save it same as build/
+      - name: Restore clang-tidy result cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.wfx/tidy_cache
+          key: tidy-cache-${{ github.run_id }}
+          restore-keys: |
+            tidy-cache-
 
       - name: Run clang-tidy
         run: bash scripts/tidy.sh --ci

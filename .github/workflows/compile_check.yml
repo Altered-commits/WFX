@@ -23,11 +23,24 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7
+      with:
+        fetch-depth: 0 # full history needed to restore mtimes below
 
     - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential clang ninja-build
+
+    # actions/checkout resets every file's mtime to checkout time, which beats-
+    # -Ninja's mtime-based staleness check against the cached build/ dir below-
+    # -(sources always look newer than cached objects -> full rebuild every run,-
+    # -cache hit or not). Reset mtimes to last-commit time so only actually-
+    # -changed files look new again.
+    - name: Restore file mtimes from git history
+      run: |
+        git ls-files -z | while IFS= read -r -d '' f; do
+          touch -d "$(git log -1 --format=%cI -- "$f")" "$f"
+        done
 
     # Save the entire build directory cuz i cannot waste github run 'time', i'm poor
     - name: Restore build/ cache
