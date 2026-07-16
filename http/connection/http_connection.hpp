@@ -5,7 +5,7 @@
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
 #include "shared/abis/types.hpp"
-#include "utils/hash/hash.hpp"
+#include "utils/crypto/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
 #include "utils/resolver/dns_resolver.hpp"
 #include "utils/diagnostics/logger.hpp"
@@ -294,6 +294,7 @@ struct EndpointMetadata {
     Shared::EndpointDesc desc = {0};
     Shared::EndpointConfig config = {0};
     std::unordered_map<std::uint64_t, CoalesceEntry> coalescePending; // TODO: Gotta switch to our hashmap
+    void* cachedTlsSession = nullptr;                                 // Opaque SSL_SESSION*, see HttpWFXSSL::WrapClient
 };
 static_assert(sizeof(EndpointMetadata) <= 512, "'EndpointMetadata' must be <= 512 bytes");
 

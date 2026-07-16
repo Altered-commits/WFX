@@ -83,14 +83,17 @@ You should see **WFX** printed.
 
 ### What the installer does
 
-The installer creates the following structure under your home directory:
+For a plain end-user install (no `--local`), the installer creates the following structure under
+your home directory:
 
 ```
 ~/.wfx/
 ~/.wfx/bin/         # wfx binary lives here
-~/.wfx/src/         # cloned repository and build artifacts
+~/.wfx/src/         # cloned repository, built in ~/.wfx/src/build_install
 ~/.wfx/daemons/     # PID files for running servers (managed by wfx itself)
 ```
+
+See [Local install](#local-install) below for how `--local` (contributor/dev mode) differs.
 
 It also appends the following line to your shell config (`~/.bashrc` on Linux):
 
@@ -102,13 +105,22 @@ That is all it touches. No system directories, no sudo required after dependenci
 
 ### Local install
 
-If you already have the source code cloned and want to build from it directly:
+If you already have the source code cloned and want to build from it directly (the path
+contributors use):
 
 ```bash
 bash scripts/install.sh --local
 ```
 
-This copies your current directory to `~/.wfx/src` (excluding `.git`, `build`, and `.venv`) and builds from there.
+This makes `~/.wfx/src` a **symlink** to your checkout and
+builds directly into the checkout's own `build/` directory. The resulting binary is moved to
+`~/.wfx/bin/wfx`, same as the end-user path. Re-run this command after pulling/editing to refresh
+the PATH binary, or just run `./wfx` directly from the checkout root while iterating.
+
+Local builds default to AddressSanitizer + UndefinedBehaviorSanitizer **on**, so memory bugs
+surface immediately during normal dev use instead of only in CI - this makes the binary noticeably
+slower than a real install. Reconfigure with `cmake -B build -DWFX_ENABLE_ASAN=OFF` if you need a
+fast build for perf testing. End-user installs (no `--local`) always build with sanitizers off.
 
 ---
 

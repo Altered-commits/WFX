@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 
-#ifdef WFX_HTTP_USE_OPENSSL
+#ifdef WFX_USE_OPENSSL
 
 #include "http_openssl.hpp"
 #include "config/config.hpp"
-#include "utils/hash/hash.hpp"
+#include "utils/crypto/hash.hpp"
 #include "utils/diagnostics/logger.hpp"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -101,6 +101,12 @@ void HttpOpenSSL::InitServerContext()
     auto& ticketKey = GetRandomPool().GetSSLKey();
     if(SSL_CTX_set_tlsext_ticket_keys(serverCtx_, ticketKey.data(), ticketKey.size()) != 1)
         LogOpenSSLError("Failed to set session ticket keys");
+
+    // Required for session resumption (any TLS version): lets OpenSSL tell apart sessions-
+    // -established under a different security context. Value is arbitrary, just needs to-
+    // -be stable (see SSL_CTX_set_session_id_context(3))
+    static constexpr unsigned char SESSION_ID_CTX[] = "wfx-server";
+    SSL_CTX_set_session_id_context(serverCtx_, SESSION_ID_CTX, sizeof(SESSION_ID_CTX) - 1);
 
     // Cipher preferences
     if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(serverCtx_, sslConfig.tls13Ciphers.c_str()) != 1)
@@ -204,12 +210,14 @@ void HttpOpenSSL::InitClientContext()
     if(SSL_CTX_set_min_proto_version(clientCtx_, protoVersion) != 1)
         LogOpenSSLError("Failed to set minimum TLS protocol version for client ctx");
 
-    // Client-side session cache: SSL_SESS_CACHE_CLIENT stores sessions for reuse
-    // Unlike server cache, client must explicitly call SSL_set_session() to reuse
-    // The engine does not do automatic reuse, but having the cache ready is correct
+    // Client-side session cache. Unlike the server, SSL_SESS_CACHE_CLIENT alone doesn't-
+    // -reuse anything, we drive resumption ourselves via NewClientSessionCallback +
+    // WrapClient's sessionSlot (see http_ssl.hpp), one session per endpoint
     if(sslConfig.enableClientSessionCache) {
         SSL_CTX_set_session_cache_mode(clientCtx_, SSL_SESS_CACHE_CLIENT);
         SSL_CTX_sess_set_cache_size(clientCtx_, sslConfig.clientSessionCacheSize);
+        SSL_CTX_sess_set_new_cb(clientCtx_, NewClientSessionCallback);
+        clientSessionCacheEnabled_ = true;
     }
     else
         SSL_CTX_set_session_cache_mode(clientCtx_, SSL_SESS_CACHE_OFF);
@@ -259,7 +267,15 @@ void* HttpOpenSSL::Wrap(SSLSocket sock)
     return ssl;
 }
 
-void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view alpnList)
+// Process-wide slot for tagging an SSL* with the void** sessionSlot it should report a-
+// -new session back into. Registered once (C++11 magic-static init is thread-safe)
+static int SessionSlotExIndex()
+{
+    static const int IDX = SSL_get_ex_new_index(0, nullptr, nullptr, nullptr, nullptr);
+    return IDX;
+}
+
+void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view alpnList, void** sessionSlot)
 {
     SSL* ssl = SSL_new(clientCtx_);
     if(!ssl)
@@ -313,7 +329,40 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view
         return nullptr;
     }
 
+    // Session resumption: offer back whatever this endpoint's slot holds, and tag the-
+    // -SSL* with the slot so NewClientSessionCallback can fill it in later
+    if(clientSessionCacheEnabled_ && sessionSlot) {
+        if(*sessionSlot)
+            SSL_set_session(ssl, static_cast<SSL_SESSION*>(*sessionSlot));
+
+        // void** -> void*: opaque storage only, cast back in NewClientSessionCallback
+        SSL_set_ex_data(ssl, SessionSlotExIndex(), reinterpret_cast<void*>(sessionSlot));
+    }
+
     return ssl;
+}
+
+int HttpOpenSSL::NewClientSessionCallback(SSL* ssl, SSL_SESSION* sess)
+{
+    auto* slot = static_cast<void**>(SSL_get_ex_data(ssl, SessionSlotExIndex()));
+
+    // No slot tagged (resumption disabled for this connection); refuse ownership so-
+    // -OpenSSL frees it
+    if(!slot)
+        return 0;
+
+    if(*slot)
+        SSL_SESSION_free(static_cast<SSL_SESSION*>(*slot));
+
+    *slot = sess;
+
+    return 1; // We now own 'sess'; released by a future replacement or FreeCachedSession()
+}
+
+void HttpOpenSSL::FreeCachedSession(void* session)
+{
+    if(session)
+        SSL_SESSION_free(static_cast<SSL_SESSION*>(session));
 }
 
 std::string_view HttpOpenSSL::NegotiatedProtocol(void* conn)
@@ -530,4 +579,4 @@ void HttpOpenSSL::LogOpenSSLError(const char* message, SSL* ssl, bool fatal)
 
 } // namespace WFX::Http
 
-#endif // WFX_HTTP_USE_OPENSSL
+#endif // WFX_USE_OPENSSL

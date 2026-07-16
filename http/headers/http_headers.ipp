@@ -33,6 +33,25 @@ template <typename K, typename V> void HttpHeaders<K, V>::SetHeader(K key, V val
     headers_[std::move(key)] = std::move(value);
 }
 
+template <typename K, typename V> void HttpHeaders<K, V>::RebasePointers(std::ptrdiff_t delta)
+{
+    if(delta == 0)
+        return;
+
+    // Keys are exposed as const by the map (rightly so, mutating them in place isn't safe in-
+    // -general), so rebasing means rebuilding rather than mutating in place
+    if constexpr(std::is_same_v<K, std::string_view> && std::is_same_v<V, std::string_view>) {
+        HeaderMapType rebased;
+        rebased.reserve(headers_.size());
+
+        for(auto& [key, value] : headers_)
+            rebased.emplace(std::string_view(key.data() + delta, key.size()),
+                            std::string_view(value.data() + delta, value.size()));
+
+        headers_ = std::move(rebased);
+    }
+}
+
 template <typename K, typename V> bool HttpHeaders<K, V>::HasHeader(const K& key) const
 {
     return headers_.find(key) != headers_.end();

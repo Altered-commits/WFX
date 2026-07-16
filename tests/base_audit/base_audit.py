@@ -8,7 +8,8 @@
 #   security   path traversal, CRLF/response-splitting, info leakage,
 #              header attacks, contract violations
 #   protocol   malformed and abusive request vectors: server must survive without crashing
-#   features   every route verified: correct status, body, headers
+#   features   every route verified: correct status, body, headers; plus buffer-relocation
+#              integrity, exact body/header size limits, and byte-at-a-time drip sends
 #   forms      WFX::Form: Content-Type matching, field structure, percent-decoding,
 #              validator bounds, decoded-value-into-header injection
 #   chaos      worker kills, SIGSTOP/SIGCONT, kill under mixed load
@@ -99,6 +100,37 @@ def raw_send(host, port, payload, rtimeout=3.0, rmax=1<<20, ctimeout=4.0):
         try: s.close()
         except OSError: pass
 
+def raw_send_dripped(host, port, payload, chunk_size=1, delay=0.0, rtimeout=5.0, rmax=1<<20, ctimeout=4.0):
+    """Like raw_send, but writes the payload in small chunks (optionally with a short
+    delay between each) instead of one sendall() call. Forces the request to actually
+    arrive over several separate recv() calls server-side, exercising the ET-epoll
+    multi-read / incremental read-buffer growth path instead of landing in a single read.
+    Never raises. Returns (status, raw)."""
+    try:
+        s = socket.create_connection((host, port), timeout=ctimeout)
+    except OSError:
+        return "CONN_ERR", b""
+    try:
+        for i in range(0, len(payload), chunk_size):
+            s.sendall(payload[i:i + chunk_size])
+            if delay: time.sleep(delay)
+        s.settimeout(rtimeout)
+        buf, total = [], 0
+        while total < rmax:
+            try:
+                d = s.recv(65536)
+            except (socket.timeout, OSError):
+                break
+            if not d: break
+            buf.append(d); total += len(d)
+        raw = b"".join(buf)
+        return _status(raw), raw
+    except OSError:
+        return "IO_ERR", b""
+    finally:
+        try: s.close()
+        except OSError: pass
+
 def _status(raw):
     if not raw.startswith(b"HTTP/"): return None
     try:    return int(raw.split(b" ", 2)[1])
@@ -111,6 +143,20 @@ def _build(method, path, headers=None, body=b"", close=True):
         for k, v in headers.items(): lines.append("%s: %s" % (k, v))
     if body:     lines.append("Content-Length: %d" % len(body))
     return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + body
+
+def _build_at_header_size(total, method="GET", path="/health"):
+    """Build a raw request whose header block (request-line through the blank line,
+    inclusive - matches SafeFindHeaderEnd's accounting in http_parser.cpp) is exactly
+    `total` bytes, via a single padding header. Lets a boundary test target
+    max_header_size precisely instead of guessing padding by hand."""
+    head = "%s %s HTTP/1.1\r\nHost: x\r\nConnection: close\r\n" % (method, path)
+    tail = "\r\n"
+    pad_prefix, pad_suffix = "X-Pad: ", "\r\n"
+    fixed = len(head) + len(tail) + len(pad_prefix) + len(pad_suffix)
+    pad_len = total - fixed
+    if pad_len < 0:
+        raise ValueError("target header size %d too small (min %d)" % (total, fixed))
+    return (head + pad_prefix + ("A" * pad_len) + pad_suffix + tail).encode("latin-1")
 
 def req(host, port, method, path, headers=None, body=b"", **kw):
     return raw_send(host, port, _build(method, path, headers, body), **kw)
@@ -456,6 +502,8 @@ CRLF_VALUES = [
 # Max body size from wfx.toml = 65536.
 # Test at-limit, one-over, and integer-overflow variants.
 _BODY_LIMIT = 65536
+# Max header block size from wfx.toml (max_header_size) = 8192.
+_HEADER_LIMIT = 8192
 BODYBOMB_PAYLOADS = [
     # Exactly at limit: should be accepted (200)
     _build("POST", "/echo-body", body=b"B" * _BODY_LIMIT),
@@ -686,6 +734,10 @@ ROUTE_CHECKS = [
     # /echo-body: echoes POST body
     ("POST", "/echo-body",        None, b"wfx-test", 200, b"wfx-test", None),
     ("POST", "/echo-body",        None, b"",         200, b"",         None),
+    # /echo-full: echoes method/path/header/body (small body here; the large-body,
+    # buffer-relocation variant is a dedicated check in phase_features)
+    ("POST", "/echo-full",        {"X-Marker": "small"}, b"wfx-test", 200, b"wfx-test",
+             ("X-Echo-Marker", b"small")),
     # /big: 1MiB of 'A'
     ("GET",  "/big",              None, b"", 200, b"A" * 16, None),
     # /download: requires X-File, returns 400 without it
@@ -765,12 +817,16 @@ ROUTE_CHECKS = [
 
 # Helpers
 def _probe(host, port, payload, retries=3, delay=0.3):
-    """Send payload with retries on CONN_ERR only."""
+    """Send payload, retrying while a still-starting worker (post-revival) can't yet serve it.
+    raw_send() surfaces that as CONN_ERR (refused), IO_ERR (reset mid-request), or a None status
+    (accepted then closed with zero bytes) - retry on all three, not just CONN_ERR, and only
+    stop once a real HTTP status code comes back."""
+    st, raw = "CONN_ERR", b""
     for i in range(retries):
         st, raw = raw_send(host, port, payload, rtimeout=3.0)
-        if st != "CONN_ERR": return st, raw
+        if isinstance(st, int): return st, raw
         if i < retries - 1: time.sleep(delay)
-    return "CONN_ERR", b""
+    return st, raw
 
 def _fetch_metrics(host, port):
     st, raw = req(host, port, "GET", "/metrics", rtimeout=3.0)
@@ -839,12 +895,14 @@ def _verify_all_routes(host, port):
 
     def _check(method, path, hdrs, body, expect_st, needle, hdr_check):
         # /health back up only means the master accepted a connection again, not that every-
-        # -respawned worker slot has finished re-listening yet. Retry on CONN_ERR only, same-
-        # -as _probe(), so a route landing on a still-starting worker isn't a false failure
+        # -respawned worker slot has finished re-listening yet. Retry until a real HTTP status-
+        # -comes back, same as _probe(), so a route landing on a still-starting worker isn't a-
+        # -false failure - CONN_ERR (refused), IO_ERR (reset), and a None status (accepted then-
+        # -closed with zero bytes) are all the same "not ready yet" signal, not just CONN_ERR
         for attempt in range(3):
             st, raw = req(host, port, method, path, headers=hdrs, body=body,
                           rtimeout=5.0, ctimeout=3.0)
-            if st != "CONN_ERR": break
+            if isinstance(st, int): break
             if attempt < 2: time.sleep(0.3)
         b = body_of(raw)
         ok = (st == expect_st)
@@ -928,7 +986,7 @@ def phase_security(cfg, srv):
     try:
         # ── /download without X-File must return 400 ─────────────────────────
         st, _ = _probe(host, port, _build("GET", "/download"))
-        if st not in (400, "CONN_ERR", None):
+        if isinstance(st, int) and st != 400:
             findings.append(("MISSING_HEADER_NOT_400",
                               "/download without X-File returned %s, expected 400" % st))
 
@@ -1241,6 +1299,85 @@ def phase_features(cfg, srv):
         else:
             _log("features", _red("  async/sleep: %d/20 failed" % fail20))
             findings.append(("ROUTE_FAIL", "async/sleep concurrent: %d/20 failed" % fail20))
+
+        # /echo-full under forced buffer relocation: request.Path()/GetHeader()/Body() are
+        # all string_views into the connection's read buffer - a body big enough to outgrow
+        # the initial recv buffer (recv_buffer_incr=8192) forces RWBuffer to relocate
+        # mid-parse (see PrepareForBody in http/parser/http_parser.cpp). This regression-
+        # tests that every one of those views still points at the right bytes afterward,
+        # not just the body - a previous bug here caused false 404s and corrupted routing.
+        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "realloc:integrity  ")
+        marker = "REALLOC-MARK-%d" % random.randint(100000, 999999)
+        big_body = b"R" * 50000  # > recv_buffer_incr (8192), < max_body_size (65536)
+        payload = _build("POST", "/echo-full", {"X-Marker": marker}, big_body)
+        st = raw = None
+        for attempt in range(3):
+            st, raw = raw_send_dripped(host, port, payload, chunk_size=333, delay=0.002, rtimeout=8.0)
+            if isinstance(st, int): break
+            if attempt < 2: time.sleep(0.3)
+        _, hdrs, b = parse_hdrs(raw)
+        ok = (st == 200
+              and hdrs.get(b"x-echo-method", [b""])[0] == b"POST"
+              and hdrs.get(b"x-echo-path", [b""])[0] == b"/echo-full"
+              and hdrs.get(b"x-echo-marker", [b""])[0] == marker.encode()
+              and b == big_body)
+        if not ok:
+            _dot("!", "31")
+            findings.append(("REALLOC_INTEGRITY",
+                              "echo-full mismatch after relocation: status=%s method=%r path=%r "
+                              "marker=%r (expected %r) body_ok=%s body_len=%d (expected %d)"
+                              % (st, hdrs.get(b"x-echo-method"), hdrs.get(b"x-echo-path"),
+                                 hdrs.get(b"x-echo-marker"), marker, b == big_body,
+                                 len(b), len(big_body))))
+        else:
+            _dot(".")
+        _progress_end()
+
+        # Boundary correctness: body/header limits from wfx.toml must be enforced exactly
+        # at the byte, not off-by-one in either direction (previously only checked for
+        # "server survives", never for the actual status code - see phase_protocol).
+        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "limits:boundary    ")
+        boundary_checks = [
+            ("body at limit",     _build("POST", "/echo-body", None, b"B" * _BODY_LIMIT), 200),
+            ("body one over",     _build("POST", "/echo-body", None, b"B" * (_BODY_LIMIT + 1)), 400),
+            ("header at limit",   _build_at_header_size(_HEADER_LIMIT), 200),
+            ("header one over",   _build_at_header_size(_HEADER_LIMIT + 1), 400),
+        ]
+        for label, vec, expect_st in boundary_checks:
+            st, raw = _probe(host, port, vec)
+            if st != expect_st:
+                _dot("!", "31")
+                findings.append(("LIMIT_BOUNDARY", "%s: status=%s (expected %s)" % (label, st, expect_st)))
+            else:
+                _dot(".")
+        _progress_end()
+
+        # Slow-drip inbound: send a small request one byte at a time, forcing the server
+        # to observe it across many separate recv() calls instead of one - exercises the
+        # ET-epoll multi-read path independently of buffer relocation (the body here stays
+        # well under recv_buffer_incr, so this isolates drip-read correctness from the
+        # relocation check above).
+        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "drip:byte-at-a-time")
+        drip_marker = "DRIP-MARK-%d" % random.randint(100000, 999999)
+        drip_body = b"d" * 500
+        drip_payload = _build("POST", "/echo-full", {"X-Marker": drip_marker}, drip_body)
+        st = raw = None
+        for attempt in range(3):
+            st, raw = raw_send_dripped(host, port, drip_payload, chunk_size=1, rtimeout=10.0)
+            if isinstance(st, int): break
+            if attempt < 2: time.sleep(0.3)
+        _, hdrs, b = parse_hdrs(raw)
+        ok = (st == 200
+              and hdrs.get(b"x-echo-marker", [b""])[0] == drip_marker.encode()
+              and b == drip_body)
+        if not ok:
+            _dot("!", "31")
+            findings.append(("DRIP_INTEGRITY",
+                              "echo-full mismatch under byte-at-a-time send: status=%s marker=%r "
+                              "(expected %r) body_ok=%s" % (st, hdrs.get(b"x-echo-marker"), drip_marker, b == drip_body)))
+        else:
+            _dot(".")
+        _progress_end()
 
         if not health(host, port, timeout=4.0):
             findings.append(("SERVER_DEAD", "server unreachable after features phase"))
@@ -1703,6 +1840,8 @@ phases:
              corpora: header-abuse, malformed, methods, smuggling, bodybomb
   features   every route verified: exact status, body, headers, invariants
              branch isolation, header injection absence, Content-Type checks
+             buffer-relocation integrity, exact body/header size limits,
+             byte-at-a-time drip sends
   chaos      6 scenarios: worker kills x3, kills under sustained load,
              rapid-fire kills, dual-kill, SIGSTOP/SIGCONT,
              kill under mixed load (75 idle conns + 12 large-response threads)

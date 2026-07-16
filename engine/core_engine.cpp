@@ -18,7 +18,7 @@
 #include "shared/utils/detection_macro.hpp"
 #include "shared/utils/memory.hpp"
 
-#if defined(WFX_PLATFORM_POSIX)
+#ifdef WFX_PLATFORM_POSIX
 #include <dlfcn.h>
 #endif
 

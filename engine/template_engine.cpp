@@ -9,7 +9,7 @@
 #include "shared/utils/detection_macro.hpp"
 #include <cstring>
 
-#if defined(WFX_PLATFORM_POSIX)
+#ifdef WFX_PLATFORM_POSIX
 #include <dlfcn.h>
 #endif
 

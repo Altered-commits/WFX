@@ -8,6 +8,7 @@
 #include "shared/apis/async_api.hpp"
 #include "shared/apis/memory_api.hpp"
 #include "shared/apis/utils_api.hpp"
+#include "shared/apis/crypto_api.hpp"
 
 namespace WFX::Shared {
 
@@ -18,6 +19,7 @@ struct MasterAPITable {
     const AsyncAPIExt1* (*getAsyncAPIExt1)();
     const MemoryAPIExt1* (*getMemoryAPIExt1)();
     const UtilsAPIExt1* (*getUtilsAPIExt1)();
+    const CryptoApiExt1* (*getCryptoApiExt1)();
 };
 static_assert(std::is_standard_layout<MasterAPITable>::value, "'MASTER_API_TABLE' must be standard layout");
 

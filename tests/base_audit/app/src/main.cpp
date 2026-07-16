@@ -32,6 +32,37 @@ WFX_GET("/echo", [](WFX::Request req, WFX::Response res) {
 
 WFX_POST("/echo-body", [](WFX::Request req, WFX::Response res) { res.Status(200).SendText(req.Body()); })
 
+// Echoes back method, path, and an arbitrary request header alongside the body, all in
+// one response - request.Path()/GetHeader()/Body() are all string_views into the
+// connection's read buffer, so a single big request here exercises whether every one of
+// them survives a mid-parse RWBuffer relocation (see PrepareForBody in
+// http/parser/http_parser.cpp), not just the body
+WFX_POST("/echo-full", [](WFX::Request req, WFX::Response res) {
+    std::string_view marker;
+    if(!req.GetHeader("X-Marker", marker))
+        marker = "(none)";
+
+    const char* methodStr = "UNKNOWN";
+    switch(req.Method()) {
+        case WFX::HttpMethod::GET: methodStr = "GET"; break;
+        case WFX::HttpMethod::POST: methodStr = "POST"; break;
+        case WFX::HttpMethod::PUT: methodStr = "PUT"; break;
+        case WFX::HttpMethod::DELETE: methodStr = "DELETE"; break;
+        case WFX::HttpMethod::PATCH: methodStr = "PATCH"; break;
+        case WFX::HttpMethod::HEAD: methodStr = "HEAD"; break;
+        case WFX::HttpMethod::OPTIONS: methodStr = "OPTIONS"; break;
+        case WFX::HttpMethod::CONNECT: methodStr = "CONNECT"; break;
+        case WFX::HttpMethod::TRACE: methodStr = "TRACE"; break;
+        default: break;
+    }
+
+    res.Status(200)
+        .Header("X-Echo-Method", methodStr)
+        .Header("X-Echo-Path", req.Path())
+        .Header("X-Echo-Marker", marker)
+        .SendText(req.Body());
+})
+
 WFX_GET("/big", [](WFX::Request, WFX::Response res) {
     static const std::string blob(1u << 20, 'A');
     res.Status(200).SendText(blob);

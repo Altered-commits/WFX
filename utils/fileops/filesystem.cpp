@@ -68,7 +68,7 @@ bool GetFileStats(const char* path, FileStats& out)
 
     out.size = st.st_size;
 
-#if defined(WFX_PLATFORM_MACOS)
+#ifdef WFX_PLATFORM_MACOS
     auto sec = st.st_mtimespec.tv_sec;
     auto nsec = st.st_mtimespec.tv_nsec;
 #else

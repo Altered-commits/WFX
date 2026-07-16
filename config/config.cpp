@@ -71,7 +71,7 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Network", "max_requests_per_ip_per_sec", networkConfig.maxTokensPerSecond);
 
         // vvv OS Specific vvv
-#if defined(WFX_PLATFORM_LINUX)
+#ifdef WFX_PLATFORM_LINUX
         ExtractValue(tbl, "Linux", "worker_processes", osSpecificConfig.workerProcesses);
         ExtractValue(tbl, "Linux", "worker_shutdown_timeout", osSpecificConfig.workerShutdownTimeout);
         ExtractValue(tbl, "Linux", "backlog", osSpecificConfig.backlog);

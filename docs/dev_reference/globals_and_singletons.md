@@ -48,7 +48,7 @@ Returns the global config instance. Populated by `LoadCoreSettings()` and `LoadF
 
 ```cpp
 // Namespace: WFX::Utils
-// Defined in: utils/hash/hash.cpp
+// Defined in: utils/crypto/hash.cpp
 WFX::Utils::RandomPool& GetRandomPool() noexcept;
 ```
 

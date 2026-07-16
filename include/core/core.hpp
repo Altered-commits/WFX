@@ -45,6 +45,10 @@ inline const Shared::UtilsAPIExt1* UtilsApiExt1() noexcept
 {
     return GlobalWFXApi->getUtilsAPIExt1();
 }
+inline const Shared::CryptoApiExt1* CryptoApiExt1() noexcept
+{
+    return GlobalWFXApi->getCryptoApiExt1();
+}
 
 } // namespace WFX::Core
 

@@ -3,7 +3,9 @@
 
 # Build files
 build/
-build_tidy/
+
+# Engine binary
+./wfx
 
 # Internal
 ignore/

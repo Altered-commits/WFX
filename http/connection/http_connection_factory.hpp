@@ -10,7 +10,7 @@
 #include "shared/utils/detection_macro.hpp"
 #include <memory>
 
-#if defined(WFX_PLATFORM_LINUX)
+#ifdef WFX_PLATFORM_LINUX
 #include "os_specific/linux/epoll_connection.hpp"
 #else
 #error "Unsupported platform - add a WFX_PLATFORM_<X> branch in HTTP factory and a new os_specific/<x>/ backend"
@@ -21,7 +21,7 @@ namespace WFX::Http {
 // Factory function that returns the correct handler
 inline std::unique_ptr<HttpConnectionHandler> CreateConnectionHandler(bool useHttps)
 {
-#if defined(WFX_PLATFORM_LINUX)
+#ifdef WFX_PLATFORM_LINUX
     return std::make_unique<OSSpecific::EpollConnectionHandler>(useHttps);
 #else
 #error "Unsupported platform - add a WFX_PLATFORM_<X> branch in HTTP factory and a new os_specific/<x>/ backend"

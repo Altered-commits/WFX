@@ -52,6 +52,7 @@ nav:
     - Templates: api_reference/templates.md
     - Forms: api_reference/forms.md
     - Json: api_reference/json.md
+    - Crypto & Hash: api_reference/crypto.md
     - Telemetry: api_reference/telemetry.md
     - Memory: api_reference/memory.md
     - Endpoint:
@@ -63,5 +64,6 @@ nav:
     - Codebase Architecture: dev_reference/codebase_architecture.md
     - Globals & Singletons: dev_reference/globals_and_singletons.md
     - ABI Layer: dev_reference/abi_layer.md
+    - Build Macros: dev_reference/build_macros.md
     - Metrics & Observability: dev_reference/metrics_and_observability.md
     - Testing: dev_reference/testing.md

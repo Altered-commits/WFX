@@ -8,7 +8,7 @@ They are designed to **fail fast**, avoid ambiguity, and prevent malformed data 
 
     To use forms, you **must** include the forms header at the top of your file:
     ```cpp
-    #include <wfx/forms.hpp>
+    #include <wfx/form.hpp>
     ```
 
 ---
@@ -353,7 +353,7 @@ A custom rule must expose:
 
 **Example (Defining custom rules)**:
 ```cpp
-#include <wfx/forms.hpp>
+#include <wfx/form.hpp>
 #include <cctype>
 #include <charconv>
 

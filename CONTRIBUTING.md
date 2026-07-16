@@ -15,7 +15,9 @@ cd WFX
 bash scripts/install.sh --local
 ```
 
-See https://altered-commits.github.io/WFX/getting_started/installation/ for what that does under the hood. Re-run it any time you want a fresh build.
+See https://altered-commits.github.io/WFX/getting_started/installation/ for what that does under the hood. `--local` builds straight into your checkout's own `build/` (via a `~/.wfx/src` symlink back to it, so nothing is duplicated) and moves the resulting binary to `~/.wfx/bin/wfx` on your PATH. After editing, either run `./wfx` directly from the checkout root, or re-run `bash scripts/install.sh --local` to refresh the PATH binary.
+
+Dev builds default to AddressSanitizer + UndefinedBehaviorSanitizer on, so they catch dangling-pointer/use-after-free/UB bugs as soon as you hit them locally instead of only in CI. That makes the dev binary noticeably slower than a real install - if you need a fast build for perf testing, reconfigure with `cmake -B build -DWFX_ENABLE_ASAN=OFF`.
 
 `main` and `dev` are protected. Work freely in your fork or personal branch.
 
@@ -92,7 +94,7 @@ bash scripts/tidy.sh --changed    # only what you changed vs main
 bash scripts/tidy.sh --fix        # apply auto-fixes where possible
 ```
 
-`tidy.sh` needs a compile database to run; it configures one itself in `build_tidy/` on first run (no need to run `install.sh --local` first, and it never touches that build).
+`tidy.sh` needs a compile database to run; it configures one itself in `build/` on first run if it's not there yet (no need to run `install.sh --local` first). Files touching recent OpenSSL APIs won't fully resolve until something actually builds `build/` though - `install.sh --local` does, and it's the same directory, so running that once covers it.
 
 ---
 

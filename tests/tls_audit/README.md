@@ -33,8 +33,10 @@ never completing it).
 `good` also does double duty as the backend for every non-cert test below: the
 HTTP framing/desync corpus replayed **over TLS** (smuggling defenses must still
 hold under encryption), request-timeout under TLS, request-serialization injection
-(CR/LF/NUL), and a raw **truncation** attack (RST with no `close_notify`) that must
-never be delivered as a complete response.
+(CR/LF/NUL), a raw **truncation** attack (RST with no `close_notify`) that must
+never be delivered as a complete response, and (`resumption` phase) verifying the
+outbound client actually resumes a cached TLS session after a forced reconnect,
+not just that it completes handshakes.
 
 ## Run
 
@@ -48,7 +50,7 @@ python3 tls_audit.py --list-phases        # list phases and exit
 python3 tls_audit.py --ci                 # no colors, GitHub Actions log groups and error annotations
 ```
 
-Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resource`.
+Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resource`, `resumption`.
 
 ### What it does
 
@@ -69,8 +71,8 @@ Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resou
    the log file. The mock's own stdout/stderr is streamed too (prefixed `[mock]`),
    so a listener that fails to bind or load its cert is visible immediately instead
    of silently masquerading as a WFX bug.
-4. Runs the handshake / verify / protocol / framing / desync / inject / resource
-   phases over TLS.
+4. Runs the handshake / verify / protocol / framing / desync / inject / resource /
+   resumption phases over TLS.
 
 ### Exit codes
 

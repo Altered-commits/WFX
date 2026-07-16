@@ -1,22 +1,25 @@
 # Testing
 
-WFX's test suite lives in `tests/` as three adversarial harnesses, called audits, rather than a
+WFX's test suite lives in `tests/` as four adversarial harnesses, called audits, rather than a
 conventional unit test suite. Most of what actually needs proving here (a worker surviving a
-SIGKILL mid-request, a malformed chunk size, a TLS client refusing a bad cert) only shows up under
-real process and wire-level conditions, not inside a unit test.
+SIGKILL mid-request, a malformed chunk size, a TLS client refusing a bad cert, a request whose
+body forces the read buffer to relocate mid-parse) only shows up under real process and wire-level
+conditions, not inside a unit test.
 
 ---
 
-## The three audits
+## The four audits
 
 | Audit | Drives | Covers |
 |-------|--------|--------|
 | `base_audit` | WFX as an HTTP server | path traversal, CRLF/response-splitting, request smuggling, header/body abuse, every user-facing route, and 6 chaos scenarios that SIGKILL/SIGSTOP workers under load and verify recovery |
 | `endpoint_audit` | `WFX::HttpEndpoint` (outbound client) | framing, chunked/close-delimited bodies, connection pooling, coalescing, multiplexing, and lifecycle behavior, all against a hostile mock upstream it boots itself |
 | `tls_audit` | the outbound client's TLS path | cert refusal (untrusted, hostname mismatch, expired, protocol downgrade), proven twice per persona: as a call error and as a mock-observed failed handshake, plus the framing/desync corpus replayed over TLS |
+| `crypto_audit` | `wfx/utils/crypto.hpp` (hashing, HMAC, AEAD, KDFs, CSPRNG) | correctness against Python stdlib oracles (`hashlib`, `hmac`, `pbkdf2_hmac`, a hand-rolled RFC 5869 HKDF) where one exists, plus AEAD tamper/cross-algo rejection, a `WFX::HashStream` driven from inside a real `res.Stream()` callback, and a 64 MiB+1 body to exercise the AEAD size cap |
 
-Each audit is a standalone Python script (`base_audit.py`, `endpoint_audit.py`, `tls_audit.py`)
-with its own small WFX project under `app/` that exists purely to give the audit something to hit.
+Each audit is a standalone Python script (`base_audit.py`, `endpoint_audit.py`, `tls_audit.py`,
+`crypto_audit.py`) with its own small WFX project under `app/` that exists purely to give the
+audit something to hit.
 Each phase within an audit is one function, registered in a `PHASES` list/dict, selectable with
 `--phase <name>` or listed with `--list-phases`, so adding or removing a phase never touches
 anything outside that one function and its registration.
@@ -30,25 +33,29 @@ anything outside that one function and its registration.
 
 ## Shared harness infrastructure (`tests/_audit_common.py`)
 
-All three audits import this module for the boilerplate that doesn't decide what a test checks:
+All four audits import this module for the boilerplate that doesn't decide what a test checks:
 
 - colored terminal output, and GitHub Actions `::group::`/`::error::`/`::warning::` commands under `--ci`
 - `LogFollower`, a thread that tails the running WFX project's worker/master/crash logs live, so a boot-time crash prints as it happens instead of vanishing on worker revival
 - a raw stdlib-socket HTTP client (`raw_send`, `build_request`, `response_status`, `response_body`)
-- `Results` / `check()` / `format_report()`, the bucketed pass/fail bookkeeping `endpoint_audit` and `tls_audit` both use to build their report table
+- `Results` / `check()` / `format_report()`, the bucketed pass/fail bookkeeping `endpoint_audit`, `tls_audit`, and `crypto_audit` all use to build their report table
 - `add_common_args()`, the shared argparse scaffolding (`--host`, `--port`, `--wfx`, `--app-dir`, `--phase`, `--ci`, `--wfx-logs`, ...)
 
 `base_audit` only borrows the colors, GitHub Actions helpers, and the raw HTTP client. Its own
-phase results are timed findings-lists rather than the bucket shape the other two use, and its
+phase results are timed findings-lists rather than the bucket shape the other three use, and its
 `raw_send` defaults differ on purpose, so it keeps its own copy instead of forcing a shared one.
+
+`crypto_audit` doesn't boot a mock upstream (`endpoint_audit`/`tls_audit` both do) - it only needs
+the WFX server itself, since it's testing `wfx/utils/crypto.hpp` directly rather than an outbound
+client's wire behavior.
 
 ---
 
 ## Running them
 
 ```bash
-tests/run_audits.sh                  # all three, one after another
-tests/run_audits.sh --audit base     # just one: base, endpoint, or tls
+tests/run_audits.sh                  # all four, one after another
+tests/run_audits.sh --audit base     # just one: base, endpoint, tls, or crypto
 tests/run_audits.sh --ci             # forward --ci to whichever audits run
 tests/run_audits.sh --audit tls -- --phase verify --wfx-logs all
                                       # anything after -- is passed through as-is
@@ -65,10 +72,19 @@ Every audit shares one `--ci` flag (wired through `add_common_args`): it disable
 emits GitHub Actions `::group::`/`::error::` annotations for failing checks so they surface in the
 PR Checks UI, without changing any timeout or process behavior versus a local run.
 
-`.github/workflows/audit_check.yml` never builds `wfx` itself. `compile_check.yml`'s gcc leg uploads
-the compiled binary as a 1-day-retention artifact; `audit_check.yml` downloads it and runs the three
+`.github/workflows/audit_check.yml` never builds `wfx` itself. `compile_check.yml` uploads the
+compiled binary as a 1-day-retention artifact; `audit_check.yml` downloads it and runs the four
 audits as parallel matrix jobs, each calling `tests/run_audits.sh --audit <name> --ci`. It's wired
-into `entry.yml` as the fourth linear stage, gated on `compile_check.yml` passing first.
+into `entry.yml` as the fourth linear stage, gated on `compile_check.yml` passing first (in
+parallel with `tidy_check.yml`, the fifth stage, both gated on the same compile step).
+
+That downloaded binary is always built with `-DWFX_ENABLE_ASAN=ON` (see
+[Build Macros](build_macros.md)) - it's CI-internal only, never distributed, so there's no downside
+to it always being instrumented. `audit_check.yml` sets `ASAN_OPTIONS=abort_on_error=1:halt_on_error=1:detect_leaks=0`
+and `UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1` for the job; `detect_leaks=0` specifically
+because `GetLogger()`'s heap-allocated-and-never-freed singleton (see
+[Globals & Singletons](globals_and_singletons.md)) is intentional, and without it every audit run
+would report a false-positive "leak."
 
 ---
 
@@ -80,8 +96,8 @@ into `entry.yml` as the fourth linear stage, gated on `compile_check.yml` passin
 - `tests/run_audits.sh`  
     Single entry point for running one or all audits, locally or from CI.
 
-- `tests/base_audit/`, `tests/endpoint_audit/`, `tests/tls_audit/`  
-    One audit each: the harness script, its own `README.md`, its `app/` test project, and a mock upstream script (`upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
+- `tests/base_audit/`, `tests/endpoint_audit/`, `tests/tls_audit/`, `tests/crypto_audit/`  
+    One audit each: the harness script, its own `README.md`, its `app/` test project, and (for `endpoint_audit`/`tls_audit`) a mock upstream script (`upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
 
 - `.github/workflows/audit_check.yml`  
-    Downloads the `wfx` binary artifact from `compile_check.yml` and runs the three audits as a parallel CI matrix.
+    Downloads the `wfx` binary artifact from `compile_check.yml` and runs the four audits as a parallel CI matrix.

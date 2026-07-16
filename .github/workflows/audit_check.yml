@@ -1,7 +1,10 @@
 name: WFX Audit Check
 
 # Reusable: invoked by entry.yml AFTER the compile check, so this file owns-
-# -ONLY the audit logic.
+# -ONLY the audit logic. The wfx binary it downloads is always ASan+UBSan-
+# -instrumented (see compile_check.yml), so a dangling-pointer/use-after-free/UB-
+# -bug halts the worker immediately with a real stack trace instead of surfacing-
+# -as a confusing correctness failure three layers away.
 on:
   workflow_call:
 
@@ -12,7 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        audit: [base, endpoint, tls]
+        audit: [base, endpoint, tls, crypto]
+
+    env:
+      ASAN_OPTIONS: abort_on_error=1:halt_on_error=1:detect_leaks=0
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
 
     steps:
       - name: Checkout repository
@@ -39,7 +46,7 @@ jobs:
           echo "$HOME/.wfx/bin" >> "$GITHUB_PATH"
 
       # openssl and mkcert are only actually needed by the tls audit (cert-
-      # -generation), installed for every entry anyway so the three jobs stay-
+      # -generation), installed for every entry anyway so the four jobs stay-
       # -identical instead of branching on matrix.audit
       - name: Install audit dependencies
         run: |

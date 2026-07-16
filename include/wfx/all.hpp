@@ -17,6 +17,8 @@
 //   #include "wfx/types.hpp"             : Just types and aliases, no HTTP machinery
 //   #include "wfx/telemetry.hpp"         : Logging and metrics
 //   #include "wfx/memory.hpp"            : Engine-allocator wrappers (Alloc/New/Vector/String)
+//   #include "wfx/utils/crypto.hpp"      : Hashing, HMAC, AEAD, KDFs, CSPRNG
+//   #include "wfx/utils/hash.hpp"        : Fast non-cryptographic hashing (WyHash, FNV-1a, ...)
 //   #include "wfx/endpoint/base.hpp"     : Raw outbound endpoint (Endpoint<TReq,TRes>)
 //   #include "wfx/endpoint/http.hpp"     : Outbound HTTP/1.1 client (HttpEndpoint)
 // -----------------------------------------------------------------------
@@ -28,6 +30,8 @@
 #include "wfx/types.hpp"
 #include "wfx/telemetry.hpp"
 #include "wfx/memory.hpp"
+#include "wfx/utils/crypto.hpp"
+#include "wfx/utils/hash.hpp"
 #include "wfx/endpoint/http.hpp"
 
 #endif // WFX_INC_WFX_ALL_HPP

@@ -210,8 +210,8 @@ class Mock:
     def stats(self, name):
         port = self.ports.get(name, 8443)
         raw = tls_send(self.cfg.host, port, _build("GET", "/ctl/stats/%s" % name))
-        try: return [int(x) for x in _body_of(raw).split()]   # [handshakes, hs_fail, requests]
-        except Exception: return [-1, -1, -1]
+        try: return [int(x) for x in _body_of(raw).split()]   # [handshakes, hs_fail, requests, resumed]
+        except Exception: return [-1, -1, -1, -1]
 
     def stage(self, sid, blob, keep=True, ep="good"):
         port = self.ports.get(ep, 8443)
@@ -295,7 +295,7 @@ def phase_handshake(cfg, mock, results):
     check(b, "TLS large body (4000)",   (lambda r: is_ok(r, 200) and r.get("bodylen") == 4000)(drive(cfg, "/cl/4000")))
     check(b, "TLS chunked",             is_ok(drive(cfg, "/chunked"), 200, "abcde"))
     check(b, "TLS keep-alive reuse x10", all(is_ok(drive(cfg, "/ok"), 200, "hello") for _ in range(10)))
-    hs, hf, rq = mock.stats("good")
+    hs, hf, rq, _ = mock.stats("good")
     check(b, "good listener completed handshakes", hs >= 1, "stats good=%r" % [hs, hf, rq])
 
 def phase_verify(cfg, mock, results):
@@ -313,7 +313,7 @@ def phase_verify(cfg, mock, results):
         r = drive(cfg, "/ok", ep=name, rtimeout=12)
         check(b, labels[name], is_err(r),
               "client ACCEPTED it (ep=%r), MitM possible" % (r and r.get("ep")), security=True)
-        hs, hf, rq = mock.stats(name)
+        hs, hf, rq, _ = mock.stats(name)
         # mock.stats() itself dials this same port with an UNVERIFIED TLS client to
         # fetch the counters, so `hs` always includes that one successful handshake
         # regardless of what the WFX client did, it is not evidence the client
@@ -408,9 +408,41 @@ def phase_resource(cfg, mock, results):
           (r is None) or (r.get("ep") != EP_SUCCESS) or (r.get("body") != "partial-body-then-brutal-reset"),
           "truncated body delivered as complete (ep=%r body=%r)" % (r and r.get("ep"), r and r.get("body")), security=True)
 
+# WFX's outbound client caches one TLS session per configured HttpEndpoint (see
+# http_openssl.cpp's NewClientSessionCallback / EndpointMetadata::cachedTlsSession) and
+# offers it back on the next connection to that same endpoint. A live TCP+TLS connection
+# just gets kept alive and reused by the connection pool though, so resumption only has
+# a chance to fire once the pooled connection actually dies and a new one has to be
+# opened - /truncate resets the connection, which is how we force that here.
+def phase_resumption(cfg, mock, results):
+    b = results.phase("resumption")
+    if not persona_available(cfg, "good"):
+        check(b, "TLS session resumption (skipped, no cert)", True); return
+
+    # Warm-up: cache is empty, this must be a full handshake
+    r = drive(cfg, "/ok", ep="good", rtimeout=12)
+    check(b, "warm-up call succeeds", is_ok(r, 200, "hello"), "got %r" % r)
+
+    # Kill every pooled connection (connLimit=4 for 'good' - more than 4 resets makes
+    # it very likely every pooled slot actually got cycled at least once)
+    for _ in range(6):
+        drive(cfg, "/truncate", ep="good", rtimeout=12)
+
+    # Each of these must reconnect (or find an already-reconnected pool slot) and still
+    # work; at least one of them should land on a fresh connection that resumes the
+    # session cached by the warm-up call above
+    reconnected = [drive(cfg, "/ok", ep="good", rtimeout=12) for _ in range(6)]
+    check(b, "calls after forced reconnect still succeed",
+          all(is_ok(r, 200, "hello") for r in reconnected), "got %r" % reconnected)
+
+    hs, hf, rq, resumed = mock.stats("good")
+    check(b, "session resumed at least once after reconnect", resumed >= 1,
+          "stats good=%r (handshakes, hs_fail, requests, resumed)" % [hs, hf, rq, resumed])
+
 
 PHASES = {"handshake": phase_handshake, "verify": phase_verify, "protocol": phase_protocol,
-          "framing": phase_framing, "desync": phase_desync, "inject": phase_inject, "resource": phase_resource}
+          "framing": phase_framing, "desync": phase_desync, "inject": phase_inject, "resource": phase_resource,
+          "resumption": phase_resumption}
 
 # Report
 def report(results, booted, server_alive):
@@ -472,8 +504,12 @@ def main():
                 results.phase(name).append(("phase-exception", False, False, repr(e)))
             common.gh_endgroup()
             if not server.alive():
-                _log("harness", _red("WFX worker NOT responding after phase '%s', see WFX logs" % name))
-                time.sleep(1.0)
+                _log("harness", _red("WFX worker NOT responding after phase '%s', waiting for revival, see WFX logs" % name))
+                t0 = time.time()
+                while time.time() - t0 < 15.0 and not server.alive():
+                    time.sleep(0.3)
+                if not server.alive():
+                    _log("harness", _red("worker did not come back within 15s"))
         return report(results, booted, server.alive())
     finally:
         follower.stop(); server.stop(); mock.stop()
