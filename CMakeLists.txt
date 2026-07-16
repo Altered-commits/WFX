@@ -151,9 +151,16 @@ target_compile_options(wfx PRIVATE
 # Linker options
 # -----------------------------
 target_link_options(wfx PRIVATE
-    # Release (GCC / Clang / AppleClang / Intel)
-    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:IntelLLVM>>>:
+    # Release (GCC / Intel)
+    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:IntelLLVM>>>:
         -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto
+    >
+
+    # Release (Clang / AppleClang): bfd's LTO plugin doesn't treat ASan's per-TU-
+    # -ctor/dtor sections as GC roots, so --gc-sections can discard one while-
+    # -.init_array/.fini_array still references it. lld does this correctly
+    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:
+        -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto -fuse-ld=lld
     >
 
     # Release (MSVC)

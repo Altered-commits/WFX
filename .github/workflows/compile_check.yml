@@ -29,7 +29,7 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential clang ninja-build
+        sudo apt-get install -y cmake build-essential clang lld ninja-build
 
     # actions/checkout resets every file's mtime to checkout time, which beats-
     # -Ninja's mtime-based staleness check against the cached build/ dir below-
