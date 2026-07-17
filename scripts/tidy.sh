@@ -12,7 +12,7 @@ set -euo pipefail
 #   ./scripts/tidy.sh --ci                 -> CI mode, see below
 #
 # Always uses THIS checkout's own './build' - never '~/.wfx/src' (that's a symlink into
-# a checkout for './scripts/install.sh --local', or a separate real clone for a plain
+# a checkout for './scripts/install.sh --local-debug'/'--local-release', or a separate real clone for a plain
 # end-user install; either way its own compile_commands.json can point somewhere other
 # than here). clang-tidy is invoked with '-p build' and looks up each file's flags
 # itself, so '--fix' always writes straight to this working tree.
@@ -20,7 +20,7 @@ set -euo pipefail
 # Locally: if './build' doesn't exist yet, this configures it (fast, no full build -
 #   compile_commands.json is emitted at CMake configure time). Files that need real
 #   OpenSSL headers (anything using recent APIs) won't fully resolve until something
-#   actually builds it, e.g. './scripts/install.sh --local' - that's the same './build',
+#   actually builds it, e.g. './scripts/install.sh --local-debug' - that's the same './build',
 #   so once it's been run once, tidy sees the real thing from then on.
 #
 # --ci: same './build', but produced by compile_check.yml's clang leg in the SAME
@@ -170,7 +170,7 @@ echo ""
 # -those newer APIs are affected - so this is a warning, not a hard stop
 if [ "$CI" != "1" ] && [ ! -f "$BUILD_DIR/openssl_lts-install/include/openssl/core_names.h" ]; then
     warn "OpenSSL not fully built in $BUILD_DIR yet - files using recent OpenSSL APIs may show" \
-        "false errors. Run './scripts/install.sh --local' (or any full build) once to fix this."
+        "false errors. Run './scripts/install.sh --local-debug' (or any full build) once to fix this."
     echo ""
 fi
 

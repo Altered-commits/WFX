@@ -43,7 +43,8 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DWFX_ENABLE_ASAN=ON
           cmake --build build
 
       # scripts/tidy_cache.py skips re-analyzing files unchanged since a prior-

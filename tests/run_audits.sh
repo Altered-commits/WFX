@@ -7,7 +7,7 @@
 #
 # This script does NOT build wfx. It assumes a wfx binary already exists,
 # either on PATH or at the repo root (where a normal CMake build leaves it).
-# Build it yourself first, with ./scripts/install.sh --local or a plain
+# Build it yourself first, with ./scripts/install.sh --local-debug or a plain
 # cmake/ninja build, the same way you would before running any audit by hand.
 #
 # Usage:
@@ -86,6 +86,12 @@ run_one() {
     local args=(--wfx "$wfx_bin")
     [[ $ci -eq 1 ]] && args+=(--ci)
     args+=("${extra_args[@]}")
+
+    # CI always starts from a clean checkout, so its template cache is never stale
+    # Locally it's gitignored and persists across runs, which can hide a template-
+    # -engine bug that a real recompile would've caught. Delete just the cache-
+    # -file so every run (local or CI) recompiles templates from current source
+    rm -f "$REPO_ROOT/tests/$dir/app/intermediate/template.wfxmeta"
 
     echo "==> running $name audit"
     (cd "$REPO_ROOT/tests/$dir" && python3 "${AUDIT_SCRIPTS[$name]}" "${args[@]}")

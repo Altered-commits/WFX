@@ -64,15 +64,18 @@ are independent, not layered on each other.
 
 Where `WFX_ENABLE_ASAN` gets turned on:
 
-- `scripts/install.sh --local` (contributor/dev builds) - **on by default**. Catches
-  dangling-pointer/use-after-free/UB bugs as soon as you hit them locally, at the cost of a
-  noticeably slower binary. Reconfigure with `cmake -B build -DWFX_ENABLE_ASAN=OFF` if you need a
-  fast build for perf testing.
-- `scripts/install.sh` (real end-user install, no `--local`) - always **off**. This is the
-  optimized build real users run.
-- `.github/workflows/compile_check.yml` - always **on**. That build artifact is only ever consumed
-  by `audit_check.yml` inside CI, never distributed, so there's no downside to it always being
-  instrumented - every audit run catches this whole bug class automatically.
+- `scripts/install.sh --local-debug` (contributor/dev builds) - **on**, paired with
+  `CMAKE_BUILD_TYPE=Debug`. Catches dangling-pointer/use-after-free/UB bugs as soon as you hit
+  them locally, at the cost of a noticeably slower binary. Use `scripts/install.sh --local-release`
+  instead if you need a fast build for perf testing (same checkout, same `build/` dir, ASan off).
+- `scripts/install.sh` (real end-user install, no flags) and `scripts/install.sh --local-release`
+  - always **off**. Both are the optimized build real users (or perf testing) run.
+- `.github/workflows/compile_check.yml` and `tidy_check.yml` - always **on**, also paired with
+  `CMAKE_BUILD_TYPE=Debug` (not Release - Release strips symbols and enables LTO, which turns
+  ASan's crash traces into useless raw offsets). That build artifact is only ever consumed by
+  `audit_check.yml` inside CI, never distributed, so there's no downside to it always being
+  instrumented - every audit run catches this whole bug class automatically, with a real stack
+  trace when it does.
 
 ---
 

@@ -56,7 +56,7 @@ jobs:
         cmake -S . -B build -G Ninja \
           -DCMAKE_C_COMPILER=${{ matrix.cc }} \
           -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
-          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_BUILD_TYPE=Debug \
           -DWFX_ENABLE_ASAN=ON
 
     - name: Build

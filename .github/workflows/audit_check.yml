@@ -31,9 +31,6 @@ jobs:
           name: wfx-binary
           path: .
 
-      - name: Make wfx executable
-        run: chmod +x wfx
-
       # wfx dynamically links against the custom-built OpenSSL 3.5.4 .so's from-
       # -compile_check.yml's build (see cmake/ssl_openssl.cmake), whose soname-
       # -(libcrypto.so.3) collides with this runner's system OpenSSL. Restoring-
@@ -65,7 +62,6 @@ jobs:
             "$GITHUB_WORKSPACE/build/openssl_lts-install/lib" \
             "$HOME/.wfx/bin/wfx.real" > "$HOME/.wfx/bin/wfx"
           chmod +x "$HOME/.wfx/bin/wfx"
-          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build/openssl_lts-install/lib" >> "$GITHUB_ENV"
 
       # openssl and mkcert are only actually needed by the tls audit (cert-
       # -generation), installed for every entry anyway so the four jobs stay-
