@@ -27,6 +27,25 @@ else()
 endif()
 
 # -----------------------------
+# Sanitizers (opt-in, off by default, catches dangling/use-after-free bugs-
+# -like the buffer-relocation one audits found; run audits against a build-
+# -with this on to sweep for more of the same class)
+# -----------------------------
+option(WFX_ENABLE_ASAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+if(WFX_ENABLE_ASAN)
+    if(MSVC)
+        message(FATAL_ERROR "WFX_ENABLE_ASAN is not supported with MSVC")
+    endif()
+
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+
+    # Tells crash_tracer.cpp to leave SIGSEGV/SIGABRT/etc alone so ASan's own handler-
+    # -stays in control and prints its actual report instead of a generic WFX crash dump
+    add_compile_definitions(WFX_ASAN_BUILD)
+endif()
+
+# -----------------------------
 # Include third-party dependencies
 # -----------------------------
 include(cmake/third_party.cmake)
@@ -132,9 +151,16 @@ target_compile_options(wfx PRIVATE
 # Linker options
 # -----------------------------
 target_link_options(wfx PRIVATE
-    # Release (GCC / Clang / AppleClang / Intel)
-    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:IntelLLVM>>>:
+    # Release (GCC / Intel)
+    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:IntelLLVM>>>:
         -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto
+    >
+
+    # Release (Clang / AppleClang): bfd's LTO plugin doesn't treat ASan's per-TU-
+    # -ctor/dtor sections as GC roots, so --gc-sections can discard one while-
+    # -.init_array/.fini_array still references it. lld does this correctly
+    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:
+        -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto -fuse-ld=lld
     >
 
     # Release (MSVC)

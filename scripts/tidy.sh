@@ -11,29 +11,28 @@ set -euo pipefail
 #   ./scripts/tidy.sh --files a.cpp b.hpp  -> lint only the given files
 #   ./scripts/tidy.sh --ci                 -> CI mode, see below
 #
-# Requires a compile database, built directly in THIS checkout - never via
-# '~/.wfx/src' (that's a separate rsync mirror produced by
-# './scripts/install.sh --local'; running clang-tidy against a mirror's
-# compile_commands.json meant '--fix' edited files under '~/.wfx/src'
-# instead of this working tree). clang-tidy is invoked with '-p <build-dir>'
-# and looks up each file's flags itself, so '--fix' writes straight to the
-# working tree.
+# Always uses THIS checkout's own './build' - never '~/.wfx/src' (that's a symlink into
+# a checkout for './scripts/install.sh --local-debug'/'--local-release', or a separate real clone for a plain
+# end-user install; either way its own compile_commands.json can point somewhere other
+# than here). clang-tidy is invoked with '-p build' and looks up each file's flags
+# itself, so '--fix' always writes straight to this working tree.
 #
-#   Local (default): './build_tidy', configured by this script on first run
-#     (config only, no full build - compile_commands.json is emitted at
-#     CMake configure time). Reused on later runs.
+# Locally: if './build' doesn't exist yet, this configures it (fast, no full build -
+#   compile_commands.json is emitted at CMake configure time). Files that need real
+#   OpenSSL headers (anything using recent APIs) won't fully resolve until something
+#   actually builds it, e.g. './scripts/install.sh --local-debug' - that's the same './build',
+#   so once it's been run once, tidy sees the real thing from then on.
 #
-#   --ci: './build', produced by compile_check.yml's clang leg in the SAME
-#     checkout this runs in. CI restores that job's cache before calling
-#     this with --ci, so nothing gets rebuilt here either
+# --ci: same './build', but produced by compile_check.yml's clang leg in the SAME
+#   checkout this runs in (a full build, so OpenSSL is always real there). CI restores
+#   that job's cache before calling this with --ci, so nothing gets rebuilt here either
 # ---------------------------------------------------------------
 
 # ---------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------
 CLANG_TIDY="${CLANG_TIDY:-clang-tidy}"
-LOCAL_BUILD_DIR="build_tidy"
-CI_BUILD_DIR="build"
+BUILD_DIR="build"
 
 # scripts/tidy_cache.py: skips re-running clang-tidy on a file whose preprocessed-
 # -content + resolved config + args are unchanged, replaying the exact prior-
@@ -55,7 +54,6 @@ IGNORE_DIRECTORIES=(
     "./.venv"
     "./.vscode"
     "./build"
-    "./build_tidy"
     "./docs"
     "./tests"
 )
@@ -148,12 +146,6 @@ echo ""
 # ---------------------------------------------------------------
 # Confirm the build we're reusing exists
 # ---------------------------------------------------------------
-if [ "$CI" = "1" ]; then
-    BUILD_DIR="$CI_BUILD_DIR"
-else
-    BUILD_DIR="$LOCAL_BUILD_DIR"
-fi
-
 if [ ! -f "$BUILD_DIR/compile_commands.json" ]; then
     if [ "$CI" = "1" ]; then
         error "No build found at $BUILD_DIR. The calling CI workflow must build it first."
@@ -169,6 +161,18 @@ fi
 
 info "Reusing build : $BUILD_DIR"
 echo ""
+
+# CMake's own configure step only declares the OpenSSL dependency, it doesn't build it-
+# -(ExternalProject_Add builds happen at 'cmake --build' time), so a configure-only-
+# -$BUILD_DIR (i.e. nobody has run a full build here yet) leaves openssl_lts-install/-
+# -include empty, and clang-tidy silently falls back to whatever OpenSSL the system-
+# -happens to have (often older, missing newer APIs). Not fatal - only files that touch-
+# -those newer APIs are affected - so this is a warning, not a hard stop
+if [ "$CI" != "1" ] && [ ! -f "$BUILD_DIR/openssl_lts-install/include/openssl/core_names.h" ]; then
+    warn "OpenSSL not fully built in $BUILD_DIR yet - files using recent OpenSSL APIs may show" \
+        "false errors. Run './scripts/install.sh --local-debug' (or any full build) once to fix this."
+    echo ""
+fi
 
 # ---------------------------------------------------------------
 # Collect files
@@ -314,8 +318,8 @@ echo ""
 FAILURES=0
 PROCESSED=0
 for file in "${FILES[@]}"; do
-    printf "[%d/%d] %s\n" "$((PROCESSED + 1))" "$FILE_COUNT" "$file"
-
+    # Filename already printed once above at dispatch time; only show output here,-
+    # -in original file order, for whichever files actually had findings
     if [ -s "$RESULT_DIR/$PROCESSED.out" ]; then
         cat "$RESULT_DIR/$PROCESSED.out"
         echo ""

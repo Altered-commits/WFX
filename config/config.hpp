@@ -75,7 +75,7 @@ struct SSLConfig {
 };
 
 struct OSSpecificConfig {
-#if defined(WFX_PLATFORM_LINUX)
+#ifdef WFX_PLATFORM_LINUX
     std::uint32_t workerProcesses = 4;
     std::uint32_t backlog = 1024;
     std::uint16_t workerShutdownTimeout = 5; // In seconds
@@ -106,7 +106,7 @@ struct MiscConfig {
 };
 
 // Main Config loader
-// TODO: Add checks for maxRecvBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
+// TODO: Add checks for maxReadBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
 class Config final {
 public: // Load from TOML
     void LoadCoreSettings(std::string_view path);

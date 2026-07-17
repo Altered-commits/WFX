@@ -9,7 +9,7 @@
 #include "shared/utils/detection_macro.hpp"
 #include <cstring>
 
-#if defined(WFX_PLATFORM_POSIX)
+#ifdef WFX_PLATFORM_POSIX
 #include <dlfcn.h>
 #endif
 
@@ -321,6 +321,7 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
     std::string_view tagView{};
 
     while(!stack.empty()) {
+        const std::size_t frameIdx = stack.size() - 1;
         TemplateFrame& frame = stack.back();
 
         // If we have any readOffset remaining, complete it before reading in more data
@@ -521,6 +522,19 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
                     return {TemplateType::FAILURE, 0};
             }
 
+            // An include just pushed a new frame via PushFile() -> stack.emplace_back(),-
+            // -which can reallocate the backing vector and leave 'frame' dangling. Re-fetch-
+            // -it by index before touching it in that case instead of using the stale ref.
+            if(tagResult == TagResult::CONTROL_TO_ANOTHER_FILE) {
+                TemplateFrame& parentFrame = stack[frameIdx];
+                if(!parentFrame.carry.empty())
+                    parentFrame.carry.clear();
+                else
+                    parentFrame.readOffset += tagView.length();
+
+                goto __ContinueOuterLoop;
+            }
+
             if(!frame.carry.empty())
                 frame.carry.clear();
 
@@ -528,9 +542,6 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
             // 'bodyView', which starts at 'frame.readOffset'
             else
                 frame.readOffset += tagView.length();
-
-            if(tagResult == TagResult::CONTROL_TO_ANOTHER_FILE)
-                goto __ContinueOuterLoop;
         }
         // Set the read offset to be zero before reading more bytes
     __NextChunk:

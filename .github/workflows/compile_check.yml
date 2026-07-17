@@ -29,7 +29,7 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential clang ninja-build
+        sudo apt-get install -y cmake build-essential clang lld ninja-build
 
     # actions/checkout resets every file's mtime to checkout time, which beats-
     # -Ninja's mtime-based staleness check against the cached build/ dir below-
@@ -47,16 +47,17 @@ jobs:
       uses: actions/cache@v6
       with:
         path: build
-        key: build-${{ matrix.compiler }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
+        key: build-${{ matrix.compiler }}-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
         restore-keys: |
-          build-${{ matrix.compiler }}-
+          build-${{ matrix.compiler }}-asan-
 
     - name: Configure
       run: |
         cmake -S . -B build -G Ninja \
           -DCMAKE_C_COMPILER=${{ matrix.cc }} \
           -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
-          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DWFX_ENABLE_ASAN=ON
 
     - name: Build
       run: cmake --build build

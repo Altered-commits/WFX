@@ -28,9 +28,16 @@ struct HttpWFXSSL {
 
     // Wrap a socket and return opaque handle
     virtual void* Wrap(SSLSocket fd) = 0;
+
     // alpnList is a wire-encoded ALPN protocol list (same encoding as the engine's hardcoded-
     // -default); empty = offer hardcoded default (http/1.1 only)
-    virtual void* WrapClient(SSLSocket fd, const char* host, std::string_view alpnList = {}) = 0;
+    //
+    // sessionSlot: caller-owned opaque per-endpoint storage for TLS session resumption
+    // May be read (offer for reuse) and/or written (store newly negotiated session)
+    // nullptr disables resumption. Caller must free via FreeCachedSession()
+    virtual void* WrapClient(SSLSocket fd, const char* host, std::string_view alpnList = {},
+                             void** sessionSlot = nullptr) = 0;
+
     // Empty if the handshake hasn't completed or the peer didn't negotiate ALPN at all
     virtual std::string_view NegotiatedProtocol(void* conn) = 0;
 
@@ -45,6 +52,9 @@ struct HttpWFXSSL {
     // Shutdown and Free connection
     virtual SSLReturn Shutdown(void* conn) = 0;
     virtual SSLReturn ForceShutdown(void* conn) = 0;
+
+    // Releases a session written into a WrapClient() sessionSlot. No-op on nullptr
+    virtual void FreeCachedSession(void* session) = 0;
 };
 
 } // namespace WFX::Http

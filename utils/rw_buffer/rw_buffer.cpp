@@ -114,7 +114,8 @@ bool RWBuffer::IsWriteInitialized() const noexcept
 }
 
 // vvv Generic Buffer Management vvv
-bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uint32_t growSize, std::uint32_t maxSize)
+bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uint32_t growSize, std::uint32_t maxSize,
+                                 std::uint32_t minSize)
 {
     if(!buffer)
         return false;
@@ -125,11 +126,15 @@ bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uin
     if(meta->bufferSize >= maxSize)
         return false;
 
-    // Advance one growSize step. growSize == 0 is treated as "jump straight to the ceiling" so a-
-    // -caller looping on this (serialize retry, region-full read) can never spin without making-
-    // -progress. Computed in 64-bit so bufferSize + growSize can't wrap a uint32 and hand back a-
-    // -newSize smaller than the current buffer, which would silently shrink and truncate the data
+    // minSize unreachable under the ceiling
+    if(minSize > maxSize)
+        return false;
+
+    // growSize == 0 means jump straight to maxSize; minSize lets the caller skip straight to a-
+    // -known target instead of looping. 64-bit to avoid wrapping bufferSize + growSize past uint32
     std::uint64_t newSize = growSize ? static_cast<std::uint64_t>(meta->bufferSize) + growSize : maxSize;
+    if(minSize > newSize)
+        newSize = minSize;
     if(newSize > maxSize)
         newSize = maxSize;
 
@@ -199,12 +204,12 @@ bool RWBuffer::GenericAppendData(char*& buffer, std::uint32_t metaSize, const ch
 }
 
 // vvv Read Buffer Management vvv
-bool RWBuffer::GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize)
+bool RWBuffer::GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize, std::uint32_t minSize)
 {
     if(!readBuffer_)
         return false;
 
-    return GenericGrowBuffer(readBuffer_, sizeof(ReadMetadata), growSize, maxSize);
+    return GenericGrowBuffer(readBuffer_, sizeof(ReadMetadata), growSize, maxSize, minSize);
 }
 
 bool RWBuffer::AppendReadData(const char* data, std::uint32_t size, std::uint32_t incSize, std::uint32_t maxSize)

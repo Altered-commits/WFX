@@ -1,7 +1,10 @@
 name: WFX Audit Check
 
 # Reusable: invoked by entry.yml AFTER the compile check, so this file owns-
-# -ONLY the audit logic.
+# -ONLY the audit logic. The wfx binary it downloads is always ASan+UBSan-
+# -instrumented (see compile_check.yml), so a dangling-pointer/use-after-free/UB-
+# -bug halts the worker immediately with a real stack trace instead of surfacing-
+# -as a confusing correctness failure three layers away.
 on:
   workflow_call:
 
@@ -12,7 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        audit: [base, endpoint, tls]
+        audit: [base, endpoint, tls, crypto]
+
+    env:
+      ASAN_OPTIONS: abort_on_error=1:halt_on_error=1:detect_leaks=0
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
 
     steps:
       - name: Checkout repository
@@ -24,22 +31,40 @@ jobs:
           name: wfx-binary
           path: .
 
-      - name: Make wfx executable
-        run: chmod +x wfx
+      # wfx dynamically links against the custom-built OpenSSL 3.5.4 .so's from-
+      # -compile_check.yml's build (see cmake/ssl_openssl.cmake), whose soname-
+      # -(libcrypto.so.3) collides with this runner's system OpenSSL. Restoring-
+      # -that job's build/ cache under the same key recovers the exact .so's it-
+      # -was linked against instead of re-uploading them as a separate artifact.
+      - name: Restore build/ cache
+        uses: actions/cache@v6
+        with:
+          path: build
+          key: build-gcc-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: |
+            build-gcc-asan-
 
       # Lays wfx out the way scripts/install.sh would: binary on PATH under-
       # -~/.wfx/bin, headers under ~/.wfx/src, since the audit apps' CMakeLists.txt-
-      # -hardcode that HOME/.wfx/src path for their include dirs.
+      # -hardcode that HOME/.wfx/src path for their include dirs. The real binary-
+      # -is renamed to wfx.real and exec'd through a wrapper that scopes-
+      # -LD_LIBRARY_PATH to just that process, so it doesn't leak into the-
+      # -system openssl/mkcert CLIs the audits also shell out to.
       - name: Set up ~/.wfx
         run: |
           mkdir -p "$HOME/.wfx/bin" "$HOME/.wfx/src"
-          cp wfx "$HOME/.wfx/bin/wfx"
-          chmod +x "$HOME/.wfx/bin/wfx"
+          cp wfx "$HOME/.wfx/bin/wfx.real"
+          chmod +x "$HOME/.wfx/bin/wfx.real"
           cp -r include shared "$HOME/.wfx/src/"
           echo "$HOME/.wfx/bin" >> "$GITHUB_PATH"
 
+          printf '#!/usr/bin/env bash\nexport LD_LIBRARY_PATH="%s"\nexec "%s" "$@"\n' \
+            "$GITHUB_WORKSPACE/build/openssl_lts-install/lib" \
+            "$HOME/.wfx/bin/wfx.real" > "$HOME/.wfx/bin/wfx"
+          chmod +x "$HOME/.wfx/bin/wfx"
+
       # openssl and mkcert are only actually needed by the tls audit (cert-
-      # -generation), installed for every entry anyway so the three jobs stay-
+      # -generation), installed for every entry anyway so the four jobs stay-
       # -identical instead of branching on matrix.audit
       - name: Install audit dependencies
         run: |

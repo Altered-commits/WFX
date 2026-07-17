@@ -14,6 +14,7 @@ const MasterAPITable* GetMasterAPI()
         GetAsyncAPIExt1,    // From async_api.hpp
         GetMemoryAPIExt1,   // From memory_api.hpp
         GetUtilsAPIExt1,    // From utils_api.hpp
+        GetCryptoApiExt1,   // From crypto_api.hpp
     };
 
     return &GlobalApi;

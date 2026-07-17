@@ -19,7 +19,10 @@ send_buffer_max              = 1100000  # ~1.05 MiB: the /big body is exactly 1 
                                #          (1,100,016 < 2,097,152) while still filling the buffer per
                                #          slow-read connection for real memory pressure.
 send_buffer_incr             = 16384   # Buffer growth step (in bytes)
-recv_buffer_max              = 65536   # >= max_body_size so a max body fits; bigger bodies overflow
+recv_buffer_max              = 73728   # max_body_size + max_header_size: a body parses alongside its
+                               #          headers in the same buffer, so recv_buffer_max needs room for
+                               #          both, not just the body alone (see config.hpp's own TODO on
+                               #          this exact invariant); bigger bodies still overflow cleanly
 recv_buffer_incr             = 8192    # Buffer growth step (in bytes)
 header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
 max_header_size              = 8192    # Max total size of all headers (header-bomb target)

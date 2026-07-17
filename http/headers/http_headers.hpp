@@ -7,6 +7,7 @@
 #include "shared/utils/hash.hpp"
 #include "utils/string/string.hpp"
 
+#include <cstddef>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -35,6 +36,9 @@ public:
     HeaderResult CheckAndGetHeader(const KeyType& key) const;
     void RemoveHeader(const KeyType& key);
     void Clear();
+
+    // Shifts every stored key/value view by 'delta' bytes; no-op for non-string_view instantiations
+    void RebasePointers(std::ptrdiff_t delta);
 
     HeaderMapType& GetHeaderMap();
     const HeaderMapType& GetHeaderMap() const;

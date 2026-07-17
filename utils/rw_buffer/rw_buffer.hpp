@@ -61,7 +61,7 @@ public: // Getter functions
     bool IsWriteInitialized() const noexcept;
 
 public: // Read buffer management
-    bool GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize);
+    bool GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize, std::uint32_t minSize = 0);
     bool AppendReadData(const char* data, std::uint32_t size, std::uint32_t incSize, std::uint32_t maxSize);
     void AdvanceReadLength(std::uint32_t n) noexcept;
     ValidRegion GetWritableReadRegion() const noexcept;
@@ -73,7 +73,8 @@ public: // Write buffer management
     ValidRegion GetWritableWriteRegion() const noexcept;
 
 private: // Internal functions
-    bool GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uint32_t growSize, std::uint32_t maxSize);
+    bool GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uint32_t growSize, std::uint32_t maxSize,
+                           std::uint32_t minSize = 0);
     bool GenericAppendData(char*& buffer, std::uint32_t metaSize, const char* data, std::uint32_t size,
                            std::uint32_t growSize, std::uint32_t maxSize);
 

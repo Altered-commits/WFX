@@ -1269,8 +1269,12 @@ def main():
             # call it out explicitly (the follower has already streamed the crash).
             if not server.alive():
                 _log("harness", _red("WFX worker NOT responding after phase '%s', "
-                                     "results below it may be crash collateral, see WFX logs above" % name))
-                time.sleep(1.5)   # give the master a beat to revive before the next phase
+                                     "waiting for revival before next phase, see WFX logs above" % name))
+                t0 = time.time()
+                while time.time() - t0 < 15.0 and not server.alive():
+                    time.sleep(0.3)
+                if not server.alive():
+                    _log("harness", _red("worker did not come back within 15s"))
 
         alive = server.alive()
         return report(results, alive)

@@ -241,6 +241,12 @@ EpollConnectionHandler::~EpollConnectionHandler()
     // -must call the user-supplied hooks explicitly
     for(auto& entry : endpoints_) {
         auto& desc = entry.meta.desc;
+
+        if(entry.meta.cachedTlsSession && sslHandler_) {
+            sslHandler_->FreeCachedSession(entry.meta.cachedTlsSession);
+            entry.meta.cachedTlsSession = nullptr;
+        }
+
         for(std::uint32_t i = 0; i < entry.pool.GetSlots(); i++) {
             EndpointCtx* ctx = entry.pool.GetPtr(i);
             ctx->rwBuffer.ResetBuffer();
@@ -1771,52 +1777,69 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
         auto result = ctx->streamGenerator.next(ctx->streamGenerator.ctx, {chunkPtr, chunkCap});
         RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 
-        if(result.action != StreamAction::CONTINUE) {
-            ctx->SetConnectionState(result.action == StreamAction::STOP_AND_ALIVE_CONN
-                                        ? ConnectionState::CONNECTION_ALIVE
-                                        : ConnectionState::CONNECTION_CLOSE);
-            break;
-        }
-
-        if(result.writtenBytes == 0 || result.writtenBytes > UINT32_MAX) {
+        // A terminal action (STOP_*) may carry its last bytes in the same call, those still-
+        // -need to be flushed below, not discarded. Only a non-terminal (CONTINUE) call with-
+        // -zero bytes is a contract violation (no progress or completion signal either)
+        const bool isTerminal = result.action != StreamAction::CONTINUE;
+        if(!isTerminal && result.writtenBytes == 0) {
             Close(ctx);
             return;
         }
 
-        if(!chunked)
-            writeMeta->dataLength = result.writtenBytes;
-        else {
-            char hdr[HDR_RESERVE + 1];
-            const int hdrLen = snprintf(hdr, HDR_RESERVE, "%zX\r\n", result.writtenBytes);
-            if(hdrLen <= 0 || hdrLen >= static_cast<int>(HDR_RESERVE)) {
-                Close(ctx);
-                return;
-            }
-
-            writeMeta->dataLength = HDR_RESERVE + result.writtenBytes + 2;
-
-            std::memcpy(chunkPtr - hdrLen, hdr, hdrLen);
-
-            rwBuffer.AdvanceWriteLength(HDR_RESERVE - hdrLen);
-            chunkPtr[result.writtenBytes] = '\r';
-            chunkPtr[result.writtenBytes + 1] = '\n';
+        // Sanity checks
+        if(result.writtenBytes > UINT32_MAX) {
+            Close(ctx);
+            return;
         }
 
-        const char* base = rwBuffer.GetWriteData();
-        while(writeMeta->writtenLength < writeMeta->dataLength) {
-            const ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, base + writeMeta->writtenLength,
-                                        writeMeta->dataLength - writeMeta->writtenLength);
-            if(n > 0)
-                writeMeta->writtenLength += static_cast<std::uint32_t>(n);
-            else if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                ctx->eventType = EventType::EVENT_SEND;
-                return;
-            }
+        if(isTerminal)
+            ctx->SetConnectionState(result.action == StreamAction::STOP_AND_ALIVE_CONN
+                                        ? ConnectionState::CONNECTION_ALIVE
+                                        : ConnectionState::CONNECTION_CLOSE);
+
+        if(result.writtenBytes > 0) {
+            // Non-chunked: raw bytes go out as-is. Chunked: wrap them in "<size-hex>\r\n<data>\r\n"-
+            // -(the size header is written right-aligned into HDR_RESERVE so no extra copy is needed)
+            if(!chunked)
+                writeMeta->dataLength = result.writtenBytes;
             else {
-                Close(ctx);
-                return;
+                char hdr[HDR_RESERVE + 1];
+                const int hdrLen = snprintf(hdr, HDR_RESERVE, "%zX\r\n", result.writtenBytes);
+                if(hdrLen <= 0 || hdrLen >= static_cast<int>(HDR_RESERVE)) {
+                    Close(ctx);
+                    return;
+                }
+
+                writeMeta->dataLength = HDR_RESERVE + result.writtenBytes + 2;
+
+                std::memcpy(chunkPtr - hdrLen, hdr, hdrLen);
+
+                rwBuffer.AdvanceWriteLength(HDR_RESERVE - hdrLen);
+                chunkPtr[result.writtenBytes] = '\r';
+                chunkPtr[result.writtenBytes + 1] = '\n';
+            }
+
+            // Write the final processed bytes to network
+            const char* base = rwBuffer.GetWriteData();
+            while(writeMeta->writtenLength < writeMeta->dataLength) {
+                const ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, base + writeMeta->writtenLength,
+                                            writeMeta->dataLength - writeMeta->writtenLength);
+                if(n > 0)
+                    writeMeta->writtenLength += static_cast<std::uint32_t>(n);
+                else if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                    ctx->eventType = EventType::EVENT_SEND;
+                    return;
+                }
+                else {
+                    Close(ctx);
+                    return;
+                }
             }
         }
+
+        if(isTerminal)
+            break;
+
         // Chunk fully sent, next iteration
     }
 
@@ -2246,7 +2269,8 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
             if(ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE) {
                 ctx->sslConn = sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(),
                                                        std::string_view{meta.config.alpnProtocols.data,
-                                                                        meta.config.alpnProtocols.length});
+                                                                        meta.config.alpnProtocols.length},
+                                                       &meta.cachedTlsSession);
 
                 if(!ctx->sslConn) {
                     HandleConnectFailure(ctx, ep, false);
@@ -3390,7 +3414,8 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
         if(ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE) {
             ctx->sslConn = sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(),
                                                    std::string_view{meta.config.alpnProtocols.data,
-                                                                    meta.config.alpnProtocols.length});
+                                                                    meta.config.alpnProtocols.length},
+                                                   &meta.cachedTlsSession);
             if(!ctx->sslConn)
                 return EndpointStatus::SSL_FAILURE;
 

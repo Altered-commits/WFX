@@ -11,7 +11,7 @@
 #include "utils/string/string.hpp"
 #include "shared/utils/detection_macro.hpp"
 
-#if defined(WFX_PLATFORM_LINUX)
+#ifdef WFX_PLATFORM_LINUX
 #include <wait.h>
 #endif
 

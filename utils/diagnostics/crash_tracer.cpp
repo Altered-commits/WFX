@@ -36,7 +36,7 @@ static std::size_t SafeStrLen(const char* s) noexcept
 
 void CrashTracer::SafeWrite(int fd, const char* s) noexcept
 {
-#if defined(WFX_PLATFORM_WINDOWS)
+#ifdef WFX_PLATFORM_WINDOWS
     DWORD w;
     WriteFile(reinterpret_cast<HANDLE>(static_cast<intptr_t>(fd)), s, (DWORD)SafeStrLen(s), &w, nullptr);
 #else
@@ -107,7 +107,7 @@ void CrashTracer::SafeWriteFrame(int fd, const Frame& f, int i) noexcept
 // vvv Common time getter vvv
 long long CrashTracer::GetEpochNow() noexcept
 {
-#if defined(WFX_PLATFORM_WINDOWS)
+#ifdef WFX_PLATFORM_WINDOWS
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
 
@@ -957,7 +957,7 @@ void CrashTracer::Install(const char* logDir) noexcept
         for(int i = 0; i < 255 && logDir[i]; i++)
             GlobalLogDir[i] = logDir[i];
     else {
-#if defined(WFX_PLATFORM_WINDOWS)
+#ifdef WFX_PLATFORM_WINDOWS
         const char* def = "C:\\Temp";
 #else
         const char* def = "/tmp";
@@ -966,10 +966,14 @@ void CrashTracer::Install(const char* logDir) noexcept
             GlobalLogDir[i] = def[i];
     }
 
+    // Under ASan, its own SIGSEGV/SIGABRT handler is more useful than ours (prints the actual-
+    // -allocation/free site)
+#ifndef WFX_ASAN_BUILD
 #if defined(WFX_PLATFORM_POSIX)
     InstallPosix();
 #elif defined(WFX_PLATFORM_WINDOWS)
     InstallWindows();
+#endif
 #endif
 }
 

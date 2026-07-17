@@ -16,6 +16,10 @@
 # A client that ACCEPTS any bad one is a MitM hole. The 'good' listener also serves
 # the HTTP framing/desync/injection corpus and the truncation/slow-response attacks,
 # so the parser's guarantees are re-checked end-to-end over TLS.
+#
+# /ctl/stats/<name> also reports session_reused (per-connection, via Python ssl's
+# SSLSocket.session_reused) so tls_audit.py can verify WFX's outbound client actually
+# resumes a session on reconnect, not just that it completes handshakes.
 
 import argparse
 import socket
@@ -30,7 +34,7 @@ _staged = {}  # id -> (raw_bytes, keep_alive)
 
 def _stat(name, key, n=1):
     with _lock:
-        s = _stats.setdefault(name, {"handshakes": 0, "hs_fail": 0, "requests": 0})
+        s = _stats.setdefault(name, {"handshakes": 0, "hs_fail": 0, "requests": 0, "resumed": 0})
         s[key] += n
 
 def _b(s):
@@ -67,8 +71,8 @@ def handle(name, method, path, headers, body, conn):
     if path.startswith("/ctl/stats/"):
         nm = path[len("/ctl/stats/"):]
         with _lock:
-            s = _stats.get(nm, {"handshakes": 0, "hs_fail": 0, "requests": 0})
-            return _cl("%d %d %d" % (s["handshakes"], s["hs_fail"], s["requests"]))
+            s = _stats.get(nm, {"handshakes": 0, "hs_fail": 0, "requests": 0, "resumed": 0})
+            return _cl("%d %d %d %d" % (s["handshakes"], s["hs_fail"], s["requests"], s["resumed"]))
     if path == "/ctl/stage":
         with _lock:
             _staged[headers.get("x-id", "0")] = (body, headers.get("x-keep", "0") == "1")
@@ -143,6 +147,8 @@ def serve_conn(raw_sock, ctx, name):
         return
 
     _stat(name, "handshakes")
+    if getattr(sock, "session_reused", False):
+        _stat(name, "resumed")
     sock.settimeout(65.0)
     conn = {"n": 0}
     buf = b""

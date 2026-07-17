@@ -33,9 +33,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build
-          key: build-clang-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
+          key: build-clang-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: |
-            build-clang-
+            build-clang-asan-
 
       # Same flags as compile_check.yml's clang leg, cache hit means no-op
       - name: Ensure compile database is up to date
@@ -43,7 +43,8 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DWFX_ENABLE_ASAN=ON
           cmake --build build
 
       # scripts/tidy_cache.py skips re-analyzing files unchanged since a prior-

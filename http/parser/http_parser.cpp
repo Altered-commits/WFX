@@ -26,6 +26,8 @@ bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from, std::siz
                   std::string_view& outLine);
 bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos);
 std::string_view Trim(std::string_view sv);
+bool PrepareForBody(ClientCtx* ctx, const char* data, HttpRequest& request, std::size_t headerEnd,
+                    std::size_t contentLen, std::uint32_t maxBufferSize);
 
 // vvv Function definitions vvv
 HttpParseState Parse(ClientCtx* ctx)
@@ -62,6 +64,7 @@ HttpParseState Parse(ClientCtx* ctx)
 
         case HttpParseState::PARSE_INCOMPLETE_HEADERS: {
             std::size_t headerEnd = 0;
+
             // Even if we werent able to find header end, update trackBytes so we don't start reading-
             // -from beginning everytime.
             if(!SafeFindHeaderEnd(data, size, trackBytes, headerEnd)) {
@@ -70,7 +73,9 @@ HttpParseState Parse(ClientCtx* ctx)
                 if(size > maxHeaderTotalSize)
                     return HttpParseState::PARSE_ERROR;
 
-                trackBytes = size;
+                // Back off up to 3 bytes: \r\n\r\n can straddle two reads, and jumping straight-
+                // -to 'size' would permanently skip past a straddling match
+                trackBytes = (size >= 3) ? size - 3 : 0;
                 return HttpParseState::PARSE_INCOMPLETE_HEADERS;
             }
 
@@ -83,6 +88,7 @@ HttpParseState Parse(ClientCtx* ctx)
             trackBytes = headerEnd;
 
             std::size_t pos = 0;
+
             // Parsing of requests will be done from starting
             if(!ParseRequest(data, size, pos, request))
                 return HttpParseState::PARSE_ERROR;
@@ -128,6 +134,9 @@ HttpParseState Parse(ClientCtx* ctx)
 
                 if(hasExpectHeader) {
                     // Set the state so the next time parser returns to this, it knows to parse body not header
+                    if(!PrepareForBody(ctx, data, request, headerEnd, contentLen, maxBufferSize))
+                        return HttpParseState::PARSE_ERROR;
+
                     ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
                     return HttpParseState::PARSE_EXPECT_100;
                 }
@@ -140,8 +149,9 @@ HttpParseState Parse(ClientCtx* ctx)
                     // Still waiting for more body data
                     if(availableBody < contentLen) {
                         // In INCOMPLETE_BODY, this means: wait until ctx.dataLength >= trackBytes
-                        trackBytes = headerEnd + contentLen;
-                        ctx->expectedBodyLength = contentLen;
+                        if(!PrepareForBody(ctx, data, request, headerEnd, contentLen, maxBufferSize))
+                            return HttpParseState::PARSE_ERROR;
+
                         ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
                         return HttpParseState::PARSE_INCOMPLETE_BODY;
                     }
@@ -292,6 +302,29 @@ bool ParseBody(const char* data, std::size_t size, std::size_t& pos, std::size_t
 
     outRequest.body = std::string_view{data + pos, contentLen};
     pos += contentLen;
+    return true;
+}
+
+bool PrepareForBody(ClientCtx* ctx, const char* data, HttpRequest& request, std::size_t headerEnd,
+                    std::size_t contentLen, std::uint32_t maxBufferSize)
+{
+    ctx->trackBytes = static_cast<std::uint32_t>(headerEnd + contentLen);
+    ctx->expectedBodyLength = static_cast<std::uint32_t>(contentLen);
+
+    // Grow to the final size in one step instead of however many 'growSize' increments the-
+    // -receive loop would take
+    if(!ctx->rwBuffer.GrowReadBuffer(1, maxBufferSize, ctx->trackBytes))
+        return false;
+
+    // request.path/headers were already parsed as views into 'data'; rebase them if the grow-
+    // -above just relocated the buffer
+    const char* newData = ctx->rwBuffer.GetReadData();
+    if(newData != data) {
+        const std::ptrdiff_t delta = newData - data;
+        request.path = std::string_view(request.path.data() + delta, request.path.size());
+        request.headers.RebasePointers(delta);
+    }
+
     return true;
 }
 
