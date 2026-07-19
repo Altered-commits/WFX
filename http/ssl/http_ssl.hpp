@@ -26,6 +26,12 @@ struct SSLResult {
 struct HttpWFXSSL {
     virtual ~HttpWFXSSL() = default;
 
+    // Builds the outbound (client) context if it isn't up yet, returns false if it can't be
+    // Idempotent, and independent of the inbound one: talking TLS to an upstream needs no-
+    // -certificate, so it must not require the server itself to serve HTTPS
+    // In-band upgrades decide this at runtime, which is why it stays callable after construction
+    virtual bool EnsureClientContext() = 0;
+
     // Wrap a socket and return opaque handle
     virtual void* Wrap(SSLSocket fd) = 0;
 

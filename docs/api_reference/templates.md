@@ -59,8 +59,14 @@ The template language itself is identical in both modes.
 - Variable mutation
 - Arbitrary code execution
 - Side effects
+- Automatic HTML escaping
 
 This feature set is **Django-like**, with minor additions (`partial`, `include`) for optimization.
+
+!!! danger "Unlike Django, output is not escaped"
+    Django and Jinja escape variables by default. WFX does not, it writes the
+    context value through verbatim. Anything user-controlled has to be escaped
+    before it reaches the context, see [Variables](#variables).
 
 ---
 
@@ -130,7 +136,24 @@ res.SendTemplate("welcome.html", std::move(o));
 
 - `{% var name %}` declares the variable name
 - Values are supplied through the JSON context
-- Variable output is HTML-escaped by default
+- Variable output is written **verbatim**, exactly as it appears in the context
+
+!!! danger "Template variables are not escaped"
+    WFX writes the context value straight into the response with no HTML
+    escaping. Rendering attacker-controlled text through `{% var %}` is a
+    cross-site scripting hole:
+
+    ```cpp
+    // If `comment` came from a user, this executes their script in every
+    // visitor's browser
+    o["comment"] = req.Body();          // "<script>steal()</script>"
+    res.SendTemplate("post.html", std::move(o));
+    ```
+
+    Escape anything user-controlled **before** putting it in the context, or
+    keep it out of templates entirely. This applies to every string that
+    originated outside your own code: request bodies, query parameters,
+    headers, database rows, and upstream API responses.
 
 !!! note
     If a variable is declared but not present in the JSON context,

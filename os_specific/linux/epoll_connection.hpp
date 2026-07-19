@@ -91,10 +91,16 @@ public: // Client operations
     bool RefreshAsyncTimer(ClientCtx* ctx, std::uint32_t delayMs, AsyncData asyncData) override;
 
 public: // Endpoint operations
-    EndpointStatus SendPayload(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
-                               AsyncData asyncData) override;
+    EndpointStatus SendPayload(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req, AsyncData asyncData,
+                               std::uint64_t pinnedSlot = 0) override;
+    std::uint64_t ReserveSlot(std::uint16_t endpointIdx) override;
+    void ReleaseSlot(std::uint64_t pinnedSlot) override;
+    EndpointStatus StreamNext(ClientCtx* clientCtx, const void* req, AsyncData asyncData) override;
+    EndpointStatus StreamNextImpl(ClientCtx* clientCtx, const void* req);
+    const void* StreamChunk(ClientCtx* clientCtx) override;
     void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, AsyncData asyncData) override;
     void SlotReceive(EndpointCtx* slotCtx, AsyncData asyncData) override;
+    void SlotUpgradeTls(EndpointCtx* slotCtx, AsyncData asyncData) override;
     StringView NegotiatedProtocol(EndpointCtx* slotCtx) override;
     void Close(EndpointCtx* ctx, bool forceClose = false, DisconnectReason reason = DisconnectReason::ERROR) override;
     void RefreshExpiry(EndpointCtx* ctx, std::uint16_t timeoutSeconds) override;
@@ -103,9 +109,25 @@ public: // Engine control
     void Run() override;
     void Stop() override;
 
+private: // Backpressure
+    // True when this slot's bytes drain piece by piece (streaming, or pushes on an idle slot), so-
+    // -a full read buffer means the consumer is behind rather than the peer misbehaving
+    bool IsIncrementallyConsumed(EndpointCtx* slotCtx) const;
+
+private: // TLS
+    // Brings up the outbound SSL context on demand, creating the handler itself if the server is-
+    // -plaintext and nothing has needed TLS yet
+    bool EnsureClientSSL();
+
 private: // Connection management
     ClientCtx* GetClientConnection();
     EndpointCtx* GetEndpointConnection(std::uint16_t endpointIdx);
+
+    // Opaque pinned-slot handle: endpointIdx | pool index | generationId. Decode returns null-
+    // -for a handle whose slot was since released or recycled, so a stale one can't be used
+    std::uint64_t EncodeSlotHandle(EndpointCtx* ctx);
+    EndpointCtx* DecodeSlotHandle(std::uint64_t pinnedSlot);
+
     EndpointCtx* FindMultiplexableSlot(std::uint16_t endpointIdx, EndpointMetadata& meta);
     void ReleaseClient(ClientCtx* ctx);
     void ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason reason = DisconnectReason::ERROR);
@@ -159,10 +181,15 @@ private: // Endpoint-specific
     std::uint64_t ComputeNextDnsRefresh(std::uint32_t minTtlSeconds, std::uint32_t userOverrideSeconds,
                                         const std::string& hostname);
     void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointMetadata& meta, bool success);
+
     // Split out of SendPayload so the non-multiplexed path (the overwhelming majority of-
     // -endpoints) stays byte-for-byte untouched. Only called when desc.hasCapacity is set
     EndpointStatus SendPayloadMultiplexed(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
                                           AsyncData asyncData, EndpointEntry& entry, std::uint64_t pendingCoalesceKey);
+
+    // Connects a closed slot, or re-arms epoll for writing on an open one. PENDING on success
+    EndpointStatus ArmSendOrConnect(EndpointCtx* ctx, EndpointEntry& entry, bool freshConnect);
+
     // Shared serialize step used by both SendPayload/SendPayloadMultiplexed and-
     // -FlushDeferredRequest (a fresh connect with onConnect defers serializing until the-
     // -handshake finishes, see EndpointCtx::pendingConnectReq). Returns EndpointStatus::SUCCESS-
@@ -170,8 +197,43 @@ private: // Endpoint-specific
     EndpointStatus SerializeSingleSlot(EndpointCtx* slotCtx, EndpointMetadata& meta, const void* req);
     EndpointStatus SerializeMultiplexed(EndpointCtx* slotCtx, EndpointMetadata& meta, const void* req,
                                         std::uint64_t* streamKey);
+
     void HandleEndpointWriteComplete(EndpointCtx* ctx);
+
+    // Parse loop, split per protocol kind. HandleEndpointReceive only picks which one runs,-
+    // -dispatching once on desc.hasCapacity instead of re-deriving it from live slot state
     void HandleEndpointReceive(EndpointCtx* ctx, bool isEof);
+    void HandleReceiveSingleSlot(EndpointCtx* ctx, EndpointEntry& entry, bool isEof);
+
+    // Server-initiated bytes on a slot with nothing in flight: hands them to desc.onPush, or-
+    // -closes the slot when the protocol has no push handler (the pre-onPush behavior)
+    void HandleEndpointPush(EndpointCtx* ctx, bool isEof);
+    void HandleReceiveMultiplexed(EndpointCtx* ctx, EndpointEntry& entry, bool isEof);
+
+    // Drops the bytes parse() consumed, sliding any remainder down. False means consumed-
+    // -exceeded what was buffered: slot is already closed, caller must not touch ctx again
+    bool ConsumeParsedBytes(EndpointCtx* ctx, std::uint32_t consumed);
+
+    // One parse() call plus the read-buffer bookkeeping that follows it, shared by the receive-
+    // -loop and StreamNext. outSlotGone true means the slot was closed, do not touch ctx again
+    ParseResult ParseSingleSlotStep(EndpointCtx* ctx, EndpointEntry& entry, bool isEof, bool* outSlotGone);
+
+    // Resolves the one in-flight request on a non-multiplexed slot, then idle-returns or closes
+    void CompleteSingleSlotRequest(EndpointCtx* ctx, EndpointEntry& entry, ParseResult pr);
+
+    // Hands one chunk of a streamed response to its waiting client. The request stays in flight-
+    // -and the chunk is borrowed until the caller's next StreamNext
+    void DeliverStreamChunk(EndpointCtx* ctx, EndpointEntry& entry, ParseResult pr);
+
+    // Ends a stream (teardown + idle-return or close) without firing a client callback, for the-
+    // -StreamNext path where completion is reported through its return value instead
+    void CompleteStreamInline(EndpointCtx* ctx, EndpointEntry& entry, ParseResult pr);
+
+    // Shared teardowns for both loops. FailSlotOnParseError also notifies a single-slot-
+    // -in-flight client first; multiplexed streams are failed by FinalizeEndpointRequest
+    void TeardownSlotOnFailure(EndpointCtx* ctx, EndpointEntry& entry);
+    void FailSlotOnParseError(EndpointCtx* ctx, EndpointEntry& entry);
+
     // Resolves and erases a single completed stream from ctx->pendingStreams (fires its client-
     // -callback / coalesce waiters, destroys its parse state), leaving the shared slot and every-
     // -other in-flight stream on it untouched. No-op if key isn't found (already resolved/stale)
@@ -223,6 +285,7 @@ private: // Misc
     std::uint64_t NowMs();
     bool SetNonBlocking(int fd);
     bool ResolveTLSFromAuto(std::uint16_t port);
+    bool EndpointUsesTls(const EndpointConfig& config, std::uint16_t port);
     bool ResolveHost(const char* host, const char* port, sockaddr_storage* outAddr, socklen_t* outLen);
     bool ResolveIP(const sockaddr_storage& inAddr, WFXIpAddress& out);
 

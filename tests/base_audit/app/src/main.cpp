@@ -8,6 +8,7 @@
 // group-prefixed paths, deliberate contract violations, and metrics.
 
 #include <wfx/http.hpp>
+#include <wfx/memory.hpp>
 #include <wfx/telemetry.hpp>
 #include <wfx/form.hpp>
 
@@ -64,7 +65,7 @@ WFX_POST("/echo-full", [](WFX::Request req, WFX::Response res) {
 })
 
 WFX_GET("/big", [](WFX::Request, WFX::Response res) {
-    static const std::string blob(1u << 20, 'A');
+    static const WFX::String blob(1u << 20, 'A');
     res.Status(200).SendText(blob);
 })
 
@@ -86,7 +87,7 @@ WFX_GET("/download", [](WFX::Request req, WFX::Response res) {
         res.Status(400).SendText("missing X-File");
         return;
     }
-    std::string path = "public/";
+    WFX::String path = "public/";
     path.append(f);
     res.SendFile(path, true);
 })

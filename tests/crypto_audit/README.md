@@ -41,7 +41,8 @@ python3 crypto_audit.py --ci
 | Code | Meaning |
 |------|---------|
 | `0` | All phases passed |
-| `1` | Correctness failure or AEAD tamper/forgery accepted |
+| `1` | Correctness failure |
+| `2` | **Security**: an AEAD forgery was accepted, i.e. tampered ciphertext, a wrong AAD, or a cross-algorithm key/nonce decrypted instead of failing authentication |
 | `3` | Server never came up |
 
 ---
@@ -60,7 +61,7 @@ Exercises `WFX::HashStream<Algo>` driven from *inside* a `res.Stream()`
 callback: the server streams deterministic content out through the response
 body while hashing it chunk-by-chunk as each callback invocation produces
 bytes, then appends the finished digest in-band (`\n#DIGEST:<hex>\n`, since
-there's no HTTP trailer mechanism exposed). The harness reconstructs the
+there's no HTTP trailer mechanism exposed). The audit reconstructs the
 expected content client-side, de-chunks the transfer-encoded response itself
 (stdlib-only, no `http.client`), and checks both the streamed bytes and the
 streaming-computed digest.

@@ -55,17 +55,21 @@
 //
 //   In parse():
 //     WFX::EpParseIncomplete     need more bytes; call again when more data arrives
+//     WFX::EpParseChunk          one chunk ready; more bytes arrive unprompted
+//     WFX::EpParseChunkFetch     one chunk ready; engine re-serializes for the next batch
 //     WFX::EpParseDone           complete message received; slot returns to pool
 //     WFX::EpParseClose          complete message received; close the slot after delivery
 //     WFX::EpParseError          unrecoverable parse error; slot is closed
 //
-//   In onConnect, from co_await handle.Send():
-//     WFX::EpSlotSendOk          bytes flushed to socket
-//     WFX::EpSlotSendError       fatal write failure; co_return EpFatal
-//
-//   In onConnect, from (co_await handle.Receive()).status:
-//     WFX::EpSlotRecvOk          data available in .buf / .len
-//     WFX::EpSlotRecvError       fatal read failure; co_return EpFatal
+//   In onConnect, from co_await handle.Send(), (co_await handle.Receive()).status-
+//   -and co_await handle.UpgradeToTLS(). Anything but EpSlotOk is fatal for the-
+//   -slot, co_return EpFatal:
+//     WFX::EpSlotOk              operation succeeded
+//     WFX::EpSlotBufferError     slot buffer couldn't be allocated or grown
+//     WFX::EpSlotEpollError      re-arming the slot with epoll failed
+//     WFX::EpSlotIoError         socket read/write failed
+//     WFX::EpSlotTlsError        TLS wrap or handshake failed
+//     WFX::EpSlotInvalidState    invalid for this slot now (upgrading an already-secure one)
 //
 // -----------------------------------------------------------------------
 // Minimal example (stateless JSON API client)
@@ -124,11 +128,11 @@
 //   WFX::EpCoro Authenticate(WFX::SlotHandle h, void* /*state*/)
 //   {
 //       static const char kAuth[] = "*2\r\n$4\r\nAUTH\r\n$8\r\npassword\r\n";
-//       if(co_await h.Send(kAuth, sizeof(kAuth) - 1) == WFX::EpSlotSendError)
+//       if(co_await h.Send(kAuth, sizeof(kAuth) - 1) != WFX::EpSlotOk)
 //           co_return WFX::EpFatal;
 //
 //       auto recv = co_await h.Receive();
-//       if(recv.status == WFX::EpSlotRecvError)
+//       if(recv.status != WFX::EpSlotOk)
 //           co_return WFX::EpFatal;
 //
 //       co_return (recv.len >= 3 && recv.buf[0] == '+') ? WFX::EpReady : WFX::EpFatal;
@@ -175,6 +179,23 @@ using Endpoint = Async::Resolve<TReq, TRes, OnConnect>;
 template <typename T> using EndpointOutput = Async::EndpointOutput<T>;
 
 // -----------------------------------------------------------------------
+// RAII owner of a connection pinned via ep.Reserve(), for protocols where-
+// -consecutive requests must share one connection (SQL transactions,-
+// -LISTEN/NOTIFY). Releases on destruction; check IsValid() first, since-
+// -Reserve() returns an empty one when the pool is exhausted.
+// -----------------------------------------------------------------------
+template <typename TReq, typename TRes> using ReservedSlot = Async::ReservedSlot<TReq, TRes>;
+
+// -----------------------------------------------------------------------
+// Chunked consumption of a large response via ep.Stream(req). Hold the-
+// -handle across the whole loop; each chunk's .data borrows engine memory-
+// -and is only valid until the next Next(), which is what keeps peak-
+// -memory at one chunk rather than the entire response.
+// -----------------------------------------------------------------------
+template <typename TReq, typename TRes> using StreamHandle = Async::StreamHandle<TReq, TRes>;
+template <typename TRes> using StreamChunk = Async::StreamChunk<TRes>;
+
+// -----------------------------------------------------------------------
 // Passed into onConnect coroutines. Use handle.Send() and handle.Receive()-
 // -to perform the handshake before the slot enters the pool.
 // -----------------------------------------------------------------------
@@ -182,7 +203,7 @@ using SlotHandle = Async::SlotHandle;
 
 // -----------------------------------------------------------------------
 // Returned by co_await handle.Receive()
-//   .status   EpSlotRecvOk or EpSlotRecvError
+//   .status   EpSlotOk, or one of the EpSlot*Error codes above
 //   .buf      pointer to received bytes (valid until the next Receive call)
 //   .len      number of bytes in .buf
 // -----------------------------------------------------------------------
@@ -298,21 +319,23 @@ inline constexpr auto EpSerError = Shared::SerializeResult::ERROR;
 // In parse() (return value)
 // -----------------------------------------------------------------------
 inline constexpr auto EpParseIncomplete = Shared::ParseResult::INCOMPLETE;
+inline constexpr auto EpParseChunk = Shared::ParseResult::CHUNK_READY;
+inline constexpr auto EpParseChunkFetch = Shared::ParseResult::CHUNK_READY_FETCH;
 inline constexpr auto EpParseDone = Shared::ParseResult::COMPLETE_KEEP_ALIVE;
 inline constexpr auto EpParseClose = Shared::ParseResult::COMPLETE_CLOSE;
 inline constexpr auto EpParseError = Shared::ParseResult::ERROR;
 
 // -----------------------------------------------------------------------
-// In onConnect (from co_await handle.Send())
+// In onConnect, shared by co_await handle.Send(), .Receive().status and-
+// -.UpgradeToTLS(). Anything other than EpSlotOk is fatal for the slot:-
+// -co_return EpFatal
 // -----------------------------------------------------------------------
-inline constexpr auto EpSlotSendOk = Shared::SlotSendResult::OK;
-inline constexpr auto EpSlotSendError = Shared::SlotSendResult::ERROR;
-
-// -----------------------------------------------------------------------
-// In onConnect (from (co_await handle.Receive()).status)
-// -----------------------------------------------------------------------
-inline constexpr auto EpSlotRecvOk = Shared::SlotReceiveStatus::OK;
-inline constexpr auto EpSlotRecvError = Shared::SlotReceiveStatus::ERROR;
+inline constexpr auto EpSlotOk = Shared::SlotStatus::OK;
+inline constexpr auto EpSlotBufferError = Shared::SlotStatus::BUFFER_ERROR;
+inline constexpr auto EpSlotEpollError = Shared::SlotStatus::EPOLL_ERROR;
+inline constexpr auto EpSlotIoError = Shared::SlotStatus::IO_ERROR;
+inline constexpr auto EpSlotTlsError = Shared::SlotStatus::TLS_ERROR;
+inline constexpr auto EpSlotInvalidState = Shared::SlotStatus::INVALID_STATE;
 
 } // namespace WFX
 

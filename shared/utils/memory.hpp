@@ -5,9 +5,12 @@
 #define WFX_SHARED_UTILS_MEMORY_HPP
 
 #include <cstddef>
-#include <new>
+#include <deque>
+#include <map>
+#include <set>
 #include <string>
-#include <utility>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifdef WFX_ENGINE_BUILD
@@ -141,8 +144,23 @@ public: // Operators
 };
 
 // vvv Useful Aliases vvv
+// Owning containers, pool-allocated
+// Sequence
 template <typename T> using Vector = std::vector<T, Allocator<T>>;
+template <typename T> using Deque = std::deque<T, Allocator<T>>;
 using String = std::basic_string<char, std::char_traits<char>, Allocator<char>>;
+
+// Hashed
+template <typename K, typename V, typename H = std::hash<K>, typename E = std::equal_to<K>>
+using UnorderedMap = std::unordered_map<K, V, H, E, Allocator<std::pair<const K, V>>>;
+template <typename T, typename H = std::hash<T>, typename E = std::equal_to<T>>
+using UnorderedSet = std::unordered_set<T, H, E, Allocator<T>>;
+
+// Ordered
+template <typename K, typename V, typename C = std::less<K>>
+using Map = std::map<K, V, C, Allocator<std::pair<const K, V>>>;
+template <typename T, typename C = std::less<T>>
+using Set = std::set<T, C, Allocator<T>>;
 
 } // namespace WFX::Shared
 

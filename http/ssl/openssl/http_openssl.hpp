@@ -13,10 +13,14 @@ namespace WFX::Http {
 
 class HttpOpenSSL : public HttpWFXSSL {
 public:
-    HttpOpenSSL();
+    // initServer builds the inbound context up front, since serving HTTPS is a boot-time fact and-
+    // -a missing certificate should fail startup rather than the first request
+    // The outbound one is left to EnsureClientContext
+    explicit HttpOpenSSL(bool initServer);
     ~HttpOpenSSL() override;
 
 public: // Main functions
+    bool EnsureClientContext() override;
     void* Wrap(SSLSocket fd) override;
     void* WrapClient(SSLSocket fd, const char* host, std::string_view alpnList = {},
                      void** sessionSlot = nullptr) override;

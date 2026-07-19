@@ -8,13 +8,38 @@ man-in-the-middle mindset: an untrusted cert, a hostname-mismatched cert, an
 expired cert, and a protocol-downgraded server. The client **must refuse every
 one of them**: accepting any is a MitM hole.
 
+## Scope: this suite vs `tests/endpoint_audit`
+
+**This suite owns the certificate and trust surface**, and is the only audit that
+needs `mkcert` plus a CA-trust step. `endpoint_audit` owns everything else about
+the outbound client and stays plaintext.
+
+`UpgradeToTLS` (in-band STARTTLS-style upgrade) is deliberately **split across
+both**, by whether a vector needs a handshake to *succeed* or only to be
+*attempted*:
+
+- **Here**: pre-upgrade plaintext must be discarded at the trust boundary
+  (CVE-2011-0411 / CVE-2026-41319), and `UpgradeToTLS` on an already-secure slot
+  must be refused. Both need a real, completing handshake.
+- **`endpoint_audit`**: the server refusing to upgrade when the protocol requires
+  TLS (must fail closed, the CVE-2015-3152 / CVE-2025-49146 class), and a server
+  that agrees then sends garbage instead of a ServerHello. Neither needs a valid
+  certificate.
+
+Note the `upgrade` persona below is the one listener here that does **not** start
+in TLS: it speaks plaintext until the client asks to upgrade, which is the entire
+point of the boundary test.
+
 ```
-harness --(TLS)--> WFX (HTTPS) /call --(TLS)--> hostile mock personality
+audit --(TLS)--> WFX (HTTPS) /call --(TLS)--> hostile mock personality
 ```
 
-WFX itself runs as an HTTPS server (`--use-https`): a TLS *endpoint* only drives
-the outbound client's SSL path when the WFX server is HTTPS too, so the harness
-talks TLS to WFX for everything, including `/health`.
+WFX itself runs as an HTTPS server (`--use-https`), so the audit talks TLS to
+WFX for everything, including `/health`. That is no longer a *requirement* for
+the outbound client: the client-side TLS context is created on demand and is
+independent of what the server itself speaks (`endpoint_audit` drives
+`UpgradeToTLS` against a plaintext WFX). It is kept here deliberately, so a
+single run exercises inbound and outbound TLS at once.
 
 ## The crown jewels (SECURITY)
 
@@ -28,6 +53,7 @@ never completing it).
 | `selfsigned` | 8444 | self-signed, unknown CA | **refuse** (untrusted) |
 | `wronghost` | 8445 | trusted CA, SAN = `evil.example` | **refuse** (hostname mismatch) |
 | `expired` | 8446 | trusted CA, `notAfter` in the past | **refuse** (expired) |
+| `upgrade` | 8448 | mkcert-trusted, **plaintext until asked** | **accept**, and discard pre-upgrade bytes |
 | `tls12` | 8447 | valid cert, server capped at TLS 1.2 | **refuse** (client requires 1.3) |
 
 `good` also does double duty as the backend for every non-cert test below: the
@@ -50,7 +76,7 @@ python3 tls_audit.py --list-phases        # list phases and exit
 python3 tls_audit.py --ci                 # no colors, GitHub Actions log groups and error annotations
 ```
 
-Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resource`, `resumption`.
+Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resource`, `resumption`, `upgrade`.
 
 ### What it does
 
@@ -72,7 +98,7 @@ Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resou
    so a listener that fails to bind or load its cert is visible immediately instead
    of silently masquerading as a WFX bug.
 4. Runs the handshake / verify / protocol / framing / desync / inject / resource /
-   resumption phases over TLS.
+   resumption / upgrade phases over TLS.
 
 ### Exit codes
 

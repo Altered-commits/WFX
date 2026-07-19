@@ -125,6 +125,13 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
         if(!region.ptr || region.len == 0) {
             if(!rwBuffer.GrowReadBuffer(config_.networkConfig.readBufferIncSize,
                                         config_.networkConfig.maxReadBufferSize)) {
+                // Fatal for one endless response, but not where bytes drain piece by piece
+                // Stop reading and leave the rest in the socket so TCP stalls the sender
+                if constexpr(std::is_same_v<Ctx, EndpointCtx>) {
+                    if(IsIncrementallyConsumed(ctx))
+                        break;
+                }
+
                 logger_.Warn("[Epoll]: Read buffer full, closing connection");
                 Close(ctx);
                 return false;
@@ -158,6 +165,14 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
         else {
             // Done reading for now, wait for more data in future
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                // A coroutine suspended in SlotReceive owns eventType until it resumes. Taking it-
+                // -here strands it: no bytes fires no completion, and the next EPOLLIN routes to-
+                // -the RECV handler instead
+                if constexpr(std::is_same_v<Ctx, EndpointCtx>) {
+                    if(ctx->inOnConnectPhase)
+                        break;
+                }
+
                 // Endpoint and client use different receive states so HandleWriteReady-
                 // -and HandleEpollIn can route without an IsEndpoint() check
                 ctx->eventType = RECV_STATE;
@@ -231,7 +246,18 @@ EpollConnectionHandler::EpollConnectionHandler(bool useHttps) : useHttps_(useHtt
     reconnectRngState_ = seed | 1ULL;
 
     if(useHttps)
-        sslHandler_ = CreateSSLHandler();
+        sslHandler_ = CreateSSLHandler(true);
+}
+
+bool EpollConnectionHandler::EnsureClientSSL()
+{
+    // Outbound TLS is independent of what the server itself speaks, so the handler may not exist-
+    // -yet on a plaintext server
+    // Built without the inbound context, which is the part that needs a certificate
+    if(!sslHandler_)
+        sslHandler_ = CreateSSLHandler(false);
+
+    return sslHandler_ && sslHandler_->EnsureClientContext();
 }
 
 EpollConnectionHandler::~EpollConnectionHandler()
@@ -501,19 +527,12 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
     meta.hostname = std::move(hostname);
     meta.port = port;
 
-    bool useTLS = false;
-    switch(config.tlsConfig) {
-        case EndpointTLSConfig::FORCE_REQUIRE:
-            useTLS = true;
-            break;
-        case EndpointTLSConfig::FORCE_INSECURE:
-            useTLS = false;
-            break;
-        case EndpointTLSConfig::AUTO:
-        default:
-            useTLS = ResolveTLSFromAuto(port);
-            break;
-    }
+    const bool useTLS = EndpointUsesTls(config, port);
+
+    // A TLS endpoint needs the outbound context whatever the server itself speaks
+    // Brought up here so a broken SSL setup fails at startup rather than on the first request
+    if(useTLS && !EnsureClientSSL())
+        logger_.Fatal("[Epoll]: Failed to initialize client SSL for endpoint: ", host);
 
     // Resolve AFTER hostname/port are set on meta
     std::uint32_t minTtl = 0;
@@ -668,6 +687,102 @@ void EpollConnectionHandler::Close(EndpointCtx* ctx, bool forceClose, Disconnect
 }
 
 // vvv Endpoint Operations vvv
+std::uint64_t EpollConnectionHandler::EncodeSlotHandle(EndpointCtx* slotCtx)
+{
+    // endpointIdx (16) | pool index (32) | generationId (16). generationId is never 0, so a-
+    // -valid handle is never 0 either, which is what lets 0 mean "no pinned slot"
+    const std::uint64_t idx = endpoints_[slotCtx->endpointIdx].pool.GetIndex(slotCtx);
+
+    return (static_cast<std::uint64_t>(slotCtx->endpointIdx) << 48) | (idx << 16) | slotCtx->generationId;
+}
+
+EndpointCtx* EpollConnectionHandler::DecodeSlotHandle(std::uint64_t pinnedSlot)
+{
+    if(pinnedSlot == 0)
+        return nullptr;
+
+    const auto endpointIdx = static_cast<std::uint16_t>(pinnedSlot >> 48);
+    const auto slotIdx = static_cast<std::uint32_t>((pinnedSlot >> 16) & 0xFFFFFFFFULL);
+    const auto generationId = static_cast<std::uint16_t>(pinnedSlot & 0xFFFFULL);
+
+    if(endpointIdx >= endpoints_.size())
+        return nullptr;
+
+    auto& entry = endpoints_[endpointIdx];
+    if(slotIdx >= entry.pool.GetSlots())
+        return nullptr;
+
+    EndpointCtx* slotCtx = entry.pool.GetPtr(slotIdx);
+
+    // A generation mismatch means this slot was torn down and recycled for an unrelated-
+    // -connection since the handle was issued; isReserved catches an already-released handle
+    if(!slotCtx || slotCtx->generationId != generationId || !slotCtx->isReserved)
+        return nullptr;
+
+    return slotCtx;
+}
+
+std::uint64_t EpollConnectionHandler::ReserveSlot(std::uint16_t endpointIdx)
+{
+    WFX_TRACE();
+
+    if(endpointIdx >= endpoints_.size())
+        return 0;
+
+    // Same allocation every request already uses; the only difference is that isReserved stops-
+    // -the completion path from freeing the bitmap bit afterwards, so the pool can't hand this-
+    // -slot to anyone else until ReleaseSlot
+    EndpointCtx* slotCtx = GetEndpointConnection(endpointIdx);
+    if(!slotCtx)
+        return 0;
+
+    slotCtx->isReserved = 1;
+
+    return EncodeSlotHandle(slotCtx);
+}
+
+void EpollConnectionHandler::ReleaseSlot(std::uint64_t pinnedSlot)
+{
+    WFX_TRACE();
+
+    EndpointCtx* slotCtx = DecodeSlotHandle(pinnedSlot);
+    if(!slotCtx)
+        return;
+
+    slotCtx->isReserved = 0;
+
+    // Released mid-request: leave it alone, the completion path now sees isReserved cleared and-
+    // -returns the slot to the pool itself once that request finishes
+    if(slotCtx->clientCtx)
+        return;
+
+    // Reserved but never actually connected (nothing was ever sent on it): there's no live-
+    // -connection to hand back, so tear the slot down instead of idling it
+    if(slotCtx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
+        ReleaseEndpoint(slotCtx);
+    else
+        ReturnEndpointToPool(slotCtx);
+}
+
+EndpointStatus EpollConnectionHandler::ArmSendOrConnect(EndpointCtx* slotCtx, EndpointEntry& entry, bool freshConnect)
+{
+    // Final dispatch step both send paths end in. A closed slot starts the connect sequence,-
+    // -an already-open one re-arms epoll for writing and swaps idle for request timeout
+    if(freshConnect)
+        return WrapConnect(slotCtx, entry);
+
+    slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
+    RefreshExpiry(slotCtx, entry.meta.config.requestTimeoutSeconds);
+
+    if(RegisterEpoll(slotCtx, EPOLL_CTL_MOD))
+        return EndpointStatus::PENDING;
+
+    logger_.Error("[Epoll]: 'ArmSendOrConnect -> RegisterEpoll(MOD)' failed for endpoint ", entry.meta.hostname, ": ",
+                  strerror(errno));
+
+    return EndpointStatus::EPOLL_ERROR;
+}
+
 EndpointStatus EpollConnectionHandler::SerializeSingleSlot(EndpointCtx* slotCtx, EndpointMetadata& meta,
                                                            const void* req)
 {
@@ -751,7 +866,7 @@ EndpointStatus EpollConnectionHandler::SerializeMultiplexed(EndpointCtx* slotCtx
 }
 
 EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
-                                                   AsyncData asyncData)
+                                                   AsyncData asyncData, std::uint64_t pinnedSlot)
 {
     if(endpointIdx >= endpoints_.size())
         return EndpointStatus::INVALID_KEY;
@@ -760,13 +875,25 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
     auto& meta = entry.meta;
     auto& desc = meta.desc;
 
+    // Resolved up front: a handle whose slot has since been recycled must fail the request-
+    // -rather than silently falling back to an unrelated pooled connection
+    EndpointCtx* reservedCtx = nullptr;
+    if(pinnedSlot != 0) {
+        reservedCtx = DecodeSlotHandle(pinnedSlot);
+        if(!reservedCtx)
+            return EndpointStatus::INVALID_KEY;
+    }
+
     std::uint64_t pendingCoalesceKey = 0;
 
     // If an identical in-flight request exists, park the client as a waiter
     // Key is computed once here and reused below when registering the primary
     // Do NOT set clientCtx->endpointCtx for waiters (ReleaseClient would otherwise-
     // -kill the in-flight slot when a waiter disconnects)
-    if(desc.coalesceKey) {
+    // Never coalesce a pinned send: the point of pinning is that these requests run on one-
+    // -specific connection, and two callers holding separate reservations can observe different-
+    // -connection-scoped state (an open transaction, session settings) despite identical bytes
+    if(!reservedCtx && desc.coalesceKey) {
         pendingCoalesceKey = desc.coalesceKey(req);
         if(pendingCoalesceKey != 0) {
             auto it = meta.coalescePending.find(pendingCoalesceKey);
@@ -778,10 +905,18 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
         }
     }
 
-    if(desc.hasCapacity)
-        return SendPayloadMultiplexed(clientCtx, endpointIdx, req, asyncData, entry, pendingCoalesceKey);
+    // Multiplexing already shares one connection across concurrent requests, so pinning has-
+    // -nothing to add there and the two would fight over slot ownership
+    if(desc.hasCapacity) {
+        if(reservedCtx)
+            return EndpointStatus::INVALID_KEY;
 
-    EndpointCtx* slotCtx = GetEndpointConnection(endpointIdx);
+        return SendPayloadMultiplexed(clientCtx, endpointIdx, req, asyncData, entry, pendingCoalesceKey);
+    }
+
+    // A pinned send reuses its reserved slot; everything downstream (serialize, connect,-
+    // -completion) is identical either way
+    EndpointCtx* slotCtx = reservedCtx ? reservedCtx : GetEndpointConnection(endpointIdx);
     if(!slotCtx)
         return EndpointStatus::POOL_EXHAUSTED;
 
@@ -836,24 +971,7 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
     clientCtx->endpointCtx = slotCtx;
     clientCtx->asyncData = asyncData;
 
-    EndpointStatus result;
-
-    // Closed slot, start from connecting to endpoint
-    if(freshConnect)
-        result = WrapConnect(slotCtx, entry);
-
-    // Re-use existing connection
-    else {
-        slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
-
-        // Switch from idle timeout to request timeout for the duration of this request
-        RefreshExpiry(slotCtx, meta.config.requestTimeoutSeconds);
-
-        result = RegisterEpoll(slotCtx, EPOLL_CTL_MOD) ? EndpointStatus::PENDING : EndpointStatus::EPOLL_ERROR;
-        if(result == EndpointStatus::EPOLL_ERROR)
-            logger_.Error("[Epoll]: 'SendPayload -> RegisterEpoll(MOD)' failed for endpoint ", meta.hostname, ": ",
-                          strerror(errno));
-    }
+    const EndpointStatus result = ArmSendOrConnect(slotCtx, entry, freshConnect);
 
     // N U L L; so Close() -> ReleaseEndpoint() doesn't ALSO try to break the bad news to this client
     if(result != EndpointStatus::PENDING) {
@@ -957,23 +1075,9 @@ EndpointStatus EpollConnectionHandler::SendPayloadMultiplexed(ClientCtx* clientC
     clientCtx->endpointCtx = slotCtx;
     clientCtx->asyncData = asyncData;
 
-    EndpointStatus result;
-
-    // Closed slot, start from connecting to endpoint. Only reachable when freshSlot is true:-
-    // -FindMultiplexableSlot only ever returns already-connected slots
-    if(freshConnect)
-        result = WrapConnect(slotCtx, entry);
-
-    // Re-use existing connection
-    else {
-        slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
-        RefreshExpiry(slotCtx, meta.config.requestTimeoutSeconds);
-
-        result = RegisterEpoll(slotCtx, EPOLL_CTL_MOD) ? EndpointStatus::PENDING : EndpointStatus::EPOLL_ERROR;
-        if(result == EndpointStatus::EPOLL_ERROR)
-            logger_.Error("[Epoll]: 'SendPayloadMultiplexed -> RegisterEpoll(MOD)' failed for endpoint ", endpointIdx,
-                          ": ", strerror(errno));
-    }
+    // freshConnect is only reachable when freshSlot is true: FindMultiplexableSlot only ever-
+    // -returns already-connected slots
+    const EndpointStatus result = ArmSendOrConnect(slotCtx, entry, freshConnect);
 
     if(result != EndpointStatus::PENDING) {
         clientCtx->endpointCtx = nullptr;
@@ -1019,20 +1123,20 @@ void EpollConnectionHandler::SlotSend(EndpointCtx* slotCtx, const void* data, st
 {
     auto& rwBuf = slotCtx->rwBuffer;
 
-    auto fireFailure = [&]() {
-        const AsyncResult fail{nullptr, 0, {.unused = 0}, AsyncStatus::IO_FAILURE};
+    auto fireFailure = [&](SlotStatus status) {
+        const AsyncResult fail{nullptr, 0, {.slotStatus = status}, AsyncStatus::IO_FAILURE};
         if(asyncData.asyncComplete)
             asyncData.asyncComplete(asyncData.userData, fail);
     };
 
     if(!rwBuf.IsWriteInitialized() && !rwBuf.InitWriteBuffer(config_.networkConfig.maxSendBufferSize)) {
-        fireFailure();
+        fireFailure(SlotStatus::BUFFER_ERROR);
         return;
     }
 
     if(!rwBuf.AppendWriteData(static_cast<const char*>(data), size, config_.networkConfig.sendBufferIncSize,
                               config_.networkConfig.maxSendBufferSize)) {
-        fireFailure();
+        fireFailure(SlotStatus::BUFFER_ERROR);
         return;
     }
 
@@ -1044,14 +1148,24 @@ void EpollConnectionHandler::SlotSend(EndpointCtx* slotCtx, const void* data, st
     // -gets a definite answer rather than a slow hang
     if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
         logger_.Error("[Epoll]: 'SlotSend -> RegisterEpoll(MOD)' failed: ", strerror(errno));
-        fireFailure();
+        fireFailure(SlotStatus::EPOLL_ERROR);
     }
 }
 
 void EpollConnectionHandler::SlotReceive(EndpointCtx* slotCtx, AsyncData asyncData)
 {
-    if(!EnsureReadReady(slotCtx))
+    auto fireFailure = [&](SlotStatus status) {
+        const AsyncResult fail{nullptr, 0, {.slotStatus = status}, AsyncStatus::IO_FAILURE};
+        if(asyncData.asyncComplete)
+            asyncData.asyncComplete(asyncData.userData, fail);
+    };
+
+    // EnsureReadReady closes the slot on allocation failure, but the caller's coroutine is-
+    // -suspended waiting on this asyncData: without firing it here that coroutine never resumes
+    if(!EnsureReadReady(slotCtx)) {
+        fireFailure(SlotStatus::BUFFER_ERROR);
         return;
+    }
 
     // 'asyncData' holds the SlotReceive completion. 'HandleEpollIn' fires it when data arrives
     slotCtx->asyncData = asyncData;
@@ -1063,10 +1177,67 @@ void EpollConnectionHandler::SlotReceive(EndpointCtx* slotCtx, AsyncData asyncDa
     // Without this MOD call, EPOLLIN would never re-fire in ET mode for that data
     if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
         logger_.Error("[Epoll]: 'SlotReceive -> RegisterEpoll(MOD)' failed: ", strerror(errno));
+        fireFailure(SlotStatus::EPOLL_ERROR);
+    }
+}
 
-        const AsyncResult fail{nullptr, 0, {.unused = 0}, AsyncStatus::IO_FAILURE};
+void EpollConnectionHandler::SlotUpgradeTls(EndpointCtx* slotCtx, AsyncData asyncData)
+{
+    WFX_TRACE();
+
+    auto& meta = endpoints_[slotCtx->endpointIdx].meta;
+
+    auto fireFailure = [&](SlotStatus status) {
+        const AsyncResult fail{nullptr, 0, {.slotStatus = status}, AsyncStatus::IO_FAILURE};
         if(asyncData.asyncComplete)
             asyncData.asyncComplete(asyncData.userData, fail);
+    };
+
+    // Nothing before this point needed TLS, so the outbound context may not be up yet
+    if(!EnsureClientSSL()) {
+        logger_.Error("[Epoll]: 'SlotUpgradeTls' could not initialize client SSL for endpoint '", meta.hostname, "'");
+        fireFailure(SlotStatus::TLS_ERROR);
+        return;
+    }
+
+    // Wrapping twice would leak the first SSL object and desync the connection. Endpoints that-
+    // -want in-band upgrades must be configured plaintext so the engine never auto-wraps them
+    if(slotCtx->sslConn) {
+        logger_.Error("[Epoll]: 'SlotUpgradeTls' called on an already-secure slot for endpoint '", meta.hostname, "'");
+        fireFailure(SlotStatus::INVALID_STATE);
+        return;
+    }
+
+    slotCtx->sslConn =
+        sslHandler_->WrapClient(slotCtx->socket, meta.hostname.c_str(),
+                                std::string_view{meta.config.alpnProtocols.data, meta.config.alpnProtocols.length},
+                                &meta.cachedTlsSession);
+
+    if(!slotCtx->sslConn) {
+        logger_.Error("[Epoll]: 'SlotUpgradeTls -> WrapClient' failed for endpoint '", meta.hostname, "'");
+        fireFailure(SlotStatus::TLS_ERROR);
+        return;
+    }
+
+    slotCtx->SetEndpointState(EndpointState::ENDPOINT_SECURE);
+
+    // Discard everything buffered before the upgrade (CVE-2011-0411 / CVE-2026-41319). A MITM can-
+    // -append plaintext after the server's go-ahead byte; carrying those bytes across the upgrade-
+    // -would let them be parsed afterwards as though the authenticated peer had sent them. Anything-
+    // -legitimately pending at this point is a protocol violation by the server anyway
+    slotCtx->rwBuffer.ClearReadBuffer();
+
+    // Park on the handshake state and let HandleEndpointHandshake drive it to completion, rather-
+    // -than stepping it here: that keeps one handshake implementation, and avoids resuming the-
+    // -caller's coroutine synchronously from inside its own await_suspend. inOnConnectPhase is-
+    // -already set (we are inside onConnect), which is what tells that handler to resume this-
+    // -asyncData instead of firing onConnect again
+    slotCtx->asyncData = asyncData;
+    slotCtx->eventType = EventType::EVENT_ENDPOINT_HANDSHAKE;
+
+    if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
+        logger_.Error("[Epoll]: 'SlotUpgradeTls -> RegisterEpoll(MOD)' failed: ", strerror(errno));
+        fireFailure(SlotStatus::EPOLL_ERROR);
     }
 }
 
@@ -1278,6 +1449,12 @@ EndpointCtx* EpollConnectionHandler::GetEndpointConnection(std::uint16_t endpoin
     ctx->generationId++;
     ctx->isPooledIdle = 0;
     metrics_->network.activeEndpointConns++;
+
+    // Anything still buffered belongs to the slot's previous life, not the response we are about-
+    // -to ask for: an onPush message left incomplete is the way this happens
+    // Carrying it over would prepend those bytes to the next response and corrupt its parse
+    if(ctx->rwBuffer.IsReadInitialized())
+        ctx->rwBuffer.ClearReadBuffer();
 
     // If it wraps to 0, bump it to 1 cuz 0 is reserved for identifying fds such as Listen/Timer
     if(ctx->generationId == 0)
@@ -1552,19 +1729,25 @@ void EpollConnectionHandler::ReturnEndpointToPool(EndpointCtx* slotCtx)
     const std::uint32_t timerIdx = entry.meta.timerBase + idx;
     timerWheel_.Cancel(timerIdx);
 
-    entry.pool.FreeSlot(idx);
-    metrics_->network.activeEndpointConns--;
+    // A pinned slot stays leased to its holder across requests, so skip handing it back: the-
+    // -bitmap bit (and the matching activeEndpointConns count) stay held until ReleaseSlot. The-
+    // -idle timeout below still applies, so a forgotten reservation can't pin a connection forever
+    if(!slotCtx->isReserved) {
+        entry.pool.FreeSlot(idx);
+        metrics_->network.activeEndpointConns--;
+
+        // Slot is now idle-pooled, open socket, no in-flight request
+        // isPooledIdle marks that activeEndpointConns was already decremented above
+        // ReleaseEndpoint checks this to avoid double-decrementing if the idle-
+        // -timer actually fires before this slot is re-leased
+        slotCtx->isPooledIdle = 1;
+    }
 
     // Slot reached a healthy idle state (fresh connect, successful reconnect, or a completed-
     // -keep-alive request), so clear any accumulated backoff attempts
     slotCtx->reconnectAttempts = 0;
 
-    // Slot is now idle-pooled, open socket, no in-flight request. Arm idle-
-    // -timeout so the connection doesn't sit open forever without traffic
-    // isPooledIdle marks that activeEndpointConns was already decremented above
-    // ReleaseEndpoint checks this to avoid double-decrementing if the idle-
-    // -timer actually fires before this slot is re-leased
-    slotCtx->isPooledIdle = 1;
+    // Arm idle timeout so the connection doesn't sit open forever without traffic
     RefreshExpiry(slotCtx, entry.meta.config.idleTimeoutSeconds);
 }
 
@@ -1581,6 +1764,22 @@ bool EpollConnectionHandler::SetNonBlocking(int fd)
         return false;
 
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+}
+
+bool EpollConnectionHandler::EndpointUsesTls(const EndpointConfig& config, std::uint16_t port)
+{
+    // The transport a fresh connection to this endpoint starts as, straight from its config
+    // Read at every connect rather than once at allocation, because SlotUpgradeTls marks a slot-
+    // -secure mid-connection and that must not survive into the slot's next connection
+    switch(config.tlsConfig) {
+        case EndpointTLSConfig::FORCE_REQUIRE:
+            return true;
+        case EndpointTLSConfig::FORCE_INSECURE:
+            return false;
+        case EndpointTLSConfig::AUTO:
+        default:
+            return ResolveTLSFromAuto(port);
+    }
 }
 
 bool EpollConnectionHandler::ResolveTLSFromAuto(std::uint16_t port)
@@ -2027,7 +2226,12 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx, std::uint
     //     below is immediately superseded by ReturnEndpointToPool's idle timeout
     RefreshExpiry(ctx, entry.meta.config.requestTimeoutSeconds);
 
-    if(ctx->eventType == EventType::EVENT_ENDPOINT_ONCONNECT)
+    // Already inside onConnect means this handshake was an in-band upgrade (SlotUpgradeTls), not-
+    // -the connect-time one: resume the suspended coroutine where it awaited instead of starting-
+    // -onConnect over from the top
+    if(ctx->inOnConnectPhase)
+        HandleEndpointAsyncCallback(ctx, {nullptr, 0, {.slotStatus = SlotStatus::OK}, AsyncStatus::COMPLETED}, false);
+    else if(ctx->eventType == EventType::EVENT_ENDPOINT_ONCONNECT)
         FireOnConnect(ctx, entry);
     else if(ctx->clientCtx)
         Write(ctx);
@@ -2174,15 +2378,16 @@ void EpollConnectionHandler::HandleEndpointEpollIn(EndpointCtx* ctx)
 
             // The parse callback only ever runs for a slot with a request in flight: clientCtx-
             // -for the single-slot path, pendingStreams for multiplexed (which never sets-
-            // -clientCtx at all). A slot with neither is idle-pooled or prewarmed: any EOF-
-            // -(peer closing an idle keep-alive) or unsolicited bytes (a misbehaving backend)-
-            // -have nothing to parse or deliver, and the slot has no outputObj, so just release-
-            // -it. Otherwise parse, passing eof through so a close-delimited body gets finalized-
-            // -on the last call
-            if(!ctx->clientCtx && !(ctx->pendingStreams && !ctx->pendingStreams->empty()))
-                Close(ctx, true);
-            else
+            // -clientCtx at all). Otherwise parse, passing eof through so a close-delimited-
+            // -body gets finalized on the last call
+            //
+            // With neither, the slot is idle-pooled or prewarmed and nothing is awaiting these-
+            // -bytes. That's server-initiated data (Postgres NOTIFY, Redis pub/sub), handed to-
+            // -desc.onPush if the protocol wants it, else the slot is released as before
+            if(ctx->clientCtx || (ctx->pendingStreams && !ctx->pendingStreams->empty()))
                 HandleEndpointReceive(ctx, eof);
+            else
+                HandleEndpointPush(ctx, eof);
 
             return;
         }
@@ -2654,11 +2859,339 @@ void EpollConnectionHandler::ResolveMultiplexedStream(EndpointCtx* slotCtx, Endp
         RefreshExpiry(slotCtx, entry.meta.config.idleTimeoutSeconds);
 }
 
+bool EpollConnectionHandler::ConsumeParsedBytes(EndpointCtx* slotCtx, std::uint32_t consumed)
+{
+    if(consumed == 0)
+        return true;
+
+    auto& rwBuf = slotCtx->rwBuffer;
+    auto* readMeta = rwBuf.GetReadMeta();
+
+    // Guard: consumed must never exceed what we actually have
+    if(consumed > readMeta->dataLength) {
+        logger_.Error("[Epoll]: While handling endpoint receive, parse returned consumed=", consumed,
+                      " but dataLength=", readMeta->dataLength, ", closing slot");
+        Close(slotCtx, true);
+        return false;
+    }
+
+    const std::uint32_t remaining = readMeta->dataLength - consumed;
+    if(remaining > 0)
+        std::memmove(rwBuf.GetReadData(), rwBuf.GetReadData() + consumed, remaining);
+
+    readMeta->dataLength = remaining;
+    return true;
+}
+
+void EpollConnectionHandler::TeardownSlotOnFailure(EndpointCtx* slotCtx, EndpointEntry& entry)
+{
+    // isShuttingDown is set before Finalize (not just inside Close, which runs after): Finalize-
+    // -fires client callbacks that synchronously resume suspended coroutines, and an ordinary-
+    // -app-level retry from one of those can reenter SendPayloadMultiplexed before this function-
+    // -returns. The flag blocks FindMultiplexableSlot from handing out this exact slot while its-
+    // -fate is still being decided
+    slotCtx->isShuttingDown = 1;
+    FinalizeEndpointRequest(slotCtx, entry.meta, false);
+    Close(slotCtx, true);
+}
+
+void EpollConnectionHandler::FailSlotOnParseError(EndpointCtx* slotCtx, EndpointEntry& entry)
+{
+    // Notify the in-flight client if there is one, since it's suspended on co_await. Only the-
+    // -single-slot path ever sets clientCtx; a multiplexed slot's streams are failed instead by-
+    // -FinalizeEndpointRequest inside TeardownSlotOnFailure below
+    if(slotCtx->clientCtx) {
+        ClientCtx* clientCtx = slotCtx->clientCtx;
+        slotCtx->clientCtx = nullptr;
+        clientCtx->endpointCtx = nullptr;
+
+        AsyncResult result{};
+        result.data = nullptr;
+        result.dataLen = 0;
+        result.status = AsyncStatus::IO_FAILURE;
+        result.endpointStatus = EndpointStatus::INTERNAL_ERROR;
+
+        HandleClientAsyncCallback(clientCtx, result, false);
+    }
+
+    TeardownSlotOnFailure(slotCtx, entry);
+}
+
+bool EpollConnectionHandler::IsIncrementallyConsumed(EndpointCtx* slotCtx) const
+{
+    if(slotCtx->isStreaming)
+        return true;
+
+    // Same test HandleEndpointEpollIn routes on: nothing in flight means these are pushes
+    return !slotCtx->clientCtx && !(slotCtx->pendingStreams && !slotCtx->pendingStreams->empty());
+}
+
+void EpollConnectionHandler::HandleEndpointPush(EndpointCtx* slotCtx, bool isEof)
+{
+    WFX_TRACE();
+
+    auto& desc = endpoints_[slotCtx->endpointIdx].meta.desc;
+    auto& rwBuf = slotCtx->rwBuffer;
+
+    // No push handler means these bytes are what they always were, a backend talking out of-
+    // -turn. isEof is the peer closing an idle keep-alive, which no handler can act on either
+    if(!desc.onPush || isEof) {
+        Close(slotCtx, true);
+        return;
+    }
+
+    // Drain every complete message that arrived; Receive() already read until EAGAIN
+    while(rwBuf.GetReadMeta()->dataLength > 0) {
+        std::uint32_t consumed = 0;
+
+        if(!desc.onPush(slotCtx->slotState, rwBuf.GetReadData(), rwBuf.GetReadMeta()->dataLength, &consumed)) {
+            Close(slotCtx, true);
+            return;
+        }
+
+        // Partial message, keep the bytes buffered and wait for the next read
+        if(consumed == 0)
+            break;
+
+        if(!ConsumeParsedBytes(slotCtx, consumed))
+            return;
+    }
+
+    // Reading may have stopped early on a full buffer, and ET never re-fires for bytes left in the-
+    // -socket, so re-arm now that draining freed room
+    if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
+        logger_.Error("[Epoll]: 'HandleEndpointPush -> RegisterEpoll(MOD)' failed: ", strerror(errno));
+        Close(slotCtx, true);
+    }
+}
+
 void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx, bool isEof)
 {
     WFX_TRACE();
 
     auto& entry = endpoints_[slotCtx->endpointIdx];
+
+    // hasCapacity is fixed at AllocateEndpoint time and exact here: a multiplexed slot resolves-
+    // -through pendingStreams/completedKey and always has clientCtx == nullptr by the time it-
+    // -reaches EVENT_ENDPOINT_RECV (FlushDeferredRequest nulls it), single-slot is the reverse
+    if(entry.meta.desc.hasCapacity)
+        HandleReceiveMultiplexed(slotCtx, entry, isEof);
+    else
+        HandleReceiveSingleSlot(slotCtx, entry, isEof);
+}
+
+ParseResult EpollConnectionHandler::ParseSingleSlotStep(EndpointCtx* slotCtx, EndpointEntry& entry, bool isEof,
+                                                        bool* outSlotGone)
+{
+    auto& desc = entry.meta.desc;
+    auto& rwBuf = slotCtx->rwBuffer;
+
+    std::uint32_t consumed = 0;
+    std::uint64_t unusedCompletedKey = 0; // multiplexed-only out-param, never read on this path
+
+    const ParseResult pr =
+        desc.parse(slotCtx->slotState, slotCtx->parseStateObj, rwBuf.GetReadData(), rwBuf.GetReadMeta()->dataLength,
+                   &consumed, slotCtx->outputObj, isEof, &unusedCompletedKey);
+
+    *outSlotGone = !ConsumeParsedBytes(slotCtx, consumed);
+
+    return pr;
+}
+
+void EpollConnectionHandler::HandleReceiveSingleSlot(EndpointCtx* slotCtx, EndpointEntry& entry, bool isEof)
+{
+    while(true) {
+        bool slotGone = false;
+        const ParseResult pr = ParseSingleSlotStep(slotCtx, entry, isEof, &slotGone);
+
+        if(slotGone)
+            return;
+
+        switch(pr) {
+            case ParseResult::INCOMPLETE:
+                // At EOF there are no more bytes coming. A parser that still wants more means the-
+                // -response was truncated, fail the in-flight request and any waiters, then close
+                if(isEof) {
+                    TeardownSlotOnFailure(slotCtx, entry);
+                    return;
+                }
+
+                // Need more bytes. eventType is already EVENT_ENDPOINT_RECV from Receive()
+                return;
+
+            case ParseResult::CHUNK_READY:
+            case ParseResult::CHUNK_READY_FETCH:
+                DeliverStreamChunk(slotCtx, entry, pr);
+                return;
+
+            case ParseResult::COMPLETE_KEEP_ALIVE:
+            case ParseResult::COMPLETE_CLOSE:
+                CompleteSingleSlotRequest(slotCtx, entry, pr);
+                return;
+
+            case ParseResult::ERROR:
+            default:
+                FailSlotOnParseError(slotCtx, entry);
+                return;
+        }
+    }
+}
+
+void EpollConnectionHandler::DeliverStreamChunk(EndpointCtx* slotCtx, EndpointEntry& entry, ParseResult pr)
+{
+    ClientCtx* clientCtx = slotCtx->clientCtx;
+
+    // A chunk with nobody waiting means the protocol emitted one outside a Stream() call
+    if(!clientCtx) {
+        logger_.Error("[Epoll]: parse returned a chunk with no client waiting for endpoint '", entry.meta.hostname,
+                      "'");
+        TeardownSlotOnFailure(slotCtx, entry);
+        return;
+    }
+
+    // The request stays in flight, so clientCtx and outputObj are deliberately left in place:-
+    // -the caller borrows the chunk until its next Next(), which is what keeps peak memory at-
+    // -one chunk instead of the whole response
+    slotCtx->isStreaming = 1;
+    slotCtx->needsFetch = (pr == ParseResult::CHUNK_READY_FETCH) ? 1 : 0;
+
+    // PENDING marks this as a chunk; the final delivery uses SUCCESS so the caller can stop
+    HandleClientAsyncCallback(
+        clientCtx, {slotCtx->outputObj, 0, {.endpointStatus = EndpointStatus::PENDING}, AsyncStatus::COMPLETED}, false);
+}
+
+EndpointStatus EpollConnectionHandler::StreamNext(ClientCtx* clientCtx, const void* req, AsyncData asyncData)
+{
+    WFX_TRACE();
+
+    clientCtx->asyncData = asyncData;
+
+    const EndpointStatus status = StreamNextImpl(clientCtx, req);
+
+    // Only PENDING resumes the caller through the completion callback
+    // Anything else resumes it synchronously (await_suspend returns false), so nothing would ever-
+    // -consume the asyncData installed above and ReleaseClient would later fire it against a-
+    // -coroutine frame that finished long ago
+    if(status != EndpointStatus::PENDING)
+        clientCtx->asyncData = {};
+
+    return status;
+}
+
+EndpointStatus EpollConnectionHandler::StreamNextImpl(ClientCtx* clientCtx, const void* req)
+{
+    EndpointCtx* slotCtx = clientCtx->endpointCtx;
+    if(!slotCtx || !slotCtx->isStreaming)
+        return EndpointStatus::INVALID_KEY;
+
+    auto& entry = endpoints_[slotCtx->endpointIdx];
+    auto& meta = entry.meta;
+
+    // Cursor/paging protocols send nothing until asked. serialize() gets the same req back and-
+    // -uses parseState (portal name, paging_state, cursor, ...) to emit the continuation instead
+    if(slotCtx->needsFetch) {
+        slotCtx->needsFetch = 0;
+
+        auto& rwBuf = slotCtx->rwBuffer;
+        if(!rwBuf.IsWriteInitialized() && !rwBuf.InitWriteBuffer(config_.networkConfig.maxSendBufferSize))
+            return EndpointStatus::BUFFER_ERROR;
+
+        const EndpointStatus sr = SerializeSingleSlot(slotCtx, meta, req);
+        if(sr != EndpointStatus::SUCCESS)
+            return sr;
+
+        return ArmSendOrConnect(slotCtx, entry, false);
+    }
+
+    // Server-driven: the last read may already hold the next chunk. Parse it here rather than-
+    // -waiting on epoll, which in ET mode will never re-fire for bytes already drained into-
+    // -rwBuffer. Delivery is by return status, not the client callback: the caller's coroutine-
+    // -is still inside await_suspend and resuming it from here would re-enter a half-suspended-
+    // -frame
+    while(slotCtx->rwBuffer.GetReadMeta()->dataLength > 0) {
+        bool slotGone = false;
+        const ParseResult pr = ParseSingleSlotStep(slotCtx, entry, false, &slotGone);
+
+        if(slotGone)
+            return EndpointStatus::INTERNAL_ERROR;
+
+        // Need more bytes than are buffered, fall through and wait on epoll
+        if(pr == ParseResult::INCOMPLETE)
+            break;
+
+        switch(pr) {
+            case ParseResult::CHUNK_READY:
+            case ParseResult::CHUNK_READY_FETCH:
+                slotCtx->needsFetch = (pr == ParseResult::CHUNK_READY_FETCH) ? 1 : 0;
+                return EndpointStatus::CHUNK_AVAILABLE;
+
+            case ParseResult::COMPLETE_KEEP_ALIVE:
+            case ParseResult::COMPLETE_CLOSE:
+                CompleteStreamInline(slotCtx, entry, pr);
+                return EndpointStatus::SUCCESS;
+
+            case ParseResult::ERROR:
+            default:
+                FailSlotOnParseError(slotCtx, entry);
+                return EndpointStatus::INTERNAL_ERROR;
+        }
+    }
+
+    slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+    RefreshExpiry(slotCtx, meta.config.requestTimeoutSeconds);
+
+    if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
+        logger_.Error("[Epoll]: 'StreamNext -> RegisterEpoll(MOD)' failed: ", strerror(errno));
+        return EndpointStatus::EPOLL_ERROR;
+    }
+
+    return EndpointStatus::PENDING;
+}
+
+const void* EpollConnectionHandler::StreamChunk(ClientCtx* clientCtx)
+{
+    EndpointCtx* slotCtx = clientCtx->endpointCtx;
+
+    return (slotCtx && slotCtx->isStreaming) ? slotCtx->outputObj : nullptr;
+}
+
+void EpollConnectionHandler::CompleteStreamInline(EndpointCtx* slotCtx, EndpointEntry& entry, ParseResult pr)
+{
+    // Same teardown CompleteSingleSlotRequest does, minus the client callback: StreamNext-
+    // -reports completion through its return value instead. The stream owns no output to hand-
+    // -over, every chunk was borrowed, so FinalizeEndpointRequest destroys it as usual
+    auto& rwBuf = slotCtx->rwBuffer;
+
+    ClientCtx* clientCtx = slotCtx->clientCtx;
+    if(clientCtx) {
+        slotCtx->clientCtx = nullptr;
+        clientCtx->endpointCtx = nullptr;
+    }
+
+    slotCtx->isStreaming = 0;
+    slotCtx->needsFetch = 0;
+
+    FinalizeEndpointRequest(slotCtx, entry.meta, pr == ParseResult::COMPLETE_KEEP_ALIVE);
+
+    if(pr == ParseResult::COMPLETE_KEEP_ALIVE) {
+        // Same trailing-byte split as CompleteSingleSlotRequest
+        auto& desc = entry.meta.desc;
+
+        if(!desc.onPush)
+            rwBuf.ClearReadBuffer();
+
+        slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+        ReturnEndpointToPool(slotCtx);
+
+        if(desc.onPush && rwBuf.GetReadMeta()->dataLength > 0)
+            HandleEndpointPush(slotCtx, false);
+    }
+    else
+        Close(slotCtx);
+}
+
+void EpollConnectionHandler::HandleReceiveMultiplexed(EndpointCtx* slotCtx, EndpointEntry& entry, bool isEof)
+{
     auto& desc = entry.meta.desc;
     auto& rwBuf = slotCtx->rwBuffer;
 
@@ -2669,28 +3202,13 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx, bool is
             desc.parse(slotCtx->slotState, slotCtx->parseStateObj, rwBuf.GetReadData(), rwBuf.GetReadMeta()->dataLength,
                        &consumed, slotCtx->outputObj, isEof, &completedKey);
 
-        if(consumed > 0) {
-            auto* readMeta = rwBuf.GetReadMeta();
+        if(!ConsumeParsedBytes(slotCtx, consumed))
+            return;
 
-            // Guard: consumed must never exceed what we actually have
-            if(consumed > readMeta->dataLength) {
-                logger_.Error("[Epoll]: While handling endpoint receive, parse returned consumed=", consumed,
-                              " but dataLength=", readMeta->dataLength, ", closing slot");
-                Close(slotCtx, true);
-                return;
-            }
-
-            const std::uint32_t remaining = readMeta->dataLength - consumed;
-            if(remaining > 0)
-                std::memmove(rwBuf.GetReadData(), rwBuf.GetReadData() + consumed, remaining);
-
-            readMeta->dataLength = remaining;
-        }
-
-        // Multiplexed slot: a non-zero key means one particular stream just finished, resolve-
-        // -and erase only that one. The connection itself may still be alive (pr == INCOMPLETE-
-        // -is the normal case here, e.g. an HTTP/2 stream ending on a connection with others-
-        // -still open), so loop back for more frames instead of falling into the switch below
+        // A non-zero key means one particular stream just finished, resolve and erase only that-
+        // -one. The connection itself may still be alive (pr == INCOMPLETE is the normal case-
+        // -here, e.g. an HTTP/2 stream ending on a connection with others still open), so loop-
+        // -back for more frames instead of falling into the switch below
         if(completedKey != 0 && slotCtx->pendingStreams) {
             ResolveMultiplexedStream(slotCtx, entry, completedKey);
 
@@ -2700,152 +3218,150 @@ void EpollConnectionHandler::HandleEndpointReceive(EndpointCtx* slotCtx, bool is
 
         switch(pr) {
             case ParseResult::INCOMPLETE:
-                // At EOF there are no more bytes coming. A parser that still wants more means the-
-                // -response was truncated, fail the in-flight request and any waiters, then close
+                // Same truncated-response handling as the single-slot path; every stream still-
+                // -pending on this slot is failed by FinalizeEndpointRequest during teardown
                 if(isEof) {
-                    // Set before Finalize (not just inside Close, which runs after): blocks a-
-                    // -reentrant SendPayloadMultiplexed (synchronously triggered by a client-
-                    // -callback Finalize fires below) from having FindMultiplexableSlot hand it-
-                    // -this exact slot while its fate is still being decided
-                    slotCtx->isShuttingDown = 1;
-                    FinalizeEndpointRequest(slotCtx, entry.meta, false);
-                    Close(slotCtx, true);
+                    TeardownSlotOnFailure(slotCtx, entry);
                     return;
                 }
 
-                // Need more bytes. eventType is already EVENT_ENDPOINT_RECV from Receive()
                 return;
 
             case ParseResult::COMPLETE_KEEP_ALIVE:
-            case ParseResult::COMPLETE_CLOSE: {
-                // Multiplexed slot: no single primary request lives in slotCtx->clientCtx (every-
-                // -request goes through pendingStreams, resolved above via completedKey). This-
-                // -return value just means the whole connection is done; behave like a plain-
-                // -teardown/idle-return and let FinalizeEndpointRequest fail any orphaned streams
-                if(slotCtx->pendingStreams && !slotCtx->clientCtx) {
-                    // Same reentrancy guard as the isEof branch above. For the KEEP_ALIVE case-
-                    // -the slot survives and goes back to the idle pool healthy, so clear the-
-                    // -flag again afterward -- it must not stay permanently poisoned against-
-                    // -future multiplexing just because this one connection cycle finished
-                    slotCtx->isShuttingDown = 1;
-                    FinalizeEndpointRequest(slotCtx, entry.meta, false);
-
-                    if(pr == ParseResult::COMPLETE_KEEP_ALIVE) {
-                        slotCtx->isShuttingDown = 0;
-                        rwBuf.ClearReadBuffer();
-                        slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
-                        ReturnEndpointToPool(slotCtx);
-                    }
-                    else
-                        Close(slotCtx);
-
-                    return;
-                }
-
-                ClientCtx* clientCtx = slotCtx->clientCtx;
-                void* outputObj = slotCtx->outputObj;
-
-                std::vector<CoalesceWaiter> waiters;
-
-                // Extract waiters and remove from coalesce map (O(1) via stored key)
-                auto& pending = entry.meta.coalescePending;
-                if(slotCtx->coalesceKey != 0) {
-                    auto it = pending.find(slotCtx->coalesceKey);
-                    if(it != pending.end()) {
-                        waiters = std::move(it->second.waiters);
-                        pending.erase(it);
-                    }
-
-                    slotCtx->coalesceKey = 0;
-                }
-
-                slotCtx->clientCtx = nullptr;
-                clientCtx->endpointCtx = nullptr;
-                slotCtx->outputObj = nullptr; // disown before any cleanup
-
-                // Fan out clones to waiters while slotCtx->slotState is still live
-                // This MUST happen before close/pool-return: COMPLETE_CLOSE destroys slotState
-                for(auto& w : waiters) {
-                    // Client disconnected before result arrived
-                    if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
-                        continue;
-
-                    w.clientCtx->endpointCtx = nullptr;
-                    void* cloned = desc.cloneOutput(slotCtx->slotState, outputObj);
-
-                    // Ownership transfers to the waiter's EndpointOutput<T> RAII wrapper
-                    if(cloned)
-                        HandleClientAsyncCallback(w.clientCtx, {cloned, 0, {.unused = 0}, AsyncStatus::COMPLETED},
-                                                  false);
-                    // Kind of worst case, normally it wouldn't happen
-                    else {
-                        AsyncResult failResult{};
-                        failResult.data = nullptr;
-                        failResult.dataLen = 0;
-                        failResult.endpointStatus = EndpointStatus::INTERNAL_ERROR;
-                        failResult.status = AsyncStatus::IO_FAILURE;
-                        HandleClientAsyncCallback(w.clientCtx, failResult, false);
-                    }
-                }
+            case ParseResult::COMPLETE_CLOSE:
+                // No single primary request lives in slotCtx->clientCtx on this path (every-
+                // -request goes through pendingStreams, resolved above via completedKey), so-
+                // -this return value only ever means the whole connection is done. Behave like-
+                // -a plain teardown/idle-return and let FinalizeEndpointRequest fail whatever-
+                // -streams were still orphaned on the slot
+                slotCtx->isShuttingDown = 1;
+                FinalizeEndpointRequest(slotCtx, entry.meta, false);
 
                 if(pr == ParseResult::COMPLETE_KEEP_ALIVE) {
-                    // Only reset parse state, do NOT touch outputObj here
-                    // If resetParseState is absent, destroy+null so SendPayload recreates fresh next request-
-                    // -without this, a keep-alive slot would carry dirty parse state into the next request
-                    if(slotCtx->parseStateObj) {
-                        if(desc.resetParseState)
-                            desc.resetParseState(slotCtx->parseStateObj);
-                        else {
-                            desc.destroyParseState(slotCtx->parseStateObj);
-                            slotCtx->parseStateObj = nullptr;
-                        }
-                    }
-
+                    // The slot survives and goes back to the idle pool healthy, so clear the-
+                    // -flag again. It must not stay permanently poisoned against future-
+                    // -multiplexing just because this one connection cycle finished
+                    slotCtx->isShuttingDown = 0;
                     rwBuf.ClearReadBuffer();
                     slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
                     ReturnEndpointToPool(slotCtx);
                 }
-                else {
-                    // CLOSE path: parse state destroy only, output handled below
-                    if(slotCtx->parseStateObj && desc.destroyParseState) {
-                        desc.destroyParseState(slotCtx->parseStateObj);
-                        slotCtx->parseStateObj = nullptr;
-                    }
-
+                else
                     Close(slotCtx);
-                }
 
-                // Ownership transfers to the primary's EndpointOutput<T> RAII wrapper
-                HandleClientAsyncCallback(clientCtx, {outputObj, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
                 return;
-            }
 
             case ParseResult::ERROR:
-            default: {
-                // Notify client if exists (as its suspended)
-                if(slotCtx->clientCtx) {
-                    ClientCtx* clientCtx = slotCtx->clientCtx;
-                    slotCtx->clientCtx = nullptr;
-                    clientCtx->endpointCtx = nullptr;
-
-                    AsyncResult result{};
-                    result.data = nullptr;
-                    result.dataLen = 0;
-                    result.status = AsyncStatus::IO_FAILURE;
-                    result.endpointStatus = EndpointStatus::INTERNAL_ERROR;
-
-                    HandleClientAsyncCallback(clientCtx, result, false);
-                }
-
-                // Same reentrancy guard as the isEof branch above
-                slotCtx->isShuttingDown = 1;
-                FinalizeEndpointRequest(slotCtx, entry.meta, false);
-                Close(slotCtx, true);
-
+            default:
+                FailSlotOnParseError(slotCtx, entry);
                 return;
-            }
         }
     }
+}
+
+void EpollConnectionHandler::CompleteSingleSlotRequest(EndpointCtx* slotCtx, EndpointEntry& entry, ParseResult pr)
+{
+    auto& desc = entry.meta.desc;
+    auto& rwBuf = slotCtx->rwBuffer;
+
+    // A stream ending: every chunk was borrowed, so there's no owned output to hand over. Signal-
+    // -completion with no data and let the shared teardown destroy the output object as usual
+    if(slotCtx->isStreaming) {
+        ClientCtx* streamClient = slotCtx->clientCtx;
+
+        CompleteStreamInline(slotCtx, entry, pr);
+
+        if(streamClient)
+            HandleClientAsyncCallback(
+                streamClient, {nullptr, 0, {.endpointStatus = EndpointStatus::SUCCESS}, AsyncStatus::COMPLETED}, false);
+
+        return;
+    }
+
+    ClientCtx* clientCtx = slotCtx->clientCtx;
+    void* outputObj = slotCtx->outputObj;
+
+    std::vector<CoalesceWaiter> waiters;
+
+    // Extract waiters and remove from coalesce map (O(1) via stored key)
+    auto& pending = entry.meta.coalescePending;
+    if(slotCtx->coalesceKey != 0) {
+        auto it = pending.find(slotCtx->coalesceKey);
+        if(it != pending.end()) {
+            waiters = std::move(it->second.waiters);
+            pending.erase(it);
+        }
+
+        slotCtx->coalesceKey = 0;
+    }
+
+    slotCtx->clientCtx = nullptr;
+    clientCtx->endpointCtx = nullptr;
+    slotCtx->outputObj = nullptr; // disown before any cleanup
+
+    // Fan out clones to waiters while slotCtx->slotState is still live
+    // This MUST happen before close/pool-return: COMPLETE_CLOSE destroys slotState
+    for(auto& w : waiters) {
+        // Client disconnected before result arrived
+        if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
+            continue;
+
+        w.clientCtx->endpointCtx = nullptr;
+        void* cloned = desc.cloneOutput(slotCtx->slotState, outputObj);
+
+        // Ownership transfers to the waiter's EndpointOutput<T> RAII wrapper
+        if(cloned)
+            HandleClientAsyncCallback(w.clientCtx, {cloned, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
+        // Kind of worst case, normally it wouldn't happen
+        else {
+            AsyncResult failResult{};
+            failResult.data = nullptr;
+            failResult.dataLen = 0;
+            failResult.endpointStatus = EndpointStatus::INTERNAL_ERROR;
+            failResult.status = AsyncStatus::IO_FAILURE;
+            HandleClientAsyncCallback(w.clientCtx, failResult, false);
+        }
+    }
+
+    if(pr == ParseResult::COMPLETE_KEEP_ALIVE) {
+        // Only reset parse state, do NOT touch outputObj here
+        // If resetParseState is absent, destroy+null so SendPayload recreates fresh next request-
+        // -without this, a keep-alive slot would carry dirty parse state into the next request
+        if(slotCtx->parseStateObj) {
+            if(desc.resetParseState)
+                desc.resetParseState(slotCtx->parseStateObj);
+            else {
+                desc.destroyParseState(slotCtx->parseStateObj);
+                slotCtx->parseStateObj = nullptr;
+            }
+        }
+
+        // Bytes trailing a response are a smuggle attempt without onPush, so they go
+        // With it they are server-initiated data, and dropping them would make delivery depend on-
+        // -whether the peer coalesced them into the response's segment
+        if(!desc.onPush)
+            rwBuf.ClearReadBuffer();
+
+        slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+        ReturnEndpointToPool(slotCtx);
+
+        // After the pool return so the slot reads as idle, but before the client callback, which-
+        // -could otherwise take this slot and route these bytes to parse
+        if(desc.onPush && rwBuf.GetReadMeta()->dataLength > 0)
+            HandleEndpointPush(slotCtx, false);
+    }
+    else {
+        // CLOSE path: parse state destroy only, output handled below
+        if(slotCtx->parseStateObj && desc.destroyParseState) {
+            desc.destroyParseState(slotCtx->parseStateObj);
+            slotCtx->parseStateObj = nullptr;
+        }
+
+        Close(slotCtx);
+    }
+
+    // Ownership transfers to the primary's EndpointOutput<T> RAII wrapper
+    HandleClientAsyncCallback(clientCtx, {outputObj, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
 }
 
 void EpollConnectionHandler::FireOnConnect(EndpointCtx* slotCtx, EndpointEntry& entry)
@@ -3393,6 +3909,13 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
     // Caller is responsible for error handling, this function never calls Close()
     auto& meta = entry.meta;
     auto& desc = meta.desc;
+
+    // Whether the slot speaks TLS belongs to the connection, not to the slot. An in-band upgrade-
+    // -(SlotUpgradeTls) marks the slot secure, and without this reset that mark outlives its-
+    // -connection: the next connect would wrap straight away and send a ClientHello to a server-
+    // -still waiting for the protocol's plaintext probe
+    const bool useTls = EndpointUsesTls(meta.config, meta.port);
+    ctx->SetEndpointState(useTls ? EndpointState::ENDPOINT_SECURE : EndpointState::ENDPOINT_INSECURE);
 
     const EndpointStatus ccResult = CreateAndConnect(ctx, meta);
     if(ccResult != EndpointStatus::PENDING)

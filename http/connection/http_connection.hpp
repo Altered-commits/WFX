@@ -79,6 +79,8 @@ enum class EventType : std::uint8_t {
 };
 
 enum class ConnectionState : std::uint8_t { CONNECTION_CLOSE, CONNECTION_ALIVE };
+static_assert(static_cast<std::uint8_t>(ConnectionState::CONNECTION_ALIVE) <= 1,
+              "'ConnectionState' no longer fits EndpointCtx's 1-bit connectionState field");
 
 enum class EndpointState : std::uint8_t {
     ENDPOINT_NONE,     // Not an endpoint type
@@ -167,21 +169,29 @@ using PendingStreamMap = std::unordered_map<std::uint64_t, PendingStream>;
 
 struct EndpointCtx : public ConnectionTag {
     // ------------------------------------------ 1 byte from ConnectionTag
+    std::uint8_t padding0 = 0; // 1 byte, aligns the 2-byte flags union below
+
     union {
         struct {
-            std::uint8_t connectionState : 2;
-            std::uint8_t endpointState : 2;
-            std::uint8_t isShuttingDown : 1;
-            std::uint8_t inOnConnectPhase : 1;
-            std::uint8_t isPooledIdle : 1;
-            std::uint8_t isAwaitingReconnect : 1;
+            std::uint16_t endpointState : 2;
+            std::uint16_t connectionState : 1; // 1 bit, ConnectionState is only CLOSE/ALIVE
+            std::uint16_t isShuttingDown : 1;
+            std::uint16_t inOnConnectPhase : 1;
+            std::uint16_t isPooledIdle : 1;
+            std::uint16_t isAwaitingReconnect : 1;
+            std::uint16_t isReserved : 1;  // Pinned by Reserve(), never auto-returned to the pool
+            std::uint16_t isStreaming : 1; // Request delivers in chunks, stays in flight between them
+            std::uint16_t needsFetch : 1;  // Next chunk needs a re-serialize (CHUNK_READY_FETCH)
+            std::uint16_t reserved : 6;
         };
-        std::uint8_t flags = 0;
-    }; // 1 bytes
+        std::uint16_t flags = 0;
+    }; // 2 bytes
 
     std::uint16_t generationId = 1;      // 2 bytes
     std::uint16_t endpointIdx = 0;       // 2 bytes
-    std::uint16_t reconnectAttempts = 0; // 2 bytes, backoff attempt count, fits in existing padding
+    std::uint16_t reconnectAttempts = 0; // 2 bytes, backoff attempt count
+    std::uint16_t padding1 = 0;          // |
+    std::uint32_t padding2 = 0;          // | -> 6 bytes, aligns the pointers below to 8
 
     ClientCtx* clientCtx = nullptr; // 8 bytes
     void* sslConn = nullptr;        // 8 bytes
@@ -318,9 +328,14 @@ struct HttpConnectionHandler {
 
     // vvv Endpoint operations vvv
     virtual Shared::EndpointStatus SendPayload(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
-                                               Shared::AsyncData asyncData) = 0;
+                                               Shared::AsyncData asyncData, std::uint64_t pinnedSlot = 0) = 0;
     virtual void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, Shared::AsyncData asyncData) = 0;
     virtual void SlotReceive(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
+    virtual void SlotUpgradeTls(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
+    virtual std::uint64_t ReserveSlot(std::uint16_t endpointIdx) = 0;
+    virtual void ReleaseSlot(std::uint64_t pinnedSlot) = 0;
+    virtual Shared::EndpointStatus StreamNext(ClientCtx* clientCtx, const void* req, Shared::AsyncData asyncData) = 0;
+    virtual const void* StreamChunk(ClientCtx* clientCtx) = 0;
     // Empty if the slot isn't TLS or the handshake hasn't completed yet. Not HTTP-specific: any-
     // -ALPN-aware protocol can call this from onConnect to decide how to speak on this connection
     virtual Shared::StringView NegotiatedProtocol(EndpointCtx* slotCtx) = 0;

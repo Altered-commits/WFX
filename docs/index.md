@@ -30,7 +30,7 @@ hide:
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Outbound Endpoint client</p>
-<p class="wfx-card-body">Pooled outbound connections with DNS refresh, retry, and request coalescing. Ships with an HTTP client; other protocols are a serialize/parse pair away.</p>
+<p class="wfx-card-body">Pooled outbound connections with DNS refresh, retry, coalescing, multiplexing, connection pinning, and chunked streaming. Ships with an HTTP client; other protocols are a serialize/parse pair away.</p>
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Middleware</p>
@@ -70,6 +70,8 @@ hide:
 </div>
 </div>
 
+<p class="wfx-sub" style="max-width: 560px; margin-top: 1.25rem !important;">...and plenty more. See the <a href="api_reference/overview/">API reference</a> for the full surface.</p>
+
 <p class="wfx-section-label">How it is designed</p>
 
 <div class="wfx-principles">
@@ -96,9 +98,8 @@ hide:
 <div class="wfx-fit-col" style="margin-bottom: 2.5rem;">
 <ul class="wfx-fit-list">
 <li><strong>Linux only.</strong> No Windows or macOS support yet.</li>
-<li><strong>No hot reload.</strong> Changing route code means restarting the server.</li>
-<li><strong>No HTTP/2 or HTTP/3.</strong> The server and outbound client both speak HTTP/1.1.</li>
-<li><strong>No built-in database client.</strong> The outbound connection pool is generic; a driver for a specific database is up to you.</li>
+<li><strong>HTTP/1.1 only.</strong> The server and the outbound client both speak it, and nothing newer.</li>
+<li><strong>An engine, not a batteries-included framework.</strong> The lower-level pieces are here and the primitives to build on them are deliberate; the conveniences layered on top of them are largely not, so expect to write some of that yourself.</li>
 <li><strong>No stability guarantees.</strong> Both the API and ABI can still change before a first stable release.</li>
 </ul>
 </div>

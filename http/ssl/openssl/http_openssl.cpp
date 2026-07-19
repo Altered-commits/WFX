@@ -21,15 +21,20 @@ using namespace WFX::Core;  // For 'Config'
 static constexpr unsigned char DEFAULT_PROTOS[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
 
 // vvv Constructors and Destructors vvv
-HttpOpenSSL::HttpOpenSSL()
+HttpOpenSSL::HttpOpenSSL(bool initServer)
 {
-    auto& logger = GetLogger();
-    auto& sslConfig = GetConfig().sslConfig;
-
     GlobalOpenSSLInit();
 
-    InitServerContext();
-    InitClientContext();
+    if(initServer)
+        InitServerContext();
+}
+
+bool HttpOpenSSL::EnsureClientContext()
+{
+    if(!clientCtx_)
+        InitClientContext();
+
+    return clientCtx_ != nullptr;
 }
 
 HttpOpenSSL::~HttpOpenSSL()

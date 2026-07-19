@@ -222,9 +222,9 @@ const EndpointAPIExt1* GetEndpointAPIExt1()
         [](const char* host, EndpointDesc desc, EndpointConfig config) -> std::uint16_t {
             return GlobalEndpointDataExt1.connHandler->AllocateEndpoint(host, desc, config);
         },
-        [](void* clientCtx, std::uint16_t endpointIdx, const void* req, AsyncData asyncData) -> EndpointStatus {
+        [](void* clientCtx, std::uint16_t endpointIdx, const void* req, AsyncData asyncData, std::uint64_t pinnedSlot) -> EndpointStatus {
             auto* ctx = static_cast<ClientCtx*>(clientCtx);
-            return GlobalEndpointDataExt1.connHandler->SendPayload(ctx, endpointIdx, req, asyncData);
+            return GlobalEndpointDataExt1.connHandler->SendPayload(ctx, endpointIdx, req, asyncData, pinnedSlot);
         },
         [](void* endpointCtx, const void* data, std::uint32_t size, AsyncData asyncData) -> void {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
@@ -234,9 +234,27 @@ const EndpointAPIExt1* GetEndpointAPIExt1()
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
             GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, asyncData);
         },
+        [](void* endpointCtx, AsyncData asyncData) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            GlobalEndpointDataExt1.connHandler->SlotUpgradeTls(ctx, asyncData);
+        },
         [](void* endpointCtx) -> StringView {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
             return GlobalEndpointDataExt1.connHandler->NegotiatedProtocol(ctx);
+        },
+        [](std::uint16_t endpointIdx) -> std::uint64_t {
+            return GlobalEndpointDataExt1.connHandler->ReserveSlot(endpointIdx);
+        },
+        [](std::uint64_t pinnedSlot) -> void {
+            GlobalEndpointDataExt1.connHandler->ReleaseSlot(pinnedSlot);
+        },
+        [](void* clientCtx, const void* req, AsyncData asyncData) -> EndpointStatus {
+            auto* ctx = static_cast<ClientCtx*>(clientCtx);
+            return GlobalEndpointDataExt1.connHandler->StreamNext(ctx, req, asyncData);
+        },
+        [](void* clientCtx) -> const void* {
+            auto* ctx = static_cast<ClientCtx*>(clientCtx);
+            return GlobalEndpointDataExt1.connHandler->StreamChunk(ctx);
         }
     };
     // clang-format on

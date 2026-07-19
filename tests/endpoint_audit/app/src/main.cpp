@@ -37,6 +37,8 @@
 
 #include <wfx/http.hpp>
 #include <wfx/memory.hpp>
+#include <wfx/telemetry.hpp>
+#include <wfx/utils/hash.hpp>
 #include <wfx/endpoint/http.hpp>
 
 #include <cstdint>
@@ -94,11 +96,7 @@ inline std::uint64_t CoalesceByPath(const void* reqVoid) noexcept
     if(r.method != WFX::HttpMethod::GET)
         return 0;
 
-    std::uint64_t h = 1469598103934665603ull; // FNV-1a 64
-    for(char c : r.path) {
-        h ^= static_cast<unsigned char>(c);
-        h *= 1099511628211ull;
-    }
+    const std::uint64_t h = WFX::Fnv1a(r.path);
 
     return h ? h : 1; // 0 is reserved for "don't coalesce"
 }
@@ -192,11 +190,11 @@ inline const auto EpPrewarm = WFX::HttpEndpoint{UPSTREAM, WFX::HttpEndpointConfi
 namespace {
 
 struct ProtoReq {
-    std::string key;
+    WFX::String key;
 };
 
 struct ProtoRes {
-    std::string value;
+    WFX::String value;
 };
 
 struct PendingReply {
@@ -210,7 +208,7 @@ struct ProtoSlotState {
     const char* token;
     std::uint64_t nextId = 1;
     std::uint32_t inFlight = 0;
-    std::vector<PendingReply> finished;
+    WFX::Vector<PendingReply> finished;
 };
 
 // Single worker (see wfx.toml, worker_processes = 1), so these are the engine's
@@ -245,15 +243,15 @@ WFX::EpCoro ProtoAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
 {
     auto* state = static_cast<ProtoSlotState*>(slotStateVoid);
 
-    std::string line = "AUTH ";
+    WFX::String line = "AUTH ";
     line += state->token;
     line += "\n";
 
-    if(co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size())) == WFX::EpSlotSendError)
+    if(co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size())) != WFX::EpSlotOk)
         co_return WFX::EpFatal;
 
     auto recv = co_await h.Receive();
-    if(recv.status == WFX::EpSlotRecvError)
+    if(recv.status != WFX::EpSlotOk)
         co_return WFX::EpFatal;
 
     std::string_view reply{recv.buf, recv.len};
@@ -311,7 +309,8 @@ WFX::Shared::ParseResult ProtoParse(void* slotStateVoid, void* /*parseState, unu
     }
 
     auto* res = WFX::New<ProtoRes>();
-    res->value = std::string(line.substr(sp + 1));
+    const auto val = line.substr(sp + 1);
+    res->value.assign(val.data(), val.size());
 
     state->finished.push_back({id, res});
     state->inFlight--;
@@ -449,6 +448,341 @@ const ProtoEp* ProtoEndpointOf(std::string_view name) noexcept
 }
 } // namespace
 
+// ---------------------------------------------------------------------------
+// Third protocol ("SP"), spoken to upstream.py's sp listener on SP_UPSTREAM.
+//
+// Proto above sets hasCapacity, so it is permanently on the multiplexed path.
+// Slot pinning and streaming are single-slot-only by construction, and onPush
+// only fires for a slot with nothing in flight, so none of the three can be
+// reached through Proto at all. SP is therefore deliberately NOT multiplexed.
+//
+// Wire format, line oriented, '\n' terminated:
+//   handshake  -> "STARTTLS\n"          <- "S\n" (upgrade) | "N\n" (stay plain)
+//                 "AUTH <token>\n"      <- "OK <connId>\n" | "ERR\n"
+//   request    -> "GET <key>\n"         <- "VAL <value>\n"
+//              -> "STREAM <n> <sz>\n"   <- "CHUNK <payload>\n" * n, "END\n"
+//              -> "PAGE <n> <sz>\n"     <- "CHUNK <payload>\n", then the engine
+//                                          re-serializes and we send "MORE\n"
+//                                          for each subsequent chunk, "END\n"
+//   push       ->                       <- "PUSH <text>\n" at any idle moment
+//
+// STREAM exercises CHUNK_READY (server keeps sending), PAGE exercises
+// CHUNK_READY_FETCH (server sends nothing until asked). connId is echoed in
+// every reply so the harness can prove which physical connection served a
+// request, which is what makes the pinning isolation assertions possible.
+// ---------------------------------------------------------------------------
+#define SP_UPSTREAM "127.0.0.1:8093"
+
+namespace {
+
+enum class SpMode : std::uint8_t { GET, STREAM_SERVER, STREAM_FETCH };
+
+struct SpReq {
+    SpMode mode = SpMode::GET;
+    WFX::String key;
+    std::uint32_t count = 0;
+    std::uint32_t size = 0;
+};
+
+// One instance per slot, reused for every chunk of a stream. value is ASSIGNED
+// per chunk, never appended to: that reuse is exactly what the engine's
+// bounded-memory guarantee rests on, and /sp/rss is what proves it holds.
+struct SpRes {
+    WFX::String value;
+    std::uint64_t connId = 0;
+    bool ended = false;
+};
+
+struct SpSlotState {
+    const char* token;
+    bool tryTls;
+    bool requireTls;
+    std::uint64_t connId = 0;
+    SpMode mode = SpMode::GET;
+    std::uint32_t pagesSent = 0;
+};
+
+// Single worker (wfx.toml, worker_processes = 1), so plain globals are fine
+std::uint64_t g_spPushCount = 0;
+std::uint64_t g_spPushBytes = 0;
+std::uint64_t g_spPushRejects = 0;
+std::uint64_t g_spDisconnects = 0;
+
+void* SpCreateSlotState(void* userCtx)
+{
+    // userCtx packs the three per-endpoint knobs as "token:tryTls:requireTls"
+    auto* state = WFX::New<SpSlotState>();
+    std::string_view cfg{static_cast<const char*>(userCtx)};
+
+    const auto c1 = cfg.find(':');
+    const auto c2 = cfg.find(':', c1 + 1);
+
+    state->token = static_cast<const char*>(userCtx); // token is the leading field
+    state->tryTls = cfg.substr(c1 + 1, c2 - c1 - 1) == "1";
+    state->requireTls = cfg.substr(c2 + 1) == "1";
+
+    return state;
+}
+
+void SpDestroySlotState(void* slotState)
+{
+    WFX::Delete(static_cast<SpSlotState*>(slotState));
+}
+
+void SpOnDisconnect(void* /*slotState*/, WFX::DisconnectReason)
+{
+    g_spDisconnects++;
+}
+
+void* SpCreateOutput(void*)
+{
+    return WFX::New<SpRes>();
+}
+
+void SpDestroyOutput(void* out)
+{
+    WFX::Delete(static_cast<SpRes*>(out));
+}
+
+WFX::EpCoro SpConnect(WFX::SlotHandle h, void* slotStateVoid)
+{
+    auto* st = static_cast<SpSlotState*>(slotStateVoid);
+
+    // The token rides along on the probe: STARTTLS precedes AUTH, so it is the
+    // only way the mock can tell which endpoint instance is connecting and
+    // therefore which upgrade behavior to act out
+    const std::string_view token{st->token, std::string_view{st->token}.find(':')};
+
+    if(st->tryTls) {
+        WFX::String probe = "STARTTLS ";
+        probe.append(token.data(), token.size());
+        probe += "\n";
+
+        if(co_await h.Send(probe.data(), static_cast<std::uint32_t>(probe.size())) != WFX::EpSlotOk)
+            co_return WFX::EpFatal;
+
+        auto answer = co_await h.Receive();
+        if(answer.status != WFX::EpSlotOk)
+            co_return WFX::EpFatal;
+
+        const std::string_view reply{answer.buf, answer.len};
+
+        if(reply.starts_with("S")) {
+            if(co_await h.UpgradeToTLS() != WFX::EpSlotOk)
+                co_return WFX::EpFatal;
+        }
+
+        // Server declined. Failing closed here is the whole point: MySQL's --ssl
+        // (CVE-2015-3152) and pgJDBC (CVE-2025-49146) both silently continued in
+        // plaintext instead, which is what made them MITM-able
+        else if(st->requireTls)
+            co_return WFX::EpFatal;
+    }
+
+    WFX::String line = "AUTH ";
+    line.append(token.data(), token.size());
+    line += "\n";
+
+    if(co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size())) != WFX::EpSlotOk)
+        co_return WFX::EpFatal;
+
+    auto recv = co_await h.Receive();
+    if(recv.status != WFX::EpSlotOk)
+        co_return WFX::EpFatal;
+
+    std::string_view ok{recv.buf, recv.len};
+    if(!ok.starts_with("OK"))
+        co_return WFX::EpFatal;
+
+    // "OK <connId>"; remembered so every response can report which physical
+    // connection produced it
+    ok.remove_prefix(2);
+    while(!ok.empty() && (ok.front() == ' '))
+        ok.remove_prefix(1);
+
+    std::uint64_t id = 0;
+    for(char c : ok) {
+        if(c < '0' || c > '9')
+            break;
+        id = id * 10 + static_cast<std::uint64_t>(c - '0');
+    }
+    st->connId = id;
+
+    co_return WFX::EpReady;
+}
+
+WFX::Shared::SerializeResult SpSerialize(void* slotStateVoid, const void* reqVoid, char* buf, std::uint32_t bufLen,
+                                         std::uint32_t* written, std::uint64_t* /*streamKey, not multiplexed*/)
+{
+    auto* st = static_cast<SpSlotState*>(slotStateVoid);
+    auto& req = *static_cast<const SpReq*>(reqVoid);
+
+    int n = 0;
+
+    // A re-serialize on a fetch stream is the engine asking for the next page.
+    // The cursor lives in slot state, exactly where a real protocol would keep
+    // its portal name / paging_state / SCAN cursor
+    if(req.mode == SpMode::STREAM_FETCH && st->pagesSent > 0)
+        n = std::snprintf(buf, bufLen, "MORE\n");
+    else if(req.mode == SpMode::STREAM_FETCH)
+        n = std::snprintf(buf, bufLen, "PAGE %u %u\n", req.count, req.size);
+    else if(req.mode == SpMode::STREAM_SERVER)
+        n = std::snprintf(buf, bufLen, "STREAM %u %u\n", req.count, req.size);
+    else
+        n = std::snprintf(buf, bufLen, "GET %s\n", req.key.c_str());
+
+    if(n < 0 || static_cast<std::uint32_t>(n) >= bufLen)
+        return WFX::EpSerBufferTooSmall;
+
+    st->mode = req.mode;
+    *written = static_cast<std::uint32_t>(n);
+
+    return WFX::EpSerOk;
+}
+
+WFX::Shared::ParseResult SpParse(void* slotStateVoid, void* /*parseState*/, const char* buf, std::uint32_t len,
+                                 std::uint32_t* consumed, void* outObj, bool isEof, std::uint64_t* /*completedKey*/)
+{
+    auto* st = static_cast<SpSlotState*>(slotStateVoid);
+    auto* out = static_cast<SpRes*>(outObj);
+
+    std::string_view view{buf, len};
+
+    const auto nl = view.find('\n');
+    if(nl == std::string_view::npos) {
+        *consumed = 0;
+        return isEof ? WFX::EpParseError : WFX::EpParseIncomplete;
+    }
+
+    std::string_view line = view.substr(0, nl);
+    *consumed = static_cast<std::uint32_t>(nl + 1);
+
+    out->connId = st->connId;
+
+    if(line.starts_with("VAL ")) {
+        out->value.assign(line.substr(4));
+        out->ended = true;
+        st->pagesSent = 0;
+        return WFX::EpParseDone;
+    }
+
+    if(line.starts_with("CHUNK ")) {
+        // assign, never append: peak memory stays at one chunk no matter how
+        // many chunks the whole response turns out to be
+        out->value.assign(line.substr(6));
+        out->ended = false;
+        st->pagesSent++;
+
+        return st->mode == SpMode::STREAM_FETCH ? WFX::EpParseChunkFetch : WFX::EpParseChunk;
+    }
+
+    if(line.starts_with("END")) {
+        out->value.clear();
+        out->ended = true;
+        st->pagesSent = 0;
+        return WFX::EpParseDone;
+    }
+
+    return WFX::EpParseError;
+}
+
+// Server-initiated "PUSH <text>". Only ever reached on a slot with no request
+// in flight; anything arriving mid-request must go through SpParse instead,
+// and the harness asserts that split explicitly
+bool SpOnPush(void* /*slotState*/, const char* buf, std::uint32_t len, std::uint32_t* consumed)
+{
+    std::string_view view{buf, len};
+
+    const auto nl = view.find('\n');
+    if(nl == std::string_view::npos) {
+        *consumed = 0; // partial line, wait for the rest
+        return true;
+    }
+
+    const std::string_view line = view.substr(0, nl);
+    *consumed = static_cast<std::uint32_t>(nl + 1);
+
+    if(!line.starts_with("PUSH ")) {
+        g_spPushRejects++;
+        return false; // undecodable -> engine closes the slot
+    }
+
+    g_spPushCount++;
+    g_spPushBytes += line.size() - 5;
+
+    return true;
+}
+
+WFX::EndpointDesc SpDesc(const char* cfg)
+{
+    return WFX::EndpointDesc{
+        .serialize        = SpSerialize,
+        .parse            = SpParse,
+        .onDisconnect     = SpOnDisconnect,
+        .createSlotState  = SpCreateSlotState,
+        .destroySlotState = SpDestroySlotState,
+        .createOutput     = SpCreateOutput,
+        .destroyOutput    = SpDestroyOutput,
+        .onPush           = SpOnPush,
+        .userCtx          = const_cast<void*>(static_cast<const void*>(cfg)),
+    };
+}
+
+using SpEp = WFX::Endpoint<SpReq, SpRes, &SpConnect>;
+
+} // namespace
+
+// Plain, no TLS probe. connLimit 4 so pinning can hold one slot while other
+// callers still get served, and pool exhaustion is reachable in a small loop.
+inline const SpEp SpGood{
+    SP_UPSTREAM, SpDesc("good:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 4,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// Probes STARTTLS and REQUIRES it. The mock answers "N", so onConnect must fail
+// closed rather than continuing in plaintext (CVE-2015-3152 / CVE-2025-49146).
+inline const SpEp SpTlsDowngrade{
+    SP_UPSTREAM, SpDesc("downgrade:1:1"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 5,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// Mock answers "S" then sends garbage instead of a ServerHello: the upgrade has
+// to fail and tear the slot down cleanly, not hang or leak the coroutine frame.
+inline const SpEp SpTlsGarbage{
+    SP_UPSTREAM, SpDesc("tlsgarbage:1:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 5,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+namespace {
+const SpEp* SpEndpointOf(std::string_view name) noexcept
+{
+    if(name == "downgrade")  return &SpTlsDowngrade;
+    if(name == "tlsgarbage") return &SpTlsGarbage;
+    return &SpGood;
+}
+} // namespace
+
 
 // Result reflection
 
@@ -470,6 +804,23 @@ static void Emit(WFX::Request& req, WFX::Response& res, WFX::Shared::EndpointSta
             j.Write("hdr", out->GetHeader(want, hv) ? hv : std::string_view{});
         }
     }
+}
+
+// Small unsigned header values (counts, sizes). Header-driven like every other
+// knob in this app, so parsing lives in one place instead of per route.
+static std::uint32_t HeaderU32(WFX::Request& req, const char* name, std::uint32_t fallback) noexcept
+{
+    std::string_view sv;
+    if(!req.GetHeader(name, sv) || sv.empty())
+        return fallback;
+
+    std::uint32_t v = 0;
+    for(char c : sv) {
+        if(c < '0' || c > '9')
+            return fallback;
+        v = v * 10 + static_cast<std::uint32_t>(c - '0');
+    }
+    return v;
 }
 
 // Map the X-Method header to the enum; unknown -> GET.
@@ -624,7 +975,7 @@ WFX_GET("/proto/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     req.GetHeader("X-Key", key);
 
     const ProtoEp* ep = ProtoEndpointOf(name);
-    auto [status, out] = co_await ep->SendPayload(ProtoReq{std::string(key)});
+    auto [status, out] = co_await ep->SendPayload(ProtoReq{WFX::String(key.data(), key.size())});
 
     res.Status(200);
     auto j = WFX::ImJson(res);
@@ -648,4 +999,229 @@ WFX_POST("/proto/disconnects/reset", [](WFX::Request, WFX::Response res) {
     g_handshakeTimeouts = 0;
     g_errorDisconnects = 0;
     res.Status(200).SendText("ok");
+})
+
+// --- SP routes: pinning, streaming, push, TLS upgrade ---------------------
+// Plain single request. X-Sp picks the endpoint instance (good/downgrade/tlsgarbage)
+WFX_GET("/sp/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    std::string_view name = "good", key = "hello";
+    req.GetHeader("X-Sp", name);
+    req.GetHeader("X-Key", key);
+
+    auto [status, out] = co_await SpEndpointOf(name)->SendPayload(SpReq{SpMode::GET, WFX::String(key.data(), key.size()), 0, 0});
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("ep", static_cast<std::uint64_t>(static_cast<unsigned>(status)));
+    if(status == WFX::EpOk) {
+        j.Write("value", std::string_view{out->value});
+        j.Write("conn", out->connId);
+    }
+
+    co_return;
+})
+
+// Drains a stream to completion, accumulating ONLY counters. Nothing here keeps
+// a chunk alive past its iteration, so if peak RSS grows with X-Count then the
+// engine is buffering, not the app. X-Mode server -> CHUNK_READY,
+// fetch -> CHUNK_READY_FETCH. X-Stop > 0 abandons the stream after N chunks.
+WFX_GET("/sp/stream", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    std::string_view mode = "server";
+    req.GetHeader("X-Mode", mode);
+
+    const std::uint32_t count = HeaderU32(req, "X-Count", 10);
+    const std::uint32_t stop = HeaderU32(req, "X-Stop", 0);
+
+    auto stream = SpGood.Stream(
+        SpReq{mode == "fetch" ? SpMode::STREAM_FETCH : SpMode::STREAM_SERVER, {}, count, HeaderU32(req, "X-Size", 64)});
+
+    std::uint64_t chunks = 0, bytes = 0, checksum = 0, conn = 0;
+    auto epStatus = WFX::EpOk;
+    bool done = false;
+
+    while(true) {
+        auto chunk = co_await stream.Next();
+
+        if(chunk.status != WFX::EpOk) {
+            epStatus = chunk.status;
+            break;
+        }
+        if(chunk.done) {
+            done = true;
+            break;
+        }
+        if(!chunk.data)
+            break;
+
+        chunks++;
+        bytes += chunk.data->value.size();
+        conn = chunk.data->connId;
+
+        // Order-sensitive fold over every chunk: proves the harness got the same
+        // bytes in the same order, so a dropped or reordered chunk is detectable
+        checksum = WFX::WyHash(std::string_view{chunk.data->value.data(), chunk.data->value.size()}, checksum);
+
+        // Abandon mid-stream: the slot must still be reclaimed, not stranded
+        if(stop != 0 && chunks >= stop)
+            break;
+    }
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("ep", static_cast<std::uint64_t>(static_cast<unsigned>(epStatus)));
+    j.Write("chunks", chunks);
+    j.Write("bytes", bytes);
+    j.Write("checksum", checksum);
+    j.Write("conn", conn);
+    j.Write("done", static_cast<std::uint64_t>(done ? 1 : 0));
+
+    co_return;
+})
+
+// Reserves a connection, runs X-N requests on it, reports the connId seen each
+// time. All must match: that is the isolation guarantee pinning exists to give.
+// X-Release early|late|double controls the release pattern.
+WFX_GET("/sp/reserve", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    std::string_view releaseMode = "late";
+    req.GetHeader("X-Release", releaseMode);
+
+    const std::uint32_t n = HeaderU32(req, "X-N", 3);
+
+    auto slot = SpGood.Reserve();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+
+    if(!slot.IsValid()) {
+        j.Write("reserved", static_cast<std::uint64_t>(0));
+        co_return;
+    }
+
+    j.Write("reserved", static_cast<std::uint64_t>(1));
+
+    std::uint64_t firstConn = 0, sameConn = 1, lastStatus = 0;
+    for(std::uint32_t i = 0; i < n; i++) {
+        auto [status, out] = co_await slot.SendPayload(SpReq{SpMode::GET, "pinned", 0, 0});
+        lastStatus = static_cast<std::uint64_t>(static_cast<unsigned>(status));
+
+        if(status != WFX::EpOk)
+            break;
+
+        if(firstConn == 0)
+            firstConn = out->connId;
+        else if(out->connId != firstConn)
+            sameConn = 0;
+    }
+
+    j.Write("conn", firstConn);
+    j.Write("same", sameConn);
+    j.Write("last", lastStatus);
+
+    // Releasing twice must be harmless; the handle clears on the first call
+    if(releaseMode == "double") {
+        slot.Release();
+        slot.Release();
+    }
+    else if(releaseMode == "early")
+        slot.Release();
+
+    // "late" leaves it to the destructor, the path an early co_return would take
+
+    co_return;
+})
+
+// Two independent reservations must land on two different physical connections
+// and must never be coalesced into one backend round trip, even byte-identical.
+WFX_GET("/sp/reserve/pair", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    auto a = SpGood.Reserve();
+    auto b = SpGood.Reserve();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("a_ok", static_cast<std::uint64_t>(a.IsValid() ? 1 : 0));
+    j.Write("b_ok", static_cast<std::uint64_t>(b.IsValid() ? 1 : 0));
+
+    if(!a.IsValid() || !b.IsValid())
+        co_return;
+
+    auto [sa, oa] = co_await a.SendPayload(SpReq{SpMode::GET, "same", 0, 0});
+    auto [sb, ob] = co_await b.SendPayload(SpReq{SpMode::GET, "same", 0, 0});
+
+    j.Write("sa", static_cast<std::uint64_t>(static_cast<unsigned>(sa)));
+    j.Write("sb", static_cast<std::uint64_t>(static_cast<unsigned>(sb)));
+
+    if(sa == WFX::EpOk && sb == WFX::EpOk) {
+        j.Write("conn_a", oa->connId);
+        j.Write("conn_b", ob->connId);
+        j.Write("distinct", static_cast<std::uint64_t>(oa->connId != ob->connId ? 1 : 0));
+    }
+
+    co_return;
+})
+
+// Streaming through a pinned connection: the two features must compose, and
+// every chunk must come from the reserved slot rather than a pooled one.
+WFX_GET("/sp/reserve/stream", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    const std::uint32_t count = HeaderU32(req, "X-Count", 8);
+
+    auto slot = SpGood.Reserve();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("reserved", static_cast<std::uint64_t>(slot.IsValid() ? 1 : 0));
+
+    if(!slot.IsValid())
+        co_return;
+
+    auto stream = slot.Stream(SpReq{SpMode::STREAM_SERVER, {}, count, 32});
+
+    std::uint64_t chunks = 0, conn = 0, sameConn = 1;
+    while(true) {
+        auto chunk = co_await stream.Next();
+        if(chunk.status != WFX::EpOk || chunk.done || !chunk.data)
+            break;
+
+        chunks++;
+        if(conn == 0)
+            conn = chunk.data->connId;
+        else if(chunk.data->connId != conn)
+            sameConn = 0;
+    }
+
+    j.Write("chunks", chunks);
+    j.Write("conn", conn);
+    j.Write("same", sameConn);
+
+    co_return;
+})
+
+WFX_GET("/sp/push", [](WFX::Request, WFX::Response res) {
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("count", g_spPushCount);
+    j.Write("bytes", g_spPushBytes);
+    j.Write("rejects", g_spPushRejects);
+    j.Write("disconnects", g_spDisconnects);
+})
+
+WFX_POST("/sp/push/reset", [](WFX::Request, WFX::Response res) {
+    g_spPushCount = 0;
+    g_spPushBytes = 0;
+    g_spPushRejects = 0;
+    g_spDisconnects = 0;
+    res.Status(200).SendText("ok");
+})
+
+// Worker memory, via the telemetry API every user already gets for free. The
+// harness samples this before and after a large stream: if peak memory tracks
+// X-Count rather than X-Size, the engine is accumulating chunks instead of
+// reusing one output object.
+WFX_GET("/sp/rss", [](WFX::Request, WFX::Response res) {
+    const auto self = WFX::GetProcessMetrics();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("rss", self.rssBytes);
+    j.Write("vm", self.vmBytes);
+    j.Write("pid", static_cast<std::uint64_t>(self.pid));
 })

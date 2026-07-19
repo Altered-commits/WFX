@@ -48,6 +48,16 @@ inline SleepForAwaitable SleepFor(std::uint32_t delayMs)
     return SleepForAwaitable{delayMs};
 }
 
+// Every slot operation reports through AsyncResult::slotStatus. A failure that never set one-
+// -(a generic engine-side I/O failure) still has to read as a failure, not as OK
+inline Shared::SlotStatus ResolveSlotStatus(const AsyncResult& r) noexcept
+{
+    if(r.status == AsyncStatus::COMPLETED)
+        return Shared::SlotStatus::OK;
+
+    return r.slotStatus == Shared::SlotStatus::OK ? Shared::SlotStatus::IO_ERROR : r.slotStatus;
+}
+
 // co_await handle.Send(...) inside onConnect coroutines
 // Suspends the coroutine, calls SlotSend via the endpoint API, resumes on flush
 struct SlotSendAwaitable : public AwaitableBase<SlotSendAwaitable> {
@@ -67,12 +77,9 @@ public:
         return true;
     }
 
-    Shared::SlotSendResult await_resume() const noexcept
+    Shared::SlotStatus await_resume() const noexcept
     {
-        if(result_.status != AsyncStatus::COMPLETED)
-            return Shared::SlotSendResult::ERROR;
-
-        return Shared::SlotSendResult::OK;
+        return ResolveSlotStatus(result_);
     }
 };
 
@@ -80,7 +87,7 @@ public:
 // Suspends the coroutine, arms the slot for the next read, resumes when data arrives
 // Buffer pointer is only valid until the next SlotReceive call
 struct SlotReceiveResult {
-    Shared::SlotReceiveStatus status;
+    Shared::SlotStatus status;
     const char* buf;
     std::uint32_t len;
 };
@@ -101,10 +108,34 @@ public:
 
     SlotReceiveResult await_resume() const noexcept
     {
-        if(result_.status != AsyncStatus::COMPLETED)
-            return {Shared::SlotReceiveStatus::ERROR, nullptr, 0};
+        const Shared::SlotStatus status = ResolveSlotStatus(result_);
+        if(status != Shared::SlotStatus::OK)
+            return {status, nullptr, 0};
 
-        return {Shared::SlotReceiveStatus::OK, static_cast<const char*>(result_.data), result_.dataLen};
+        return {status, static_cast<const char*>(result_.data), result_.dataLen};
+    }
+};
+
+// co_await handle.UpgradeToTLS() inside onConnect coroutines
+// For protocols that negotiate encryption in-band: the probe runs on the raw socket via-
+// -Send/Receive, then this wraps the same connection in TLS before the rest of the handshake
+struct SlotUpgradeTlsAwaitable : public AwaitableBase<SlotUpgradeTlsAwaitable> {
+    void* slotInternal;
+
+public:
+    explicit SlotUpgradeTlsAwaitable(void* impl) noexcept : AwaitableBase{}, slotInternal(impl)
+    {}
+
+    bool await_suspend(std::coroutine_handle<> h) noexcept
+    {
+        handle_ = h;
+        Core::EndpointApiExt1()->slotUpgradeTls(slotInternal, {this, OnComplete, OnDestroy});
+        return true;
+    }
+
+    Shared::SlotStatus await_resume() const noexcept
+    {
+        return ResolveSlotStatus(result_);
     }
 };
 

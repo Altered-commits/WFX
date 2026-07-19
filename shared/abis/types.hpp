@@ -38,6 +38,18 @@ enum class AsyncStatus : std::uint8_t {
     INTERNAL_FAILURE
 };
 
+// Shared result for every slot-level operation available inside an onConnect coroutine-
+// -(Send, Receive, UpgradeToTLS). One enum rather than one per operation: the failure modes-
+// -are the same underlying set, and each operation can only produce a subset anyway
+enum class SlotStatus : std::uint8_t {
+    OK,           // Operation completed
+    BUFFER_ERROR, // Slot's read/write buffer couldn't be allocated or grown
+    EPOLL_ERROR,  // Re-arming the slot with epoll failed
+    IO_ERROR,     // Socket read/write failed
+    TLS_ERROR,    // TLS wrap or handshake failed
+    INVALID_STATE // Not valid for this slot right now (e.g. upgrading an already-secure one)
+};
+
 struct AsyncResult {
     void* data;
     std::uint32_t dataLen;
@@ -45,6 +57,7 @@ struct AsyncResult {
         MiddlewareAction action;       // CONTINUE for non-middleware
         ConnectResult connectResult;   // Set by Promise<ConnectResult> on final_suspend
         EndpointStatus endpointStatus; // Set by ReleaseEndpoint and HandleEndpointReceive on client failure
+        SlotStatus slotStatus;         // Set by SlotSend/SlotReceive/SlotUpgradeTls on failure
         std::uint8_t unused;           // Filler when none of the above apply (e.g. endpoint success)
     };
     AsyncStatus status;
@@ -129,8 +142,9 @@ static_assert(std::is_standard_layout_v<StreamGenerator>, "'StreamGenerator' mus
 // vvv Endpoint vvv
 enum class EndpointStatus : std::uint8_t {
     // Success
-    SUCCESS = 0, // Endpoint processing finished
-    PENDING,     // Endpoint processing in progress
+    SUCCESS = 0,     // Endpoint processing finished
+    PENDING,         // Endpoint processing in progress
+    CHUNK_AVAILABLE, // Stream Next() satisfied from buffered bytes, chunk ready without suspending
 
     // Buffer errors
     BUFFER_ERROR,        // Initialization failed, etc
@@ -171,24 +185,19 @@ enum class DisconnectReason : std::uint8_t {
     ERROR              // I/O or protocol error, or any other close not covered above
 };
 
-enum class SlotSendResult : std::uint8_t {
-    OK,   // Written and flushed immediately
-    ERROR // Fatal write failure
-};
-
-enum class SlotReceiveStatus : std::uint8_t {
-    OK,   // Data arrived, buffer pointer and length are valid
-    ERROR // Fatal read failure
-};
-
 enum class SerializeResult : std::uint8_t {
     OK,               // Serialized successfully
     BUFFER_TOO_SMALL, // Output buffer insufficient, engine may retry with larger buffer
     ERROR             // Unrecoverable serialization failure
 };
 
+// CHUNK_* deliver one piece of a response and keep the request in flight. outObj is borrowed-
+// -until the next Next(), so the protocol must reset it on the following parse call, not append:-
+// -reusing one object is what bounds memory to a single chunk regardless of total size
 enum class ParseResult : std::uint8_t {
     INCOMPLETE,          // Need more bytes, call again when data arrives
+    CHUNK_READY,         // Chunk ready; more bytes arrive unprompted (MySQL rows, HTTP chunked, etc)
+    CHUNK_READY_FETCH,   // Chunk ready; engine re-serializes to ask for the next batch (Postgres, Cassandra, etc)
     COMPLETE_KEEP_ALIVE, // Full message received, slot returns to pool
     COMPLETE_CLOSE,      // Full message received, slot must close after delivery
     ERROR                // Unrecoverable parse failure
@@ -211,42 +220,44 @@ struct EndpointSlotHandle {
 static_assert(sizeof(EndpointSlotHandle) == 24, "'EndpointSlotHandle' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<EndpointSlotHandle>, "'EndpointSlotHandle' must be standard layout");
 
-// Writes req's wire encoding into buf; streamKey is only used when hasCapacity is set-
-// -(the key this request should be tracked under, e.g. an HTTP/2 stream id), else left at 0
+// Wire codec, the two every protocol implements. serialize's streamKey is only set when-
+// -hasCapacity is (e.g. an HTTP/2 stream id), else left 0; parse's completedKey mirrors it
+// isEof forbids parse from returning INCOMPLETE, no more bytes are coming
 using EndpointSerializeFn = SerializeResult (*)(void* slotState, const void* req, char* buf, std::uint32_t bufLen,
                                                 std::uint32_t* written, std::uint64_t* streamKey);
-// Reads arriving bytes for one slot; isEof forbids returning INCOMPLETE (no more bytes coming)
-// completedKey is 0 unless hasCapacity is set, in which case non-zero means that stream is done
 using EndpointParseFn = ParseResult (*)(void* slotState, void* parseState, const char* buf, std::uint32_t len,
                                         std::uint32_t* consumed, void* outObj, bool isEof, std::uint64_t* completedKey);
-// Runs once per connection before it enters the pool (auth handshakes, etc.)
-// Must eventually call onDone with a ConnectResult via onDoneUd
+
+// Connection lifecycle. onConnect runs before the slot enters the pool (auth handshakes) and-
+// -must eventually call onDone with a ConnectResult; onDisconnect runs on teardown, before-
+// -slotState is destroyed
 using EndpointOnConnectFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone,
                                      void* onDoneUd);
-// Fires when a slot is torn down, before slotState is destroyed
-// reason distinguishes drain / idle-timeout / error
 using EndpointOnDisconnectFn = void (*)(void* slotState, DisconnectReason reason);
-// Allocates per-slot or per-request state (ctx is userCtx for slots, slotState for requests)
-// Paired with the matching EndpointDestroyStateFn
+
+// State allocation for slot state, parse state and output. create's ctx is userCtx for slot-
+// -state, slotState for per-request state. reset clears parse state between keep-alive requests;-
+// -without it the engine destroys and recreates instead
 using EndpointCreateStateFn = void* (*)(void* ctx);
-// Frees state allocated by the matching EndpointCreateStateFn
-// Called on request completion or slot teardown
 using EndpointDestroyStateFn = void (*)(void* state);
-// Clears parse state for reuse between keep-alive requests on the same slot
-// Only called when non-null; otherwise the engine destroys and recreates it
 using EndpointResetStateFn = void (*)(void* parseState);
-// Computes a dedup key for req; identical keys share one in-flight backend request
-// Return 0 to opt this request out of coalescing
+
+// Coalescing, where identical in-flight requests share one backend round trip. coalesceKey-
+// -returns 0 to opt a request out; cloneOutput gives each waiter its own owned copy and is-
+// -REQUIRED whenever coalesceKey is set
 using EndpointCoalesceKeyFn = std::uint64_t (*)(const void* req);
-// Returns a freshly allocated deep clone of srcOutput, or null on allocation failure
-// Required when coalesceKey is set (each coalesced waiter receives its own owned clone)
 using EndpointCloneOutputFn = void* (*)(void* slotState, const void* srcOutput);
-// Null = slot is exclusively single-request (today's behavior)
-// Non-null = engine may hand this busy slot another request when this returns true
+
+// Multiplexing, several concurrent requests over one connection. Non-null hasCapacity enables-
+// -it, and the engine hands a busy slot more work whenever it returns true. takeStreamOutput-
+// -claims a stream's output (null if unfinished) and is REQUIRED alongside it
 using EndpointHasCapacityFn = bool (*)(void* slotState);
-// Claims a multiplexed stream's finished output (completed or being abandoned early)
-// Returns null if unfinished; protocol must free any partial internal state for that key
 using EndpointTakeStreamOutputFn = void* (*)(void* slotState, std::uint64_t key);
+
+// Server-initiated data with nothing awaiting it (Postgres NOTIFY, Redis pub/sub), so a plain-
+// -callback rather than a coroutine resume. Set *consumed to a complete message's length-
+// -(0 = need more bytes); return false if undecodable, which closes the slot
+using EndpointOnPushFn = bool (*)(void* slotState, const char* buf, std::uint32_t len, std::uint32_t* consumed);
 
 struct EndpointDesc {
     EndpointSerializeFn serialize;
@@ -264,9 +275,10 @@ struct EndpointDesc {
     EndpointCloneOutputFn cloneOutput;           // nullable, REQUIRED when coalesceKey is set
     EndpointHasCapacityFn hasCapacity;           // nullable, non-null enables multiplexed slot sharing
     EndpointTakeStreamOutputFn takeStreamOutput; // nullable, REQUIRED when hasCapacity is set
+    EndpointOnPushFn onPush;                     // nullable, null closes the slot on unsolicited bytes
     void* userCtx;                               // injected into createSlotState
 };
-static_assert(sizeof(EndpointDesc) == 128, "'EndpointDesc' must be exactly 128 bytes.");
+static_assert(sizeof(EndpointDesc) == 136, "'EndpointDesc' must be exactly 136 bytes.");
 static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be standard layout");
 
 struct EndpointConfig {

@@ -1,7 +1,7 @@
-# WFX Audit Harness
+# WFX base audit
 
-Phased correctness and security testing for WFX. Boots the server, runs all
-phases, stops the server
+Phased correctness and security testing for the WFX server itself. Boots it, runs
+the phases, stops it. Shared plumbing lives in `tests/common/`, see `tests/README.md`
 
 ---
 
@@ -24,7 +24,11 @@ python3 base_audit.py
 # Single phase
 python3 base_audit.py --phase security
 python3 base_audit.py --phase features
+python3 base_audit.py --phase forms
 python3 base_audit.py --phase chaos
+
+# Every WFX log line, not just crash dumps
+python3 base_audit.py --wfx-logs all
 
 # Different binary or port
 python3 base_audit.py --wfx /path/to/wfx --port 9090
@@ -39,7 +43,7 @@ python3 base_audit.py --ci
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `chaos` |
+| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `chaos` |
 | `--host HOST` | `127.0.0.1` | Server hostname |
 | `--port N` | `8080` | HTTP port |
 | `--wfx PATH` | `wfx` | Path to the wfx binary |
@@ -47,6 +51,7 @@ python3 base_audit.py --ci
 | `--pid-file PATH` | `~/.wfx/daemons/app.pid` | WFX daemon PID file |
 | `--ready-timeout N` | `20` | Seconds to wait for `/health` on startup |
 | `--phase-timeout N` | `0` | Max seconds per phase before marking TIMEOUT and continuing (0 = unlimited; auto-set to 300 with `--ci`) |
+| `--wfx-logs MODE` | `crash` | Stream WFX's own logs live: `off`, `crash` (dumps and sanitizer reports), `important` (those plus WRN/ERR/FTL), `all`. This suite provokes contract violations by the thousand, so its `[ERR]` lines are the tests working and printing them buries the results |
 | `--ci` | off | CI-friendly output: no inline dot progress, GitHub Actions workflow commands (`::group::`, `::error::`) |
 | `--list-phases` | n/a | Print available phases and exit |
 
@@ -58,7 +63,8 @@ python3 base_audit.py --ci
 |------|---------|
 | `0` | All phases passed |
 | `1` | Correctness failure, server crash, or server death |
-| `2` | Security finding (path traversal or response splitting) |
+| `2` | Security finding (path traversal or response splitting). The run stops at the first one: later phases would be measuring an already-compromised server |
+| `3` | WFX never answered `/health`, so nothing was exercised |
 
 ---
 
@@ -141,6 +147,27 @@ Exit code 1 for any failure.
 
 ---
 
+### FORMS
+
+`WFX::Form` end to end, against `/form` (validators, required and optional
+fields) and `/form/raw` (one unvalidated field, so a vector can be attributed to
+decoding rather than to a validator). Four groups, each a run of vectors:
+
+| Group | What it proves |
+|-------|----------------|
+| **functional** | Content-Type matching, field structure (order, count, duplicate keys, empty values), required-vs-optional, and validator bounds |
+| **percent-decoding** | Every escape shape through a single isolated field: valid pairs, truncated escapes, non-hex digits, `+` handling, NUL and CRLF bytes, and over-long encodings |
+| **header-injection** | A decoded value carrying CR/LF must never reach a response header. This is the security-relevant one: it is the path from attacker-controlled form input to response splitting |
+| **dos-resistance** | Structural abuse: huge field counts, giant keys and values, deeply repeated separators. Must be bounded and refused, never hang |
+
+Validators bound the **decoded** length, not the raw wire bytes, so a percent-
+encoded payload cannot slip past a length check by being longer before decoding
+than after.
+
+Exit code 2 if header injection lands, 1 for other failures.
+
+---
+
 ### CHAOS
 
 6 scenarios. Each is followed by a recovery wait and a full 52-route
@@ -173,6 +200,9 @@ every user-facing feature.
 | `/text` | Minimal 200: variety for flood workers |
 | `/echo` | Reflects `X-Echo` header: CRLF injection target |
 | `/echo-body` | Echoes POST body: body-bomb and smuggling target |
+| `/echo-full` | Echoes path, a header and the body together: proves every `string_view` into the read buffer survives a mid-parse relocation |
+| `/form` | `WFX::Form` with validators, required and optional fields |
+| `/form/raw` | `WFX::Form` with one unvalidated field: isolates percent-decoding from validation |
 | `/big` | 1 MiB of `A`: large-response target |
 | `/stream` | Chunked 512 × 256 B stream: streaming path target |
 | `/download` | Serves `public/<X-File>`: path-traversal target |

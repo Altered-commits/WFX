@@ -191,15 +191,20 @@ void EndpointCtx::Reset()
     isShuttingDown = 0;
     inOnConnectPhase = 0;
     isAwaitingReconnect = 0;
+    // Any reservation dies with the connection; leaving this set would let a stale handle-
+    // -resolve to this slot again once it's recycled
+    isReserved = 0;
+    isStreaming = 0;
+    needsFetch = 0;
     eventType = EventType::EVENT_ACCEPT;
     clientCtx = nullptr;
     asyncData = AsyncData{};
     coalesceKey = 0;
     reconnectAttempts = 0;
     socket = WFX_INVALID_SOCKET;
-    // endpointState, endpointIdx:                        preserved, TLS config and pool identity survive reset
-    // sslConn:                                            caller freed it before Reset()
-    // generationId:                                       managed by GetConnection()
+    // endpointState, endpointIdx:                          preserved, TLS config and pool identity survive reset
+    // sslConn:                                             caller freed it before Reset()
+    // generationId:                                        managed by GetConnection()
     // slotState, parseStateObj, outputObj, pendingStreams: managed by FinalizeEndpointRequest/ReleaseEndpoint
 }
 

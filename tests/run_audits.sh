@@ -14,7 +14,12 @@
 #   tests/run_audits.sh                  run all four audits, one after another
 #   tests/run_audits.sh --audit base     run one audit only: base, endpoint, tls, crypto
 #   tests/run_audits.sh --ci             forward --ci to every audit that runs
-#   tests/run_audits.sh --audit tls -- --phase verify --wfx-logs all
+#   tests/run_audits.sh --audit endpoint --phase streaming
+#                                        run a single phase, needs --audit since phase
+#                                        names differ per audit
+#   tests/run_audits.sh --audit endpoint --list-phases
+#                                        list that audit's phases and exit
+#   tests/run_audits.sh --audit tls -- --wfx-logs all
 #                                        anything after -- is passed through as-is
 #
 # Locally, run it with no --audit and it goes through all four in sequence,
@@ -24,11 +29,18 @@
 
 set -euo pipefail
 
+# Ctrl+C ends the whole run
+# Without this the loop below reads the interrupt as "this audit failed" and starts the next one,
+# so stopping a full run takes one Ctrl+C per remaining audit
+trap 'echo; echo "Interrupted."; exit 130' INT
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 audit=""
 ci=0
+phase=""
+list_phases=0
 extra_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -39,6 +51,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --ci)
             ci=1
+            shift
+            ;;
+        --phase)
+            phase="$2"
+            shift 2
+            ;;
+        --list-phases)
+            list_phases=1
             shift
             ;;
         --)
@@ -52,6 +72,18 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Phase names differ per audit, so both only make sense against a single one
+if [[ -z "$audit" ]]; then
+    if [[ -n "$phase" ]]; then
+        echo "--phase needs --audit, phase names differ per audit" >&2
+        exit 1
+    fi
+    if [[ $list_phases -eq 1 ]]; then
+        echo "--list-phases needs --audit, phase names differ per audit" >&2
+        exit 1
+    fi
+fi
 
 declare -A AUDIT_DIRS=(
     [base]="base_audit"
@@ -85,6 +117,8 @@ run_one() {
 
     local args=(--wfx "$wfx_bin")
     [[ $ci -eq 1 ]] && args+=(--ci)
+    [[ -n "$phase" ]] && args+=(--phase "$phase")
+    [[ $list_phases -eq 1 ]] && args+=(--list-phases)
     args+=("${extra_args[@]}")
 
     # CI always starts from a clean checkout, so its template cache is never stale
@@ -104,7 +138,18 @@ fi
 
 failed=()
 for name in base endpoint tls crypto; do
-    if ! run_one "$name"; then
+    rc=0
+    run_one "$name" || rc=$?
+
+    # 130 is SIGINT, which the trap above normally catches first: this covers the case where only
+    # the audit process got signalled, so an interrupt still stops the sequence
+    if [[ $rc -eq 130 ]]; then
+        echo
+        echo "Interrupted during $name audit."
+        exit 130
+    fi
+
+    if [[ $rc -ne 0 ]]; then
         failed+=("$name")
     fi
 done

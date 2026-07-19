@@ -384,10 +384,18 @@ them:
 - **`parse(slotState, parseState, buf, len, &consumed, outObj, isEof)`**: read
   bytes as they arrive off the wire and fill in `outObj` (a `TRes*`). Set
   `*consumed` to how many bytes you actually read, the engine keeps whatever's
-  left for your next call. Return `WFX::EpParseDone` (or `WFX::EpParseClose` if
-  the protocol wants the connection closed after this response) once `outObj`
-  is complete, `WFX::EpParseIncomplete` if you need more bytes first, or
-  `WFX::EpParseError` on a framing failure.
+  left for your next call.
+
+The return value tells the engine what to do next:
+
+| Return | Meaning |
+|--------|---------|
+| `WFX::EpParseIncomplete` | Need more bytes, call again when they arrive |
+| `WFX::EpParseDone` | `outObj` is complete, the slot returns to the pool |
+| `WFX::EpParseClose` | `outObj` is complete, close the connection after delivering it |
+| `WFX::EpParseChunk` | One chunk is ready, more arrive unprompted, see [Streaming](#streaming-large-responses) |
+| `WFX::EpParseChunkFetch` | One chunk is ready, the engine re-serializes to ask for the next |
+| `WFX::EpParseError` | Unrecoverable framing failure, the slot is closed |
 
 !!! danger
     When `isEof` is `true`, the peer has closed the connection and no more
@@ -451,8 +459,8 @@ These run once per request, not once per connection:
 
 ### Optional protocol features
 
-Two pairs of callbacks unlock specific behavior. Both are documented in full,
-with a worked example, in their own sections:
+These callbacks unlock specific behavior. Each is documented in full, with a
+worked example, in its own section:
 
 - **`coalesceKey(&req)`** / **`cloneOutput(slotState, srcOutput)`**: collapse
   duplicate in-flight requests into one backend call, see
@@ -460,6 +468,9 @@ with a worked example, in their own sections:
 - **`hasCapacity(slotState)`** / **`takeStreamOutput(slotState, key)`**: run
   several requests concurrently over one connection, see
   [Multiplexing (advanced)](#multiplexing-advanced).
+- **`onPush(slotState, buf, len, &consumed)`**: handle messages the server
+  sends on its own, with no request outstanding, see
+  [Server-initiated messages](#server-initiated-messages).
 
 !!! important
     WFX validates all of this at startup, before the server accepts a single
@@ -612,11 +623,12 @@ argument to `Endpoint<>`:
 WFX::EpCoro Authenticate(WFX::SlotHandle h, void* /*state*/)
 {
     static const char kAuth[] = "*2\r\n$4\r\nAUTH\r\n$8\r\npassword\r\n";
-    if(co_await h.Send(kAuth, sizeof(kAuth) - 1) == WFX::EpSlotSendError)
+
+    if(co_await h.Send(kAuth, sizeof(kAuth) - 1) != WFX::EpSlotOk)
         co_return WFX::EpFatal;
 
     auto recv = co_await h.Receive();
-    if(recv.status == WFX::EpSlotRecvError)
+    if(recv.status != WFX::EpSlotOk)
         co_return WFX::EpFatal;
 
     co_return (recv.len >= 3 && recv.buf[0] == '+') ? WFX::EpReady : WFX::EpFatal;
@@ -636,6 +648,46 @@ and `co_await h.Receive()` to drive the handshake yourself, plus
 `h.NegotiatedProtocol()` to read back the ALPN protocol chosen during the TLS
 handshake (empty if the connection isn't TLS, or the handshake hasn't finished).
 
+Every slot operation reports the same `WFX::SlotStatus`, and anything other
+than `WFX::EpSlotOk` is fatal for the slot:
+
+| Status | Meaning |
+|--------|---------|
+| `WFX::EpSlotOk` | Operation succeeded |
+| `WFX::EpSlotBufferError` | Slot buffer couldn't be allocated or grown |
+| `WFX::EpSlotEpollError` | Re-arming the slot with epoll failed |
+| `WFX::EpSlotIoError` | Socket read/write failed |
+| `WFX::EpSlotTlsError` | TLS wrap or handshake failed |
+| `WFX::EpSlotInvalidState` | Not valid for this slot right now |
+
+### In-band TLS upgrades
+
+Protocols that negotiate encryption over an already-open plaintext connection
+(Postgres `SSLRequest`, SMTP `STARTTLS`) call `co_await h.UpgradeToTLS()` from
+inside `onConnect`, after probing with `Send`/`Receive`:
+
+```cpp
+if(co_await h.Send(kSslRequest, sizeof(kSslRequest)) != WFX::EpSlotOk)
+    co_return WFX::EpFatal;
+
+auto probe = co_await h.Receive();
+if(probe.status != WFX::EpSlotOk)
+    co_return WFX::EpFatal;
+
+// Server agreed, wrap the connection before sending anything sensitive
+if(probe.len >= 1 && probe.buf[0] == 'S' && co_await h.UpgradeToTLS() != WFX::EpSlotOk)
+    co_return WFX::EpFatal;
+```
+
+The endpoint must be configured `WFX::EpTlsInsecure`, otherwise the engine
+already wrapped the connection at connect time and the upgrade is refused with
+`WFX::EpSlotInvalidState`. Bytes buffered before the upgrade are discarded, so
+plaintext an attacker appended after the server's go-ahead can never be read
+back as though the authenticated peer had sent it.
+
+Outbound TLS is independent of whether your own server serves HTTPS; the
+client-side TLS context is created on demand.
+
 Return one of:
 
 - `WFX::EpReady`: handshake succeeded, the slot enters the pool
@@ -645,6 +697,155 @@ Return one of:
 The whole budget for connect + TLS + `onConnect` combined is
 `connectTimeoutSeconds`. If it isn't done in time, the attempt is treated as a
 connect failure.
+
+---
+
+## Pinning a connection
+
+Normally every `SendPayload` takes whatever slot the pool hands it, and two
+consecutive calls may land on different connections. That breaks any protocol
+where state lives *on the connection*: a SQL transaction, a `SET` that has to
+apply to later queries, a `LISTEN` subscription.
+
+`Reserve()` pins one connection to you until you let it go. The SQL below is
+illustrative, `Db` is an endpoint you would have written yourself with
+`EndpointDesc`:
+
+```cpp
+WFX_POST("/transfer", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    auto slot = Db.Reserve();
+
+    // pool exhausted
+    if(!slot.IsValid()) {
+        res.Status(503).SendText("no connection available");
+        co_return;
+    }
+
+    co_await slot.SendPayload({"BEGIN"});
+    co_await slot.SendPayload({"UPDATE accounts SET balance = balance - 100 WHERE id = 1"});
+    co_await slot.SendPayload({"UPDATE accounts SET balance = balance + 100 WHERE id = 2"});
+    co_await slot.SendPayload({"COMMIT"});
+
+    res.SendText("ok");
+    co_return;
+});
+```
+
+Every `SendPayload` through `slot` runs on the same physical connection, in
+order. `ReservedSlot` is move-only and releases on destruction, so an early
+`co_return` or a thrown exception can't leak the pin. Call `.Release()` if you
+want it back sooner.
+
+!!! warning
+    Always check `IsValid()`. A reservation takes a slot out of the pool for
+    its whole lifetime, so `Reserve()` returns an empty handle rather than
+    waiting when every connection is busy. Holding reservations longer than
+    `connLimit` allows will starve the pool.
+
+Two things the engine guarantees for you:
+
+- **Coalescing never merges pinned sends.** Two transactions running identical
+  SQL must not share one execution, since each may observe different
+  uncommitted state.
+- **Reserve is unavailable on multiplexed endpoints** (`hasCapacity` set), which
+  already share one connection between callers by design.
+
+---
+
+## Streaming large responses
+
+`SendPayload` materializes the whole response before handing it to you, which
+is wrong for a result set that doesn't fit in memory. `Stream()` delivers it a
+chunk at a time instead, reusing one output object so peak memory tracks a
+single chunk rather than the total:
+
+```cpp
+WFX_GET("/export", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    auto stream = Db.Stream({"SELECT * FROM huge_table"});
+
+    while(true) {
+        auto chunk = co_await stream.Next();
+
+        if(chunk.status != WFX::EpOk || chunk.done)
+            break;
+
+        // chunk.data is valid only until the next Next()
+        res.Write(chunk.data->rows);
+    }
+
+    res.Commit();
+    co_return;
+});
+```
+
+Hold the `StreamHandle` across the whole loop: it owns the request, which
+cursor and paging protocols need handed back on every `Next()` to build their
+continuation.
+
+!!! danger
+    `chunk.data` points at an object the engine reuses for the next chunk.
+    Copy anything you need to keep before calling `Next()` again. This reuse
+    is exactly what bounds memory, a 10-row result and a 10-million-row result
+    have the same peak.
+
+Your protocol opts in from `parse` by returning a chunk result instead of
+`EpParseDone`:
+
+- **`WFX::EpParseChunk`** for protocols that keep sending unprompted (MySQL
+  rows, HTTP chunked transfer).
+- **`WFX::EpParseChunkFetch`** for protocols where the client must ask for each
+  batch (Postgres portals, Cassandra paging). The engine re-serializes the
+  request to fetch the next chunk.
+
+Either way, reset `outObj` between chunks rather than accumulating into it,
+that reset is what keeps memory flat. Without a chunk result, `Stream()` behaves
+like an ordinary `SendPayload` that completes on the first `Next()`.
+
+Streaming composes with pinning, `ReservedSlot` has its own `Stream()` that
+runs on the reserved connection.
+
+---
+
+## Server-initiated messages
+
+Some protocols let the server talk first: Postgres `NOTIFY`, Redis pub/sub,
+MQTT deliveries. By default, bytes arriving on an idle pooled connection are
+treated as a misbehaving backend and the connection is closed. Setting
+`onPush` tells the engine those bytes are expected:
+
+```cpp
+bool OnPush(void* slotStateVoid, const char* buf, std::uint32_t len,
+            std::uint32_t* consumed)
+{
+    const std::string_view view{buf, len};
+    const auto nl = view.find('\n');
+
+    if(nl == std::string_view::npos) {
+        *consumed = 0;        // partial message, wait for more bytes
+        return true;
+    }
+
+    Deliver(view.substr(0, nl));
+    *consumed = static_cast<std::uint32_t>(nl + 1);
+    return true;              // false closes the slot
+}
+```
+
+It's a plain synchronous callback, not a coroutine, because nothing is waiting
+on it, there's no caller suspended for a message the server sent on its own.
+
+Three rules the engine holds to:
+
+- **Set `*consumed = 0`** when you have a partial message. The engine parks and
+  waits for more bytes rather than spinning, and the slot stays usable.
+- **Return `false`** if the bytes are undecodable. The engine closes that slot;
+  the endpoint recovers and later requests work normally.
+- **Bytes arriving while a request is in flight go to `parse`, never `onPush`.**
+  Only a genuinely idle slot delivers pushes, which is what stops a push from
+  desyncing a response mid-parse.
+
+A pushing connection is usually one you also want pinned, so it stays
+subscribed, see [Pinning a connection](#pinning-a-connection).
 
 ---
 

@@ -209,13 +209,6 @@ security_level              = 2               # Integer (0 - 5 only)
 
 ---
 
-## `[Windows]`
-
-!!! note
-    This section will be updated once official Windows support is released.
-
----
-
 ## `[Linux]`
 
 Socket and worker configuration for **Linux systems only**. All settings in this section are **optional**.
@@ -236,11 +229,6 @@ backlog                 = 1024  # 32-bit Unsigned Integer
 
 - `backlog`  
   Sets the maximum number of incoming connections the OS can queue while workers are busy. If this limit is too low, new connections may be rejected during traffic spikes even if the server is healthy.
-
-## `[Linux.IoUring]`
-
-!!! note
-    This section will be updated once official IoUring support is released.
 
 ## `[Linux.Epoll]`
 

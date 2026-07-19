@@ -8,6 +8,7 @@
 // raw POST body.
 
 #include <wfx/http.hpp>
+#include <wfx/memory.hpp>
 #include <wfx/utils/crypto.hpp>
 
 #include <algorithm>
@@ -18,10 +19,10 @@
 
 namespace {
 
-std::string ToHex(std::string_view bytes)
+WFX::String ToHex(std::string_view bytes)
 {
     static const char* digits = "0123456789abcdef";
-    std::string out;
+    WFX::String out;
     out.reserve(bytes.size() * 2);
     for(unsigned char c : bytes) {
         out.push_back(digits[c >> 4]);
@@ -30,7 +31,7 @@ std::string ToHex(std::string_view bytes)
     return out;
 }
 
-bool FromHex(std::string_view hex, std::string& out)
+bool FromHex(std::string_view hex, WFX::String& out)
 {
     if(hex.size() % 2 != 0)
         return false;
@@ -58,12 +59,12 @@ bool FromHex(std::string_view hex, std::string& out)
     return true;
 }
 
-std::string HexHeader(WFX::Request& req, const char* name)
+WFX::String HexHeader(WFX::Request& req, const char* name)
 {
     std::string_view v;
     if(!req.GetHeader(name, v))
         return {};
-    std::string decoded;
+    WFX::String decoded;
     if(!FromHex(v, decoded))
         return {};
     return decoded;
@@ -126,7 +127,7 @@ void RunHashStreamResponse(WFX::Response& res, std::uint32_t numChunks, std::uin
 {
     res.Status(200).Stream(
         [numChunks, chunkLen, chunkIndex = std::uint32_t{0}, withinChunk = std::uint32_t{0},
-         phase = StreamPhase::DATA, footer = std::string{}, footerOffset = std::size_t{0},
+         phase = StreamPhase::DATA, footer = WFX::String{}, footerOffset = std::size_t{0},
          hasher = WFX::HashStream<Algo>()](WFX::Shared::StreamBuffer buf) mutable -> WFX::Shared::StreamResult {
             std::size_t written = 0;
 
@@ -135,7 +136,7 @@ void RunHashStreamResponse(WFX::Response& res, std::uint32_t numChunks, std::uin
                     if(chunkIndex >= numChunks) {
                         auto [status, digest] = hasher.Final();
                         footer = "\n#DIGEST:";
-                        footer += (status == WFX::CryptoOk) ? ToHex(digest.View()) : std::string("ERR");
+                        footer += (status == WFX::CryptoOk) ? ToHex(digest.View()) : WFX::String("ERR");
                         footer += "\n";
                         footerOffset = 0;
                         phase = StreamPhase::FOOTER;
@@ -242,7 +243,7 @@ WFX_GET("/crypto/hash-stream-response", [](WFX::Request req, WFX::Response res) 
 // vvv HMAC vvv
 WFX_POST("/crypto/hmac", [](WFX::Request req, WFX::Response res) {
     const auto algo = AlgoFromHeader(req);
-    const std::string key = HexHeader(req, "X-Key");
+    const WFX::String key = HexHeader(req, "X-Key");
 
     if(algo == WFX::CryptoHashAlgo::SHA256) {
         auto [s, d] = WFX::HmacSha256(key, req.Body());
@@ -260,7 +261,7 @@ WFX_POST("/crypto/hmac", [](WFX::Request req, WFX::Response res) {
 
 WFX_POST("/crypto/hmac-stream", [](WFX::Request req, WFX::Response res) {
     const auto algo = AlgoFromHeader(req);
-    const std::string key = HexHeader(req, "X-Key");
+    const WFX::String key = HexHeader(req, "X-Key");
     std::string_view body = req.Body();
     std::size_t mid = body.size() / 2;
 
@@ -282,9 +283,9 @@ WFX_POST("/crypto/hmac-stream", [](WFX::Request req, WFX::Response res) {
 // vvv AEAD vvv
 WFX_POST("/crypto/aead/encrypt", [](WFX::Request req, WFX::Response res) {
     const auto algo = AeadAlgoFromHeader(req);
-    const std::string key = HexHeader(req, "X-Key");
-    const std::string nonce = HexHeader(req, "X-Nonce");
-    const std::string aad = HexHeader(req, "X-Aad");
+    const WFX::String key = HexHeader(req, "X-Key");
+    const WFX::String nonce = HexHeader(req, "X-Nonce");
+    const WFX::String aad = HexHeader(req, "X-Aad");
 
     auto [s, out] = WFX::AeadEncrypt(algo, key, nonce, aad, req.Body());
     WriteStatusHex(res, s, out);
@@ -292,9 +293,9 @@ WFX_POST("/crypto/aead/encrypt", [](WFX::Request req, WFX::Response res) {
 
 WFX_POST("/crypto/aead/decrypt", [](WFX::Request req, WFX::Response res) {
     const auto algo = AeadAlgoFromHeader(req);
-    const std::string key = HexHeader(req, "X-Key");
-    const std::string nonce = HexHeader(req, "X-Nonce");
-    const std::string aad = HexHeader(req, "X-Aad");
+    const WFX::String key = HexHeader(req, "X-Key");
+    const WFX::String nonce = HexHeader(req, "X-Nonce");
+    const WFX::String aad = HexHeader(req, "X-Aad");
 
     auto [s, out] = WFX::AeadDecrypt(algo, key, nonce, aad, req.Body());
     WriteStatusHex(res, s, out);
@@ -302,8 +303,8 @@ WFX_POST("/crypto/aead/decrypt", [](WFX::Request req, WFX::Response res) {
 
 // vvv Key derivation vvv
 WFX_GET("/crypto/pbkdf2", [](WFX::Request req, WFX::Response res) {
-    const std::string password = HexHeader(req, "X-Password");
-    const std::string salt = HexHeader(req, "X-Salt");
+    const WFX::String password = HexHeader(req, "X-Password");
+    const WFX::String salt = HexHeader(req, "X-Salt");
     const std::uint32_t iterations = UintHeader(req, "X-Iter", 1000);
     const std::uint32_t outLen = UintHeader(req, "X-Outlen", 32);
 
@@ -312,9 +313,9 @@ WFX_GET("/crypto/pbkdf2", [](WFX::Request req, WFX::Response res) {
 })
 
 WFX_GET("/crypto/hkdf", [](WFX::Request req, WFX::Response res) {
-    const std::string ikm = HexHeader(req, "X-Ikm");
-    const std::string salt = HexHeader(req, "X-Salt");
-    const std::string info = HexHeader(req, "X-Info");
+    const WFX::String ikm = HexHeader(req, "X-Ikm");
+    const WFX::String salt = HexHeader(req, "X-Salt");
+    const WFX::String info = HexHeader(req, "X-Info");
     const std::uint32_t outLen = UintHeader(req, "X-Outlen", 32);
 
     auto [s, out] = WFX::Hkdf(ikm, salt, info, outLen);
@@ -322,8 +323,8 @@ WFX_GET("/crypto/hkdf", [](WFX::Request req, WFX::Response res) {
 })
 
 WFX_GET("/crypto/argon2id", [](WFX::Request req, WFX::Response res) {
-    const std::string password = HexHeader(req, "X-Password");
-    const std::string salt = HexHeader(req, "X-Salt");
+    const WFX::String password = HexHeader(req, "X-Password");
+    const WFX::String salt = HexHeader(req, "X-Salt");
     const std::uint32_t iterations = UintHeader(req, "X-Iter", 2);
     const std::uint32_t memoryKb = UintHeader(req, "X-Memkb", 8192);
     const std::uint32_t parallelism = UintHeader(req, "X-Parallelism", 1);
@@ -341,8 +342,8 @@ WFX_GET("/crypto/random", [](WFX::Request req, WFX::Response res) {
 })
 
 WFX_GET("/crypto/consttime", [](WFX::Request req, WFX::Response res) {
-    const std::string a = HexHeader(req, "X-A");
-    const std::string b = HexHeader(req, "X-B");
+    const WFX::String a = HexHeader(req, "X-A");
+    const WFX::String b = HexHeader(req, "X-B");
 
     res.Status(200);
     auto w = WFX::ImJson(res);

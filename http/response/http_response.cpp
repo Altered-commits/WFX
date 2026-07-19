@@ -489,8 +489,10 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
     }
 
     // Static template, just a file send with html content type
+    // Charset is explicit: a browser left to sniff can land on UTF-7, where '+ADw-script+AD4-'-
+    // -decodes to '<script>'
     if(meta->type == TemplateType::STATIC) {
-        WriteHeader("Content-Type", "text/html");
+        WriteHeader("Content-Type", "text/html; charset=utf-8");
         WriteFile(meta->filePath, false);
         return;
     }
@@ -514,7 +516,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
     }
 
     // All good, write headers before handing off to stream
-    WriteHeader("Content-Type", "text/html");
+    WriteHeader("Content-Type", "text/html; charset=utf-8");
 
     using State = struct {
         BaseFilePtr inFile;

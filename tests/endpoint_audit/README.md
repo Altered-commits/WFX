@@ -18,6 +18,38 @@ tortures it as a **client**, in two parts:
   second, tiny hand-rolled protocol drives `onConnect`, `onDisconnect`, and
   multiplexing directly: the three things `HttpEndpoint` structurally cannot
   reach.
+- **SP protocol** (`WFX::Endpoint<>`, *non*-multiplexed): the raw protocol above
+  sets `hasCapacity`, which puts it permanently on the multiplexed path. Slot
+  pinning and streaming are single-slot-only by construction, and `onPush` only
+  fires on a slot with nothing in flight, so a third protocol on its own listener
+  covers **`Reserve`/`Release`**, **`Stream`** (both chunk families), **`onPush`**,
+  and the cert-free half of **`UpgradeToTLS`**.
+
+---
+
+## Scope: this suite vs `tests/tls_audit`
+
+Both suites touch TLS, so the boundary is worth stating plainly.
+
+**`tls_audit` owns the certificate and trust surface.** Endpoints there are TLS
+from the first byte (`EpTlsRequire`), and it asserts what TLS itself must do:
+untrusted / hostname-mismatched / expired certs are refused, version downgrade is
+refused, sessions resume. It needs `mkcert` and a CA-trust step.
+
+**This suite owns everything else about the outbound client**, and stays
+plaintext so it needs no certificates.
+
+`UpgradeToTLS` is split across both, because its vectors have different needs:
+
+| Vector | Suite | Why |
+|---|---|---|
+| Server refuses to upgrade, protocol requires TLS → must fail closed | **endpoint** | No handshake needed; the connection never becomes TLS |
+| Server agrees, then sends garbage instead of a ServerHello | **endpoint** | The handshake is *meant* to fail; no valid cert required |
+| Pre-upgrade plaintext must be discarded at the boundary | **tls** | Needs a *working* handshake to establish the trust boundary the injected bytes cross |
+| `UpgradeToTLS` on an already-secure slot → refused | **tls** | Needs a slot the engine already wrapped, i.e. a real TLS endpoint |
+
+The rule of thumb: if a vector needs a handshake to *succeed*, it lives in
+`tls_audit`; if it only needs one to be *attempted*, it lives here.
 
 The suite deliberately thinks like an attacker: beyond the legal-matrix and
 malformed-input corpora, it drives request smuggling, CRLF injection,
@@ -104,7 +136,7 @@ The runner:
 ## Architecture
 
 ```
-harness (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)  --HTTP--------> mock: upstream.py
+audit (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)  --HTTP--------> mock: upstream.py
         |                             WFX app (/proto/*)       --raw proto--> mock: proto listener
         +----------------- stages raw response bytes, reads counters ---------------+
 ```
@@ -135,9 +167,9 @@ harness (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)  --HTTP--------> 
   `onDisconnect` callback.
 
 - **`upstream.py`**: a deliberately thin, raw-socket **byte oracle**, with two
-  listeners. The HTTP one (300+ attacks live in the harness; the mock just puts
+  listeners. The HTTP one (300+ attacks live in the audit; the mock just puts
   exact bytes on the wire) has these key primitives:
-  - **staging**: the harness `POST`s an arbitrary raw response blob to
+  - **staging**: the audit `POST`s an arbitrary raw response blob to
     `/ctl/stage`, then asks WFX to fetch `/raw/<id>`, and the mock replays those
     exact bytes. Powers all the status-line, header, chunk, EOF, and limit fuzzing.
   - **fragmented delivery**: staging with `X-Mode: drip` (N-byte pieces) or
@@ -181,6 +213,11 @@ harness (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)  --HTTP--------> 
 | **security** | Smuggling / poisoning / leaks / DoS | cross-request **bleed** (A to B to A body + header isolation), **trailer** and **1xx** header-leak hidden, CL-bounded body (extra bytes dropped), keep-alive poison via chunked-trailing / 204+TE / 304+TE / 204+hidden-CL / drip-204, CR/LF/NUL path+header injection breadth (plus passthrough of non-CRLF/NUL bytes), header-byte and header-count DoS caps, pipelined-burst first-only |
 | **lifecycle** | Connection lifecycle: connect, idle, prewarm | connect-refused and connect-unreachable both error cleanly within budget (worker survives), reconnect after upstream close, keep-alive reuse (`/kacount` climbs on one pooled conn), idle timeout recycles the connection, prewarm opens its connections eagerly at boot |
 | **protocol** | `onConnect` / `onDisconnect` / multiplexing (raw `WFX::Endpoint<>`) | **auth-bypass** check: rejected (`bad`) and dropped-mid-handshake (`reset`) connections must never serve a request, handshake timeout (`slow`) surfaces as `EpHandshakeTimeout` within budget, worker survives every failure, a good connection still works right after (no pool poisoning), `onDisconnect` counted per reason (handshake-timeout / error / idle), and **multiplexing cross-request bleed**: 12 concurrent requests on one connLimit=1 slot, deliberately resolved out of order, every caller must get back exactly its own value |
+
+| **pinning** | Slot reservation (`Reserve` / `ReservedSlot`) | two pins never share a physical connection (`connId` proves it), a pinned slot is never handed to another caller mid-session, release paths (early, destructor-late, double) all leave the pool usable, and coalescing can never merge two pinned callers however identical their requests |
+| **push** | Server-initiated messages on an idle slot (`onPush`) | pushes arriving while a request is in flight go to `parse()`, never `onPush`, a partial push parks instead of spinning or wedging the slot, a flood is drained incrementally rather than buffered whole, an undecodable push closes the slot and the endpoint recovers |
+| **streaming** | Bounded-memory chunked delivery (`Stream` / `StreamHandle`) | both `CHUNK_READY` families (server-driven and fetch-driven), a checksum over 200 chunks proving no chunk is dropped or duplicated, **peak RSS tracks one chunk, not the total**, abandonment mid-stream reclaims the slot, and two concurrent streams never cross-deliver |
+| **upgrade** | In-band TLS (`UpgradeToTLS`) | a server refusing the upgrade must fail closed when the protocol requires TLS, and upgrading an already-wrapped connection must be refused rather than wrapping twice. The plaintext-discard half of this surface needs a real handshake, so it lives in `tls_audit` |
 
 Vectors marked **security** in the report cause exit code `2` if they trip: a
 tripped desync, smuggle, injection, bleed, leak, or auth-bypass means a

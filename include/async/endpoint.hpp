@@ -31,6 +31,15 @@ public:
         return SlotReceiveAwaitable{raw.impl};
     }
 
+    // Wraps this still-plaintext connection in TLS, for protocols that negotiate encryption-
+    // -in-band (Postgres SSLRequest, SMTP STARTTLS). Probe with Send/Receive first, then call-
+    // -this only if the server agreed. The endpoint must be configured plaintext, otherwise-
+    // -the engine already wrapped it at connect time and this fails with EpSlotInvalidState
+    SlotUpgradeTlsAwaitable UpgradeToTLS() const noexcept
+    {
+        return SlotUpgradeTlsAwaitable{raw.impl};
+    }
+
     // Empty if this slot isn't TLS or the handshake hasn't completed. Any-
     // -ALPN-aware protocol can call this to decide how to speak on this connection
     StringView NegotiatedProtocol() const noexcept
@@ -117,11 +126,13 @@ struct SendPayloadAwaitable : public AwaitableBase<SendPayloadAwaitable<TReq, TR
     EndpointStatus syncStatus{};
     std::uint16_t endpointIdx{0};
     EndpointDestroyStateFn destroyOutput_{nullptr};
+    std::uint64_t pinnedSlot_{0}; // 0 = pool-routed, else the ReservedSlot this was issued from
 
 public:
-    SendPayloadAwaitable(std::uint16_t idx, TReq r, EndpointDestroyStateFn destroy) noexcept
+    SendPayloadAwaitable(std::uint16_t idx, TReq r, EndpointDestroyStateFn destroy,
+                         std::uint64_t pinnedSlot = 0) noexcept
         : AwaitableBase<SendPayloadAwaitable<TReq, TRes>>{}, req(std::move(r)), endpointIdx(idx),
-          destroyOutput_(destroy)
+          destroyOutput_(destroy), pinnedSlot_(pinnedSlot)
     {}
 
     bool await_suspend(std::coroutine_handle<> h) noexcept
@@ -132,7 +143,8 @@ public:
             Core::EndpointApiExt1()->sendPayload(Core::HttpApiExt1()->getGlobalPtrData(), endpointIdx,
                                                  static_cast<const void*>(&req),
                                                  {this, AwaitableBase<SendPayloadAwaitable<TReq, TRes>>::OnComplete,
-                                                  AwaitableBase<SendPayloadAwaitable<TReq, TRes>>::OnDestroy});
+                                                  AwaitableBase<SendPayloadAwaitable<TReq, TRes>>::OnDestroy},
+                                                 pinnedSlot_);
 
         // Synchronous failure, engine could not start the operation. Resume immediately
         if(s != EndpointStatus::PENDING) {
@@ -193,6 +205,200 @@ template <UserOnConnectFn UserFn> constexpr EndpointOnConnectFn GetErasedOnConne
         return &EraseOnConnectImpl<UserFn>;
 }
 
+// One chunk of a streamed response. data borrows the engine's output object and stays valid-
+// -only until the next Next(), which is what keeps peak memory at one chunk instead of the-
+// -whole response. Copy anything you need to outlive the loop iteration
+// done marks the final delivery, at which point data is null and the slot is back in the pool
+template <typename TRes> struct StreamChunk {
+    EndpointStatus status = EndpointStatus::SUCCESS;
+    const TRes* data = nullptr;
+    bool done = false;
+};
+
+// Returned by StreamHandle::Next(). The first Next() sends the request, later ones pull the-
+// -following chunk; when the engine can satisfy one from already-buffered bytes it says so-
+// -and this never suspends, mirroring SendPayloadAwaitable's synchronous path
+template <typename TReq, typename TRes>
+struct StreamNextAwaitable : public AwaitableBase<StreamNextAwaitable<TReq, TRes>> {
+    const TReq* req;
+    bool first;
+    std::uint16_t endpointIdx;
+    std::uint64_t pinnedSlot;
+    EndpointStatus syncStatus{EndpointStatus::PENDING};
+
+public:
+    StreamNextAwaitable(std::uint16_t idx, const TReq* r, bool isFirst, std::uint64_t pinned) noexcept
+        : AwaitableBase<StreamNextAwaitable<TReq, TRes>>{}, req(r), first(isFirst), endpointIdx(idx),
+          pinnedSlot(pinned)
+    {}
+
+    bool await_suspend(std::coroutine_handle<> h) noexcept
+    {
+        this->handle_ = h;
+
+        const AsyncData onDone{this, AwaitableBase<StreamNextAwaitable<TReq, TRes>>::OnComplete,
+                               AwaitableBase<StreamNextAwaitable<TReq, TRes>>::OnDestroy};
+
+        // The opening request is an ordinary send; the engine only learns this is a stream when-
+        // -parse() first returns a CHUNK_* result, so nothing extra is needed on the send side
+        const EndpointStatus s =
+            first ? Core::EndpointApiExt1()->sendPayload(Core::HttpApiExt1()->getGlobalPtrData(), endpointIdx,
+                                                         static_cast<const void*>(req), onDone, pinnedSlot)
+                  : Core::EndpointApiExt1()->streamNext(Core::HttpApiExt1()->getGlobalPtrData(),
+                                                        static_cast<const void*>(req), onDone);
+
+        if(s == EndpointStatus::PENDING)
+            return true;
+
+        // Either a chunk was already buffered, the stream ended, or it failed. All three resume-
+        // -immediately: suspending would strand the coroutine, since no callback is coming
+        syncStatus = s;
+        this->result_.status = (s == EndpointStatus::CHUNK_AVAILABLE || s == EndpointStatus::SUCCESS)
+                                   ? AsyncStatus::COMPLETED
+                                   : AsyncStatus::IO_FAILURE;
+
+        return false;
+    }
+
+    StreamChunk<TRes> await_resume() const noexcept
+    {
+        // Synchronous chunk: the engine left it in the slot's output object rather than firing-
+        // -a callback, so ask for it now that the coroutine is safely past its suspend point
+        if(syncStatus == EndpointStatus::CHUNK_AVAILABLE) {
+            const auto* chunk =
+                static_cast<const TRes*>(Core::EndpointApiExt1()->streamChunk(Core::HttpApiExt1()->getGlobalPtrData()));
+
+            // A null chunk here would otherwise read as "more to come, but nothing yet" and spin-
+            // -the caller's loop forever, so it terminates the stream instead
+            return {EndpointStatus::SUCCESS, chunk, chunk == nullptr};
+        }
+
+        if(syncStatus == EndpointStatus::SUCCESS)
+            return {EndpointStatus::SUCCESS, nullptr, true};
+
+        if(this->result_.status != AsyncStatus::COMPLETED)
+            return {syncStatus != EndpointStatus::PENDING ? syncStatus : this->result_.endpointStatus, nullptr, true};
+
+        // PENDING on a delivered result means "chunk, more to come"; SUCCESS means the stream ended
+        // A null chunk is terminal either way, for the same reason as the synchronous path above
+        const auto* chunk = static_cast<const TRes*>(this->result_.data);
+        const bool isFinal = this->result_.endpointStatus != EndpointStatus::PENDING || chunk == nullptr;
+
+        return {EndpointStatus::SUCCESS, chunk, isFinal};
+    }
+};
+
+// Drives a chunked response. Hold it across the whole loop: it owns the request, which-
+// -cursor/paging protocols need handed back on every Next() to build their continuation
+//
+//   auto stream = ep.Stream(req);
+//   while(true) {
+//       auto chunk = co_await stream.Next();
+//       if(chunk.status != WFX::EpOk || chunk.done) break;
+//       // use chunk.data, only valid until the next Next()
+//   }
+template <typename TReq, typename TRes> class StreamHandle {
+public:
+    StreamHandle(std::uint16_t idx, TReq r, std::uint64_t pinned) noexcept
+        : req_(std::move(r)), endpointIdx_(idx), pinnedSlot_(pinned)
+    {}
+
+    StreamHandle(StreamHandle&&) = default;
+    StreamHandle& operator=(StreamHandle&&) = default;
+    StreamHandle(const StreamHandle&) = delete;
+    StreamHandle& operator=(const StreamHandle&) = delete;
+
+public:
+    StreamNextAwaitable<TReq, TRes> Next() noexcept
+    {
+        const bool isFirst = first_;
+        first_ = false;
+
+        return {endpointIdx_, &req_, isFirst, pinnedSlot_};
+    }
+
+private: // Storage
+    TReq req_;
+    std::uint16_t endpointIdx_ = 0;
+    std::uint64_t pinnedSlot_ = 0;
+    bool first_ = true;
+};
+
+// RAII owner of a connection pinned via Resolve::Reserve(). Every SendPayload through it runs-
+// -on that one connection instead of whatever the pool hands out, which is what makes-
+// -connection-scoped protocol state (an open transaction, a LISTEN subscription) work at all
+//
+// Releases on destruction, so an early co_return or a thrown exception can't leak the pin. The-
+// -underlying slot can still die on its own (server hangup, idle timeout); the handle detects-
+// -that and later sends fail with EpInvalidKey rather than landing on an unrelated connection
+template <typename TReq, typename TRes> class ReservedSlot {
+public:
+    ReservedSlot(std::uint16_t idx, std::uint64_t handle, EndpointDestroyStateFn destroy) noexcept
+        : endpointIdx_(idx), handle_(handle), destroyOutput_(destroy)
+    {}
+
+    ~ReservedSlot()
+    {
+        Release();
+    }
+
+    // Move-only: two owners would double-release
+    ReservedSlot(ReservedSlot&& o) noexcept
+        : endpointIdx_(o.endpointIdx_), handle_(o.handle_), destroyOutput_(o.destroyOutput_)
+    {
+        o.handle_ = 0;
+    }
+    ReservedSlot& operator=(ReservedSlot&& o) noexcept
+    {
+        if(this != &o) {
+            Release();
+            endpointIdx_ = o.endpointIdx_;
+            handle_ = o.handle_;
+            destroyOutput_ = o.destroyOutput_;
+            o.handle_ = 0;
+        }
+
+        return *this;
+    }
+
+    ReservedSlot(const ReservedSlot&) = delete;
+    ReservedSlot& operator=(const ReservedSlot&) = delete;
+
+public:
+    // False when the reservation failed (pool exhausted) or was already released
+    bool IsValid() const noexcept
+    {
+        return handle_ != 0;
+    }
+
+    SendPayloadAwaitable<TReq, TRes> SendPayload(TReq req) const noexcept
+    {
+        return {endpointIdx_, std::move(req), destroyOutput_, handle_};
+    }
+
+    // Same chunked consumption as Resolve::Stream(), pinned to this reservation
+    StreamHandle<TReq, TRes> Stream(TReq req) const noexcept
+    {
+        return {endpointIdx_, std::move(req), handle_};
+    }
+
+    // Idempotent, also runs on destruction. Safe to call mid-request: the engine hands the-
+    // -connection back once that request finishes rather than yanking it out from under it
+    void Release() noexcept
+    {
+        if(handle_ == 0)
+            return;
+
+        Core::EndpointApiExt1()->releaseSlot(handle_);
+        handle_ = 0;
+    }
+
+private: // Storage
+    std::uint16_t endpointIdx_ = 0;
+    std::uint64_t handle_ = 0;
+    EndpointDestroyStateFn destroyOutput_ = nullptr;
+};
+
 // Constructed once at namespace scope before Run(). Registers the endpoint with the engine-
 // -via the deferred init vector and stores the assigned index for use in SendPayload calls
 //
@@ -231,6 +437,23 @@ public:
     SendPayloadAwaitable<TReq, TRes> SendPayload(TReq req) const noexcept
     {
         return {endpointIdx_, std::move(req), destroyOutput_};
+    }
+
+    // Pins one connection to the caller so consecutive requests share it, for protocols where-
+    // -that's load-bearing (SQL transactions, LISTEN/NOTIFY). Returns an empty ReservedSlot when-
+    // -the pool is exhausted, check IsValid() before using it. Not available on multiplexed-
+    // -endpoints (hasCapacity set), which already share one connection by design
+    ReservedSlot<TReq, TRes> Reserve() const noexcept
+    {
+        return {endpointIdx_, Core::EndpointApiExt1()->reserveSlot(endpointIdx_), destroyOutput_};
+    }
+
+    // Consumes a response in chunks instead of materializing it whole, for results too large to-
+    // -hold in memory. The protocol opts in by returning a CHUNK_* ParseResult; without that-
+    // -this behaves like an ordinary SendPayload that completes on the first Next()
+    StreamHandle<TReq, TRes> Stream(TReq req) const noexcept
+    {
+        return {endpointIdx_, std::move(req), 0};
     }
 
 private:

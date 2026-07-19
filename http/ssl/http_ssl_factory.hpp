@@ -17,10 +17,12 @@
 namespace WFX::Http {
 
 // Factory function that returns the correct handler
-inline std::unique_ptr<HttpWFXSSL> CreateSSLHandler()
+// initServer builds the inbound context immediately; the outbound one is created on demand-
+// -through EnsureClientContext, so outbound TLS never depends on the server serving HTTPS
+inline std::unique_ptr<HttpWFXSSL> CreateSSLHandler(bool initServer)
 {
 #ifdef WFX_USE_OPENSSL
-    return std::make_unique<HttpOpenSSL>();
+    return std::make_unique<HttpOpenSSL>(initServer);
 #else
     static_assert(false, "WFX_USE_OPENSSL macro not found. Only OpenSSL backend is supported for now");
     return nullptr;

@@ -178,88 +178,36 @@ The decayed type is determined via the `Form::DecayedType<Rule>` trait.
 
 #### **Builtins**
 
-WFX provides the following built-in rules:
+Five rules cover the common cases. Every one of them also carries the members
+of `BaseRule` (`.required`, defaulting to `true`), which are not repeated below.
 
-- `Text`
+| Rule | Members | Defaults | Decayed type |
+|------|---------|----------|--------------|
+| `Text` | `.ascii` (`bool`)<br>`.min` (`std::uint32_t`)<br>`.max` (`std::uint32_t`) | `false`<br>`0`<br>`65535` | `std::string_view` |
+| `Email` | `.strict` (`bool`) | `true` | `std::string_view` |
+| `Int` | `.min` (`std::int64_t`)<br>`.max` (`std::int64_t`) | `INT64_MIN`<br>`INT64_MAX` | `std::int64_t` |
+| `UInt` | `.min` (`std::uint64_t`)<br>`.max` (`std::uint64_t`) | `0`<br>`UINT64_MAX` | `std::uint64_t` |
+| `Float` | `.min` (`double`)<br>`.max` (`double`) | `-1e308`<br>`1e308` | `double` |
 
-    **Usage**:
-    ```cpp
-    Form::Text{
-        .ascii = /* true | false */,
-        .min   = /* minimum length */,
-        .max   = /* maximum length */
-    }
-    ```
+- `ascii` restricts input to ASCII characters
+- `strict` enables the stricter of the two email grammars
+- `min` and `max` bound length for `Text`, and value for the numeric rules
 
-    - `ascii` (`bool`): restrict input to ASCII characters only  
-    - `min` (`std::uint32_t`): minimum allowed length  
-    - `max` (`std::uint32_t`): maximum allowed length  
+```cpp
+Form::Text{ .min = 3, .max = 32 }          // 3-32 characters
+Form::Text{ .required = false }            // optional, from BaseRule
+Form::Int{ .min = 0, .max = 150 }          // an age
+Form::Email{}                              // strict by default
+```
 
-    **Decayed type**: `std::string_view`
-
-- **`Email`**
-
-    **Usage**:
-    ```cpp
-    Form::Email{
-        .strict = /* true | false */
-    }
-    ```
-
-    - `strict` (`bool`): enable strict email validation rules  
-
-    **Decayed type**: `std::string_view`
-
-- **`Int`**
-
-    **Usage**:
-    ```cpp
-    Form::Int{
-        .min = /* minimum value */,
-        .max = /* maximum value */
-    }
-    ```
-
-    - `min` (`std::int64_t`): minimum allowed value  
-    - `max` (`std::int64_t`): maximum allowed value  
-
-    **Decayed type**: `std::int64_t`
-
-- **`UInt`**
-
-    **Usage**:
-    ```cpp
-    Form::UInt{
-        .min = /* minimum value */,
-        .max = /* maximum value */
-    }
-    ```
-
-    - `min` (`std::uint64_t`): minimum allowed value  
-    - `max` (`std::uint64_t`): maximum allowed value  
-
-    **Decayed type**: `std::uint64_t`
-
-- **`Float`**
-
-    **Usage**:
-    ```cpp
-    Form::Float{
-        .min = /* minimum value */,
-        .max = /* maximum value */
-    }
-    ```
-
-    - `min` (`double`): minimum allowed value  
-    - `max` (`double`): maximum allowed value  
-
-    **Decayed type**: `double`
+!!! important
+    `min` and `max` on `Text` bound the **decoded** length, not the raw wire
+    bytes. A percent-encoded payload cannot slip past a length check by being
+    longer before decoding than after.
 
 !!! note
-    The members shown here are only the members specific to the builtin rule itself.  
-    All **common members** (e.g. `.required`, etc.) are defined in the **`BaseRule`** struct, which is documented **earlier** in the *Base interface* section.  
-    They are **not repeated** for each builtin rule to avoid duplication.  
-    If a member is not listed here, assume it comes from **`BaseRule`** and **still applies**.
+    Anything not listed above comes from `BaseRule` and still applies. See the
+    *Base interface* section for the full set.
 
 #### **Custom**
 
