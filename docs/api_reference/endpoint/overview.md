@@ -138,8 +138,9 @@ before touching `out`, a non-`EpOk` status means `out` is empty.
 
 ## Connection pool & lifecycle
 
-Every endpoint owns a fixed-size pool of connection slots, sized by `connLimit`.
-A slot moves through roughly this lifecycle:
+Every endpoint owns a fixed-size pool of connection slots, sized from `connLimit`
+(rounded up, see the note under [Pool settings](#pool-settings)). A slot moves
+through roughly this lifecycle:
 
 1. **Closed** -> no socket, nothing allocated.
 2. **Connecting** -> TCP connect (and TLS handshake, if applicable) in progress.
@@ -169,7 +170,7 @@ struct EndpointConfig {
 
 | Setting | Meaning |
 |---------|---------|
-| `connLimit` | Max simultaneous connections to this host, per worker |
+| `connLimit` | Max simultaneous connections to this host, per worker (rounded up, see below) |
 | `dnsRefreshSeconds` | `0` to follow the DNS record's own TTL, or a ceiling in seconds |
 | `connectTimeoutSeconds` | Budget for TCP connect + TLS handshake + `onConnect` combined |
 | `requestTimeoutSeconds` | Budget for one send + receive cycle once a request starts |
@@ -182,12 +183,17 @@ struct EndpointConfig {
 | `alpnProtocols` | ALPN protocols to offer during the TLS handshake |
 
 !!! important
-    These are validated at startup and the server refuses to start if any are
-    invalid: `connLimit` must be greater than zero, `prewarm` cannot exceed
-    `connLimit`, `reconnectBackoffBase` cannot exceed `reconnectBackoffMax`, and
-    every timeout must be at least as long as the engine's internal timer tick
-    (5 seconds). A shorter value would silently fire later than configured, so
-    WFX rejects it outright instead of lying to you.
+    - These are validated at startup and the server refuses to start if any are
+      invalid: `connLimit` must be greater than zero, `prewarm` cannot exceed
+      `connLimit`, `reconnectBackoffBase` cannot exceed `reconnectBackoffMax`, and
+      every timeout must be at least as long as the engine's internal timer tick
+      (5 seconds). A shorter value would silently fire later than configured, so
+      WFX rejects it outright instead of lying to you.
+    - The effective `connLimit` is the next multiple of 64 at or above the value you
+      set, because the slot pool is a bitmap sized in whole 64-bit words. A `connLimit`
+      of 1 to 64 gives 64 slots, 65 to 128 gives 128, and so on. This rounded capacity
+      is the real ceiling on simultaneous connections, and the point at which further
+      requests are refused with `poolExhausted`.
 
 ### Reconnects and backoff
 

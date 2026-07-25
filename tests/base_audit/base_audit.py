@@ -1191,6 +1191,21 @@ def phase_features(ctx):
             else:
                 pr.ok()
 
+        # /stream: chunked streaming response via res.Stream() (512 chunks x 256 'S'
+        # bytes). This whole response-streaming path had no coverage: no ROUTE_CHECK
+        # ever requested it. Drive it and verify the full 131072-byte body reassembles
+        with term.progress("features", "stream:chunked") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/stream"), rtimeout=8.0, rmax=1 << 20)
+            sbody = net.dechunk(body_of(raw)) if raw else b""
+            expected = b"S" * (512 * 256)
+            if st != 200 or sbody != expected:
+                pr.bad()
+                findings.append(("STREAM_FAIL",
+                                  "/stream: status=%s len=%d (expected 200, %d bytes of 'S')"
+                                  % (st, len(sbody), len(expected))))
+            else:
+                pr.ok()
+
         if not common.health(host, port, 4.0):
             findings.append(("SERVER_DEAD", "server unreachable after features phase"))
 
@@ -1396,7 +1411,112 @@ def phase_forms(ctx):
     ctx.phase("forms").record(findings, security=("FORM_HEADER_INJECT", "FORM_DECODE_BYPASS"),
                               vectors=checks)
 
-# Phase 5: CHAOS
+# Phase 5: METRICS
+#
+# The per-route metrics table: identity plumbing (path + method attached at read
+# time), counters that match driven traffic, status-class bucketing, and - since
+# the audit toml sets [Metrics] latency = true - the route latency histogram.
+#
+# Every assertion is delta-based (snapshot, drive a known count, snapshot again),
+# so earlier phases' traffic and the two-worker aggregation don't matter: only the
+# change caused by this phase's own requests is checked. Runs before chaos, whose
+# worker kills reset a slot's counters mid-flight and would break a delta.
+def _find_route(metrics, pred):
+    for r in metrics.get("routes", []):
+        if pred(r):
+            return r
+    return None
+
+def _route_exact(method, path):
+    return lambda r: r.get("method") == method and r.get("path") == path
+
+def _route_prefix(method, prefix):
+    return lambda r: r.get("method") == method and (r.get("path") or "").startswith(prefix)
+
+# Every RouteMetrics field: requests, status1xx..5xx, bytesOut, plus the latency
+# histogram. status1xx is unreachable over HTTP (no response's FINAL status is 1xx),
+# so it is asserted to stay zero rather than driven
+def phase_metrics(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    p = ctx.phase("metrics")
+
+    before = _fetch_metrics(host, port)
+    p.check("metrics: latency histograms enabled", before.get("latency_enabled") is True,
+            "expected [Metrics] latency = true in wfx.toml, got %r" % before.get("latency_enabled"))
+
+    # Identity plumbing: two known routes each show up with their own path and method.
+    # /status/<code:uint> is the status-class workhorse, /health a second static route
+    sb = _find_route(before, _route_prefix("GET", "/status"))
+    hb = _find_route(before, _route_exact("GET", "/health"))
+    p.check("metrics: dynamic route identity (path + method) attached", sb is not None,
+            "no GET /status* route in routes[]: %r" % [r.get("path") for r in before.get("routes", [])])
+    p.check("metrics: static route identity (path + method) attached", hb is not None,
+            "GET /health absent")
+    if sb is None or hb is None:
+        return
+
+    # Drive every status class through the one /status route, and /health separately
+    counts = {200: 20, 301: 7, 404: 11, 500: 5}
+    for code, n in counts.items():
+        for _ in range(n):
+            req(host, port, "GET", "/status/%d" % code, rtimeout=3.0)
+    n_health = 13
+    for _ in range(n_health):
+        req(host, port, "GET", "/health", rtimeout=3.0)
+
+    after = _fetch_metrics(host, port)
+    sa = _find_route(after, _route_prefix("GET", "/status"))
+    ha = _find_route(after, _route_exact("GET", "/health"))
+    if sa is None or ha is None:
+        p.failed("metrics: routes vanished after drive", "status=%r health=%r" % (sa, ha))
+        return
+
+    n_status_total = sum(counts.values())
+    checks = [
+        ("requests count matches total driven", sa["requests"] - sb["requests"], n_status_total),
+        ("2xx status class matches",            sa["status_2xx"] - sb["status_2xx"], counts[200]),
+        ("3xx status class matches",            sa["status_3xx"] - sb["status_3xx"], counts[301]),
+        ("4xx status class matches",            sa["status_4xx"] - sb["status_4xx"], counts[404]),
+        ("5xx status class matches",            sa["status_5xx"] - sb["status_5xx"], counts[500]),
+    ]
+    for label, got, want in checks:
+        p.check("metrics: " + label, got == want, "expected +%d, got +%d" % (want, got))
+
+    p.check("metrics: 1xx bucket stays zero (no final-1xx over HTTP)",
+            sa["status_1xx"] - sb["status_1xx"] == 0)
+    p.check("metrics: bytes_out increased (one byte body x N)",
+            sa["bytes_out"] - sb["bytes_out"] >= n_status_total)
+
+    # Route isolation: /health traffic lands only on /health, never on /status
+    p.check("metrics: per-route isolation (health counted on its own slot)",
+            ha["requests"] - hb["requests"] == n_health,
+            "expected +%d on /health, got +%d" % (n_health, ha["requests"] - hb["requests"]))
+    p.check("metrics: /health traffic never bleeds into /status requests",
+            (sa["requests"] - sb["requests"]) == n_status_total)
+
+    # Latency: one sample per served request on each route's own histogram
+    ls_b, ls_a = sb.get("latency") or {}, sa.get("latency") or {}
+    lh_b, lh_a = hb.get("latency") or {}, ha.get("latency") or {}
+    p.check("metrics: /status latency count tracks its requests",
+            ls_a.get("count", 0) - ls_b.get("count", 0) == n_status_total,
+            "expected +%d, got +%d" % (n_status_total, ls_a.get("count", 0) - ls_b.get("count", 0)))
+    p.check("metrics: /health latency count tracks its requests",
+            lh_a.get("count", 0) - lh_b.get("count", 0) == n_health,
+            "expected +%d, got +%d" % (n_health, lh_a.get("count", 0) - lh_b.get("count", 0)))
+    p.check("metrics: latency percentiles ordered and populated",
+            ls_a.get("count", 0) == 0 or
+            (ls_a.get("p50_us", 0) > 0 and ls_a.get("p99_us", 0) >= ls_a.get("p50_us", 0)
+             and ls_a.get("max_us", 0) >= ls_a.get("p99_us", 0)),
+            "p50=%r p99=%r max=%r" % (ls_a.get("p50_us"), ls_a.get("p99_us"), ls_a.get("max_us")))
+    p.check("metrics: latency mean within [p50-ish, max]",
+            ls_a.get("count", 0) == 0 or (0 < ls_a.get("mean_us", 0) <= ls_a.get("max_us", 1)),
+            "mean=%r max=%r" % (ls_a.get("mean_us"), ls_a.get("max_us")))
+
+    if not ctx.server.alive():
+        p.failed("SERVER_DEAD", "unreachable after metrics phase")
+
+# Phase 6: CHAOS
 def phase_chaos(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -1566,6 +1686,116 @@ def phase_chaos(ctx):
 
     ctx.phase("chaos").record(findings, vectors=stats.get("kills", 0) + stats.get("stops", 0))
 
+# Phase 7: KEEP-ALIVE SOAK
+#
+# Every other phase opens a fresh Connection: close socket per request, so WFX's
+# INBOUND keep-alive path - many sequential requests parsed off ONE persistent
+# connection, each reusing the same per-connection read/write buffers and parser
+# state - is barely exercised anywhere. This drives a long run of back-to-back
+# requests on a single socket and asserts every response is byte-exact, which is
+# what catches read/write buffer offsets that never reset, parser state that
+# carries across requests, and cross-request body/header bleed on reuse
+def _read_http_response(sock, buf):
+    """Read exactly one CL-framed HTTP response off `sock`. Returns (status, body, leftover)."""
+    while b"\r\n\r\n" not in buf:
+        try:
+            d = sock.recv(65536)
+        except OSError:
+            return None, b"", buf
+        if not d:
+            return None, b"", buf
+        buf += d
+
+    head, _, rest = buf.partition(b"\r\n\r\n")
+    lines = head.split(b"\r\n")
+    try:
+        status = int(lines[0].split(b" ")[1])
+    except (IndexError, ValueError):
+        return None, b"", rest
+
+    clen = 0
+    for line in lines[1:]:
+        if line.lower().startswith(b"content-length:"):
+            try:
+                clen = int(line.split(b":", 1)[1].strip())
+            except ValueError:
+                clen = 0
+            break
+
+    while len(rest) < clen:
+        try:
+            d = sock.recv(65536)
+        except OSError:
+            break
+        if not d:
+            break
+        rest += d
+
+    return status, rest[:clen], rest[clen:]
+
+def phase_soak(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    findings = []
+
+    # CL-framed routes with mixed body sizes so the read buffer sees varying request
+    # shapes and the write buffer varying response lengths across reuse
+    rotation = [
+        ("/health",        200, b"ok"),
+        ("/text",          200, b"ok"),
+        ("/items/42",      200, b"42"),
+        ("/greet/soak",    200, b"hello soak"),
+        ("/api/v1/status", 200, b"ok"),
+    ]
+    n = 2000
+    term.log("soak", "started  (%d sequential requests on ONE keep-alive connection)" % n)
+
+    try:
+        sock = socket.create_connection((host, port), timeout=5.0)
+        sock.settimeout(5.0)
+    except OSError as e:
+        ctx.phase("soak").record([("SOAK_CONNECT", "could not open keep-alive socket: %s" % e)])
+        return
+
+    buf = b""
+    completed = 0
+    with term.progress("soak", "keep-alive", n) as pr:
+        try:
+            for i in range(n):
+                path, exp_st, exp_body = rotation[i % len(rotation)]
+                reqb = ("GET %s HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n" % path).encode("latin-1")
+                try:
+                    sock.sendall(reqb)
+                except OSError as e:
+                    findings.append(("SOAK_SEND", "send failed at request #%d: %s" % (i, e)))
+                    pr.bad()
+                    break
+
+                st, rbody, buf = _read_http_response(sock, buf)
+                if st != exp_st or rbody != exp_body:
+                    findings.append(("SOAK_MISFRAME",
+                                      "request #%d %s -> status=%r body=%r (expected %d / %r)"
+                                      % (i, path, st, rbody[:64], exp_st, exp_body)))
+                    pr.bad()
+                    break
+
+                completed += 1
+                pr.ok()
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+    term.log("soak", "%d/%d requests correct on one connection" % (completed, n))
+    if completed < n and not findings:
+        findings.append(("SOAK_INCOMPLETE", "only %d/%d completed on the reused connection" % (completed, n)))
+
+    if not common.health(host, port, 4.0):
+        findings.append(("SERVER_DEAD", "server unreachable after soak phase"))
+
+    ctx.phase("soak").record(findings, vectors=completed)
+
 # Torture suite: hostile load and deliberate worker kills, so the interesting output is what went
 # wrong rather than a pass count. Phases collect findings and flush them with Phase.record()
 #
@@ -1581,6 +1811,8 @@ class BaseAudit(common.Suite):
         "protocol": phase_protocol,
         "features": phase_features,
         "forms":    phase_forms,
+        "metrics":  phase_metrics,
+        "soak":     phase_soak,
         "chaos":    phase_chaos,
     }
 

@@ -318,6 +318,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     auto& osConfig = config.osSpecificConfig;
     auto& buildConfig = config.buildConfig;
     auto& loggingConfig = config.loggingConfig;
+    auto& metricsConfig = config.metricsConfig;
 
     // Used in daemon registry
     auto& projectName = config.projectConfig.projectName;
@@ -331,7 +332,8 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     if(!GetRandomPool().GenerateSSLKey())
         logger.Fatal("[WFX-Master]: Failed to generate SSL key");
 
-    if(!MetricTracer::Create(static_cast<int>(osConfig.workerProcesses)))
+    if(!MetricTracer::Create(static_cast<int>(osConfig.workerProcesses), metricsConfig.maxRoutes,
+                             metricsConfig.maxEndpoints, metricsConfig.latency))
         logger.Fatal("[WFX-Master]: Failed to initialize metric tracer region");
 
     // -------------------- TEMPLATE / USER CODE COMPILATION PHASE --------------------

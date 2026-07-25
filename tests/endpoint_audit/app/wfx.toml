@@ -23,8 +23,12 @@ max_connections_per_ip       = 512     # ENDPOINT TEST: the audit drives many co
                                        # requests from a single IP (127.0.0.1) to exercise pool
                                        # exhaustion + coalescing, so the per-IP caps are raised
                                        # well above the burst sizes the harness fires.
-max_request_burst_per_ip     = 512     # Initial request tokens per IP (was 10 -> throttled 16-way bursts)
-max_requests_per_ip_per_sec  = 512     # Refill rate (tokens per second per IP)
+max_request_burst_per_ip     = 8000    # ENDPOINT TEST: the soak phase fires thousands of
+                                       # sequential requests to march a multiplexed slot's
+                                       # write buffer to the cap, faster than 512/s, so the
+                                       # inbound rate cap is raised above that to keep the
+                                       # silting signal from being masked by throttling.
+max_requests_per_ip_per_sec  = 8000    # Refill rate (tokens per second per IP)
 
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
@@ -75,6 +79,11 @@ enable_timestamps = true       # Prepend [HH:MM:SS.mmm] to each line
 enable_file       = true      # Write to log files
 max_file_size     = 16777216   # Max log file size before rotation (in bytes) [if enable_file = true]
 max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
+
+[Metrics]
+max_routes    = 256    # Max routes tracked in the per-route metrics table
+max_endpoints = 256    # Max endpoints tracked in the per-endpoint metrics table
+latency       = true   # AUDIT: on so the metrics phase can assert endpoint latency histograms
 
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)

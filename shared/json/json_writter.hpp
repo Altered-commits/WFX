@@ -110,6 +110,12 @@ public: // Main Functions
         WKey(key);
         WStr(v);
     }
+    void Write(std::string_view key, const Shared::StringView& v)
+    {
+        Comma();
+        WKey(key);
+        WStr({v.Data(), v.Size()});
+    }
     void Write(std::string_view key, const char* v)
     {
         Comma();
@@ -186,6 +192,11 @@ public: // Main Functions
     {
         Comma();
         WStr(v);
+    }
+    void Push(const Shared::StringView& v)
+    {
+        Comma();
+        WStr({v.Data(), v.Size()});
     }
     void Push(std::int64_t v)
     {

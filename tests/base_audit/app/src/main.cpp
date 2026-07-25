@@ -102,6 +102,13 @@ WFX_GET("/violate/recommit", [](WFX::Request, WFX::Response res) {
     res.Write("after commit").Commit();
 })
 
+// Echoes the requested status code back, so the metrics phase can drive each response-
+// -status class (2xx / 3xx / 4xx / 5xx) through one route and check the per-class buckets
+WFX_GET("/status/<code:uint>", [](WFX::Request req, WFX::Response res) {
+    const auto code = static_cast<std::uint16_t>(req.GetSegment(0).AsU64());
+    res.Status(code).SendText("s");
+})
+
 WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     auto log = WFX::GetLogMetricsAll();
     auto net = WFX::GetNetworkMetricsAll();
@@ -118,17 +125,48 @@ WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
 
     j.Obj("network");
     j.Write("accepts", net.accepts);
-    j.Write("requests", net.requests);
     j.Write("active_conns", net.activeClientConns);
-    j.Write("response_2xx", net.response2xx);
-    j.Write("response_4xx", net.response4xx);
-    j.Write("response_5xx", net.response5xx);
+    j.Write("bytes_written", net.bytesWritten);
     j.End();
 
     j.Obj("process");
     j.Write("rss_bytes", self.rssBytes);
     j.Write("restarts", self.restarts);
     j.Write("crashes", self.crashes);
+    j.End();
+
+    // Per-route counters, summed across workers, each tagged with its own path and method
+    // rv.path / HttpMethodToStringView return Shared::StringView, written directly via the-
+    // -JsonWriter StringView overload (no manual std::string_view wrapping)
+    const bool latencyOn = WFX::MetricsLatencyEnabled();
+    j.Write("latency_enabled", latencyOn);
+
+    j.Arr("routes");
+    for(std::uint16_t r = 0; r < WFX::RouteMetricCount(); r++) {
+        const auto rv = WFX::GetRouteMetricsAt(r);
+        j.Obj();
+        j.Write("path", rv.path);
+        j.Write("method", WFX::Shared::HttpMethodToStringView(rv.method));
+        j.Write("requests", rv.metrics.requests);
+        j.Write("status_1xx", rv.metrics.status1xx);
+        j.Write("status_2xx", rv.metrics.status2xx);
+        j.Write("status_3xx", rv.metrics.status3xx);
+        j.Write("status_4xx", rv.metrics.status4xx);
+        j.Write("status_5xx", rv.metrics.status5xx);
+        j.Write("bytes_out", rv.metrics.bytesOut);
+
+        if(latencyOn) {
+            const auto st = WFX::ComputeLatencyStats(WFX::GetRouteLatencyAt(r));
+            j.Obj("latency");
+            j.Write("count", st.count);
+            j.Write("mean_us", static_cast<std::uint64_t>(st.meanUs));
+            j.Write("p50_us", st.p50Us);
+            j.Write("p99_us", st.p99Us);
+            j.Write("max_us", st.maxUs);
+            j.End();
+        }
+        j.End();
+    }
     j.End();
 })
 
@@ -174,7 +212,7 @@ WFX_GET("/api/v1/item/<id:uint>", [](WFX::Request req, WFX::Response res) {
 // Per-route middleware routes
 // MwContinue: middleware adds a header, handler runs normally.
 // NOTE: Header() in middleware calls EnsureHeadersOpen() which flushes the
-// status line (default 200) immediately — so the handler must NOT call
+// status line (default 200) immediately, so the handler must NOT call
 // Status() again, only write the body.
 WFX_GET_EX("/mw/injected", WFX_MW_LIST([](WFX::Request, WFX::Response res) {
                res.Header("X-Route-MW", "hit");
@@ -182,7 +220,7 @@ WFX_GET_EX("/mw/injected", WFX_MW_LIST([](WFX::Request, WFX::Response res) {
            }),
            [](WFX::Request, WFX::Response res) { res.Header("Content-Type", "text/plain").Write("ok").Commit(); })
 
-// MwBreak: middleware sends 403 and aborts the chain — handler never runs
+// MwBreak: middleware sends 403 and aborts the chain, handler never runs
 WFX_GET_EX("/mw/blocked", WFX_MW_LIST([](WFX::Request, WFX::Response res) {
                res.Status(403).SendText("blocked");
                return WFX::MwBreak;
@@ -213,7 +251,7 @@ WFX_GET_EX("/mw/skipnext",
            [](WFX::Request, WFX::Response res) { res.Status(200).SendText("handler-ran"); })
 
 
-// Async handler — exercises the coroutine + timer path under load
+// Async handler that exercises the coroutine + timer path under load
 WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     auto s = co_await WFX::SleepFor(25); // 25 ms
     if(s != WFX::AsyncOk) {
@@ -267,7 +305,7 @@ WFX_POST("/parse-json", [](WFX::Request req, WFX::Response res) {
 })
 
 
-// Chained header test — verifies the chainable Response API
+// Chained header test that verifies the chainable Response API
 WFX_GET("/chain", [](WFX::Request, WFX::Response res) {
     res.Status(200)
         .Header("X-Chain-A", "alpha")
@@ -328,7 +366,7 @@ WFX_GET("/template/inherit", [](WFX::Request, WFX::Response res) {
     res.SendTemplate("child.html", std::move(ctx));
 })
 
-// Form routes — surface for the forms security audit (percent-decoding,
+// Form routes, the surface for the forms security audit (percent-decoding,
 // Content-Type matching, field-order/count structure, validator/sanitizer
 // bounds, and value-into-header injection)
 static const auto AuditForm = WFX::Form::Schema("audit",

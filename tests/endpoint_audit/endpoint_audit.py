@@ -181,6 +181,24 @@ def inject(cfg, mode, body, ep="default"):
     except Exception:
         return None
 
+# /metrics: the per-endpoint metrics table (WFX::GetEndpointMetricsAt et al).
+# Several endpoint instances share the same host, so the metrics phase asserts on
+# the aggregate delta across every slot rather than one named endpoint
+def fetch_metrics(cfg):
+    raw = raw_send(cfg.host, cfg.port, _build("GET", "/metrics"), rtimeout=4.0)
+    if not raw or _status_of(raw) != 200:
+        return {}
+    try:
+        return json.loads(_body_of(raw))
+    except Exception:
+        return {}
+
+def _agg(metrics, field):
+    return sum(e.get(field, 0) for e in metrics.get("endpoints", []))
+
+def _agg_lat(metrics, field):
+    return sum((e.get("latency") or {}).get(field, 0) for e in metrics.get("endpoints", []))
+
 # /proto/* helpers
 # onConnect / onDisconnect / multiplexing, driven against app/src/proto.cpp's raw-
 # -WFX::Endpoint<> instances (good/bad/slow/reset)
@@ -1205,6 +1223,77 @@ def phase_protocol(ctx):
     dc2 = proto_disconnects(cfg)
     p.check("onDisconnect: idle timeout counted", dc2.get("idle", 0) >= 1, "counters=%r" % dc2)
 
+# PHASE: sustained multiplexed load (write-buffer reclaim regression)
+#
+# phase_protocol fires the multiplexing check exactly once (12 concurrent
+# requests, ~240 bytes total on the write buffer) and then lets the connection
+# idle-recycle. That never comes close to send_buffer_max, so it cannot see what
+# happens to a multiplexed slot's WRITE buffer over a long-lived connection.
+#
+# ProtoGood is connLimit=1 with hasCapacity set, so every request multiplexes
+# onto ONE persistent connection. SerializeMultiplexed appends each request to
+# the TAIL of that slot's write buffer and never clears it (other in-flight
+# streams' queued bytes must survive a clear). The failure this guards against:
+# if the engine never reclaims the already-flushed prefix, dataLength marches
+# monotonically toward send_buffer_max (16384 here) and, once the writable tail
+# is too small for the next "REQ <id> <key>\n" (~14 bytes), every further request
+# fails with a buffer error even though the socket is idle and fully drained.
+#
+# Only sustained sequential load reaches that ceiling: ~16384/14 ~= 1150 requests.
+# Drive well past it and assert EVERY request still succeeds on the SAME physical
+# connection. A first-failure index in the low thousands with the connection count
+# unchanged is the silting signature.
+def phase_soak(ctx):
+    cfg, mock = ctx.cfg, ctx.mock
+    p = ctx.phase("soak")
+
+    n = 2500
+    conns_before = mock.proto_conn_count()
+
+    failed_at = None
+    bad = None
+    for i in range(n):
+        key = "k%d" % i
+        r = proto_call(cfg, key=key, proto="good", rtimeout=10.0)
+        if not (is_alive(r) and r.get("ep") == EP_SUCCESS and r.get("value") == key):
+            failed_at = i
+            bad = r
+            break
+
+    conns_after = mock.proto_conn_count()
+
+    p.check("soak: %d sequential multiplexed requests all succeeded" % n,
+          failed_at is None,
+          "first failure at request #%s: %r (multiplexed write buffer not reclaimed?)" % (failed_at, bad))
+    # connLimit=1, so a healthy run rides exactly one connection start to finish.
+    # A silt-then-reopen would bump this as the poisoned slot is replaced
+    p.check("soak: sustained load stayed on one pooled connection",
+          conns_after - conns_before <= 1,
+          "proto connections before=%d after=%d (expected at most +1)" % (conns_before, conns_after),
+          security=False)
+
+    # Repeated concurrent waves on the same multiplexed connection: churns the
+    # pendingStreams map and per-stream parse-state alloc/free under sustained
+    # concurrency, many streams in flight at once, over and over. A single 12-request
+    # burst (phase_protocol) touches each of those paths once; this hammers them, so a
+    # use-after-free or leak on the multiplexed completion path shows up here (as a
+    # mismatch, or via the sanitizer gate killing the worker mid-wave)
+    waves, width = 30, 16
+    wave_fail = 0
+    for w in range(waves):
+        expect = set("w%d_%d" % (w, i) for i in range(width))
+        joins = [proto_call_async(cfg, key=k, proto="good", rtimeout=10.0) for k in expect]
+        got = [j() for j in joins]
+        vals = set(r.get("value") for r in got if is_alive(r) and r.get("ep") == EP_SUCCESS)
+        if vals != expect:
+            wave_fail += 1
+    p.check("soak: %d concurrent multiplexed waves (%d-wide) all matched" % (waves, width),
+          wave_fail == 0,
+          "%d/%d waves had a missing or mismatched response" % (wave_fail, waves),
+          security=True)
+
+    p.check("worker healthy after soak phase", _wfx_healthy(cfg) and mock.ping())
+
 # PHASE: slot pinning (Reserve/Release)
 #
 # Threat model is the connection-pool contamination class: a pooled connection
@@ -1469,6 +1558,156 @@ def phase_upgrade(ctx):
 
     p.check("worker healthy after upgrade phase", _wfx_healthy(cfg) and mock.ping())
 
+# PHASE: per-endpoint metrics
+#
+# The outbound counterpart to base_audit's route metrics. Covers every EndpointMetrics
+# field: requests, completed, status_2xx/3xx/4xx/5xx, connect_failures, tls_failures,
+# request_timeouts, pool_exhausted, other_errors, coalesce_hits, bytes_out, bytes_in,
+# slots_in_use, plus the latency histogram.
+#
+# Delta-based on the aggregate across all endpoint slots (host repeats across instances,
+# so a slot can't be mapped back to one instance by host alone). Each sub-check snapshots
+# immediately before its own traffic, so unrelated prior phases and the several endpoint
+# instances don't affect the measured change.
+#
+# Two fields are asserted structurally rather than driven: status_1xx (no response's
+# FINAL status is 1xx over HTTP) and reconnects (only the background pool-healing path
+# bumps it, on a timer, so it can't be pinned to a delta window here)
+def phase_metrics(ctx):
+    cfg, mock = ctx.cfg, ctx.mock
+    p = ctx.phase("metrics")
+
+    before = fetch_metrics(cfg)
+    p.check("metrics: latency histograms enabled", before.get("latency_enabled") is True,
+            "expected [Metrics] latency = true in wfx.toml, got %r" % before.get("latency_enabled"))
+    p.check("metrics: endpoints registered with host identity",
+            len(before.get("endpoints", [])) > 0 and all("host" in e for e in before["endpoints"]),
+            "endpoints[]=%r" % before.get("endpoints"))
+    # At rest every lease is returned, so the in-use gauge nets to zero
+    p.check("metrics: slots_in_use gauge quiescent at rest", _agg(before, "slots_in_use") == 0,
+            "expected 0 in-use slots before driving, got %d" % _agg(before, "slots_in_use"))
+
+    # Success path: requests, completed, status_2xx and latency-count each move by
+    # exactly the number driven; bytes flow in both directions
+    n_ok = 20
+    ok = [drive(cfg, "/ok", ep="default") for _ in range(n_ok)]
+    p.check("metrics: driven calls all succeeded", all(is_ok(r, 200, "hello") for r in ok),
+            "results=%r" % ok)
+    a = fetch_metrics(cfg)
+    for label, field, want in (("requests", "requests", n_ok), ("completed", "completed", n_ok),
+                               ("2xx status class", "status_2xx", n_ok)):
+        got = _agg(a, field) - _agg(before, field)
+        p.check("metrics: %s matches driven calls" % label, got == want,
+                "expected +%d, got +%d" % (want, got))
+    p.check("metrics: latency sample per completion", _agg_lat(a, "count") - _agg_lat(before, "count") == n_ok,
+            "expected +%d, got +%d" % (n_ok, _agg_lat(a, "count") - _agg_lat(before, "count")))
+    p.check("metrics: bytes_out recorded on send", _agg(a, "bytes_out") - _agg(before, "bytes_out") > 0)
+    p.check("metrics: bytes_in recorded on receive", _agg(a, "bytes_in") - _agg(before, "bytes_in") > 0)
+
+    # Non-2xx status classes, each mapped by the mock's /status/<code> to its own bucket
+    for code, field, other in ((301, "status_3xx", "status_2xx"),
+                               (404, "status_4xx", "status_2xx"),
+                               (503, "status_5xx", "status_4xx")):
+        b = fetch_metrics(cfg)
+        n = 4
+        rs = [drive(cfg, "/status/%d" % code, ep="default") for _ in range(n)]
+        a = fetch_metrics(cfg)
+        p.check("metrics: %d calls completed" % code, all(is_ok(r, code) for r in rs), "results=%r" % rs)
+        p.check("metrics: %s bucket matches" % field, _agg(a, field) - _agg(b, field) == n,
+                "expected +%d, got +%d" % (n, _agg(a, field) - _agg(b, field)))
+        p.check("metrics: %d never lands in %s" % (code, other), _agg(a, other) - _agg(b, other) == 0)
+
+    p.check("metrics: 1xx bucket stays zero (no final-1xx over HTTP)",
+            _agg(a, "status_1xx") - _agg(before, "status_1xx") == 0)
+
+    # Connect failure: nothing listening on the dead endpoint. The attempt is counted
+    # (requests) and classed as a connect failure, and never as a completion. This is
+    # the synchronous ECONNREFUSED path that used to slip past the metrics entirely
+    b2 = fetch_metrics(cfg)
+    n_dead = 2
+    dead = [drive(cfg, "/ok", ep="dead", rtimeout=18) for _ in range(n_dead)]
+    a2 = fetch_metrics(cfg)
+    p.check("metrics: dead-endpoint calls failed cleanly", all(is_err(r) for r in dead), "results=%r" % dead)
+    p.check("metrics: connect failures counted", _agg(a2, "connect_failures") - _agg(b2, "connect_failures") == n_dead,
+            "expected +%d, got +%d" % (n_dead, _agg(a2, "connect_failures") - _agg(b2, "connect_failures")))
+    p.check("metrics: failed attempt still counted as a request",
+            _agg(a2, "requests") - _agg(b2, "requests") == n_dead,
+            "expected +%d, got +%d" % (n_dead, _agg(a2, "requests") - _agg(b2, "requests")))
+    p.check("metrics: a failed call never counts as completed",
+            _agg(a2, "completed") - _agg(b2, "completed") == 0)
+
+    # Request timeout: a backend that stalls past the fast endpoint's 5s budget
+    b3 = fetch_metrics(cfg)
+    rt = drive(cfg, "/slow-headers", ep="fast", rtimeout=18)
+    a3 = fetch_metrics(cfg)
+    p.check("metrics: slow backend timed out", is_errc(rt, EP_REQ_TIMEOUT), "r=%r" % rt)
+    p.check("metrics: request timeout counted", _agg(a3, "request_timeouts") - _agg(b3, "request_timeouts") == 1,
+            "expected +1, got +%d" % (_agg(a3, "request_timeouts") - _agg(b3, "request_timeouts")))
+
+    # Pool exhaustion: the slot pool rounds connLimit up to a power of two (64) so slot
+    # indexing wraps with a mask instead of a modulo, so an endpoint only refuses once
+    # that rounded capacity is in flight, not at connLimit itself. Fire a burst wider
+    # than the rounded pool: the surplus that finds no free slot is refused outright with
+    # POOL_EXHAUSTED, one metric increment per refusal (never a completion or a timeout)
+    b4 = fetch_metrics(cfg)
+    burst = _concurrent(lambda i: drive(cfg, "/slow-headers", ep="fast", rtimeout=30), 96)
+    a4 = fetch_metrics(cfg)
+    refused = sum(1 for r in burst if is_errc(r, EP_POOL_EXHAUSTED))
+    p.check("metrics: burst wider than the pool refuses the surplus", refused >= 1,
+            "no request out of 96 came back POOL_EXHAUSTED")
+    p.check("metrics: pool exhaustion counted once per refusal",
+            _agg(a4, "pool_exhausted") - _agg(b4, "pool_exhausted") == refused,
+            "refused=%d, pool_exhausted delta=%d" % (refused, _agg(a4, "pool_exhausted") - _agg(b4, "pool_exhausted")))
+    p.check("metrics: a refused request is never also served", all(not is_ok(r) for r in burst),
+            "a burst request came back 2xx")
+
+    # Protocol / parse failure: a reply that is not valid HTTP surfaces as other_errors
+    b5 = fetch_metrics(cfg)
+    bad = drive_staged(cfg, mock, b"NOT-HTTP AT ALL\r\n\r\n", keep=False)
+    a5 = fetch_metrics(cfg)
+    p.check("metrics: malformed reply failed cleanly", is_err(bad), "r=%r" % bad)
+    p.check("metrics: parse failure counted as other_errors",
+            _agg(a5, "other_errors") - _agg(b5, "other_errors") >= 1,
+            "expected >= 1, got +%d" % (_agg(a5, "other_errors") - _agg(b5, "other_errors")))
+
+    # TLS failure: the upgrade endpoint gets a garbage ServerHello, so the handshake
+    # fails. It fails inside onConnect (the in-band upgrade), where the waiting caller is
+    # not attached to the slot as clientCtx, so the failure class depends on timing: an
+    # immediate OpenSSL error with the client attached lands in tls_failures, a stall
+    # trips the connect timer into connect_failures, and a background reschedule shows as
+    # reconnects. The tls_failures bucket is only reliably hit by the auto-TLS path, which
+    # has no endpoint here. What must always hold is that the failure is recorded, never
+    # silently dropped, so assert it lands in one of the failure buckets and is never served
+    tls_buckets = ("tls_failures", "connect_failures", "reconnects", "other_errors")
+    m6 = fetch_metrics(cfg)
+    b6 = {k: _agg(m6, k) for k in tls_buckets}
+    tg = sp_get(cfg, key="x", sp="tlsgarbage", rtimeout=20.0)
+    a6 = fetch_metrics(cfg)
+    d6 = {k: _agg(a6, k) - b6[k] for k in tls_buckets}
+    p.check("metrics: garbage TLS handshake failed, never served", is_err(tg), "r=%r" % tg)
+    p.check("metrics: failed TLS handshake recorded as a failure, never dropped",
+            sum(d6.values()) >= 1, "no failure bucket moved: %r" % d6)
+
+    # Coalescing: N concurrent identical requests collapse to one backend call; the
+    # merged waiters are counted as coalesce_hits, not as completions
+    mock.coalesce_reset()
+    b7 = fetch_metrics(cfg)
+    res = _concurrent(lambda i: drive(cfg, "/coalesce", ep="coalesce"), 16)
+    a7 = fetch_metrics(cfg)
+    p.check("metrics: coalesced waiters all ok", all(is_ok(r, 200, "coalesced") for r in res), "results=%r" % res)
+    p.check("metrics: coalesce hits recorded", _agg(a7, "coalesce_hits") - _agg(b7, "coalesce_hits") > 0,
+            "expected > 0, got +%d" % (_agg(a7, "coalesce_hits") - _agg(b7, "coalesce_hits")))
+
+    # Gauge invariant: every lease taken above has since been returned, so the in-use
+    # gauge is back to zero. Catches an unbalanced increment/decrement
+    end = fetch_metrics(cfg)
+    p.check("metrics: slots_in_use gauge back to zero after phase", _agg(end, "slots_in_use") == 0,
+            "expected 0 in-use slots, got %d" % _agg(end, "slots_in_use"))
+
+    p.check("worker healthy after metrics phase", _wfx_healthy(cfg) and mock.ping())
+
+    p.check("worker healthy after metrics phase", _wfx_healthy(cfg) and mock.ping())
+
 class EndpointAudit(common.Suite):
     name = "endpoint_audit"
     description = "WFX HttpEndpoint audit"
@@ -1487,10 +1726,12 @@ class EndpointAudit(common.Suite):
         "security":   phase_security,
         "lifecycle":  phase_lifecycle,
         "protocol":   phase_protocol,
+        "soak":       phase_soak,
         "pinning":    phase_pinning,
         "push":       phase_push,
         "streaming":  phase_streaming,
         "upgrade":    phase_upgrade,
+        "metrics":    phase_metrics,
     }
 
     def add_arguments(self, parser):

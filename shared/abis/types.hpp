@@ -4,6 +4,7 @@
 #ifndef WFX_SHARED_ABI_TYPES_HPP
 #define WFX_SHARED_ABI_TYPES_HPP
 
+#include "constants.hpp"
 #include "uuid.hpp"
 
 // Fwd declare user side request and response
@@ -259,6 +260,12 @@ using EndpointTakeStreamOutputFn = void* (*)(void* slotState, std::uint64_t key)
 // -(0 = need more bytes); return false if undecodable, which closes the slot
 using EndpointOnPushFn = bool (*)(void* slotState, const char* buf, std::uint32_t len, std::uint32_t* consumed);
 
+// Reports the protocol's own response status so the engine can bucket upstream results per-
+// -endpoint. Only protocols that have such a concept implement it, everything else leaves it null-
+// -and the status counters stay zero
+// Returning 0 means "no status for this response" and is not counted
+using EndpointStatusCodeFn = std::uint16_t (*)(const void* outObj);
+
 struct EndpointDesc {
     EndpointSerializeFn serialize;
     EndpointParseFn parse;
@@ -276,9 +283,10 @@ struct EndpointDesc {
     EndpointHasCapacityFn hasCapacity;           // nullable, non-null enables multiplexed slot sharing
     EndpointTakeStreamOutputFn takeStreamOutput; // nullable, REQUIRED when hasCapacity is set
     EndpointOnPushFn onPush;                     // nullable, null closes the slot on unsolicited bytes
+    EndpointStatusCodeFn statusCode;             // nullable, feeds the per-endpoint status counters
     void* userCtx;                               // injected into createSlotState
 };
-static_assert(sizeof(EndpointDesc) == 136, "'EndpointDesc' must be exactly 136 bytes.");
+static_assert(sizeof(EndpointDesc) == 144, "'EndpointDesc' must be exactly 144 bytes.");
 static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be standard layout");
 
 struct EndpointConfig {
@@ -311,6 +319,69 @@ struct LogMetrics {
 static_assert(sizeof(LogMetrics) == 48, "'LogMetrics' must be exactly 48 bytes");
 static_assert(std::is_standard_layout_v<LogMetrics>, "'LogMetrics' must be standard layout");
 
+// vvv Per-route and per-endpoint metrics vvv
+// Counters only, kept deliberately small: these are always mapped, so every field here is paid-
+// -for in production. Anything only interesting while chasing a specific bug belongs in a log-
+// -line, not a permanent counter
+// Slots are indexed densely from 0, so the mmap only faults in the pages actually used, and the-
+// -route name is not stored here: it is registration data, identical in every worker, and is-
+// -attached when the metrics are read
+struct RouteMetrics {
+    std::uint64_t requests = 0;
+    std::uint64_t status1xx = 0;
+    std::uint64_t status2xx = 0;
+    std::uint64_t status3xx = 0;
+    std::uint64_t status4xx = 0;
+    std::uint64_t status5xx = 0;
+    std::uint64_t bytesOut = 0;
+};
+static_assert(sizeof(RouteMetrics) == 56, "'RouteMetrics' must be exactly 56 bytes");
+static_assert(std::is_standard_layout_v<RouteMetrics>, "'RouteMetrics' must be standard layout");
+
+// Errors are split only where the split changes what you would do about it: unreachable host, bad-
+// -TLS, slow upstream and a pool too small are four different fixes. Everything else shares one-
+// -bucket, since narrowing it further is a debugging job rather than a monitoring one
+// The status counters are filled from EndpointDesc::statusCode, so they stay zero for protocols-
+// -that have no such concept
+struct EndpointMetrics {
+    std::uint64_t requests = 0;
+    std::uint64_t completed = 0;
+    std::uint64_t status1xx = 0;
+    std::uint64_t status2xx = 0;
+    std::uint64_t status3xx = 0;
+    std::uint64_t status4xx = 0;
+    std::uint64_t status5xx = 0;
+    std::uint64_t connectFailures = 0;
+    std::uint64_t tlsFailures = 0;
+    std::uint64_t requestTimeouts = 0;
+    std::uint64_t poolExhausted = 0;
+    std::uint64_t otherErrors = 0;
+    std::uint64_t reconnects = 0;
+    std::uint64_t coalesceHits = 0;
+    std::uint64_t bytesOut = 0;
+    std::uint64_t bytesIn = 0;
+    std::uint64_t slotsInUse = 0; // Gauge, current leases against connLimit
+};
+static_assert(sizeof(EndpointMetrics) == 136, "'EndpointMetrics' must be exactly 136 bytes");
+static_assert(std::is_standard_layout_v<EndpointMetrics>,
+              "'EndpointMetrics' must be standard layout");
+
+// Latency lives in its own array, mapped only when [Metrics] latency is on
+// Production wants to know what happened, a perf run wants to know how long it took, and the-
+// -second question costs two clock reads per request and far more memory than the counters
+//
+// 24 power-of-two ranges of 8 linear sub-buckets cover 1us to ~16s. A value reported at its-
+// -bucket midpoint is within 6.25% of the truth, which is tight enough to tell a p99 regression-
+// -from noise. Recording is a shift and an increment, percentiles are rebuilt at scrape time
+inline constexpr std::uint32_t LATENCY_BUCKET_COUNT = 192;
+
+struct LatencyMetrics {
+    std::uint64_t sumUs = 0;
+    std::uint64_t buckets[LATENCY_BUCKET_COUNT] = {};
+};
+static_assert(sizeof(LatencyMetrics) == 1544, "'LatencyMetrics' must be exactly 1544 bytes");
+static_assert(std::is_standard_layout_v<LatencyMetrics>, "'LatencyMetrics' must be standard layout");
+
 // Updated per request-response cycle
 struct NetworkMetrics {
     std::uint64_t accepts = 0;
@@ -323,14 +394,8 @@ struct NetworkMetrics {
     std::uint64_t fileBytesWritten = 0;
     std::uint64_t activeClientConns = 0;
     std::uint64_t activeEndpointConns = 0;
-    std::uint64_t requests = 0;
-    std::uint64_t response1xx = 0;
-    std::uint64_t response2xx = 0;
-    std::uint64_t response3xx = 0;
-    std::uint64_t response4xx = 0;
-    std::uint64_t response5xx = 0;
 };
-static_assert(sizeof(NetworkMetrics) == 128, "'NetworkMetrics' must be exactly 128 bytes");
+static_assert(sizeof(NetworkMetrics) == 80, "'NetworkMetrics' must be exactly 80 bytes");
 static_assert(std::is_standard_layout_v<NetworkMetrics>, "'NetworkMetrics' must be standard layout");
 
 // Written by master process, reflects live state of each worker slot
@@ -346,6 +411,24 @@ struct SelfMetrics {
 };
 static_assert(sizeof(SelfMetrics) == 48, "'SelfMetrics' must be exactly 48 bytes");
 static_assert(std::is_standard_layout_v<SelfMetrics>, "'SelfMetrics' must be standard layout");
+
+// Counters plus the identity they belong to, assembled at read time: the counters come from the-
+// -mmap, the identity from registration data. path and host are views into engine-owned strings-
+// -that live for the whole process, so they stay valid for the scraping handler's lifetime
+struct RouteMetricsView {
+    StringView path;
+    HttpMethod method = HttpMethod::GET;
+    RouteMetrics metrics;
+};
+static_assert(sizeof(RouteMetricsView) == 80, "'RouteMetricsView' must be exactly 80 bytes");
+static_assert(std::is_standard_layout_v<RouteMetricsView>, "'RouteMetricsView' must be standard layout");
+
+struct EndpointMetricsView {
+    StringView host;
+    EndpointMetrics metrics;
+};
+static_assert(sizeof(EndpointMetricsView) == 152, "'EndpointMetricsView' must be exactly 152 bytes");
+static_assert(std::is_standard_layout_v<EndpointMetricsView>, "'EndpointMetricsView' must be standard layout");
 
 // One slot per worker in shared mmap
 // Embeds user-facing metric structs directly (add fields there, not here)

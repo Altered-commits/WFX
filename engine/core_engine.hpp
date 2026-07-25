@@ -28,6 +28,7 @@ private: // Internal Functions
     void HandleSuccess(Http::ClientCtx* ctx);
 
 private: // Helper Functions
+    void RecordRouteMetrics(Http::ClientCtx* ctx);
     void FinishRequest(Http::ClientCtx* ctx);
     void HandleError(Http::ClientCtx* ctx, Shared::HttpStatus code, std::string_view message);
     std::uint8_t HandleConnectionHeader(std::string_view header);

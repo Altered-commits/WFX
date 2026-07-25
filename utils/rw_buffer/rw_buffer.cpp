@@ -258,6 +258,22 @@ void RWBuffer::AdvanceWriteLength(std::uint32_t n) noexcept
     meta->writtenLength = std::min(meta->writtenLength + n, meta->dataLength);
 }
 
+void RWBuffer::CompactWriteBuffer() noexcept
+{
+    // Discards the flushed prefix [0, writtenLength), slides the unsent tail [writtenLength,-
+    // -dataLength) down to offset 0, and rebases both watermarks so only live bytes remain
+    auto* meta = GetWriteMeta();
+    if(!meta || meta->writtenLength == 0)
+        return;
+
+    const std::uint32_t remaining = meta->dataLength - meta->writtenLength;
+    if(remaining > 0)
+        std::memmove(GetWriteData(), GetWriteData() + meta->writtenLength, remaining);
+
+    meta->dataLength = remaining;
+    meta->writtenLength = 0;
+}
+
 ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept
 {
     if(!writeBuffer_)

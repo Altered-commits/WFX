@@ -97,6 +97,11 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Misc", "max_worker_restarts", miscConfig.maxWorkerRestarts);
         ExtractValue(tbl, "Misc", "worker_backoff_base", miscConfig.workerBackoffBase);
         ExtractValue(tbl, "Misc", "worker_backoff_max", miscConfig.workerBackoffMax);
+
+        // vvv Metrics vvv
+        ExtractValue(tbl, "Metrics", "max_routes", metricsConfig.maxRoutes);
+        ExtractValue(tbl, "Metrics", "max_endpoints", metricsConfig.maxEndpoints);
+        ExtractValue(tbl, "Metrics", "latency", metricsConfig.latency);
     }
     catch(const toml::parse_error& err) {
         logger.Fatal("[Config]: File -> 'wfx.toml', Error -> ", err.what());

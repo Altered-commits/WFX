@@ -825,6 +825,9 @@ inline EndpointDesc BuildDesc(HttpEndpointOptions* opts, Shared::EndpointCoalesc
     d.cloneOutput = coalesceKey ? &CloneOutput : nullptr;
     d.hasCapacity = nullptr; // HTTP/1.1 only: no multiplexing
     d.takeStreamOutput = nullptr;
+    d.statusCode = [](const void* out) -> std::uint16_t {
+        return static_cast<const HttpEndpointResponse*>(out)->status;
+    };
     d.userCtx = opts;
     return d;
 }

@@ -204,7 +204,7 @@ security_level              = 2               # Integer (0 - 5 only)
   **Example**: `2` means TLS 1.2 or higher only; older clients using TLS 1.0 or 1.1 will be rejected for security reasons.
 
 - `security_level`  
-  OpenSSL security strictness (0–5). Higher values enforce stronger algorithms, longer keys, and stricter certificate checks.  
+  OpenSSL security strictness (0-5). Higher values enforce stronger algorithms, longer keys, and stricter certificate checks.  
   **Example**: `2` is a reasonable default, while `5` is extremely strict and may block older clients.
 
 ---
@@ -266,6 +266,33 @@ max_rotations     = 2         # 16-bit Unsigned Integer
 - `enable_file`: Write log output to per-worker log files under `logs/default_logs/`.
 - `max_file_size`: Max size of a single log file before it rotates. Only applies when `enable_file = true`.
 - `max_rotations`: Number of rotated log files to keep. Files are named `.1` through `.N`, oldest are discarded. Only applies when `enable_file = true`.
+
+---
+
+## `[Metrics]`
+
+Controls the per-route and per-endpoint metrics tables and optional latency histograms. This section is **optional**.
+
+```toml
+[Metrics]
+max_routes    = 256    # 16-bit Unsigned Integer
+max_endpoints = 256    # 16-bit Unsigned Integer
+latency       = false  # Boolean
+```
+
+- `max_routes`: Number of route slots reserved in the per-route metrics table. Routes are indexed densely from `0`, so this caps how many distinct routes can be tracked. Registering more routes than this leaves the overflow untracked.
+- `max_endpoints`: Number of endpoint slots reserved in the per-endpoint metrics table, indexed the same way as routes.
+- `latency`: Record per-route and per-endpoint latency histograms. When `true`, each request costs two extra clock reads and each tracked route/endpoint gets its own histogram in the shared metrics map. Leave it `false` in normal operation and enable it only when profiling. When `false`, `WFX::GetRouteLatencyAt` / `WFX::GetEndpointLatencyAt` return zeroed histograms and `WFX::MetricsLatencyEnabled()` returns `false`.
+
+!!! note "Allocation is lazy"
+    `max_routes` and `max_endpoints` reserve **virtual** address space in the shared metrics map, not physical memory. The map is anonymous, so a page only faults into physical memory the first time a slot on it is actually written. A slot is written when its route/endpoint first serves a request, so setting these higher than you need costs address space but almost no real memory. Size them to your worst case and forget about them; the counter tables themselves are tiny (roughly 48 KB per worker at the defaults).
+
+!!! warning "When to enable `latency`"
+    Latency histograms are the one part of the metrics map that is genuinely expensive. Each histogram is ~1.5 KB, and turning `latency` on maps one per route **and** one per endpoint, per worker. At the defaults that is ~772 KB of reserved space per worker (still lazily faulted, so real cost tracks the slots you actually touch), on top of two clock reads on every request.
+
+    Keep `latency = false` for steady-state production, where the counter tables (request counts, status classes, byte totals, endpoint failures) already answer "what is happening." Turn it on when you specifically need the shape of the latency distribution: chasing a p99 regression, validating a change under load, or capacity planning. Turn it back off when you are done. It is a profiling switch, not an always-on gauge.
+
+See [Telemetry](../api_reference/telemetry.md) for the read-side API that consumes these tables.
 
 ---
 

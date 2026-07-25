@@ -95,6 +95,15 @@ struct LoggingConfig {
     std::uint32_t maxFileSize = 16 * 1024 * 1024;
 };
 
+struct MetricsConfig {
+    std::uint16_t maxRoutes = 256;
+    std::uint16_t maxEndpoints = 256;
+
+    // Latency histograms cost two clock reads per request and far more memory than the counters
+    // Keep it false in normal case (unless debugging)
+    bool latency = false;
+};
+
 struct MiscConfig {
     std::uint16_t fileCacheSize = 20;
     std::uint16_t cacheChunkSize = 2 * 1024;
@@ -121,6 +130,7 @@ public: // Main storage space for configurations
     OSSpecificConfig osSpecificConfig;
     LoggingConfig loggingConfig;
     MiscConfig miscConfig;
+    MetricsConfig metricsConfig;
 };
 
 // Free function declaration (defined in 'config.cpp')

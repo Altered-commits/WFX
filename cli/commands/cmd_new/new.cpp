@@ -246,6 +246,11 @@ enable_file       = false      # Write to log files
 max_file_size     = 16777216   # Max log file size before rotation (in bytes) [if enable_file = true]
 max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
 
+[Metrics]
+max_routes    = 256    # Max routes tracked in the per-route metrics table
+max_endpoints = 256    # Max endpoints tracked in the per-endpoint metrics table
+latency       = false  # Record per-route / per-endpoint latency histograms (costs two clock reads per request)
+
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)
 template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)

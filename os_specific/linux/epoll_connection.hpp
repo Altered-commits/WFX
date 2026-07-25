@@ -80,6 +80,8 @@ public: // Initializing
     void Initialize(const std::string& host, std::uint16_t port) override;
     void SetEngineCallback(ReceiveCallback onData) override;
     std::uint16_t AllocateEndpoint(const char* host, EndpointDesc desc, EndpointConfig config) override;
+    std::uint16_t EndpointCount() const override;
+    StringView EndpointHostAt(std::uint16_t endpointIdx) const override;
 
 public: // Client operations
     void ResumeReceive(ClientCtx* ctx) override;
@@ -128,10 +130,16 @@ private: // Connection management
     std::uint64_t EncodeSlotHandle(EndpointCtx* ctx);
     EndpointCtx* DecodeSlotHandle(std::uint64_t pinnedSlot);
 
-    EndpointCtx* FindMultiplexableSlot(std::uint16_t endpointIdx, EndpointMetadata& meta);
     void ReleaseClient(ClientCtx* ctx);
     void ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason reason = DisconnectReason::ERROR);
     void ReturnEndpointToPool(EndpointCtx* ctx);
+
+    // Lease accounting for multiplexed slots, which keep their pool bit across the idle window-
+    // -(so FindMultiplexableSlot can reuse them) instead of going through ReturnEndpointToPool:-
+    // -drop the in-use count when the last stream drains, reacquire it when a new stream lands
+    void MultiplexReleaseLeaseIfIdle(EndpointCtx* ctx);
+    void MultiplexReacquireLease(EndpointCtx* ctx);
+    EndpointCtx* FindMultiplexableSlot(std::uint16_t endpointIdx, EndpointMetadata& meta);
 
 private: // I/O
     bool EnsureFileReady(ClientCtx* ctx, const std::string& path);
@@ -241,7 +249,7 @@ private: // Endpoint-specific
     void HandlePrewarm();
 
     void HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,
-                              DisconnectReason reason = DisconnectReason::ERROR);
+                              DisconnectReason reason = DisconnectReason::ERROR, bool tls = false);
     void ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& entry);
     void HandleReconnects();
     std::uint32_t ComputeBackoffSeconds(const EndpointConfig& config, std::uint16_t attempt);
@@ -283,6 +291,11 @@ private: // Async callback
 
 private: // Misc
     std::uint64_t NowMs();
+    std::uint64_t NowUs();
+    void RecordEndpointCompletion(std::uint16_t endpointIdx, const EndpointDesc& desc, const void* outputObj,
+                                  std::uint64_t startUs);
+    void RecordEndpointLatency(std::uint16_t endpointIdx, std::uint64_t startUs);
+    void RecordEndpointSendFailure(std::uint16_t endpointIdx, EndpointStatus status);
     bool SetNonBlocking(int fd);
     bool ResolveTLSFromAuto(std::uint16_t port);
     bool EndpointUsesTls(const EndpointConfig& config, std::uint16_t port);
@@ -294,6 +307,7 @@ private: // Singletons / config
     Logger& logger_ = GetLogger();
     FileCache& fileCache_ = GetFileCache();
     WorkerMetrics* metrics_ = MetricTracer::Current();
+    EndpointMetrics* endpointMetrics_ = MetricTracer::EndpointSlots(MetricTracer::WorkerIndex());
 
     IpLimiter ipLimiter_;
     ReceiveCallback onReceive_ = {};

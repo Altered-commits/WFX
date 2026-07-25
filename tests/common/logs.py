@@ -58,12 +58,52 @@ def launch_env(app_dir):
 
     # One prefix for both: they share a runtime, so the last log_path set wins and separate names
     # would mislabel whichever report actually lands
+    # halt_on_error=1 stops the worker at the FIRST error instead of limping on and possibly
+    # papering over the crash with a revival, so the report on disk is the whole story and
+    # scan_crash_reports() below can turn it into a hard failure
     env = dict(os.environ)
     log_path = "log_path=%s" % os.path.join(crash_dir, _SANITIZER_PREFIX)
-    env["ASAN_OPTIONS"] = "%s:detect_leaks=0" % log_path
-    env["UBSAN_OPTIONS"] = "%s:print_stacktrace=1" % log_path
+    env["ASAN_OPTIONS"] = "%s:detect_leaks=0:halt_on_error=1" % log_path
+    env["UBSAN_OPTIONS"] = "%s:print_stacktrace=1:halt_on_error=1" % log_path
 
     return env
+
+def scan_crash_reports(app_dir):
+    """Sanitizer (ASan/UBSan) report files written during this run, as (path, first_line).
+
+    launch_env() wipes crash_logs at boot and points ASAN/UBSAN log_path at the
+    'sanitizer' prefix here, so any 'sanitizer*' file is a memory-safety error from
+    THIS run. The log follower prints these in red but never counts them, so without
+    this a UAF that kills-then-revives a worker scrolls by and the suite still exits
+    green. The suite turns a non-empty result into a hard failure
+    """
+    crash_dir = os.path.join(app_dir, "logs", "crash_logs")
+    out = []
+    try:
+        names = sorted(os.listdir(crash_dir))
+    except OSError:
+        return out
+
+    for name in names:
+        if not name.startswith(_SANITIZER_PREFIX):
+            continue
+        path = os.path.join(crash_dir, name)
+        if not os.path.isfile(path):
+            continue
+
+        first = ""
+        try:
+            with open(path, "r", errors="replace") as handle:
+                for line in handle:
+                    stripped = line.strip()
+                    if stripped:
+                        first = stripped
+                        break
+        except OSError:
+            pass
+        out.append((path, first))
+
+    return out
 
 class LogFollower(threading.Thread):
     """Tails the app's log directories and prints new lines as they appear, like `tail -F`."""

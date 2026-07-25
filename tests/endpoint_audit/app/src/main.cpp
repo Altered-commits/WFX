@@ -31,7 +31,7 @@
 // Further down (search "Raw-protocol endpoint") this file also drives the RAW
 // WFX::Endpoint<> primitive directly against a tiny hand-rolled text protocol
 // (proto_upstream.py's second listener, PROTO_UPSTREAM) to cover onConnect,
-// onDisconnect, and multiplexing — three things HttpEndpoint structurally
+// onDisconnect, and multiplexing, three things HttpEndpoint structurally
 // cannot exercise, since HTTP/1.1 has no connection handshake and no concept
 // of concurrent requests sharing one connection.
 
@@ -866,7 +866,7 @@ WFX_GET("/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     // added in that order so the harness can assert header ordering and that a
     // forged Host/CL/TE is dropped even when surrounded by clean headers. The
     // views point into the inbound request buffer, which outlives this
-    // coroutine's co_await — safe.
+    // coroutine's co_await, so it is safe
     WFX::HttpEndpointRequestHeaders hdrs;
     auto addFwd = [&](std::string_view hdrName) {
         std::string_view fwd;
@@ -931,7 +931,7 @@ WFX_GET("/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 })
 
 // Serialize-side injection probe. The inbound POST *body* carries raw bytes that
-// may contain CR/LF/NUL — bytes the inbound header parser would never allow, so
+// may contain CR/LF/NUL, bytes the inbound header parser would never allow, so
 // this is the only way to feed the client serializer a genuinely hostile path or
 // header. The client MUST refuse (EpSerializeError == 10), never emit a request
 // that smuggles a second header/line upstream.
@@ -1217,11 +1217,60 @@ WFX_POST("/sp/push/reset", [](WFX::Request, WFX::Response res) {
 // X-Count rather than X-Size, the engine is accumulating chunks instead of
 // reusing one output object.
 WFX_GET("/sp/rss", [](WFX::Request, WFX::Response res) {
-    const auto self = WFX::GetProcessMetrics();
+    const auto self = WFX::GetProcessMetricsAt(WFX::WorkerIndex());
 
     res.Status(200);
     auto j = WFX::ImJson(res);
     j.Write("rss", self.rssBytes);
     j.Write("vm", self.vmBytes);
     j.Write("pid", static_cast<std::uint64_t>(self.pid));
+})
+
+// Per-endpoint metrics, summed across workers, each tagged with its host. Several endpoint-
+// -instances share the same host (all the UPSTREAM ones), so the metrics phase asserts on the-
+// -aggregate delta across every slot rather than trying to map a slot back to one instance.
+// ev.host is a Shared::StringView, written directly via the JsonWriter StringView overload
+WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
+    const bool latencyOn = WFX::MetricsLatencyEnabled();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("latency_enabled", latencyOn);
+
+    j.Arr("endpoints");
+    for(std::uint16_t e = 0; e < WFX::EndpointMetricCount(); e++) {
+        const auto ev = WFX::GetEndpointMetricsAt(e);
+        j.Obj();
+        j.Write("host", ev.host);
+        j.Write("requests", ev.metrics.requests);
+        j.Write("completed", ev.metrics.completed);
+        j.Write("status_1xx", ev.metrics.status1xx);
+        j.Write("status_2xx", ev.metrics.status2xx);
+        j.Write("status_3xx", ev.metrics.status3xx);
+        j.Write("status_4xx", ev.metrics.status4xx);
+        j.Write("status_5xx", ev.metrics.status5xx);
+        j.Write("connect_failures", ev.metrics.connectFailures);
+        j.Write("tls_failures", ev.metrics.tlsFailures);
+        j.Write("request_timeouts", ev.metrics.requestTimeouts);
+        j.Write("pool_exhausted", ev.metrics.poolExhausted);
+        j.Write("other_errors", ev.metrics.otherErrors);
+        j.Write("reconnects", ev.metrics.reconnects);
+        j.Write("coalesce_hits", ev.metrics.coalesceHits);
+        j.Write("bytes_out", ev.metrics.bytesOut);
+        j.Write("bytes_in", ev.metrics.bytesIn);
+        j.Write("slots_in_use", ev.metrics.slotsInUse);
+
+        if(latencyOn) {
+            const auto st = WFX::ComputeLatencyStats(WFX::GetEndpointLatencyAt(e));
+            j.Obj("latency");
+            j.Write("count", st.count);
+            j.Write("mean_us", static_cast<std::uint64_t>(st.meanUs));
+            j.Write("p50_us", st.p50Us);
+            j.Write("p99_us", st.p99Us);
+            j.Write("max_us", st.maxUs);
+            j.End();
+        }
+        j.End();
+    }
+    j.End();
 })

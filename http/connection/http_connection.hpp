@@ -255,6 +255,14 @@ struct ClientCtx : public ConnectionTag {
     HttpRequest* requestInfo = nullptr;   // 8 bytes
     HttpResponse* responseInfo = nullptr; // 8 bytes
 
+    // Monotonic microsecond stamps for latency, both 0 until stamped. Only written when [Metrics]-
+    // -latency is on, so the two clock reads they cost are never paid otherwise. routeStartUs is-
+    // -set when the request is dispatched; endpointStartUs when this client issues an outbound-
+    // -request, and holds for whichever endpoint path (single-slot, streaming, multiplexed) serves-
+    // -it, since a client only ever has one endpoint call in flight
+    std::uint64_t routeStartUs = 0;    // 8 bytes
+    std::uint64_t endpointStartUs = 0; // 8 bytes
+
     Utils::RWBuffer rwBuffer;                     // 16 bytes
     Shared::AsyncData asyncData = {};             // 24 bytes
     FileInfo fileInfo = {};                       // 24 bytes
@@ -276,7 +284,7 @@ public:
 
     bool IsAsyncOperation() const;
 };
-static_assert(sizeof(ClientCtx) <= 168, "'ClientCtx' must be <= 168 bytes");
+static_assert(sizeof(ClientCtx) <= 184, "'ClientCtx' must be <= 184 bytes");
 
 // Per-waiter entry for a coalesced in-flight request
 // Both pointers are non-owning (lifetime is tied to the owning CoalesceEntry)
@@ -316,6 +324,11 @@ struct HttpConnectionHandler {
     virtual void SetEngineCallback(ReceiveCallback onData) = 0;
     virtual std::uint16_t AllocateEndpoint(const char* host, Shared::EndpointDesc desc,
                                            Shared::EndpointConfig config) = 0;
+
+    // Registration data read back when metrics are scraped. Count is the number of allocated-
+    // -endpoints, HostAt returns an empty view for an out-of-range index
+    virtual std::uint16_t EndpointCount() const = 0;
+    virtual Shared::StringView EndpointHostAt(std::uint16_t endpointIdx) const = 0;
 
     // vvv Client operations vvv
     virtual void ResumeReceive(ClientCtx* ctx) = 0;

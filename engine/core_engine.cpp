@@ -22,6 +22,8 @@
 #include <dlfcn.h>
 #endif
 
+#include <chrono>
+
 namespace WFX::Core {
 
 using namespace WFX::Http;
@@ -36,6 +38,14 @@ enum ConnectionHeader : std::uint8_t {
     ERROR = 1 << 3,
 };
 
+// Monotonic microseconds for route latency. Stamp and read both go through here, so the base-
+// -cancels out and only the delta matters
+static std::uint64_t NowUs()
+{
+    auto tse = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::microseconds>(tse).count();
+}
+
 // vvv Main Functions vvv
 CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
 {
@@ -47,6 +57,7 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
     InitHttpAPIExt1(&router_, &middleware_);
     InitEndpointAPIExt1(connHandler_.get());
     InitAsyncAPIExt1(connHandler_.get());
+    InitUtilsAPIExt1(&router_, connHandler_.get());
 
     // We set it on our end because each compiled binary has its own copy of 'GlobalWFXApi'
     // If we want it to work on our end, we gotta set it here as well
@@ -110,12 +121,15 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             return;
 
         case HttpParseState::PARSE_SUCCESS: {
-            metrics_->network.requests++;
-
             // After parsing, ctx->trackBytes becomes the compact state register used by-
             // -'HandleSuccess' for async resumption IF needed that is
             // For now reset ctx->trackBytes so ctx->trackAsync becomes zeroed out 'HandleSuccess'
             ctx->trackBytes = 0;
+
+            // Stamp request-dispatch time for route latency, read back in RecordRouteMetrics. Gated-
+            // -so the clock read is only paid when latency is on
+            if(Utils::MetricTracer::LatencyEnabled())
+                ctx->routeStartUs = NowUs();
 
             auto& reqInfo = *ctx->requestInfo;
             auto connHeader = reqInfo.headers.GetHeader("Connection");
@@ -201,13 +215,9 @@ void CoreEngine::HandleResponse(ClientCtx* ctx)
     if(!res.IsCommitted())
         res.Commit();
 
-    // Metrics
-    auto code = static_cast<std::uint16_t>(res.GetStatus());
-    metrics_->network.response1xx += (code >= 100 && code < 200);
-    metrics_->network.response2xx += (code >= 200 && code < 300);
-    metrics_->network.response3xx += (code >= 300 && code < 400);
-    metrics_->network.response4xx += (code >= 400 && code < 500);
-    metrics_->network.response5xx += (code >= 500 && code < 600);
+    // Every completed request converges here (sync, async, 404, public file), so per-route-
+    // -counters are recorded once at this single point
+    RecordRouteMetrics(ctx);
 
     if(res.IsFile()) {
         connHandler_->WriteFile(ctx, res.TakeFilePath());
@@ -315,6 +325,41 @@ void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
 
     // Route completed, serialize and send
     engine->HandleResponse(ctx);
+}
+
+void CoreEngine::RecordRouteMetrics(ClientCtx* ctx)
+{
+    auto& req = *ctx->requestInfo;
+    auto& res = *ctx->responseInfo;
+
+    // Unmatched traffic (404, public file) has no route to attribute to, so it is not recorded
+    const auto* node = static_cast<const TrieNode*>(req.routeNode_);
+    if(!node)
+        return;
+
+    auto* rm = MetricTracer::CurrentRoute(node->metricsIdx);
+    if(!rm)
+        return;
+
+    rm->requests++;
+
+    const auto code = static_cast<std::uint16_t>(res.GetStatus());
+    rm->status1xx += (code >= 100 && code < 200);
+    rm->status2xx += (code >= 200 && code < 300);
+    rm->status3xx += (code >= 300 && code < 400);
+    rm->status4xx += (code >= 400 && code < 500);
+    rm->status5xx += (code >= 500 && code < 600);
+
+    // dataLength is the fully serialized response for buffered bodies. File and stream bodies-
+    // -live outside rwBuffer, so this counts their headers only, the true wire total stays in-
+    // -network.bytesWritten
+    if(ctx->rwBuffer.IsWriteInitialized())
+        if(const auto* wm = ctx->rwBuffer.GetWriteMeta())
+            rm->bytesOut += wm->dataLength;
+
+    // routeStartUs stays 0 when latency is off (the stamp is gated), so this also skips the read
+    if(ctx->routeStartUs != 0)
+        MetricTracer::RecordRouteLatencyUs(node->metricsIdx, NowUs() - ctx->routeStartUs);
 }
 
 void CoreEngine::FinishRequest(ClientCtx* ctx)

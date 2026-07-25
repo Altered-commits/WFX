@@ -319,6 +319,22 @@ def phase_misc(ctx):
     r = kdf_call(cfg, "/crypto/consttime", {"X-A": a.hex(), "X-B": (a + b"\x00").hex()})
     p.check("consttime unequal (length)", bool(r) and r.get("equal") is False, "got %r" % r)
 
+    # Robustness: the app decodes hex-encoded headers (key/nonce/salt/...). Odd-length
+    # and non-hex inputs hit FromHex's failure path, which must be handled gracefully,
+    # never crash the worker. No oracle here, the assertion is survival plus a
+    # well-formed response, with the sanitizer gate catching any memory fault
+    for bad_hex in ("0", "zzz", "gg", "12345", "x" * 129, " ", "%41"):
+        r = hmac_call(cfg, "sha256", b"", b"data")  # baseline shape
+        rr = call(cfg, "POST", "/crypto/hmac", {"X-Algo": "sha256", "X-Key": bad_hex}, b"data")
+        p.check("malformed key hex survives: %r" % bad_hex,
+              rr is not None and "status" in rr, "got %r" % rr)
+
+    for bad_hex in ("1", "zz", "g0"):
+        rr = call(cfg, "POST", "/crypto/aead/encrypt",
+                  {"X-Algo": "aesgcm", "X-Key": bad_hex, "X-Nonce": bad_hex, "X-Aad": ""}, b"pt")
+        p.check("malformed aead hex survives: %r" % bad_hex,
+              rr is not None and "status" in rr, "got %r" % rr)
+
 class CryptoAudit(common.Suite):
     name = "crypto_audit"
     description = "WFX crypto ABI audit"
