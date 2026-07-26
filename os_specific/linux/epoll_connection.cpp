@@ -57,12 +57,12 @@ template <typename Ctx> bool EpollConnectionHandler::TryHandshake(Ctx* ctx, Even
 {
     switch(sslHandler_->Handshake(ctx->sslConn)) {
         case SSLReturn::SUCCESS:
-            ctx->eventType = onSuccess;
+            EnterState(ctx, onSuccess);
             return true;
 
         case SSLReturn::WANT_READ:
         case SSLReturn::WANT_WRITE:
-            ctx->eventType = stayState;
+            EnterState(ctx, stayState);
             return true;
 
         default:
@@ -176,7 +176,7 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
 
                 // Endpoint and client use different receive states so HandleWriteReady-
                 // -and HandleEpollIn can route without an IsEndpoint() check
-                ctx->eventType = RECV_STATE;
+                EnterState(ctx, RECV_STATE);
                 break;
             }
 
@@ -221,9 +221,9 @@ template <typename Ctx> bool EpollConnectionHandler::CloseCommon(Ctx* ctx, bool 
     // Wait for the event loop to complete the shutdown. Endpoint and client shutdowns-
     // -are distinct so the event loop can route them without an 'IsEndpoint()' check
     if constexpr(std::is_same_v<Ctx, ClientCtx>)
-        ctx->eventType = EventType::EVENT_SHUTDOWN;
+        EnterState(ctx, EventType::EVENT_SHUTDOWN);
     else
-        ctx->eventType = EventType::EVENT_ENDPOINT_SHUTDOWN;
+        EnterState(ctx, EventType::EVENT_ENDPOINT_SHUTDOWN);
 
     return false;
 }
@@ -585,7 +585,7 @@ void EpollConnectionHandler::ResumeReceive(ClientCtx* ctx)
         return;
 
     // We are ready to receive data now, set 'eventType' to EVENT_RECV
-    ctx->eventType = EventType::EVENT_RECV;
+    EnterState(ctx, EventType::EVENT_RECV);
 }
 
 void EpollConnectionHandler::Write(ClientCtx* ctx, std::string_view msg)
@@ -618,7 +618,7 @@ void EpollConnectionHandler::Write(ClientCtx* ctx, std::string_view msg)
 
             // Partial progress, wait for event loop to notify when we can send more data
             else if(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                ctx->eventType = EventType::EVENT_SEND;
+                EnterState(ctx, EventType::EVENT_SEND);
                 return;
             }
 
@@ -793,7 +793,7 @@ EndpointStatus EpollConnectionHandler::ArmSendOrConnect(EndpointCtx* slotCtx, En
     if(freshConnect)
         return WrapConnect(slotCtx, entry);
 
-    slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
+    EnterState(slotCtx, EventType::EVENT_ENDPOINT_SEND);
     RefreshExpiry(slotCtx, entry.meta.config.requestTimeoutSeconds);
 
     if(RegisterEpoll(slotCtx, EPOLL_CTL_MOD))
@@ -1203,7 +1203,7 @@ void EpollConnectionHandler::SlotSend(EndpointCtx* slotCtx, const void* data, st
 
     // 'asyncData' holds the SlotSend completion. 'HandleEndpointWriteComplete' fires it
     slotCtx->asyncData = asyncData;
-    slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
+    EnterState(slotCtx, EventType::EVENT_ENDPOINT_SEND);
 
     // Fail the operation immediately so that the user's onConnect coroutine-
     // -gets a definite answer rather than a slow hang
@@ -1230,7 +1230,7 @@ void EpollConnectionHandler::SlotReceive(EndpointCtx* slotCtx, AsyncData asyncDa
 
     // 'asyncData' holds the SlotReceive completion. 'HandleEpollIn' fires it when data arrives
     slotCtx->asyncData = asyncData;
-    slotCtx->eventType = EventType::EVENT_ENDPOINT_ONCONNECT;
+    EnterState(slotCtx, EventType::EVENT_ENDPOINT_ONCONNECT);
 
     // Re-arm epoll so EPOLLIN fires even if backend data arrived while we were in the-
     // -SlotSend write phase. During that phase eventType was EVENT_ENDPOINT_SEND, so any-
@@ -1294,7 +1294,7 @@ void EpollConnectionHandler::SlotUpgradeTls(EndpointCtx* slotCtx, AsyncData asyn
     // -already set (we are inside onConnect), which is what tells that handler to resume this-
     // -asyncData instead of firing onConnect again
     slotCtx->asyncData = asyncData;
-    slotCtx->eventType = EventType::EVENT_ENDPOINT_HANDSHAKE;
+    EnterState(slotCtx, EventType::EVENT_ENDPOINT_HANDSHAKE);
 
     if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
         logger_.Error("[Epoll]: 'SlotUpgradeTls -> RegisterEpoll(MOD)' failed: ", strerror(errno));
@@ -1479,6 +1479,57 @@ void EpollConnectionHandler::Stop()
     running_ = false;
 }
 
+// vvv Slot state vvv
+void EpollConnectionHandler::EnterState(ConnectionTag* ctx, EventType next)
+{
+    // Bit i of LEGAL_FROM[state] set means state i can legally precede it, keyed by enum value-
+    // -(not list position) so a reorder of EventType can't desync this. Traced against every-
+    // -'eventType' write in this file. EVENT_ACCEPT is never a legal target, *_SHUTDOWN only-
+    // -leads back to itself, both matching how the rest of the file already treats them
+    static constexpr auto LEGAL_FROM = [] {
+        using ET = EventType;
+        auto bit = [](ET e) constexpr { return static_cast<std::uint16_t>(1u << static_cast<unsigned>(e)); };
+
+        std::array<std::uint16_t, 12> t{};
+        t[static_cast<std::size_t>(ET::EVENT_HANDSHAKE)] = bit(ET::EVENT_ACCEPT) | bit(ET::EVENT_HANDSHAKE);
+        t[static_cast<std::size_t>(ET::EVENT_RECV)] = bit(ET::EVENT_ACCEPT) | bit(ET::EVENT_HANDSHAKE) |
+                                                      bit(ET::EVENT_RECV) | bit(ET::EVENT_SEND) |
+                                                      bit(ET::EVENT_SEND_FILE);
+        t[static_cast<std::size_t>(ET::EVENT_SEND)] =
+            bit(ET::EVENT_RECV) | bit(ET::EVENT_SEND) | bit(ET::EVENT_SEND_FILE);
+        t[static_cast<std::size_t>(ET::EVENT_SEND_FILE)] = t[static_cast<std::size_t>(ET::EVENT_SEND)];
+        t[static_cast<std::size_t>(ET::EVENT_SHUTDOWN)] = bit(ET::EVENT_ACCEPT) | bit(ET::EVENT_HANDSHAKE) |
+                                                          bit(ET::EVENT_RECV) | bit(ET::EVENT_SEND) |
+                                                          bit(ET::EVENT_SEND_FILE) | bit(ET::EVENT_SHUTDOWN);
+
+        t[static_cast<std::size_t>(ET::EVENT_CONNECT)] = bit(ET::EVENT_ACCEPT) | bit(ET::EVENT_CONNECT) |
+                                                         bit(ET::EVENT_ENDPOINT_HANDSHAKE) |
+                                                         bit(ET::EVENT_ENDPOINT_ONCONNECT);
+        t[static_cast<std::size_t>(ET::EVENT_ENDPOINT_HANDSHAKE)] = t[static_cast<std::size_t>(ET::EVENT_CONNECT)];
+        t[static_cast<std::size_t>(ET::EVENT_ENDPOINT_ONCONNECT)] =
+            t[static_cast<std::size_t>(ET::EVENT_CONNECT)] | bit(ET::EVENT_ENDPOINT_ONCONNECT) |
+            bit(ET::EVENT_ENDPOINT_SEND);
+        t[static_cast<std::size_t>(ET::EVENT_ENDPOINT_SEND)] =
+            t[static_cast<std::size_t>(ET::EVENT_ENDPOINT_ONCONNECT)] | bit(ET::EVENT_ENDPOINT_RECV);
+        t[static_cast<std::size_t>(ET::EVENT_ENDPOINT_RECV)] = bit(ET::EVENT_CONNECT) |
+                                                               bit(ET::EVENT_ENDPOINT_ONCONNECT) |
+                                                               bit(ET::EVENT_ENDPOINT_SEND) |
+                                                               bit(ET::EVENT_ENDPOINT_RECV);
+        t[static_cast<std::size_t>(ET::EVENT_ENDPOINT_SHUTDOWN)] =
+            t[static_cast<std::size_t>(ET::EVENT_ENDPOINT_SEND)] | bit(ET::EVENT_ENDPOINT_SHUTDOWN);
+
+        return t;
+    }();
+
+    const auto from = static_cast<std::size_t>(ctx->eventType);
+    const auto to = static_cast<std::size_t>(next);
+
+    if(!((LEGAL_FROM[to] >> from) & 1u))
+        logger_.Fatal("[Epoll]: illegal EventType transition ", static_cast<int>(from), " -> ", static_cast<int>(to));
+
+    ctx->eventType = next;
+}
+
 // vvv Helper Functions vvv
 //  --- Connection Handlers ---
 ClientCtx* EpollConnectionHandler::GetClientConnection()
@@ -1627,22 +1678,9 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
                 if(stream.coalesceKey != 0) {
                     auto cit = meta.coalescePending.find(stream.coalesceKey);
                     if(cit != meta.coalescePending.end()) {
-                        const std::vector<CoalesceWaiter> waiters = std::move(cit->second.waiters);
+                        std::vector<CoalesceWaiter> waiters = std::move(cit->second.waiters);
                         meta.coalescePending.erase(cit);
-
-                        for(auto& w : waiters) {
-                            if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
-                                continue;
-
-                            w.clientCtx->endpointCtx = nullptr;
-
-                            AsyncResult failResult{};
-                            failResult.data = nullptr;
-                            failResult.dataLen = 0;
-                            failResult.status = AsyncStatus::IO_FAILURE;
-                            failResult.endpointStatus = EndpointStatus::INTERNAL_ERROR;
-                            HandleClientAsyncCallback(w.clientCtx, failResult, false);
-                        }
+                        FailCoalesceWaiters(waiters, EndpointStatus::INTERNAL_ERROR);
                     }
                 }
 
@@ -1679,6 +1717,54 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
 
     ctx->Reset();
     connections_.FreeSlot(idx);
+}
+
+void EpollConnectionHandler::FailCoalesceWaiters(std::vector<CoalesceWaiter>& waiters, EndpointStatus status)
+{
+    for(auto& w : waiters) {
+        // Stale waiter, its client already disconnected, skip it
+        if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
+            continue;
+
+        // Unlink first, then wake the waiter with a failure result
+        w.clientCtx->endpointCtx = nullptr;
+
+        AsyncResult failResult{};
+        failResult.data = nullptr;
+        failResult.dataLen = 0;
+        failResult.status = AsyncStatus::IO_FAILURE;
+        failResult.endpointStatus = status;
+
+        HandleClientAsyncCallback(w.clientCtx, failResult, false);
+    }
+}
+
+void EpollConnectionHandler::NotifyCoalesceWaiters(std::vector<CoalesceWaiter>& waiters, void* slotState,
+                                                   void* outputObj, const EndpointDesc& desc)
+{
+    for(auto& w : waiters) {
+        // Stale waiter, its client already disconnected, skip it
+        if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
+            continue;
+
+        // Unlink first, then hand this waiter its own clone of the result
+        w.clientCtx->endpointCtx = nullptr;
+
+        void* cloned = outputObj ? desc.cloneOutput(slotState, outputObj) : nullptr;
+
+        // Ownership transfers to the waiter's EndpointOutput<T> RAII wrapper
+        if(cloned)
+            HandleClientAsyncCallback(w.clientCtx, {cloned, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
+        else {
+            // No output to clone (protocol bug) or cloneOutput itself failed, report it instead
+            AsyncResult failResult{};
+            failResult.data = nullptr;
+            failResult.dataLen = 0;
+            failResult.endpointStatus = EndpointStatus::INTERNAL_ERROR;
+            failResult.status = AsyncStatus::IO_FAILURE;
+            HandleClientAsyncCallback(w.clientCtx, failResult, false);
+        }
+    }
 }
 
 void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason disconnectReason)
@@ -1736,21 +1822,7 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
 
         auto it = pending.find(ctx->coalesceKey);
         if(it != pending.end()) {
-            for(auto& w : it->second.waiters) {
-                if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
-                    continue;
-
-                w.clientCtx->endpointCtx = nullptr;
-
-                AsyncResult failResult{};
-                failResult.data = nullptr;
-                failResult.dataLen = 0;
-                failResult.status = AsyncStatus::IO_FAILURE;
-                failResult.endpointStatus = DisconnectReasonToStatus(disconnectReason);
-
-                HandleClientAsyncCallback(w.clientCtx, failResult, false);
-            }
-
+            FailCoalesceWaiters(it->second.waiters, DisconnectReasonToStatus(disconnectReason));
             pending.erase(it);
         }
         // coalesceKey = 0 handled by Reset() at end of ReleaseEndpoint
@@ -2054,7 +2126,7 @@ void EpollConnectionHandler::SendFile(ClientCtx* ctx)
 
             // Partial progress, wait for event loop to notify us when it wants more data
             if(errno == EAGAIN || errno == EWOULDBLOCK)
-                ctx->eventType = EventType::EVENT_SEND_FILE;
+                EnterState(ctx, EventType::EVENT_SEND_FILE);
 
             // Fatal error, close connection
             else
@@ -2167,7 +2239,7 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
                 if(n > 0)
                     writeMeta->writtenLength += static_cast<std::uint32_t>(n);
                 else if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                    ctx->eventType = EventType::EVENT_SEND;
+                    EnterState(ctx, EventType::EVENT_SEND);
                     return;
                 }
                 else {
@@ -2653,7 +2725,7 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
             if(ctx->clientCtx)
                 Write(ctx);
             else {
-                ctx->eventType = EventType::EVENT_ENDPOINT_RECV;
+                EnterState(ctx, EventType::EVENT_ENDPOINT_RECV);
                 ReturnEndpointToPool(ctx);
                 if(!RegisterEpoll(ctx, EPOLL_CTL_MOD)) {
                     logger_.Error("[Epoll]: 'RegisterEpoll(MOD)' failed for endpoint '", meta.hostname,
@@ -2828,22 +2900,9 @@ void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointM
             if(stream.coalesceKey != 0) {
                 auto it = meta.coalescePending.find(stream.coalesceKey);
                 if(it != meta.coalescePending.end()) {
-                    const std::vector<CoalesceWaiter> waiters = std::move(it->second.waiters);
+                    std::vector<CoalesceWaiter> waiters = std::move(it->second.waiters);
                     meta.coalescePending.erase(it);
-
-                    for(auto& w : waiters) {
-                        if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
-                            continue;
-
-                        w.clientCtx->endpointCtx = nullptr;
-
-                        AsyncResult failResult{};
-                        failResult.data = nullptr;
-                        failResult.dataLen = 0;
-                        failResult.status = AsyncStatus::IO_FAILURE;
-                        failResult.endpointStatus = EndpointStatus::INTERNAL_ERROR;
-                        HandleClientAsyncCallback(w.clientCtx, failResult, false);
-                    }
+                    FailCoalesceWaiters(waiters, EndpointStatus::INTERNAL_ERROR);
                 }
             }
 
@@ -2883,7 +2942,7 @@ void EpollConnectionHandler::HandleEndpointWriteComplete(EndpointCtx* slotCtx)
     }
 
     // Normal path, request sent, transition to response phase
-    slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+    EnterState(slotCtx, EventType::EVENT_ENDPOINT_RECV);
 }
 
 void EpollConnectionHandler::Write(EndpointCtx* ctx)
@@ -2908,7 +2967,7 @@ void EpollConnectionHandler::Write(EndpointCtx* ctx)
 
         // Partial progress, wait for event loop to notify when we can send more data
         else if(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            ctx->eventType = EventType::EVENT_ENDPOINT_SEND;
+            EnterState(ctx, EventType::EVENT_ENDPOINT_SEND);
             return;
         }
 
@@ -2951,27 +3010,7 @@ void EpollConnectionHandler::ResolveMultiplexedStream(EndpointCtx* slotCtx, Endp
         }
     }
 
-    for(auto& w : waiters) {
-        // Client disconnected before result arrived
-        if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
-            continue;
-
-        w.clientCtx->endpointCtx = nullptr;
-
-        void* cloned = outputObj ? desc.cloneOutput(slotCtx->slotState, outputObj) : nullptr;
-
-        // Ownership transfers to the waiter's EndpointOutput<T> RAII wrapper
-        if(cloned)
-            HandleClientAsyncCallback(w.clientCtx, {cloned, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
-        else {
-            AsyncResult failResult{};
-            failResult.data = nullptr;
-            failResult.dataLen = 0;
-            failResult.endpointStatus = EndpointStatus::INTERNAL_ERROR;
-            failResult.status = AsyncStatus::IO_FAILURE;
-            HandleClientAsyncCallback(w.clientCtx, failResult, false);
-        }
-    }
+    NotifyCoalesceWaiters(waiters, slotCtx->slotState, outputObj, desc);
 
     if(stream.parseState && desc.destroyParseState)
         desc.destroyParseState(stream.parseState);
@@ -3294,7 +3333,7 @@ EndpointStatus EpollConnectionHandler::StreamNextImpl(ClientCtx* clientCtx, cons
         }
     }
 
-    slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+    EnterState(slotCtx, EventType::EVENT_ENDPOINT_RECV);
     RefreshExpiry(slotCtx, meta.config.requestTimeoutSeconds);
 
     if(!RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
@@ -3337,7 +3376,7 @@ void EpollConnectionHandler::CompleteStreamInline(EndpointCtx* slotCtx, Endpoint
         if(!desc.onPush)
             rwBuf.ClearReadBuffer();
 
-        slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+        EnterState(slotCtx, EventType::EVENT_ENDPOINT_RECV);
         ReturnEndpointToPool(slotCtx);
 
         if(desc.onPush && rwBuf.GetReadMeta()->dataLength > 0)
@@ -3399,7 +3438,7 @@ void EpollConnectionHandler::HandleReceiveMultiplexed(EndpointCtx* slotCtx, Endp
                     // -flag again. It must not stay permanently poisoned against future-
                     // -multiplexing just because this one connection cycle finished
                     slotCtx->isShuttingDown = 0;
-                    slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+                    EnterState(slotCtx, EventType::EVENT_ENDPOINT_RECV);
                     rwBuf.ClearReadBuffer();
                     ReturnEndpointToPool(slotCtx);
                 }
@@ -3464,26 +3503,7 @@ void EpollConnectionHandler::CompleteSingleSlotRequest(EndpointCtx* slotCtx, End
 
     // Fan out clones to waiters while slotCtx->slotState is still live
     // This MUST happen before close/pool-return: COMPLETE_CLOSE destroys slotState
-    for(auto& w : waiters) {
-        // Client disconnected before result arrived
-        if(!w.clientCtx || w.clientCtx->generationId != w.generationId)
-            continue;
-
-        w.clientCtx->endpointCtx = nullptr;
-
-        void* cloned = desc.cloneOutput(slotCtx->slotState, outputObj);
-
-        if(cloned)
-            HandleClientAsyncCallback(w.clientCtx, {cloned, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
-        else {
-            AsyncResult failResult{};
-            failResult.data = nullptr;
-            failResult.dataLen = 0;
-            failResult.endpointStatus = EndpointStatus::INTERNAL_ERROR;
-            failResult.status = AsyncStatus::IO_FAILURE;
-            HandleClientAsyncCallback(w.clientCtx, failResult, false);
-        }
-    }
+    NotifyCoalesceWaiters(waiters, slotCtx->slotState, outputObj, desc);
 
     if(pr == ParseResult::COMPLETE_KEEP_ALIVE) {
         // Only reset parse state, do NOT touch outputObj here
@@ -3504,7 +3524,7 @@ void EpollConnectionHandler::CompleteSingleSlotRequest(EndpointCtx* slotCtx, End
         if(!desc.onPush)
             rwBuf.ClearReadBuffer();
 
-        slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+        EnterState(slotCtx, EventType::EVENT_ENDPOINT_RECV);
         ReturnEndpointToPool(slotCtx);
 
         // After the pool return so the slot reads as idle, but before the client callback, which-
@@ -3544,7 +3564,7 @@ void EpollConnectionHandler::FireOnConnect(EndpointCtx* slotCtx, EndpointEntry& 
     onDone.asyncDestroy = nullptr;
 
     slotCtx->asyncData = onDone;
-    slotCtx->eventType = EventType::EVENT_ENDPOINT_ONCONNECT;
+    EnterState(slotCtx, EventType::EVENT_ENDPOINT_ONCONNECT);
     slotCtx->inOnConnectPhase = 1;
 
     desc.onConnect(handle, slotCtx->slotState, onDone.asyncComplete, onDone.userData);
@@ -3671,7 +3691,7 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
         // Drive the write directly instead of calling RegisterEpoll(MOD) and waiting-
         // -for EPOLLOUT, because in ET mode the EPOLLOUT edge was consumed when EVENT_CONNECT-
         // -fired and a MOD on an already-writable fd does not generate a new edge
-        slotCtx->eventType = EventType::EVENT_ENDPOINT_SEND;
+        GlobalInstance->EnterState(slotCtx, EventType::EVENT_ENDPOINT_SEND);
         GlobalInstance->Write(slotCtx);
     }
     else {
@@ -3679,7 +3699,7 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
         // -SendPayload's AllocSlot can actually lease it for a future request
         // Without this, prewarmed slots stay permanently marked allocated and-
         // -are never reused, silently shrinking the effective pool by 'prewarm' count
-        slotCtx->eventType = EventType::EVENT_ENDPOINT_RECV;
+        GlobalInstance->EnterState(slotCtx, EventType::EVENT_ENDPOINT_RECV);
         GlobalInstance->ReturnEndpointToPool(slotCtx);
 
         if(!GlobalInstance->RegisterEpoll(slotCtx, EPOLL_CTL_MOD)) {
@@ -4029,7 +4049,7 @@ EndpointStatus EpollConnectionHandler::CreateAndConnect(EndpointCtx* ctx, Endpoi
             continue;
 
         if(errno == EINPROGRESS) {
-            ctx->eventType = EventType::EVENT_CONNECT;
+            EnterState(ctx, EventType::EVENT_CONNECT);
             return EndpointStatus::PENDING;
         }
 
@@ -4056,7 +4076,7 @@ void EpollConnectionHandler::WrapAccept(ClientCtx* ctx)
     }
     // Plain HTTP
     else
-        ctx->eventType = EventType::EVENT_RECV;
+        EnterState(ctx, EventType::EVENT_RECV);
 
     if(!RegisterEpoll(ctx, EPOLL_CTL_ADD)) {
         Close(ctx);
@@ -4111,13 +4131,13 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
                 return EndpointStatus::SSL_FAILURE;
 
             const EventType onSuccess =
-                desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_RECV;
+                desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND;
 
             if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE))
                 return EndpointStatus::SSL_FAILURE;
         }
         else
-            ctx->eventType = desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND;
+            EnterState(ctx, desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND);
     }
 
     // else: EVENT_CONNECT, EPOLLOUT fires naturally when OS completes the TCP handshake

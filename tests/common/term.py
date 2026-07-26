@@ -52,9 +52,9 @@ def rule(width=78):
 class Progress:
     """A one-line ticker: one mark per vector instead of one line per vector.
 
-    A phase driving hundreds of hostile requests would otherwise either print nothing for a minute-
-    -or bury its result in output, and neither shows whether it is still moving
-    Under --ci the marks are dropped, since a build log has no cursor to overwrite
+    A phase driving hundreds of hostile requests would otherwise either print nothing for a minute
+    or bury its result in output, and neither shows whether it is still moving. Under --ci the marks
+    are dropped, since a build log has no cursor to overwrite.
     """
 
     def __init__(self, tag, label, count=None):

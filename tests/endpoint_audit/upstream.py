@@ -7,7 +7,7 @@
 # This is NOT a conformant HTTP server. It is a raw-socket byte oracle whose whole
 # purpose is to attack the WFX client-side HTTP/1.1 parser/serializer in
 # include/wfx/endpoint/http.hpp. It speaks exact, hand-built wire bytes so the
-# The audit can drive every branch and every boundary of the client
+# audit can drive every branch and every boundary of the client
 #
 # The 150+ attack vectors live in the HARNESS (endpoint_audit.py), not here; this
 # file is deliberately thin. It gets hostile bytes onto the wire two ways:

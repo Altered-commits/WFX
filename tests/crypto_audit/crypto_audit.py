@@ -232,6 +232,7 @@ def phase_aead(ctx):
     bad_nonce = aead_call(cfg, "/crypto/aead/encrypt", "aesgcm", os.urandom(32), os.urandom(8), b"", b"x")
     p.check("short nonce -> invalid_arg", bool(bad_nonce) and bad_nonce.get("status") == ST_INVALID_ARG, "got %r" % bad_nonce)
 
+# PHASE: AEAD input-size cap (oversized plaintext rejected, not OOM'd)
 def phase_aead_cap(ctx):
     cfg = ctx.cfg
     p = ctx.phase("aead-cap")

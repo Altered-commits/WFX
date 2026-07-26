@@ -12,6 +12,30 @@ import socket
 import ssl
 import time
 
+def _drain(sock, rtimeout, rmax):
+    """Reads until the peer closes, the read times out, or rmax bytes arrive. Never raises."""
+    sock.settimeout(rtimeout)
+
+    chunks, total = [], 0
+    while total < rmax:
+        try:
+            data = sock.recv(65536)
+        except (socket.timeout, OSError):
+            break
+        if not data:
+            break
+        chunks.append(data)
+        total += len(data)
+
+    return b"".join(chunks)
+
+def _close(sock):
+    if sock is not None:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
 def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=False, sni="localhost"):
     """Write payload, read until close or timeout. Returns raw bytes, or None if it never landed."""
     sock = None
@@ -20,43 +44,22 @@ def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=Fals
         if tls:
             sock = ssl._create_unverified_context().wrap_socket(sock, server_hostname=sni)
     except (OSError, ssl.SSLError):
-        if sock is not None:
-            try:
-                sock.close()
-            except OSError:
-                pass
+        _close(sock)
         return None
 
     try:
         sock.sendall(payload)
-        sock.settimeout(rtimeout)
-
-        chunks, total = [], 0
-        while total < rmax:
-            try:
-                data = sock.recv(65536)
-            except (socket.timeout, OSError):
-                break
-            if not data:
-                break
-            chunks.append(data)
-            total += len(data)
-
-        return b"".join(chunks)
+        return _drain(sock, rtimeout, rmax)
     except (OSError, ssl.SSLError):
         return None
     finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
+        _close(sock)
 
 def send_dripped(host, port, payload, chunk_size=1, delay=0.0, rtimeout=5.0, ctimeout=4.0,
                  rmax=8 << 20):
     """Writes the payload in small pieces, for slow-send and partial-request vectors.
 
-    A parser that buffers correctly cannot tell this from one write
-    one that assumes a whole
+    A parser that buffers correctly cannot tell this from a single write; one that assumes a whole
     request per read falls apart, which is the point.
     """
     sock = None
@@ -71,26 +74,11 @@ def send_dripped(host, port, payload, chunk_size=1, delay=0.0, rtimeout=5.0, cti
             if delay:
                 time.sleep(delay)
 
-        sock.settimeout(rtimeout)
-        chunks, total = [], 0
-        while total < rmax:
-            try:
-                data = sock.recv(65536)
-            except (socket.timeout, OSError):
-                break
-            if not data:
-                break
-            chunks.append(data)
-            total += len(data)
-
-        return b"".join(chunks)
+        return _drain(sock, rtimeout, rmax)
     except OSError:
         return None
     finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
+        _close(sock)
 
 def request(method, path, headers=None, body=b""):
     """Builds a well-formed request. Suites testing malformed framing build their own bytes."""

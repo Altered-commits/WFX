@@ -6,6 +6,7 @@
 
 #include "core/core.hpp"
 #include "shared/abis/types.hpp"
+#include "shared/utils/memory.hpp"
 #include <coroutine>
 
 namespace WFX::Async {
@@ -24,11 +25,11 @@ struct BasePromise {
 public:
     void* operator new(std::size_t size)
     {
-        return Core::MemoryApiExt1()->alloc(size);
+        return Shared::Alloc(size);
     }
     void operator delete(void* ptr)
     {
-        Core::MemoryApiExt1()->free(ptr);
+        Shared::Free(ptr);
     }
 
 public:

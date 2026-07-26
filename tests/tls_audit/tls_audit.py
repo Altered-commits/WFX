@@ -17,7 +17,6 @@
 # Topology:  audit --(TLS)--> WFX(HTTPS) /call --(TLS)--> hostile mock personality
 # Exit codes: 0 pass  1 correctness fail / worker died  2 SECURITY finding  3 boot crash
 
-import argparse
 import itertools
 import json
 import os

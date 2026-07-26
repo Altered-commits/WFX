@@ -19,7 +19,6 @@
 # Exit codes:  0 all pass   1 correctness failure   2 SECURITY finding (desync,
 #              smuggle, request-injection); these are called out separately
 
-import argparse
 import itertools
 import json
 import os

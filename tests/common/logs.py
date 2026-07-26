@@ -41,9 +41,8 @@ def _is_important(line):
 def launch_env(app_dir):
     """Environment for `wfx run`, plus a wiped crash_logs to launch it into.
 
-    Old dumps are removed so anything the follower prints in red belongs to this run
-    a report
-    from hours ago replaying at startup reads as a fresh crash. default_logs is left alone.
+    Old dumps are removed so anything the follower prints in red belongs to this run; a report from
+    hours ago replaying at startup would otherwise read as a fresh crash. default_logs is left alone.
     """
     crash_dir = os.path.join(app_dir, "logs", "crash_logs")
 
