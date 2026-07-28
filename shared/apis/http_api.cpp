@@ -255,6 +255,14 @@ const EndpointAPIExt1* GetEndpointAPIExt1()
         [](void* clientCtx) -> const void* {
             auto* ctx = static_cast<ClientCtx*>(clientCtx);
             return GlobalEndpointDataExt1.connHandler->StreamChunk(ctx);
+        },
+        [](void* ownerCtx, AsyncData asyncData) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(ownerCtx);
+            GlobalEndpointDataExt1.connHandler->OpenSideConnection(ctx, asyncData);
+        },
+        [](void* endpointCtx) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            GlobalEndpointDataExt1.connHandler->CloseSideConnection(ctx);
         }
     };
     // clang-format on

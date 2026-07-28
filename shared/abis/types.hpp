@@ -204,9 +204,10 @@ enum class ParseResult : std::uint8_t {
     ERROR                // Unrecoverable parse failure
 };
 
-// Reserved slot-close hook, currently unused (nullptr) by the engine
-// Present for ABI symmetry with the rest of EndpointSlotHandle
+// Closes a side connection opened via the endpoint API's openSideConnection. nullptr on a-
+// -primary handle (onConnect's/onAbort's own slot); only a side-connection handle gets a real one
 using EndpointSlotCloseFn = void (*)(void* endpointCtx);
+
 // Returns the ALPN protocol negotiated on this slot's TLS connection
 // Empty if not TLS or the handshake hasn't completed yet
 using EndpointNegotiatedProtocolFn = StringView (*)(void* endpointCtx);
@@ -235,6 +236,13 @@ using EndpointParseFn = ParseResult (*)(void* slotState, void* parseState, const
 using EndpointOnConnectFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone,
                                      void* onDoneUd);
 using EndpointOnDisconnectFn = void (*)(void* slotState, DisconnectReason reason);
+
+// Fires when a single-slot request's client disconnects, instead of force-closing the slot. The-
+// -slot itself is left alone (still mid-request, real response completes normally). handle is-
+// -read-only + OpenSideConnection only (see AbortSlotHandle), Send/Receive on it directly is illegal-
+// -here. Never fires for multiplexed slots or a request already mid-Stream()
+using EndpointOnAbortFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone,
+                                   void* onDoneUd);
 
 // State allocation for slot state, parse state and output. create's ctx is userCtx for slot-
 // -state, slotState for per-request state. reset clears parse state between keep-alive requests;-
@@ -270,6 +278,7 @@ struct EndpointDesc {
     EndpointSerializeFn serialize;
     EndpointParseFn parse;
     EndpointOnConnectFn onConnect;               // nullable, skipped for simple protocols (Redis, etc)
+    EndpointOnAbortFn onAbort;                   // nullable, single-slot requests only
     EndpointOnDisconnectFn onDisconnect;         // nullable
     EndpointCreateStateFn createSlotState;       // nullable
     EndpointDestroyStateFn destroySlotState;     // nullable
@@ -286,11 +295,12 @@ struct EndpointDesc {
     EndpointStatusCodeFn statusCode;             // nullable, feeds the per-endpoint status counters
     void* userCtx;                               // injected into createSlotState
 };
-static_assert(sizeof(EndpointDesc) == 144, "'EndpointDesc' must be exactly 144 bytes.");
+static_assert(sizeof(EndpointDesc) == 152, "'EndpointDesc' must be exactly 152 bytes.");
 static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be standard layout");
 
 struct EndpointConfig {
-    std::uint32_t connLimit;             // Max simultaneous connections in the slot pool
+    std::uint32_t connLimit;             // Max simultaneous connections (next 64 aligned) in the slot pool
+    std::uint32_t auxConnLimit;          // Max simultaneous OpenSideConnection()'s (next 64 aligned); 0 = disabled, no pool allocated
     std::uint32_t dnsRefreshSeconds;     // 0 = respect actual DNS TTL, N = override with N seconds
     std::uint16_t connectTimeoutSeconds; // TCP+TLS+onConnect must complete within this window
     std::uint16_t requestTimeoutSeconds; // Send+receive cycle must complete within this window
@@ -303,7 +313,7 @@ struct EndpointConfig {
     std::uint32_t maxConcurrentStreams;  // Cap on requests sharing one slot; 0/1 = exclusive slot
     StringView alpnProtocols;            // Wire-encoded ALPN list; empty = offer http/1.1 only
 };
-static_assert(sizeof(EndpointConfig) == 48, "'EndpointConfig' must be exactly 48 bytes.");
+static_assert(sizeof(EndpointConfig) == 56, "'EndpointConfig' must be exactly 56 bytes.");
 static_assert(std::is_standard_layout_v<EndpointConfig>, "'EndpointConfig' must be standard layout");
 
 // vvv Server Metrics vvv

@@ -14,6 +14,31 @@ namespace WFX::Async {
 
 using namespace WFX::Shared;
 
+// Fwd declare stuff
+struct SlotHandle;
+
+// co_await handle.OpenSideConnection() inside onConnect/onAbort. Opens a second, throwaway-
+// -connection to the same endpoint (Postgres CancelRequest, MySQL COM_PROCESS_KILL, ...). The-
+// -returned SlotHandle supports Send/Receive/UpgradeToTLS like any other, plus Close()
+struct SlotOpenSideConnectionAwaitable : public AwaitableBase<SlotOpenSideConnectionAwaitable> {
+    void* ownerImpl;
+
+public:
+    explicit SlotOpenSideConnectionAwaitable(void* impl) noexcept : AwaitableBase{}, ownerImpl(impl)
+    {}
+
+    bool await_suspend(std::coroutine_handle<> h) noexcept
+    {
+        handle_ = h;
+        Core::EndpointApiExt1()->openSideConnection(ownerImpl, {this, OnComplete, OnDestroy});
+        return true;
+    }
+
+    // Defined out-of-line below, once SlotHandle is a complete type
+    struct Result;
+    Result await_resume() const noexcept;
+};
+
 // Typed wrapper over EndpointSlotHandle passed into onConnect-
 // -coroutines. Exposes co_await Send(...) and co_await Receive()
 // The underlying impl pointer is the slot's context, type-erased at the ABI boundary
@@ -42,6 +67,61 @@ public:
 
     // Empty if this slot isn't TLS or the handshake hasn't completed. Any-
     // -ALPN-aware protocol can call this to decide how to speak on this connection
+    StringView NegotiatedProtocol() const noexcept
+    {
+        return raw.negotiatedProtocol(raw.impl);
+    }
+
+    // Opens a second, throwaway connection to the same endpoint. Valid from onConnect and-
+    // -onAbort alike (onAbort only gets this via AbortSlotHandle, not the full SlotHandle)
+    SlotOpenSideConnectionAwaitable OpenSideConnection() const noexcept
+    {
+        return SlotOpenSideConnectionAwaitable{raw.impl};
+    }
+
+    // Closes a side connection early. No-op on a primary handle (raw.close is null there,-
+    // -only a side connection's handle gets a real one)
+    void Close() const noexcept
+    {
+        if(raw.close)
+            raw.close(raw.impl);
+    }
+};
+
+struct SlotOpenSideConnectionAwaitable::Result {
+    Shared::SlotStatus status;
+    SlotHandle handle;
+};
+
+inline SlotOpenSideConnectionAwaitable::Result SlotOpenSideConnectionAwaitable::await_resume() const noexcept
+{
+    const Shared::SlotStatus status = ResolveSlotStatus(result_);
+    if(status != Shared::SlotStatus::OK)
+        return {status, SlotHandle{}};
+
+    const auto* api = Core::EndpointApiExt1();
+
+    EndpointSlotHandle raw{};
+    raw.impl = result_.data;
+    raw.close = api->closeSideConnection;
+    raw.negotiatedProtocol = api->negotiatedProtocol;
+    return {status, SlotHandle{raw}};
+}
+
+// Restricted handle passed into onAbort coroutines: OpenSideConnection + NegotiatedProtocol only
+// The primary slot is still mid-request (EVENT_ENDPOINT_RECV) when onAbort fires, so driving-
+// -Send/Receive/UpgradeToTLS on it directly is illegal (crashes or corrupts the real response-
+// -in flight). This is a compile-time restriction, not a runtime guard, since there's no safe-
+// -general meaning for it. A protocol that needs to talk must go through OpenSideConnection()
+struct AbortSlotHandle {
+    EndpointSlotHandle raw;
+
+public:
+    SlotOpenSideConnectionAwaitable OpenSideConnection() const noexcept
+    {
+        return SlotOpenSideConnectionAwaitable{raw.impl};
+    }
+
     StringView NegotiatedProtocol() const noexcept
     {
         return raw.negotiatedProtocol(raw.impl);
@@ -203,6 +283,31 @@ template <UserOnConnectFn UserFn> constexpr EndpointOnConnectFn GetErasedOnConne
         return nullptr;
     else
         return &EraseOnConnectImpl<UserFn>;
+}
+
+// User facing onAbort function pointer type
+// The user writes: Task<void> MyAbort(AbortSlotHandle, void*)-
+// -and passes &MyAbort as the OnAbort template argument to Resolve
+// No ConnectResult-style verdict: the original slot's fate is decided by its own ongoing-
+// -receive/parse/timeout cycle, not by what onAbort returns
+using UserOnAbortFn = Task<void> (*)(AbortSlotHandle, void*);
+
+// Compile-time ABI erasure for the onAbort coroutine, same pattern as EraseOnConnectImpl/GetErasedOnConnect
+template <UserOnAbortFn UserFn>
+void EraseOnAbortImpl(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd) noexcept
+{
+    AbortSlotHandle sh{handle};
+    auto task = UserFn(sh, slotState);
+    task.SetCompletion(onDone, onDoneUd);
+    task.Resume();
+}
+
+template <UserOnAbortFn UserFn> constexpr EndpointOnAbortFn GetErasedOnAbort() noexcept
+{
+    if constexpr(UserFn == nullptr)
+        return nullptr;
+    else
+        return &EraseOnAbortImpl<UserFn>;
 }
 
 // One chunk of a streamed response. data borrows the engine's output object and stays valid-
@@ -412,7 +517,8 @@ private: // Storage
 // Example without onConnect:
 //   inline const auto RedisEndpoint = Resolve<RedisReq, RedisRes>{
 //       "redis.internal:6379", EndpointDesc{.serialize=..., .parse=...}, config };
-template <typename TReq, typename TRes, UserOnConnectFn OnConnect = nullptr> class Resolve {
+template <typename TReq, typename TRes, UserOnConnectFn OnConnect = nullptr, UserOnAbortFn OnAbort = nullptr>
+class Resolve {
 public:
     Resolve(const char* host, EndpointDesc desc, EndpointConfig config)
     {
@@ -420,6 +526,7 @@ public:
         Core::__WFXDeferred.emplace_back([=, this] {
             EndpointDesc d = desc;
             d.onConnect = GetErasedOnConnect<OnConnect>();
+            d.onAbort = GetErasedOnAbort<OnAbort>();
             endpointIdx_ = Core::EndpointApiExt1()->allocateEndpoint(host, d, config);
         });
     }

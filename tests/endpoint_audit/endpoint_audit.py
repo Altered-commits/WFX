@@ -116,6 +116,21 @@ class Mock:
         except ValueError:
             return -1
 
+    def cancel_reset(self):
+        raw_send(self.cfg.host, self.cfg.up_port, _build("GET", "/ctl/cancels/reset"))
+
+    def cancel_count(self):
+        try:
+            return int(self.get("/ctl/cancels/count"))
+        except ValueError:
+            return -1
+
+    def cancel_last_id(self):
+        try:
+            return int(self.get("/ctl/cancels/lastid"))
+        except ValueError:
+            return -1
+
     def stop(self):
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
@@ -1707,6 +1722,220 @@ def phase_metrics(ctx):
 
     p.check("worker healthy after metrics phase", _wfx_healthy(cfg) and mock.ping())
 
+# PHASE: onAbort (graceful cancel over a side connection when the client bails)
+#
+# Threat model mirrors a real Postgres CancelRequest / MySQL COM_PROCESS_KILL: a
+# side connection opened purely to cancel work in flight on a DIFFERENT, still-live
+# connection. Confusing which connection a cancel targets, corrupting the primary's
+# own in-flight state, or a hostile/buggy onAbort implementation taking the worker
+# down are all real-world failure classes for this feature, not hypothetical ones -
+# every assertion here maps to one of them, not just "does the happy path work"
+def phase_abort(ctx):
+    cfg, mock = ctx.cfg, ctx.mock
+    p = ctx.phase("abort")
+
+    # --- 1. Happy path: cancel delivered, references the right connection, the-
+    # -original connection survives (isn't force-closed) and gets reused afterward
+    mock.cancel_reset()
+    r0 = sp_get(cfg, key="warmup", sp="abort")
+    p.check("abort: warmup request succeeds", is_ok_sp(r0), "r=%r" % r0)
+    conn_before = r0.get("conn", -1) if r0 else -1
+
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:1.0"}),
+                        hold=0.15)
+    time.sleep(0.4) # onAbort's side connection dials + sends CANCEL well before the 1.0s reply
+    p.check("abort: cancel delivered exactly once", mock.cancel_count() == 1,
+          "count=%d" % mock.cancel_count())
+    p.check("abort: cancel references the SAME connection being aborted",
+          mock.cancel_last_id() == conn_before,
+          "cancel id=%d expected=%d" % (mock.cancel_last_id(), conn_before), security=True)
+
+    time.sleep(1.0) # let the now-orphaned real reply land and return the slot to the pool
+    r1 = sp_get(cfg, key="after-abort", sp="abort")
+    p.check("abort: connection reused after abort, not force-closed",
+          is_ok_sp(r1) and r1.get("conn") == conn_before, "r=%r expected conn=%d" % (r1, conn_before))
+
+    # --- 2. auxConnLimit=0: onAbort still runs, OpenSideConnection() fails gracefully
+    mock.cancel_reset()
+    b = sp_json(cfg, "/sp/abort") or {}
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/get", {"X-Sp": "abortnoaux", "X-Key": "slow:1.0"}),
+                        hold=0.15)
+    time.sleep(0.4)
+    a = sp_json(cfg, "/sp/abort") or {}
+    p.check("abortnoaux: no cancel sent, no aux capacity to send it on",
+          mock.cancel_count() == 0, "count=%d" % mock.cancel_count())
+    p.check("abortnoaux: onAbort ran and recorded the side-open failure",
+          a.get("side_failures", 0) - b.get("side_failures", 0) == 1, "before=%r after=%r" % (b, a))
+    time.sleep(1.0)
+    p.check("abortnoaux: worker still healthy", _wfx_healthy(cfg) and mock.ping())
+
+    # --- 3. Concurrent aborts on the same endpoint's aux pool. auxConnLimit=1 rounds-
+    # -up to 64 internally (BitmapPool stays branch-free, see EndpointConfig doc), so-
+    # -2 concurrent side connections comfortably both succeed - this proves concurrent-
+    # -aborts on one endpoint don't corrupt or fight over each other, not a hard cap
+    mock.cancel_reset()
+    b = sp_json(cfg, "/sp/abort") or {}
+
+    def _fire_concurrent(i):
+        net.send_and_abandon(cfg.host, cfg.port,
+                            net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:1.5"}), hold=0.05)
+    _concurrent(_fire_concurrent, 2, stagger=0.03)
+    time.sleep(2.0)
+
+    a = sp_json(cfg, "/sp/abort") or {}
+    opens = a.get("side_opens", 0) - b.get("side_opens", 0)
+    fails = a.get("side_failures", 0) - b.get("side_failures", 0)
+    p.check("abort: 2 concurrent aborts on one endpoint both succeed cleanly",
+          opens == 2 and fails == 0, "opens=%d fails=%d" % (opens, fails))
+    p.check("abort: mock received both cancels", mock.cancel_count() == 2, "count=%d" % mock.cancel_count())
+    p.check("worker healthy after concurrent aborts", _wfx_healthy(cfg) and mock.ping())
+
+    # --- 4. Leaked side connection (onAbort forgets/chooses not to Close()) must never-
+    # -hang or crash the worker, and connectTimeoutSeconds is the real, working safety-
+    # -net that eventually reclaims it - not just a config value nobody exercises
+    mock.cancel_reset()
+    b = sp_json(cfg, "/sp/abort") or {}
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:1.0", "X-Leak": "1"}),
+                        hold=0.1)
+    time.sleep(0.3)
+    s1 = sp_json(cfg, "/sp/abort") or {}
+    p.check("abort: leak opens a side connection and sends its cancel",
+          s1.get("side_opens", 0) - b.get("side_opens", 0) == 1, "s1=%r" % s1)
+    p.check("abort: mock received the leaked connection's cancel", mock.cancel_count() == 1,
+          "count=%d" % mock.cancel_count())
+
+    time.sleep(5.5) # past SpAbort's connectTimeoutSeconds=5, the leaked slot self-heals
+    r = sp_get(cfg, key="after-leak", sp="abort")
+    p.check("abort: endpoint still fully usable after a leaked side connection", is_ok_sp(r), "r=%r" % r)
+    p.check("worker healthy after leak-reclaim sequence", _wfx_healthy(cfg) and mock.ping())
+
+    # --- 5. Regression guard: client disconnects while onConnect (AUTH) is still-
+    # -in flight. onAbort must NOT fire here - it would steal onConnect's own-
+    # -asyncData mid-await and strand its coroutine forever. Force-close instead,
+    # -exactly the pre-onAbort behavior, since no request ever reached the backend
+    mock.cancel_reset()
+    b = sp_json(cfg, "/sp/abort") or {}
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/get", {"X-Sp": "abortmidconnect", "X-Key": "x"}),
+                        hold=0.15)
+    time.sleep(1.5) # past the mock's 1.0s AUTH stall
+    a = sp_json(cfg, "/sp/abort") or {}
+    p.check("abort: onAbort never fires while onConnect is still in flight",
+          a.get("runs", 0) == b.get("runs", 0), "before=%r after=%r" % (b, a), security=True)
+    p.check("abort: no cancel sent, nothing had reached the backend yet",
+          mock.cancel_count() == 0, "count=%d" % mock.cancel_count())
+
+    r = sp_get(cfg, key="after-midconnect-abort", sp="abortmidconnect")
+    p.check("abort: endpoint still healthy after mid-connect abort", is_ok_sp(r), "r=%r" % r)
+    p.check("worker healthy after mid-connect abort race", _wfx_healthy(cfg) and mock.ping())
+
+    # --- 6. Hostile onAbort: closes its side connection three times and keeps the-
+    # -handle around afterward. A real protocol author will get this wrong at least-
+    # -once; the engine must survive it (no double-free, no corrupting whatever-
+    # -connection the freed aux slot gets reused for next), not just the well-behaved case
+    mock.cancel_reset()
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/get", {"X-Sp": "abortbadclose", "X-Key": "slow:0.8"}),
+                        hold=0.1)
+    time.sleep(1.3)
+    p.check("abort: double/triple Close() on a side connection never crashes the worker",
+          _wfx_healthy(cfg) and mock.ping(), security=True)
+    p.check("abort: hostile onAbort still delivered its one cancel",
+          mock.cancel_count() == 1, "count=%d" % mock.cancel_count())
+    r = sp_get(cfg, key="after-badclose", sp="abortbadclose")
+    p.check("abort: endpoint still usable after hostile onAbort misuse", is_ok_sp(r), "r=%r" % r)
+
+    # --- 7. Scope cut: once a request is already streaming (isStreaming=1, i.e. past-
+    # -its first chunk), a client disconnect must still force-close as before. onAbort-
+    # -is defined for single-slot in-flight requests only, never a stream mid-delivery
+    mock.cancel_reset()
+    b = sp_json(cfg, "/sp/abort") or {}
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/stream", {"X-Sp": "abort", "X-Count": "4",
+                                                          "X-StallAfter": "1", "X-StallMs": "2000"}),
+                        hold=0.3)
+    time.sleep(2.5)
+    a = sp_json(cfg, "/sp/abort") or {}
+    p.check("abort: onAbort never fires for a slot already streaming",
+          a.get("runs", 0) == b.get("runs", 0), "before=%r after=%r" % (b, a), security=True)
+    p.check("abort: no cancel sent for an abandoned stream (force-close instead)",
+          mock.cancel_count() == 0, "count=%d" % mock.cancel_count())
+    r = sp_get(cfg, key="after-stream-abort", sp="abort")
+    p.check("abort: endpoint healthy after abandoning a stream mid-flight", is_ok_sp(r), "r=%r" % r)
+
+    # --- 8. Cross-endpoint isolation: each EndpointEntry owns its own auxPool. One-
+    # -endpoint's aux slot being fully held must never block or interfere with a-
+    # -completely different endpoint's own (separate) aux pool
+    mock.cancel_reset()
+    b = sp_json(cfg, "/sp/abort") or {}
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:1.5", "X-Leak": "1"}),
+                        hold=0.05)
+    time.sleep(0.2) # let SpAbort's onAbort claim (and hold) its one aux slot first
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/get", {"X-Sp": "abortbadclose", "X-Key": "slow:0.5"}),
+                        hold=0.05)
+    time.sleep(0.8)
+    a = sp_json(cfg, "/sp/abort") or {}
+    p.check("abort: a different endpoint's aux pool is unaffected by SpAbort's exhaustion",
+          a.get("side_opens", 0) - b.get("side_opens", 0) == 2, "before=%r after=%r" % (b, a), security=True)
+    p.check("abort: mock received both endpoints' cancels", mock.cancel_count() == 2,
+          "count=%d" % mock.cancel_count())
+    time.sleep(5.5) # let SpAbort's leaked slot self-heal before anything else runs
+    p.check("worker healthy after cross-endpoint isolation check", _wfx_healthy(cfg) and mock.ping())
+
+    # --- 9. Soak: rapid repeated abort/reclaim cycles must never leak a primary-
+    # -slot, an aux slot, or a coroutine frame. slots_in_use returning to 0 is the-
+    # -same invariant phase_metrics checks after every other phase, under abort load
+    mock.cancel_reset()
+    n_soak = 20
+    for i in range(n_soak):
+        net.send_and_abandon(cfg.host, cfg.port,
+                            net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:0.05"}),
+                            hold=0.01)
+        time.sleep(0.03)
+    time.sleep(1.0)
+    p.check("abort: soak of %d rapid aborts recorded that many cancels" % n_soak,
+          mock.cancel_count() == n_soak, "count=%d expected=%d" % (mock.cancel_count(), n_soak))
+
+    end = fetch_metrics(cfg)
+    p.check("abort: slots_in_use gauge back to zero after abort soak", _agg(end, "slots_in_use") == 0,
+          "expected 0, got %d" % _agg(end, "slots_in_use"))
+    p.check("worker healthy after abort soak", _wfx_healthy(cfg) and mock.ping())
+
+    # --- 10. Backend that never responds, even after the cancel: onAbort still runs-
+    # -and sends its cancel normally (it has no idea whether the cancel "worked"),-
+    # -but if the backend genuinely never replies, requestTimeoutSeconds is what-
+    # -eventually force-closes the already-aborted slot. onAbort adds no new timer-
+    # -plumbing of its own, this is the exact same budget every other request gets
+    mock.cancel_reset()
+    r0 = sp_get(cfg, key="warmup-timeout", sp="abort")
+    p.check("abort: warmup before timeout test succeeds", is_ok_sp(r0), "r=%r" % r0)
+    conn_before = r0.get("conn", -1) if r0 else -1
+
+    b = fetch_metrics(cfg)
+    net.send_and_abandon(cfg.host, cfg.port,
+                        net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:30"}),
+                        hold=0.15)
+    time.sleep(0.5)
+    p.check("abort: cancel still sent even though the backend will never reply",
+          mock.cancel_count() == 1, "count=%d" % mock.cancel_count())
+
+    time.sleep(17.0) # past SpAbort's requestTimeoutSeconds=10 (+ up to a 5s timer tick, plus slack)
+    a = fetch_metrics(cfg)
+    p.check("abort: never-responding backend recorded as a request timeout",
+          _agg(a, "request_timeouts") - _agg(b, "request_timeouts") >= 1,
+          "before=%d after=%d" % (_agg(b, "request_timeouts"), _agg(a, "request_timeouts")))
+
+    r1 = sp_get(cfg, key="after-timeout", sp="abort")
+    p.check("abort: fresh connection after the timed-out slot was force-closed",
+          is_ok_sp(r1) and r1.get("conn") != conn_before,
+          "r=%r old_conn=%d" % (r1, conn_before))
+    p.check("worker healthy after never-responding-backend timeout", _wfx_healthy(cfg) and mock.ping())
+
 class EndpointAudit(common.Suite):
     name = "endpoint_audit"
     description = "WFX HttpEndpoint audit"
@@ -1731,6 +1960,7 @@ class EndpointAudit(common.Suite):
         "streaming":  phase_streaming,
         "upgrade":    phase_upgrade,
         "metrics":    phase_metrics,
+        "abort":      phase_abort,
     }
 
     def add_arguments(self, parser):

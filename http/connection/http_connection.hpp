@@ -179,10 +179,12 @@ struct EndpointCtx : public ConnectionTag {
             std::uint16_t inOnConnectPhase : 1;
             std::uint16_t isPooledIdle : 1;
             std::uint16_t isAwaitingReconnect : 1;
-            std::uint16_t isReserved : 1;  // Pinned by Reserve(), never auto-returned to the pool
-            std::uint16_t isStreaming : 1; // Request delivers in chunks, stays in flight between them
-            std::uint16_t needsFetch : 1;  // Next chunk needs a re-serialize (CHUNK_READY_FETCH)
-            std::uint16_t reserved : 6;
+            std::uint16_t isReserved : 1;       // Pinned by Reserve(), never auto-returned to the pool
+            std::uint16_t isStreaming : 1;      // Request delivers in chunks, stays in flight between them
+            std::uint16_t needsFetch : 1;       // Next chunk needs a re-serialize (CHUNK_READY_FETCH)
+            std::uint16_t isAborted : 1;        // Client bailed mid-request, real response still pending
+            std::uint16_t isSideConnection : 1; // Ephemeral, lives in auxPool not pool
+            std::uint16_t reserved : 4;
         };
         std::uint16_t flags = 0;
     }; // 2 bytes
@@ -308,6 +310,7 @@ struct EndpointMetadata {
     std::uint16_t nextAddrIdx = 0;
     std::uint16_t port = 0;
     std::uint32_t timerBase = 0;            // Specific to timer wheel
+    std::uint32_t auxTimerBase = 0;         // Timer wheel base for auxPool, = timerBase + pool.GetSlots()
     std::uint32_t lastMultiplexHintIdx = 0; // Last slot idx that had multiplex capacity, tried first next time
     Shared::EndpointDesc desc = {0};
     Shared::EndpointConfig config = {0};
@@ -347,6 +350,9 @@ struct HttpConnectionHandler {
     virtual void SlotUpgradeTls(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
     virtual std::uint64_t ReserveSlot(std::uint16_t endpointIdx) = 0;
     virtual void ReleaseSlot(std::uint64_t pinnedSlot) = 0;
+    // Opens a throwaway second connection to ownerCtx's endpoint. Valid from onConnect and onAbort
+    virtual void OpenSideConnection(EndpointCtx* ownerCtx, Shared::AsyncData asyncData) = 0;
+    virtual void CloseSideConnection(EndpointCtx* auxCtx) = 0;
     virtual Shared::EndpointStatus StreamNext(ClientCtx* clientCtx, const void* req, Shared::AsyncData asyncData) = 0;
     virtual const void* StreamChunk(ClientCtx* clientCtx) = 0;
     // Empty if the slot isn't TLS or the handshake hasn't completed yet. Not HTTP-specific: any-

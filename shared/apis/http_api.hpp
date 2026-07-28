@@ -141,6 +141,11 @@ using SlotUpgradeTlsApiFn = void (*)(void* endpointCtx, AsyncData onComplete);
 // Empty unless the slot is TLS and its handshake finished
 using NegotiatedProtocolApiFn = StringView (*)(void* endpointCtx);
 
+// Opens a second, throwaway connection to the same endpoint (Postgres CancelRequest, MySQL-
+// -COM_PROCESS_KILL, ...). Valid from onConnect and onAbort alike; ownerCtx only resolves which-
+// -endpoint's host/TLS config to dial. onComplete's data is the new slot's impl pointer
+using OpenSideConnectionApiFn = void (*)(void* ownerCtx, AsyncData onComplete);
+
 struct EndpointAPIExt1 {
     AllocateEndpointApiFn allocateEndpoint;
     SendPayloadApiFn sendPayload;
@@ -152,6 +157,8 @@ struct EndpointAPIExt1 {
     ReleaseSlotApiFn releaseSlot;
     StreamNextApiFn streamNext;
     StreamChunkApiFn streamChunk;
+    OpenSideConnectionApiFn openSideConnection;
+    EndpointSlotCloseFn closeSideConnection;
 };
 static_assert(std::is_standard_layout_v<EndpointAPIExt1>, "'ENDPOINT_API_EXT1' must be standard layout");
 

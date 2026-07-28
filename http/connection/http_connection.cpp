@@ -196,13 +196,14 @@ void EndpointCtx::Reset()
     isReserved = 0;
     isStreaming = 0;
     needsFetch = 0;
+    isAborted = 0;
     eventType = EventType::EVENT_ACCEPT;
     clientCtx = nullptr;
     asyncData = AsyncData{};
     coalesceKey = 0;
     reconnectAttempts = 0;
     socket = WFX_INVALID_SOCKET;
-    // endpointState, endpointIdx:                          preserved, TLS config and pool identity survive reset
+    // endpointState, endpointIdx, isSideConnection:        preserved, TLS config and pool identity survive reset
     // sslConn:                                             caller freed it before Reset()
     // generationId:                                        managed by GetConnection()
     // slotState, parseStateObj, outputObj, pendingStreams: managed by FinalizeEndpointRequest/ReleaseEndpoint

@@ -38,11 +38,15 @@ using ClientPool = BitmapPool<ClientCtx>;
 using EndpointPool = BitmapPool<EndpointCtx>;
 
 // One entry per registered endpoint: metadata + fixed connection pool
+// auxPool backs OpenSideConnection() (Postgres CancelRequest, MySQL COM_PROCESS_KILL, ...), sized-
+// -independently via EndpointConfig::auxConnLimit. 0 is a legitimate empty pool (BitmapPool tolerates-
+// -it), so most endpoints that never use side connections pay nothing extra
 struct EndpointEntry {
     EndpointMetadata meta;
     EndpointPool pool;
+    EndpointPool auxPool;
 
-    explicit EndpointEntry(std::uint32_t connLimit) : pool(connLimit)
+    explicit EndpointEntry(std::uint32_t connLimit, std::uint32_t auxConnLimit) : pool(connLimit), auxPool(auxConnLimit)
     {}
 
     // BitmapPool is move-only, so EndpointEntry must be too
@@ -106,6 +110,8 @@ public: // Endpoint operations
     StringView NegotiatedProtocol(EndpointCtx* slotCtx) override;
     void Close(EndpointCtx* ctx, bool forceClose = false, DisconnectReason reason = DisconnectReason::ERROR) override;
     void RefreshExpiry(EndpointCtx* ctx, std::uint16_t timeoutSeconds) override;
+    void OpenSideConnection(EndpointCtx* ownerCtx, AsyncData asyncData) override;
+    void CloseSideConnection(EndpointCtx* auxCtx) override;
 
 public: // Engine control
     void Run() override;
@@ -129,6 +135,7 @@ private: // Slot state
 private: // Connection management
     ClientCtx* GetClientConnection();
     EndpointCtx* GetEndpointConnection(std::uint16_t endpointIdx);
+    EndpointCtx* GetAuxConnection(std::uint16_t endpointIdx);
 
     // Opaque pinned-slot handle: endpointIdx | pool index | generationId. Decode returns null-
     // -for a handle whose slot was since released or recycled, so a stale one can't be used
@@ -164,7 +171,7 @@ private: // Epoll dispatch
 
 private: // Handshake
     void HandleClientHandshake(ClientCtx* ctx, std::uint32_t ev);
-    void HandleEndpointHandshake(EndpointCtx* ctx, std::uint32_t ev);
+    void HandleEndpointHandshake(EndpointCtx* ctx);
 
 private: // Shared ClientCtx/EndpointCtx templates
     // Drives one SSL handshake step off its return value: success sets 'onSuccess',-
@@ -244,6 +251,15 @@ private: // onConnect
     bool FlushDeferredRequest(EndpointCtx* ctx, EndpointEntry& entry);
     void FailDeferredRequest(EndpointCtx* ctx, EndpointStatus status);
 
+private: // onAbort / side connections
+    // Fires desc.onAbort. Unlike FireOnConnect, ctx does NOT transition eventType (still-
+    // -mid-request, EVENT_ENDPOINT_RECV); onAbort only ever drives a separate auxPool ctx
+    void FireOnAbort(EndpointCtx* ctx, EndpointEntry& entry);
+    // Connected (+TLS'd if needed): fires the caller's asyncData with the aux ctx as result.data
+    void CompleteAuxConnect(EndpointCtx* auxCtx);
+    // Connect/TLS failed: tears down auxCtx and fires the caller's asyncData with the failure
+    void FailAuxConnect(EndpointCtx* auxCtx, SlotStatus status);
+
 private: // Wrap / low-level
     void WrapAccept(ClientCtx* ctx);
     EndpointStatus WrapConnect(EndpointCtx* ctx, EndpointEntry& entry);
@@ -298,6 +314,10 @@ private: // Constants
     constexpr static ssize_t SWITCH_FILE_TO_STREAM = std::numeric_limits<ssize_t>::min();
     constexpr static std::uint16_t MAX_DISTINCT_ENDPOINTS = std::numeric_limits<std::uint16_t>::max() - 1;
     constexpr static std::uint16_t CLIENT_CONNECTION_TAG = 0xFFFF;
+
+    // Top bit of PackEpollData's 32-bit pool-index half: flags an auxPool ctx so Run() routes to it-
+    // -instead of pool. No realistic pool size gets anywhere near 2^31 slots
+    constexpr static std::uint32_t AUX_CONNECTION_TAG_BIT = 0x8000'0000u;
 
     constexpr static int INVOKE_TIMEOUT_COOLDOWN = 5;
     constexpr static int INVOKE_TIMEOUT_DELAY = 1;

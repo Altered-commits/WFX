@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -482,6 +483,9 @@ struct SpReq {
     WFX::String key;
     std::uint32_t count = 0;
     std::uint32_t size = 0;
+    std::uint32_t stallAfter = 0; // STREAM_SERVER only: stall before this chunk index, 0 = never
+    std::uint32_t stallMs = 0;    // how long that stall lasts
+    bool leakAux = false;         // GET only: onAbort skips side.Close(), proves the timeout reclaims it
 };
 
 // One instance per slot, reused for every chunk of a stream. value is ASSIGNED
@@ -500,6 +504,7 @@ struct SpSlotState {
     std::uint64_t connId = 0;
     SpMode mode = SpMode::GET;
     std::uint32_t pagesSent = 0;
+    bool leakAux = false; // stashed by SpSerialize, read by SpOnAbort
 };
 
 // Single worker (wfx.toml, worker_processes = 1), so plain globals are fine
@@ -507,6 +512,12 @@ std::uint64_t g_spPushCount = 0;
 std::uint64_t g_spPushBytes = 0;
 std::uint64_t g_spPushRejects = 0;
 std::uint64_t g_spDisconnects = 0;
+
+// onAbort observability: the app's own view, independent of what the mock recorded,
+// so the audit can tell "OpenSideConnection failed" apart from "cancel never arrived"
+std::uint64_t g_spAbortRuns = 0;
+std::uint64_t g_spAbortSideOpens = 0;
+std::uint64_t g_spAbortSideFailures = 0;
 
 void* SpCreateSlotState(void* userCtx)
 {
@@ -611,6 +622,73 @@ WFX::EpCoro SpConnect(WFX::SlotHandle h, void* slotStateVoid)
     co_return WFX::EpReady;
 }
 
+// Postgres-style graceful cancel: opens a throwaway connection to the same upstream and
+// sends "CANCEL <connId>\n", no auth (mirrors a real Postgres CancelRequest, which also
+// rides a brand-new connection with no prior handshake). connId identifies which physical
+// primary connection is being aborted, exactly the way a real PID+secret key would
+//
+// Deliberately does NOT touch 'h' beyond OpenSideConnection()/NegotiatedProtocol(): the
+// primary slot is still mid-request, and AbortSlotHandle doesn't even expose Send/Receive
+// on it for that reason (see the plan doc / base.hpp doc comment for why that's unsafe)
+WFX::EpAbortCoro SpOnAbort(WFX::AbortSlotHandle h, void* slotStateVoid)
+{
+    auto* st = static_cast<SpSlotState*>(slotStateVoid);
+    g_spAbortRuns++;
+
+    auto [status, side] = co_await h.OpenSideConnection();
+    if(status != WFX::EpSlotOk) {
+        // auxConnLimit exhausted (or 0/disabled), or the dial itself failed. Either way,
+        // there's nothing to send the cancel on: give up quietly. The primary slot is
+        // unaffected either way, its own response/timeout cycle doesn't depend on this
+        g_spAbortSideFailures++;
+        co_return;
+    }
+
+    g_spAbortSideOpens++;
+
+    char buf[32];
+    const int n = std::snprintf(buf, sizeof(buf), "CANCEL %llu\n", static_cast<unsigned long long>(st->connId));
+    if(n > 0)
+        co_await side.Send(buf, static_cast<std::uint32_t>(n));
+
+    // leakAux deliberately skips this, to prove connectTimeoutSeconds reclaims a side-
+    // -connection whose caller forgot (or, here, chose not) to Close() it
+    if(!st->leakAux)
+        side.Close();
+
+    co_return;
+}
+
+// Hostile/buggy protocol simulation: a real onAbort author will get this wrong at least
+// once. Closes the side connection TWICE and keeps using the handle afterward. The engine
+// must survive this (bump generationId before freeing, same discipline every other
+// pool-recycle path already uses), never double-free the aux slot or corrupt a DIFFERENT-
+// -side connection that gets handed that same slot in the meantime
+WFX::EpAbortCoro SpOnAbortDoubleClose(WFX::AbortSlotHandle h, void* slotStateVoid)
+{
+    auto* st = static_cast<SpSlotState*>(slotStateVoid);
+    g_spAbortRuns++;
+
+    auto [status, side] = co_await h.OpenSideConnection();
+    if(status != WFX::EpSlotOk) {
+        g_spAbortSideFailures++;
+        co_return;
+    }
+
+    g_spAbortSideOpens++;
+
+    char buf[32];
+    const int n = std::snprintf(buf, sizeof(buf), "CANCEL %llu\n", static_cast<unsigned long long>(st->connId));
+    if(n > 0)
+        co_await side.Send(buf, static_cast<std::uint32_t>(n));
+
+    side.Close();
+    side.Close(); // deliberate misuse: must be a harmless no-op, not a double-free
+    side.Close(); // ...and a third time for good measure
+
+    co_return;
+}
+
 WFX::Shared::SerializeResult SpSerialize(void* slotStateVoid, const void* reqVoid, char* buf, std::uint32_t bufLen,
                                          std::uint32_t* written, std::uint64_t* /*streamKey, not multiplexed*/)
 {
@@ -627,7 +705,7 @@ WFX::Shared::SerializeResult SpSerialize(void* slotStateVoid, const void* reqVoi
     else if(req.mode == SpMode::STREAM_FETCH)
         n = std::snprintf(buf, bufLen, "PAGE %u %u\n", req.count, req.size);
     else if(req.mode == SpMode::STREAM_SERVER)
-        n = std::snprintf(buf, bufLen, "STREAM %u %u\n", req.count, req.size);
+        n = std::snprintf(buf, bufLen, "STREAM %u %u %u %u\n", req.count, req.size, req.stallAfter, req.stallMs);
     else
         n = std::snprintf(buf, bufLen, "GET %s\n", req.key.c_str());
 
@@ -635,6 +713,7 @@ WFX::Shared::SerializeResult SpSerialize(void* slotStateVoid, const void* reqVoi
         return WFX::EpSerBufferTooSmall;
 
     st->mode = req.mode;
+    st->leakAux = req.leakAux;
     *written = static_cast<std::uint32_t>(n);
 
     return WFX::EpSerOk;
@@ -729,6 +808,8 @@ WFX::EndpointDesc SpDesc(const char* cfg)
 }
 
 using SpEp = WFX::Endpoint<SpReq, SpRes, &SpConnect>;
+using SpAbortEp = WFX::Endpoint<SpReq, SpRes, &SpConnect, &SpOnAbort>;
+using SpAbortBadCloseEp = WFX::Endpoint<SpReq, SpRes, &SpConnect, &SpOnAbortDoubleClose>;
 
 } // namespace
 
@@ -782,6 +863,73 @@ const SpEp* SpEndpointOf(std::string_view name) noexcept
     return &SpGood;
 }
 } // namespace
+
+// --- onAbort: graceful cancel over a side connection when the client bails --------
+// connLimit=4 so overlapping primaries can be in flight at once (needed to drive-
+// -auxConnLimit=1 into exhaustion on purpose, plus headroom for a tight sequential-
+// -leak-reclaim test). connectTimeoutSeconds=5 is the engine's own hard floor-
+// -(must be >= the timer tick interval, INVOKE_TIMEOUT_COOLDOWN) - the reclaim-
+// -test just waits it out rather than fighting it
+inline const SpAbortEp SpAbort{
+    SP_UPSTREAM, SpDesc("abort:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 4,
+        .auxConnLimit          = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// auxConnLimit=0: onAbort still fires (desc.onAbort is set), but OpenSideConnection()
+// must fail every time with nowhere to allocate from, never a crash or a hang
+inline const SpAbortEp SpAbortNoAux{
+    SP_UPSTREAM, SpDesc("abortnoaux:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .auxConnLimit          = 0,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// Mock stalls 1s before answering AUTH. Gives the audit a window to abandon the-
+// -client while onConnect is still running, proving onAbort never fires while-
+// -inOnConnectPhase is set (it would steal onConnect's asyncData mid-flight)
+inline const SpAbortEp SpAbortMidConnect{
+    SP_UPSTREAM, SpDesc("abortmidconnect:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 2,
+        .auxConnLimit          = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// Deliberately hostile onAbort (SpOnAbortDoubleClose): a real protocol author will
+// misuse .Close() sooner or later, the engine must not crash or corrupt a DIFFERENT
+// side connection over it. Own endpoint (not just a slotState flag), since the whole
+// point is exercising the ABI's close path directly, not layering it on SpAbort's config
+inline const SpAbortBadCloseEp SpAbortBadClose{
+    SP_UPSTREAM, SpDesc("abort:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .auxConnLimit          = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
 
 
 // Result reflection
@@ -1001,14 +1149,31 @@ WFX_POST("/proto/disconnects/reset", [](WFX::Request, WFX::Response res) {
     res.Status(200).SendText("ok");
 })
 
-// --- SP routes: pinning, streaming, push, TLS upgrade ---------------------
-// Plain single request. X-Sp picks the endpoint instance (good/downgrade/tlsgarbage)
+// --- SP routes: pinning, streaming, push, TLS upgrade, onAbort -------------
+// Plain single request. X-Sp picks the endpoint instance
+// (good/downgrade/tlsgarbage/abort/abortnoaux/abortmidconnect/abortbadclose).
+// X-Leak=1 tells onAbort (on the abort* endpoints) to skip side.Close()
 WFX_GET("/sp/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     std::string_view name = "good", key = "hello";
     req.GetHeader("X-Sp", name);
     req.GetHeader("X-Key", key);
 
-    auto [status, out] = co_await SpEndpointOf(name)->SendPayload(SpReq{SpMode::GET, WFX::String(key.data(), key.size()), 0, 0});
+    const bool leak = HeaderU32(req, "X-Leak", 0) != 0;
+    SpReq sreq{SpMode::GET, WFX::String(key.data(), key.size()), 0, 0, 0, 0, leak};
+
+    WFX::Shared::EndpointStatus status{};
+    WFX::EndpointOutput<SpRes> out;
+
+    if(name == "abort")
+        std::tie(status, out) = co_await SpAbort.SendPayload(sreq);
+    else if(name == "abortnoaux")
+        std::tie(status, out) = co_await SpAbortNoAux.SendPayload(sreq);
+    else if(name == "abortmidconnect")
+        std::tie(status, out) = co_await SpAbortMidConnect.SendPayload(sreq);
+    else if(name == "abortbadclose")
+        std::tie(status, out) = co_await SpAbortBadClose.SendPayload(sreq);
+    else
+        std::tie(status, out) = co_await SpEndpointOf(name)->SendPayload(sreq);
 
     res.Status(200);
     auto j = WFX::ImJson(res);
@@ -1025,15 +1190,23 @@ WFX_GET("/sp/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 // a chunk alive past its iteration, so if peak RSS grows with X-Count then the
 // engine is buffering, not the app. X-Mode server -> CHUNK_READY,
 // fetch -> CHUNK_READY_FETCH. X-Stop > 0 abandons the stream after N chunks.
+// X-Sp="abort" plus X-StallAfter/X-StallMs lets the audit abandon the CLIENT
+// mid-stream (after isStreaming is already set) and prove onAbort's scope cut:
+// a streaming request still force-closes on client disconnect, never fires onAbort
 WFX_GET("/sp/stream", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
-    std::string_view mode = "server";
+    std::string_view name = "good", mode = "server";
+    req.GetHeader("X-Sp", name);
     req.GetHeader("X-Mode", mode);
 
     const std::uint32_t count = HeaderU32(req, "X-Count", 10);
     const std::uint32_t stop = HeaderU32(req, "X-Stop", 0);
+    const std::uint32_t stallAfter = HeaderU32(req, "X-StallAfter", 0);
+    const std::uint32_t stallMs = HeaderU32(req, "X-StallMs", 0);
 
-    auto stream = SpGood.Stream(
-        SpReq{mode == "fetch" ? SpMode::STREAM_FETCH : SpMode::STREAM_SERVER, {}, count, HeaderU32(req, "X-Size", 64)});
+    SpReq sreq{mode == "fetch" ? SpMode::STREAM_FETCH : SpMode::STREAM_SERVER, {}, count,
+              HeaderU32(req, "X-Size", 64), stallAfter, stallMs, false};
+
+    auto stream = (name == "abort") ? SpAbort.Stream(sreq) : SpGood.Stream(sreq);
 
     std::uint64_t chunks = 0, bytes = 0, checksum = 0, conn = 0;
     auto epStatus = WFX::EpOk;
@@ -1209,6 +1382,23 @@ WFX_POST("/sp/push/reset", [](WFX::Request, WFX::Response res) {
     g_spPushBytes = 0;
     g_spPushRejects = 0;
     g_spDisconnects = 0;
+    res.Status(200).SendText("ok");
+})
+
+// The app's own view of onAbort activity, independent of what the mock recorded on
+// the wire: separates "onAbort never ran" from "it ran but OpenSideConnection failed"
+WFX_GET("/sp/abort", [](WFX::Request, WFX::Response res) {
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("runs", g_spAbortRuns);
+    j.Write("side_opens", g_spAbortSideOpens);
+    j.Write("side_failures", g_spAbortSideFailures);
+})
+
+WFX_POST("/sp/abort/reset", [](WFX::Request, WFX::Response res) {
+    g_spAbortRuns = 0;
+    g_spAbortSideOpens = 0;
+    g_spAbortSideFailures = 0;
     res.Status(200).SendText("ok");
 })
 

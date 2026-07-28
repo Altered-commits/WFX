@@ -406,11 +406,19 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
                                  Close(ctx, true);
                          }
                          else {
-                             // connId is an absolute timer wheel index, recover pool index by-
-                             // -subtracting timerBase
+                             // connId is an absolute timer wheel index. auxPool has its own range-
+                             // -(auxTimerBase onward), a side connection never reconnects/backs off
+                             // FailAuxConnect resumes a still-suspended caller (mid-connect, or the-
+                             // -caller simply forgot to Close() after a successful handoff) before-
+                             // -tearing down; safe even if nothing is pending (no-op resume then close)
                              auto& entry = endpoints_[extra];
-                             const std::uint32_t slotIdx = connId - entry.meta.timerBase;
-                             EndpointCtx* ctx = entry.pool.GetPtr(slotIdx);
+                             if(connId >= entry.meta.auxTimerBase) {
+                                 FailAuxConnect(entry.auxPool.GetPtr(connId - entry.meta.auxTimerBase),
+                                                SlotStatus::IO_ERROR);
+                                 return;
+                             }
+
+                             EndpointCtx* ctx = entry.pool.GetPtr(connId - entry.meta.timerBase);
 
                              // A timeout during the connect phase (TCP connect / TLS handshake /-
                              // -onConnect) is a transient connect failure: route it through the funnel-
@@ -430,7 +438,7 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
 
     // Re-expand for any endpoints registered before Initialize was called
     for(auto& entry : endpoints_)
-        timerWheel_.Expand(entry.pool.GetSlots());
+        timerWheel_.Expand(entry.pool.GetSlots() + entry.auxPool.GetSlots());
 
     timeoutTimerFd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if(timeoutTimerFd_ < 0)
@@ -522,14 +530,16 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
     // 'timerBase' used in RefreshExpiry(EndpointCtx*) overload, do check it out for info
     if(!endpoints_.empty()) {
         auto& last = endpoints_.back();
-        timerBase = last.meta.timerBase + last.pool.GetSlots();
+        timerBase = last.meta.timerBase + last.pool.GetSlots() + last.auxPool.GetSlots();
     }
 
-    auto& entry = endpoints_.emplace_back(config.connLimit);
+    auto& entry = endpoints_.emplace_back(config.connLimit, config.auxConnLimit);
     auto& meta = entry.meta;
     auto& pool = entry.pool;
+    auto& auxPool = entry.auxPool;
 
     meta.timerBase = timerBase;
+    meta.auxTimerBase = timerBase + pool.GetSlots();
     meta.desc = desc;
     meta.config = config;
     meta.hostname = std::move(hostname);
@@ -549,12 +559,18 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
 
     meta.dnsNextRefreshSeconds = ComputeNextDnsRefresh(minTtl, config.dnsRefreshSeconds, meta.hostname);
 
-    for(std::uint32_t i = 0; i < pool.GetSlots(); i++) {
-        EndpointCtx* ctx = pool.GetPtr(i);
+    auto initCtx = [&](EndpointCtx* ctx, bool isAux) {
         ctx->endpointIdx = endpointIdx;
+        ctx->isSideConnection = isAux;
         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
         ctx->SetEndpointState(useTLS ? EndpointState::ENDPOINT_SECURE : EndpointState::ENDPOINT_INSECURE);
-    }
+    };
+
+    for(std::uint32_t i = 0; i < pool.GetSlots(); i++)
+        initCtx(pool.GetPtr(i), false);
+
+    for(std::uint32_t i = 0; i < auxPool.GetSlots(); i++)
+        initCtx(auxPool.GetPtr(i), true);
 
     logger_.Info("[Epoll]: Endpoint allocated -- host='", meta.hostname, "' port=", meta.port,
                  " endpointIdx=", endpointIdx, " tls=", (useTLS ? "yes" : "no"), " connLimit=", config.connLimit,
@@ -1311,6 +1327,65 @@ StringView EpollConnectionHandler::NegotiatedProtocol(EndpointCtx* slotCtx)
     return StringView{proto.data(), proto.size()};
 }
 
+void EpollConnectionHandler::OpenSideConnection(EndpointCtx* ownerCtx, AsyncData asyncData)
+{
+    WFX_TRACE();
+
+    auto& entry = endpoints_[ownerCtx->endpointIdx];
+
+    EndpointCtx* auxCtx = GetAuxConnection(ownerCtx->endpointIdx);
+    if(!auxCtx) {
+        const AsyncResult fail{nullptr, 0, {.slotStatus = SlotStatus::BUFFER_ERROR}, AsyncStatus::IO_FAILURE};
+        if(asyncData.asyncComplete)
+            asyncData.asyncComplete(asyncData.userData, fail);
+
+        return;
+    }
+
+    auxCtx->asyncData = asyncData;
+
+    const EndpointStatus result = WrapConnect(auxCtx, entry);
+    if(result != EndpointStatus::PENDING) {
+        const SlotStatus mapped = result == EndpointStatus::SSL_FAILURE   ? SlotStatus::TLS_ERROR
+                                  : result == EndpointStatus::EPOLL_ERROR ? SlotStatus::EPOLL_ERROR
+                                                                          : SlotStatus::IO_ERROR;
+        FailAuxConnect(auxCtx, mapped);
+    }
+}
+
+void EpollConnectionHandler::CloseSideConnection(EndpointCtx* auxCtx)
+{
+    WFX_TRACE();
+
+    if(!auxCtx)
+        return;
+
+    auto& entry = endpoints_[auxCtx->endpointIdx];
+    const std::uint32_t idx = entry.auxPool.GetIndex(auxCtx);
+
+    timerWheel_.Cancel(entry.meta.auxTimerBase + idx);
+    (void)RegisterEpoll(auxCtx, EPOLL_CTL_DEL);
+
+    if(auxCtx->sslConn) {
+        sslHandler_->ForceShutdown(auxCtx->sslConn);
+        auxCtx->sslConn = nullptr;
+    }
+
+    if(auxCtx->socket >= 0) {
+        close(auxCtx->socket);
+        auxCtx->socket = WFX_INVALID_SOCKET;
+    }
+
+    // Bump before Reset so a stale asyncData/generationId reference can't resolve to this-
+    // -slot again once it's freed and reused for a different side connection
+    auxCtx->generationId++;
+    if(auxCtx->generationId == 0)
+        auxCtx->generationId = 1;
+
+    auxCtx->Reset();
+    entry.auxPool.FreeSlot(idx);
+}
+
 // vvv Main Functions vvv
 void EpollConnectionHandler::Run()
 {
@@ -1419,7 +1494,11 @@ void EpollConnectionHandler::Run()
                 HandleClientEvent(ctx, ev, gen);
             }
             else {
-                EndpointCtx* ctx = endpoints_[endpointIdx].pool.GetPtr(poolIdx);
+                auto& entry = endpoints_[endpointIdx];
+
+                const bool isAux = (poolIdx & AUX_CONNECTION_TAG_BIT) != 0;
+                EndpointCtx* ctx = isAux ? entry.auxPool.GetPtr(poolIdx & ~AUX_CONNECTION_TAG_BIT)
+                                        : entry.pool.GetPtr(poolIdx);
 
                 // If the slot's current generation doesn't match the event's generation, it means-
                 // -this event is for a dead connection
@@ -1449,9 +1528,12 @@ void EpollConnectionHandler::RefreshExpiry(ClientCtx* ctx, std::uint16_t timeout
 void EpollConnectionHandler::RefreshExpiry(EndpointCtx* ctx, std::uint16_t timeoutSeconds)
 {
     // 'timerBase' offsets endpoint indices past all client slots and all preceding endpoint pools-
-    // -so client slot N and endpoint slot N never collide in the timer wheel's meta_ array
+    // -so client slot N and endpoint slot N never collide in the timer wheel's meta_ array-
+    // -auxPool gets its own range past pool's ('auxTimerBase'), side connections never mix with it
     auto& entry = endpoints_[ctx->endpointIdx];
-    const std::uint32_t idx = entry.meta.timerBase + entry.pool.GetIndex(ctx);
+    const std::uint32_t idx = ctx->isSideConnection ? entry.meta.auxTimerBase + entry.auxPool.GetIndex(ctx)
+                                                    : entry.meta.timerBase + entry.pool.GetIndex(ctx);
+
     timerWheel_.Schedule(idx, ctx->endpointIdx, timeoutSeconds);
 }
 
@@ -1576,6 +1658,23 @@ EndpointCtx* EpollConnectionHandler::GetEndpointConnection(std::uint16_t endpoin
     return ctx;
 }
 
+EndpointCtx* EpollConnectionHandler::GetAuxConnection(std::uint16_t endpointIdx)
+{
+    WFX_TRACE();
+
+    // No metrics/isPooledIdle bookkeeping: those track real pool capacity, auxPool is throwaway-
+    // -and never goes through ReturnEndpointToPool/ReleaseEndpoint
+    EndpointCtx* ctx = endpoints_[endpointIdx].auxPool.AllocSlot();
+    if(!ctx)
+        return nullptr;
+
+    ctx->generationId++;
+    if(ctx->generationId == 0)
+        ctx->generationId = 1;
+
+    return ctx;
+}
+
 EndpointCtx* EpollConnectionHandler::FindMultiplexableSlot(std::uint16_t endpointIdx, EndpointMetadata& meta)
 {
     WFX_TRACE();
@@ -1663,6 +1762,7 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
         if(ctx->streamKey != 0 && epCtx->pendingStreams) {
             auto& meta = endpoints_[epCtx->endpointIdx].meta;
             auto& desc = meta.desc;
+
             auto it = epCtx->pendingStreams->find(ctx->streamKey);
             if(it != epCtx->pendingStreams->end()) {
                 // Copy the entry out and erase it BEFORE any callback below. desc.takeStreamOutput-
@@ -1695,10 +1795,25 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
                     desc.destroyOutput(abandoned);
             }
         }
-        // Non-multiplexed: force close the whole endpoint connection as before
+        // Non-multiplexed: let onAbort try a graceful cancel if the protocol defines one, the-
+        // -request isn't already streaming (DeliverStreamChunk isn't taught to tolerate an-
+        // -orphaned-by-abort stream yet, a separate change), and onConnect isn't still running-
+        // -on this same ctx. inOnConnectPhase matters: onConnect's coroutine may be suspended-
+        // -mid-Send/Receive/UpgradeToTLS, owning slotCtx->asyncData for its own resume. FireOnAbort-
+        // -unconditionally overwrites that same field, so firing it here would strand the-
+        // -onConnect coroutine forever (its completion never arrives) while a second coroutine-
+        // -starts on the same slot. Nothing meaningful is lost falling back to force-close: no-
+        // -request has reached the backend yet at this point anyway
         else {
             epCtx->clientCtx = nullptr;
-            Close(epCtx, true);
+
+            auto& epEntry = endpoints_[epCtx->endpointIdx];
+            if(epEntry.meta.desc.onAbort && !epCtx->isStreaming && !epCtx->inOnConnectPhase) {
+                epCtx->isAborted = 1;
+                FireOnAbort(epCtx, epEntry);
+            }
+            else
+                Close(epCtx, true);
         }
 
         ctx->endpointCtx = nullptr;
@@ -1776,9 +1891,9 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
 
     auto& em = endpointMetrics_[ctx->endpointIdx];
 
-    // A TIMEOUT teardown with a client still attached is a request that ran past its deadline
-    // Idle-pooled slots have no in-flight client, so their idle-timeout close is not counted here
-    if(disconnectReason == DisconnectReason::TIMEOUT && ctx->clientCtx)
+    // clientCtx is null for an idle slot AND for an aborted-but-still-in-flight one-
+    // -isPooledIdle tells them apart; only the idle case should skip the count
+    if(disconnectReason == DisconnectReason::TIMEOUT && !ctx->isPooledIdle)
         em.requestTimeouts++;
 
     // If this slot was idle-pooled (returned via ReturnEndpointToPool and never-
@@ -2403,19 +2518,28 @@ void EpollConnectionHandler::HandleClientHandshake(ClientCtx* ctx, std::uint32_t
         HandleClientEpollIn(ctx);
 }
 
-void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx, std::uint32_t /*ev*/)
+void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx)
 {
     WFX_TRACE();
 
+    auto& entry = endpoints_[ctx->endpointIdx];
+    auto& meta = entry.meta;
+
     // SSL handshake for outbound endpoint connections
-    // On success: EVENT_ENDPOINT_ONCONNECT if onConnect hook exists, else EVENT_ENDPOINT_SEND
-    auto& meta = endpoints_[ctx->endpointIdx].meta;
-    const EventType onSuccess =
-        meta.desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND;
+    // On success: EVENT_ENDPOINT_ONCONNECT if onConnect hook exists (or this is a side connection,-
+    // -which never runs desc.onConnect but still lands here for the caller to drive directly),-
+    // -else EVENT_ENDPOINT_SEND
+    const EventType onSuccess = (ctx->isSideConnection || meta.desc.onConnect) ? EventType::EVENT_ENDPOINT_ONCONNECT
+                                                                                : EventType::EVENT_ENDPOINT_SEND;
 
     if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE)) {
         logger_.Error("[Epoll]: TLS handshake failed for endpoint '", meta.hostname, "'");
-        HandleConnectFailure(ctx, endpoints_[ctx->endpointIdx], false, DisconnectReason::ERROR, true);
+
+        if(ctx->isSideConnection)
+            FailAuxConnect(ctx, SlotStatus::TLS_ERROR);
+        else
+            HandleConnectFailure(ctx, entry, false, DisconnectReason::ERROR, true);
+
         return;
     }
 
@@ -2427,8 +2551,6 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx, std::uint
     // - Frankenstein
     ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
 
-    auto& entry = endpoints_[ctx->endpointIdx];
-
     // TLS handshake done, connectTimeoutSeconds phase is over. What happens next-
     // -depends on whether onConnect exists and whether a client is waiting:
     //   - onConnect hook exists -> FireOnConnect drives the handshake protocol,
@@ -2439,11 +2561,13 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx, std::uint
     //     below is immediately superseded by ReturnEndpointToPool's idle timeout
     RefreshExpiry(ctx, entry.meta.config.requestTimeoutSeconds);
 
-    // Already inside onConnect means this handshake was an in-band upgrade (SlotUpgradeTls), not-
-    // -the connect-time one: resume the suspended coroutine where it awaited instead of starting-
-    // -onConnect over from the top
+    // Already inside onConnect/side-connect means this handshake was an in-band upgrade-
+    // -(SlotUpgradeTls), not the initial one: resume the suspended caller where it awaited-
+    // -instead of starting onConnect/CompleteAuxConnect over from the top
     if(ctx->inOnConnectPhase)
         HandleEndpointAsyncCallback(ctx, {nullptr, 0, {.slotStatus = SlotStatus::OK}, AsyncStatus::COMPLETED}, false);
+    else if(ctx->isSideConnection)
+        CompleteAuxConnect(ctx);
     else if(ctx->eventType == EventType::EVENT_ENDPOINT_ONCONNECT)
         FireOnConnect(ctx, entry);
     else if(ctx->clientCtx)
@@ -2511,7 +2635,7 @@ void EpollConnectionHandler::HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t
 
     // SSL handshake dispatch
     if(ctx->eventType == EventType::EVENT_ENDPOINT_HANDSHAKE) {
-        HandleEndpointHandshake(ctx, ev);
+        HandleEndpointHandshake(ctx);
         return;
     }
 
@@ -2590,7 +2714,6 @@ void EpollConnectionHandler::HandleEndpointEpollIn(EndpointCtx* ctx)
 
     switch(ctx->eventType) {
         case EventType::EVENT_ENDPOINT_RECV: {
-            // Data arrived from backend, run the parse loop
             bool eof = false;
             const bool gotData = Receive(ctx, &eof);
 
@@ -2601,32 +2724,36 @@ void EpollConnectionHandler::HandleEndpointEpollIn(EndpointCtx* ctx)
 
             // The parse callback only ever runs for a slot with a request in flight: clientCtx-
             // -for the single-slot path, pendingStreams for multiplexed (which never sets-
-            // -clientCtx at all). Otherwise parse, passing eof through so a close-delimited-
-            // -body gets finalized on the last call
+            // -clientCtx at all), or isAborted (client bailed but a real response is still owed).
+            // Otherwise parse, passing eof through so a close-delimited body gets finalized on-
+            // -the last call
             //
-            // With neither, the slot is idle-pooled or prewarmed and nothing is awaiting these-
-            // -bytes. That's server-initiated data (Postgres NOTIFY, Redis pub/sub), handed to-
-            // -desc.onPush if the protocol wants it, else the slot is released as before
-            if(ctx->clientCtx || (ctx->pendingStreams && !ctx->pendingStreams->empty()))
+            // With none of those, the slot is idle-pooled or prewarmed and nothing is awaiting-
+            // -these bytes. That's server-initiated data (Postgres NOTIFY, Redis pub/sub), handed-
+            // -to desc.onPush if the protocol wants it, else the slot is released as before
+            if(ctx->clientCtx || ctx->isAborted || (ctx->pendingStreams && !ctx->pendingStreams->empty()))
                 HandleEndpointReceive(ctx, eof);
             else
                 HandleEndpointPush(ctx, eof);
 
             return;
         }
-
-        case EventType::EVENT_ENDPOINT_ONCONNECT:
-            // clang-format off
-
+        case EventType::EVENT_ENDPOINT_ONCONNECT: {
             // onConnect coroutine called SlotReceive and is now suspended waiting for data
-            // Wake it by firing its asyncData completion with the buffer contents
-            if(Receive(ctx))
+            // Passing 'eof' matters: without it, Receive() bare-Closes on hangup and the failure-
+            // -goes uncounted. Data-then-EOF still wakes the coroutine normally; EOF alone routes-
+            // -through HandleConnectFailure so it's counted like any other connect-phase failure
+            bool eof = false;
+            const bool gotData = Receive(ctx, &eof);
+
+            if(gotData)
                 HandleEndpointAsyncCallback(ctx, {ctx->rwBuffer.GetReadData(), ctx->rwBuffer.GetReadMeta()->dataLength,
                                              {.unused = 0}, AsyncStatus::COMPLETED}, false);
+            else if(eof)
+                HandleConnectFailure(ctx, endpoints_[ctx->endpointIdx], false, DisconnectReason::ERROR);
+
             return;
-
-            // clang-format on
-
+        }
         default:
             // Any other state, connection is doing something else, ignore stray EPOLLIN
             return;
@@ -2663,18 +2790,23 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
             Write(ctx);
             break;
 
-        // Immediate connect completed and onConnect hook exists, fire it now
-        // This case is reached when connect() returned 0 synchronously (loopback,-
-        // -same-host) and WrapConnect set EVENT_ENDPOINT_ONCONNECT before RegisterEpoll(ADD + MOD)
-        // The MOD causes EPOLLOUT to fire immediately since the socket is already writable
+        // Immediate connect completed (onConnect hook, or a side connection), hand it off now
+        // Reached when connect() returned 0 synchronously and WrapConnect set-
+        // -EVENT_ENDPOINT_ONCONNECT before RegisterEpoll(ADD + MOD); the MOD fires EPOLLOUT-
+        // -immediately since the socket is already writable
         //
-        // RegisterEpoll always arms EPOLLIN|EPOLLOUT together, so once onConnect is running-
-        // -and suspended on a Receive (same eventType, opposite meaning: "waiting for a reply"-
-        // -instead of "just connected"), a still-writable socket can redeliver EPOLLOUT here
-        // inOnConnectPhase tells the two apart: only fire onConnect while nothing is running yet
+        // RegisterEpoll always arms EPOLLIN|EPOLLOUT together, so once the coroutine/caller is-
+        // -suspended on a Receive (same eventType, opposite meaning: "waiting for a reply" instead-
+        // -of "just connected"), a still-writable socket can redeliver EPOLLOUT here
+        // inOnConnectPhase tells the two apart: only hand off while nothing is running yet-
+        // -(reused as-is for side connections, which never touch desc.onConnect)
         case EventType::EVENT_ENDPOINT_ONCONNECT: {
-            if(!ctx->inOnConnectPhase)
-                FireOnConnect(ctx, endpoints_[ctx->endpointIdx]);
+            if(!ctx->inOnConnectPhase) {
+                if(ctx->isSideConnection)
+                    CompleteAuxConnect(ctx);
+                else
+                    FireOnConnect(ctx, endpoints_[ctx->endpointIdx]);
+            }
         } break;
 
         // TCP connect completed, proceed to SSL handshake or directly to write/onConnect
@@ -2687,7 +2819,12 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
 
             if(getsockopt(ctx->socket, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0) {
                 logger_.Error("[Epoll]: Connect failed for endpoint '", meta.hostname, "': ", strerror(err));
-                HandleConnectFailure(ctx, ep, false);
+
+                if(ctx->isSideConnection)
+                    FailAuxConnect(ctx, SlotStatus::IO_ERROR);
+                else
+                    HandleConnectFailure(ctx, ep, false);
+
                 break;
             }
 
@@ -2701,11 +2838,21 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uin
                                                        &meta.cachedTlsSession);
 
                 if(!ctx->sslConn) {
-                    HandleConnectFailure(ctx, ep, false, DisconnectReason::ERROR, true);
+                    if(ctx->isSideConnection)
+                        FailAuxConnect(ctx, SlotStatus::TLS_ERROR);
+                    else
+                        HandleConnectFailure(ctx, ep, false, DisconnectReason::ERROR, true);
                     break;
                 }
 
-                HandleEndpointHandshake(ctx, ev);
+                HandleEndpointHandshake(ctx);
+                break;
+            }
+
+            // Side connection, plain TCP: fully connected, hand it back to the caller directly-
+            // -(never runs desc.onConnect, never touches Write/ReturnEndpointToPool below)
+            if(ctx->isSideConnection) {
+                CompleteAuxConnect(ctx);
                 break;
             }
 
@@ -3119,7 +3266,8 @@ bool EpollConnectionHandler::IsIncrementallyConsumed(EndpointCtx* slotCtx) const
         return true;
 
     // Same test HandleEndpointEpollIn routes on: nothing in flight means these are pushes
-    return !slotCtx->clientCtx && !(slotCtx->pendingStreams && !slotCtx->pendingStreams->empty());
+    return !slotCtx->clientCtx && !slotCtx->isAborted &&
+           !(slotCtx->pendingStreams && !slotCtx->pendingStreams->empty());
 }
 
 void EpollConnectionHandler::HandleEndpointPush(EndpointCtx* slotCtx, bool isEof)
@@ -3496,10 +3644,14 @@ void EpollConnectionHandler::CompleteSingleSlotRequest(EndpointCtx* slotCtx, End
     }
 
     slotCtx->clientCtx = nullptr;
-    clientCtx->endpointCtx = nullptr;
+    if(clientCtx)
+        clientCtx->endpointCtx = nullptr;
     slotCtx->outputObj = nullptr; // disown before any cleanup
 
-    RecordEndpointCompletion(slotCtx->endpointIdx, desc, outputObj, clientCtx->endpointStartUs);
+    // clientCtx is null when the client aborted mid-request (isAborted) and this is the real-
+    // -response arriving after the fact: 0 skips the latency sample (same signal as latency-
+    // -being off), status-code counters below still record normally
+    RecordEndpointCompletion(slotCtx->endpointIdx, desc, outputObj, clientCtx ? clientCtx->endpointStartUs : 0);
 
     // Fan out clones to waiters while slotCtx->slotState is still live
     // This MUST happen before close/pool-return: COMPLETE_CLOSE destroys slotState
@@ -3524,6 +3676,10 @@ void EpollConnectionHandler::CompleteSingleSlotRequest(EndpointCtx* slotCtx, End
         if(!desc.onPush)
             rwBuf.ClearReadBuffer();
 
+        // Back to a perfectly ordinary idle pooled connection, whether or not it got here via-
+        // -onAbort (the CLOSE path below clears this too, via Reset() in ReleaseEndpoint)
+        slotCtx->isAborted = 0;
+
         EnterState(slotCtx, EventType::EVENT_ENDPOINT_RECV);
         ReturnEndpointToPool(slotCtx);
 
@@ -3542,8 +3698,12 @@ void EpollConnectionHandler::CompleteSingleSlotRequest(EndpointCtx* slotCtx, End
         Close(slotCtx);
     }
 
-    // Ownership transfers to the primary's EndpointOutput<T> RAII wrapper
-    HandleClientAsyncCallback(clientCtx, {outputObj, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
+    // Ownership transfers to the primary's EndpointOutput<T> RAII wrapper. If the client aborted-
+    // -(clientCtx null), nobody is waiting to receive outputObj: destroy it ourselves instead of leaking
+    if(clientCtx)
+        HandleClientAsyncCallback(clientCtx, {outputObj, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
+    else if(outputObj && desc.destroyOutput)
+        desc.destroyOutput(outputObj);
 }
 
 void EpollConnectionHandler::FireOnConnect(EndpointCtx* slotCtx, EndpointEntry& entry)
@@ -3568,6 +3728,25 @@ void EpollConnectionHandler::FireOnConnect(EndpointCtx* slotCtx, EndpointEntry& 
     slotCtx->inOnConnectPhase = 1;
 
     desc.onConnect(handle, slotCtx->slotState, onDone.asyncComplete, onDone.userData);
+}
+
+void EpollConnectionHandler::FireOnAbort(EndpointCtx* slotCtx, EndpointEntry& entry)
+{
+    auto& desc = entry.meta.desc;
+
+    // Unlike FireOnConnect, slotCtx does NOT transition eventType or set inOnConnectPhase: it's-
+    // -still mid-request (EVENT_ENDPOINT_RECV), still owed a real response. onAbort only ever-
+    // -drives a separate connection (OpenSideConnection), never this primary ctx directly-
+    // -(AbortSlotHandle doesn't even expose Send/Receive on it)
+    EndpointSlotHandle handle{};
+    handle.impl = slotCtx;
+    handle.negotiatedProtocol = Shared::GetEndpointAPIExt1()->negotiatedProtocol;
+    handle.close = nullptr;
+
+    // No completion callback: the original slot's fate is its own receive/parse/timeout-
+    // -cycle, not onAbort's return value. Task<void>'s final_suspend null-checks onDone-
+    // -before calling it, so nullptr here is a plain no-op, not a missing piece
+    desc.onAbort(handle, slotCtx->slotState, nullptr, nullptr);
 }
 
 bool EpollConnectionHandler::FlushDeferredRequest(EndpointCtx* slotCtx, EndpointEntry& entry)
@@ -4011,9 +4190,12 @@ std::uint64_t EpollConnectionHandler::PackEpollData(ClientCtx* ctx)
 
 std::uint64_t EpollConnectionHandler::PackEpollData(EndpointCtx* ctx)
 {
-    const std::uint32_t idx = endpoints_[ctx->endpointIdx].pool.GetIndex(ctx);
+    auto& entry = endpoints_[ctx->endpointIdx];
 
-    // Pack => [( EndpointIdx (16) | GenerationID (16) ) and PoolIdx (Low 32)]
+    const std::uint32_t idx = ctx->isSideConnection ? (entry.auxPool.GetIndex(ctx) | AUX_CONNECTION_TAG_BIT)
+                                                    : entry.pool.GetIndex(ctx);
+
+    // Pack => [( EndpointIdx (16) | GenerationID (16) ) and PoolIdx (Low 32, top bit = auxPool tag)]
     return (static_cast<std::uint64_t>(ctx->endpointIdx) << 48) |
            (static_cast<std::uint64_t>(ctx->generationId) << 32) | static_cast<std::uint64_t>(idx);
 }
@@ -4113,9 +4295,11 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
     // For the plain TCP case eventType is still EVENT_ACCEPT (the slot default). We must-
     // -set it to the correct state now so that when RegisterEpoll(MOD) fires EPOLLOUT,-
     // -HandleWriteReady dispatches correctly
-    //   - onConnect exists: set EVENT_ENDPOINT_ONCONNECT so HandleWriteReady calls FireOnConnect
-    //   - no onConnect: set EVENT_ENDPOINT_SEND so HandleWriteReady calls Write()
+    //   - onConnect exists, or this is a side connection: set EVENT_ENDPOINT_ONCONNECT so-
+    //     -HandleWriteReady calls FireOnConnect / CompleteAuxConnect
+    //   - neither: set EVENT_ENDPOINT_SEND so HandleWriteReady calls Write()
     // The SSL case is excluded here because TryHandshake below sets eventType itself
+    const bool onConnectPath = ctx->isSideConnection || desc.onConnect;
     const bool immediateConnect = (ctx->eventType != EventType::EVENT_CONNECT);
 
     if(immediateConnect) {
@@ -4130,14 +4314,13 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
             if(!ctx->sslConn)
                 return EndpointStatus::SSL_FAILURE;
 
-            const EventType onSuccess =
-                desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND;
+            const EventType onSuccess = onConnectPath ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND;
 
             if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE))
                 return EndpointStatus::SSL_FAILURE;
         }
         else
-            EnterState(ctx, desc.onConnect ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND);
+            EnterState(ctx, onConnectPath ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND);
     }
 
     // else: EVENT_CONNECT, EPOLLOUT fires naturally when OS completes the TCP handshake
@@ -4153,9 +4336,11 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
         return EndpointStatus::EPOLL_ERROR;
     }
 
-    // Three possible states after the connect/handshake attempt above:
+    // Four possible states after the connect/handshake attempt above:
     //   - still mid-TCP-connect or mid-TLS-handshake (async, EPOLLOUT pending)
     //     -> arm connectTimeoutSeconds, the in-progress connection must finish in time
+    //   - a side connection, connected (and handshake done, if any)
+    //     -> arm connectTimeoutSeconds, waiting for CompleteAuxConnect to hand it to the caller
     //   - connected (and handshake done, if any) AND a client is waiting
     //     -> arm requestTimeoutSeconds, onConnect/Write is about to run for that client
     //   - connected with no client waiting (prewarm, no onConnect hook)
@@ -4169,12 +4354,37 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
 
     if(ctx->eventType == EventType::EVENT_CONNECT || ctx->eventType == EventType::EVENT_ENDPOINT_HANDSHAKE)
         RefreshExpiry(ctx, meta.config.connectTimeoutSeconds);
+    else if(ctx->isSideConnection)
+        RefreshExpiry(ctx, meta.config.connectTimeoutSeconds);
     else if(hasWaitingClient)
         RefreshExpiry(ctx, meta.config.requestTimeoutSeconds);
     else
         ReturnEndpointToPool(ctx);
 
     return EndpointStatus::PENDING;
+}
+
+void EpollConnectionHandler::CompleteAuxConnect(EndpointCtx* auxCtx)
+{
+    // Reused from the onConnect flow: marks "handed off once", so a later in-band SlotUpgradeTls-
+    // -on this same connection resumes its own caller instead of re-running this handoff
+    auxCtx->inOnConnectPhase = 1;
+
+    // Re-arm past the connect phase: this is now the safety net for the caller's whole usage-
+    // -window (Send/Receive/Close), not just the connect itself. If the caller forgets to Close(),-
+    // -this fires FailAuxConnect on the timer-wheel path below instead of leaking the connection
+    auto& entry = endpoints_[auxCtx->endpointIdx];
+    RefreshExpiry(auxCtx, entry.meta.config.connectTimeoutSeconds);
+
+    HandleEndpointAsyncCallback(auxCtx, {auxCtx, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
+}
+
+void EpollConnectionHandler::FailAuxConnect(EndpointCtx* auxCtx, SlotStatus status)
+{
+    const AsyncResult result{nullptr, 0, {.slotStatus = status}, AsyncStatus::IO_FAILURE};
+
+    HandleEndpointAsyncCallback(auxCtx, result, false);
+    CloseSideConnection(auxCtx);
 }
 
 ssize_t EpollConnectionHandler::WrapRead(WFXSocket socket, void* sslConn, char* buf, std::size_t len)

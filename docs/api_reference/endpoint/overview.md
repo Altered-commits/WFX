@@ -9,9 +9,9 @@ anything else in WFX's async system.
 There are two layers:
 
 - **`WFX::Endpoint<TReq, TRes>`**, documented on this page, is the raw, protocol-agnostic
-  primitive. It owns the connection pool, DNS resolution, reconnects, TLS, timeouts, and
-  coalescing. You provide the wire format for one protocol (how to serialize a request and
-  parse a response), and everything else is handled for you.
+  primitive. It owns the connection pool, DNS resolution, reconnects, TLS, timeouts,
+  coalescing, and graceful cancellation. You provide the wire format for one protocol (how to
+  serialize a request and parse a response), and everything else is handled for you.
 - **[`WFX::HttpEndpoint`](http.md)** is a ready-to-use HTTP/1.1 client built on top of this
   primitive. If you're calling an HTTP upstream, use that page instead, it covers the same
   ground as this page but pre-wired for HTTP.
@@ -19,7 +19,7 @@ There are two layers:
 Everything on this page applies to **any** protocol built on `Endpoint<>`, current or future
 (Redis, Postgres, a custom binary protocol, `HttpEndpoint` itself). A protocol-specific doc
 page only needs to describe its own wire format and request/response shape; the pool,
-lifecycle, DNS, TLS, and coalescing behavior described here is shared by all of them.
+lifecycle, DNS, TLS, coalescing, and cancellation behavior described here is shared by all of them.
 
 !!! important
     All endpoint functionality lives inside the `WFX::` namespace. To build a protocol
@@ -154,6 +154,7 @@ through roughly this lifecycle:
 ```cpp
 struct EndpointConfig {
     std::uint32_t connLimit;
+    std::uint32_t auxConnLimit;
     std::uint32_t dnsRefreshSeconds;
     std::uint16_t connectTimeoutSeconds;
     std::uint16_t requestTimeoutSeconds;
@@ -171,6 +172,7 @@ struct EndpointConfig {
 | Setting | Meaning |
 |---------|---------|
 | `connLimit` | Max simultaneous connections to this host, per worker (rounded up, see below) |
+| `auxConnLimit` | Max simultaneous side connections for graceful cancellation, per worker (rounded up, see below); `0` disables it, see [`onAbort` cancellation](#onabort-cancellation) |
 | `dnsRefreshSeconds` | `0` to follow the DNS record's own TTL, or a ceiling in seconds |
 | `connectTimeoutSeconds` | Budget for TCP connect + TLS handshake + `onConnect` combined |
 | `requestTimeoutSeconds` | Budget for one send + receive cycle once a request starts |
@@ -189,11 +191,13 @@ struct EndpointConfig {
       every timeout must be at least as long as the engine's internal timer tick
       (5 seconds). A shorter value would silently fire later than configured, so
       WFX rejects it outright instead of lying to you.
-    - The effective `connLimit` is the next multiple of 64 at or above the value you
-      set, because the slot pool is a bitmap sized in whole 64-bit words. A `connLimit`
-      of 1 to 64 gives 64 slots, 65 to 128 gives 128, and so on. This rounded capacity
-      is the real ceiling on simultaneous connections, and the point at which further
-      requests are refused with `poolExhausted`.
+    - The effective `connLimit` and `auxConnLimit` are each the next multiple of 64
+      at or above the value you set, because both pools are bitmaps sized in whole
+      64-bit words. A value of 1 to 64 gives 64 slots, 65 to 128 gives 128, and so
+      on. This rounded capacity is the real ceiling on simultaneous connections, and
+      the point at which further requests are refused with `poolExhausted` (or, for
+      `auxConnLimit`, the point at which `OpenSideConnection()` starts failing).
+      `auxConnLimit = 0` is the one exception: it stays disabled, no pool allocated.
 
 ### Reconnects and backoff
 
@@ -430,6 +434,10 @@ protocol needs to remember between calls:
   `Endpoint<>`, see [onConnect handshakes](#onconnect-handshakes) below. Runs
   once per connection, right after the TCP/TLS handshake and before the slot
   is allowed to serve any request.
+- **`onAbort`**: set automatically from the `OnAbort` template argument on
+  `Endpoint<>`, see [`onAbort` cancellation](#onabort-cancellation)
+  below. Runs once per request, if the client disconnects before the backend
+  replied.
 - **`onDisconnect(slotState, reason)`**: fires once, right before
   `destroySlotState`, whenever a slot is torn down for any reason. `slotState`
   is still valid when this runs, `reason` tells you why:
@@ -703,6 +711,141 @@ Return one of:
 The whole budget for connect + TLS + `onConnect` combined is
 `connectTimeoutSeconds`. If it isn't done in time, the attempt is treated as a
 connect failure.
+
+---
+
+## `onAbort` cancellation
+
+A client can disconnect while your endpoint is still waiting on a backend
+reply. By default WFX handles that the blunt way: force-close the backend
+connection. For a lot of protocols that's fine, dropping the TCP connection
+*is* the cancellation. It's wrong for anything where cancelling a running
+operation means telling the backend to stop, not severing the pipe:
+Postgres's `CancelRequest`, MySQL's `COM_PROCESS_KILL`, MongoDB's `killOp`.
+All three need a **second, separate connection** to deliver the cancellation,
+and none of them want the original connection torn down. It's healthy,
+authenticated, and mid-query, throwing it away means paying a full
+reconnect for no reason.
+
+Pass a coroutine as the fourth template argument to `Endpoint<>` to opt in.
+The Postgres example below is illustrative, `Connect` is the `onConnect`
+handshake you'd write yourself (see [onConnect handshakes](#onconnect-handshakes)),
+the same way `Db` in [Pinning a connection](#pinning-a-connection) is an
+endpoint you'd have written with a real `EndpointDesc`:
+
+```cpp
+inline const auto Postgres = WFX::Endpoint<PgReq, PgRes, &Connect, &CancelQuery>{
+    "postgres.internal:5432",
+    WFX::EndpointDesc{ .serialize = ..., .parse = ... },
+    WFX::EndpointConfig{ .connLimit = 8, .auxConnLimit = 4, .requestTimeoutSeconds = 30 }
+};
+```
+
+When a client goes away mid-request, `onAbort` runs once on the slot that was
+serving it. The slot itself is left completely alone: whatever response the
+backend eventually sends still gets parsed normally and the slot returns to
+the pool exactly as if the client were still there, just with nobody left to
+hand the result to. Your protocol needs no special cleanup for this case.
+
+!!! important "When `onAbort` does *not* fire"
+    Three cases fall back to the old force-close behavior instead, all for the
+    same reason: there is either nothing worth protecting yet, or nothing
+    left that can safely run a graceful cancel.
+
+    - **Still connecting.** If the client disconnects while `onConnect` is
+      still running for that same connection, WFX force-closes it instead of
+      firing `onAbort`. No request has reached the backend yet at that point,
+      there's nothing to cancel, and `onConnect`'s own coroutine may still be
+      suspended waiting on that same connection, running `onAbort`
+      concurrently would corrupt it.
+    - **Already streaming.** Once your protocol has delivered a request's
+      first chunk through [`Stream()`](#streaming-large-responses)
+      (`isStreaming` becomes true at that point), a later disconnect force-closes
+      the slot as before. `onAbort` is defined for a single in-flight
+      request, not a response partway through delivery. A disconnect that
+      lands *before* the first chunk still triggers `onAbort` normally, only
+      a stream already in progress is exempt.
+    - **The request times out on its own budget instead.** `onAbort` only
+      ever fires from a client disconnecting. A request that instead runs out
+      `requestTimeoutSeconds` with the client still connected and waiting
+      force-closes directly, the same blunt way every timeout has always
+      worked, no hook runs, and the client gets `WFX::EpRequestTimeout`. A
+      slow query your own timeout gives up on is torn down harder than one a
+      client walked away from, not something this page is going to pretend
+      around.
+
+    None of these are something you need to guard against, WFX picks the
+    right behavior automatically. They're worth knowing so you don't expect
+    `onAbort` to run somewhere it structurally can't.
+
+    The two triggers can still race each other on the *same* request (client
+    disconnects, and the backend also never replies): whichever happens first
+    wins outright, and the other side is a no-op. Client-disconnects-first
+    means `onAbort` runs, and if the backend still never replies,
+    `requestTimeoutSeconds` force-closes the slot afterward same as any other
+    request, without running `onAbort` a second time. Timeout-first means the
+    client is notified before it has even disconnected, so by the time WFX
+    notices it's gone the slot is already detached and `onAbort`'s trigger is
+    never reached. Either ordering is safe.
+
+### `AbortSlotHandle`
+
+`onAbort` receives `WFX::AbortSlotHandle`, not the `WFX::SlotHandle` that
+`onConnect` gets. It only has two members:
+
+```cpp
+co_await handle.OpenSideConnection() // -> {WFX::SlotStatus, WFX::SlotHandle}
+handle.NegotiatedProtocol()          // same as SlotHandle's, read-only
+```
+
+There is no `Send`/`Receive`/`UpgradeToTLS` on it, deliberately. The slot
+`onAbort` was fired for is still mid-request, a real response is still owed
+to the backend's own state machine, and driving it directly would corrupt
+that in-flight parse out from under the engine. If your cancel mechanism
+needs to talk to the backend at all, it does so over a **different**
+connection, which is exactly what `OpenSideConnection()` gives you.
+
+### Opening a side connection
+
+`OpenSideConnection()` dials a brand-new, throwaway connection to the same
+host, using the same TLS config as the endpoint itself. It returns the same
+kind of pair every send does, a status and a handle, except the handle here
+is a full `SlotHandle`, the throwaway connection is yours to drive however
+your protocol needs:
+
+```cpp
+WFX::EpAbortCoro CancelQuery(WFX::AbortSlotHandle h, void* state)
+{
+    auto* pg = static_cast<PgSlotState*>(state);
+
+    auto [status, side] = co_await h.OpenSideConnection();
+    if(status != WFX::EpSlotOk)
+        co_return; // no capacity, or the dial itself failed, nothing to send the cancel on
+
+    char msg[16];
+    EncodeCancelRequest(msg, pg->backendPid, pg->secretKey);
+    co_await side.Send(msg, sizeof(msg));
+    side.Close();
+
+    co_return;
+}
+```
+
+!!! note
+    A side connection gets no implicit handshake or authentication. Postgres's
+    cancel needs neither, it's a bare, unauthenticated packet the server
+    matches by backend PID and secret key. A protocol whose cancel mechanism
+    *does* need one (MySQL's `COM_PROCESS_KILL` expects a normal greeting and
+    auth exchange first) hand-rolls it inline with the side handle's own
+    `Send`/`Receive`/`UpgradeToTLS`, the same way `onConnect` hand-rolls its
+    handshake.
+
+`side.Close()` releases the throwaway connection as soon as you're done with
+it. If you don't call it, either because the coroutine forgot or because it
+never got the chance, `connectTimeoutSeconds` (the same setting your regular
+connects use) is the safety net: the connection is torn down once that
+budget elapses, and its capacity becomes available again. Nothing leaks
+either way.
 
 ---
 

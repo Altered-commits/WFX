@@ -80,6 +80,24 @@ def send_dripped(host, port, payload, chunk_size=1, delay=0.0, rtimeout=5.0, cti
     finally:
         _close(sock)
 
+def send_and_abandon(host, port, payload, ctimeout=5.0, hold=0.0):
+    """Connects, writes the payload, then vanishes without ever reading a reply.
+
+    Simulates a client that bails mid-request (browser tab closed, curl ^C'd). `hold`
+    sleeps before the socket closes, giving the server time to actually dispatch the
+    request to whatever it's proxying before the disconnect lands. Never raises.
+    """
+    sock = None
+    try:
+        sock = socket.create_connection((host, port), timeout=ctimeout)
+        sock.sendall(payload)
+        if hold:
+            time.sleep(hold)
+    except OSError:
+        pass
+    finally:
+        _close(sock)
+
 def request(method, path, headers=None, body=b""):
     """Builds a well-formed request. Suites testing malformed framing build their own bytes."""
     if isinstance(body, str):

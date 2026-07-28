@@ -149,6 +149,15 @@ def handle(method, path, headers, body, conn):
     if path == "/ctl/protoconns":
         with _lock:
             return _cl(str(_proto_connections))
+    if path == "/ctl/cancels/reset":
+        _sp_cancel_reset()
+        return _cl("ok")
+    if path == "/ctl/cancels/count":
+        with _lock:
+            return _cl(str(_sp_cancels_count))
+    if path == "/ctl/cancels/lastid":
+        with _lock:
+            return _cl(str(_sp_last_cancel_id))
 
     # Accepted-connections minus served-requests, computed atomically under one lock
     # in a SINGLE request (this request itself counts as +1 conn and +1 req, netting
@@ -488,8 +497,21 @@ def _sp_set(name, value):
     with _lock:
         _sp_mode[name] = value
 
+# onAbort cancel tracking: a side connection sends "CANCEL <connId>\n" with no
+# STARTTLS/AUTH first (mirrors a real Postgres CancelRequest, which needs none
+# either). connId is the primary connection's own AUTH-time id, so the audit
+# can prove a cancel references the SAME physical connection being aborted
+_sp_cancels_count = 0
+_sp_last_cancel_id = 0
+
+def _sp_cancel_reset():
+    global _sp_cancels_count, _sp_last_cancel_id
+    with _lock:
+        _sp_cancels_count = 0
+        _sp_last_cancel_id = 0
+
 def _serve_sp_conn(sock):
-    global _sp_conn_seq
+    global _sp_conn_seq, _sp_cancels_count, _sp_last_cancel_id
     with _lock:
         _sp_conn_seq += 1
         conn_id = _sp_conn_seq
@@ -526,6 +548,14 @@ def _serve_sp_conn(sock):
             line = buf[:nl].decode("latin-1", "replace").rstrip("\r")
             buf = buf[nl + 1:]
 
+            # No auth needed, same as a real Postgres CancelRequest: it rides on its
+            # own brand-new connection and is the only thing that connection ever sends
+            if line.startswith("CANCEL "):
+                with _lock:
+                    _sp_cancels_count += 1
+                    _sp_last_cancel_id = _int(line[7:], 0)
+                return
+
             if line.startswith("STARTTLS"):
                 bits = line.split(" ", 1)
                 who = bits[1] if len(bits) > 1 else ""
@@ -547,7 +577,15 @@ def _serve_sp_conn(sock):
             if not authed:
                 parts = line.split(" ", 1)
                 token = parts[1] if len(parts) > 1 else ""
-                if token in ("good", "tlsgarbage"):
+                if token == "abortmidconnect":
+                    # Slow AUTH reply: gives the audit a window to abandon the CLIENT
+                    # connection while onConnect is still awaiting this very reply,
+                    # proving onAbort must not fire while inOnConnectPhase is set
+                    # (it would steal onConnect's asyncData and strand its coroutine)
+                    time.sleep(1.0)
+                    send("OK %d\n" % conn_id)
+                    authed = True
+                elif token in ("good", "tlsgarbage", "abort", "abortnoaux"):
                     send("OK %d\n" % conn_id)
                     authed = True
                 elif token == "downgrade":
@@ -567,6 +605,13 @@ def _serve_sp_conn(sock):
                     send("PUSH midflight\n")
                     send("VAL %d:%s\n" % (conn_id, key))
                     continue
+
+                # Slow backend: the audit abandons the CLIENT connection well before
+                # this fires, giving onAbort a window to run while the primary slot
+                # is genuinely mid-request (EVENT_ENDPOINT_RECV). The reply below
+                # still arrives on schedule, exercising "let it finish naturally"
+                if key.startswith("slow:"):
+                    time.sleep(_float(key.split(":", 1)[1], 1.0))
 
                 # Everything below lands on an idle slot (the reply above ended
                 # the request), which is the only state onPush ever sees
@@ -592,12 +637,23 @@ def _serve_sp_conn(sock):
                 bits = line.split(" ")
                 n = _int(bits[1] if len(bits) > 1 else "0", 0)
                 sz = _int(bits[2] if len(bits) > 2 else "8", 8)
+
+                # Optional stall: chunk 'stall_after' onward is delayed stall_ms milliseconds.
+                # Absent (0) is a no-op, so every pre-existing STREAM call is unaffected.
+                # Lets the audit abandon the client AFTER isStreaming is already set-
+                # -(the first chunk got through), proving onAbort's scope cut holds:
+                # a client bailing mid-stream still force-closes, never fires onAbort
+                stall_after = _int(bits[3], 0) if len(bits) > 3 else 0
+                stall_secs = (_int(bits[4], 0) if len(bits) > 4 else 0) / 1000.0
+
                 for i in range(n):
                     if _sp_mode.get("stall_mid_stream") and i == max(1, n // 2):
                         # Go silent mid-stream: the client's request timeout must
                         # fire instead of hanging forever
                         time.sleep(30.0)
                         return
+                    if stall_after and i == stall_after:
+                        time.sleep(stall_secs)
                     send("CHUNK %s\n" % payload(sz))
                 send("END\n")
                 continue
