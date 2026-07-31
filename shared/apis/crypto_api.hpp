@@ -33,6 +33,17 @@ struct CryptoApiExt1 {
 
     CryptoRandomBytesFn randomBytes;
     CryptoConstantTimeEqualsFn constantTimeEquals;
+
+    CryptoAsymKeyLoadFn asymKeyLoad;
+    CryptoAsymKeyGenerateFn asymKeyGenerate;
+    CryptoAsymKeyFromRsaPublicFn asymKeyFromRsaPublic;
+    CryptoAsymKeyFromEcPublicFn asymKeyFromEcPublic;
+    CryptoAsymKeyPemLenFn asymKeyPemLen;
+    CryptoAsymKeyExportFn asymKeyExport;
+    CryptoAsymKeyFreeFn asymKeyFree;
+    CryptoAsymSigLenFn asymSigLen;
+    CryptoAsymSignFn asymSign;
+    CryptoAsymVerifyFn asymVerify;
 };
 static_assert(std::is_standard_layout_v<CryptoApiExt1>, "'CryptoApiExt1' must be standard layout");
 

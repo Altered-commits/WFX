@@ -52,9 +52,13 @@ nav:
     - Templates: api_reference/templates.md
     - Forms: api_reference/forms.md
     - Json: api_reference/json.md
-    - Crypto & Hash: api_reference/crypto.md
     - Telemetry: api_reference/telemetry.md
     - Memory: api_reference/memory.md
+    - Environment: api_reference/env.md
+    - Utils:
+      - Crypto & Hash: api_reference/utils/crypto.md
+      - Encoding: api_reference/utils/encoding.md
+      - JWK: api_reference/utils/jwk.md
     - Endpoint:
       - Overview: api_reference/endpoint/overview.md
       - HTTP: api_reference/endpoint/http.md

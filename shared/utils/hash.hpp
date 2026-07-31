@@ -6,6 +6,7 @@
 
 #include "detection_macro.hpp"
 #include "shared/abis/string_view.hpp"
+#include <bit>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -15,13 +16,42 @@ namespace WFX::Shared {
 
 namespace Hasher {
 
-namespace WyHashDetail {
+// vvv Primitives shared by every hash below vvv
+namespace Detail {
 
-static constexpr std::uint64_t SECRET0 = 0xa0761d6478bd642full;
-static constexpr std::uint64_t SECRET1 = 0xe7037ed1a0b428dbull;
-static constexpr std::uint64_t SECRET2 = 0x8ebc6af09c88c6e3ull;
-static constexpr std::uint64_t SECRET3 = 0x589965cc75374cc3ull;
+// memcpy avoids strict-aliasing/alignment UB on an unaligned read
+inline std::uint32_t Read32(const std::uint8_t* p) noexcept
+{
+    std::uint32_t v;
+    std::memcpy(&v, p, 4);
+    return v;
+}
 
+inline std::uint64_t Read64(const std::uint8_t* p) noexcept
+{
+    std::uint64_t v;
+    std::memcpy(&v, p, 8);
+    return v;
+}
+
+// Every mainstream compiler (GCC, Clang, MSVC, ICX) pattern-matches this exact shift-mask-
+// -sequence into a single native bswap instruction, so this costs nothing over a compiler-
+// -specific builtin while staying portable to any standards-conforming compiler
+inline constexpr std::uint32_t ByteSwap32(std::uint32_t x) noexcept
+{
+    return ((x & 0x000000FFu) << 24) | ((x & 0x0000FF00u) << 8) | ((x & 0x00FF0000u) >> 8) |
+           ((x & 0xFF000000u) >> 24);
+}
+
+inline constexpr std::uint64_t ByteSwap64(std::uint64_t x) noexcept
+{
+    return ((x & 0x00000000000000FFull) << 56) | ((x & 0x000000000000FF00ull) << 40) |
+           ((x & 0x0000000000FF0000ull) << 24) | ((x & 0x00000000FF000000ull) << 8) |
+           ((x & 0x000000FF00000000ull) >> 8) | ((x & 0x0000FF0000000000ull) >> 24) |
+           ((x & 0x00FF000000000000ull) >> 40) | ((x & 0xFF00000000000000ull) >> 56);
+}
+
+// 64x64->128 multiply, folded to 64 bits (low ^ high)
 inline std::uint64_t Mix(std::uint64_t a, std::uint64_t b) noexcept
 {
 #if defined(WFX_COMPILER_MSVC)
@@ -47,24 +77,20 @@ inline std::uint64_t Mix(std::uint64_t a, std::uint64_t b) noexcept
 #endif
 }
 
-inline std::uint64_t R64(const std::uint8_t* p) noexcept
-{
-    std::uint64_t v;
-    std::memcpy(&v, p, 8);
-    return v;
-}
+} // namespace Detail
 
-inline std::uint64_t R32(const std::uint8_t* p) noexcept
-{
-    std::uint32_t v;
-    std::memcpy(&v, p, 4);
-    return v;
-}
+namespace WyHashDetail {
+
+static constexpr std::uint64_t SECRET0 = 0xa0761d6478bd642full;
+static constexpr std::uint64_t SECRET1 = 0xe7037ed1a0b428dbull;
+static constexpr std::uint64_t SECRET2 = 0x8ebc6af09c88c6e3ull;
+static constexpr std::uint64_t SECRET3 = 0x589965cc75374cc3ull;
 
 } // namespace WyHashDetail
 
 inline std::uint64_t WyHash(const char* key, std::size_t len, std::uint64_t seed = 0) noexcept
 {
+    using namespace Detail;
     using namespace WyHashDetail;
 
     const std::uint8_t* p = reinterpret_cast<const std::uint8_t*>(key);
@@ -77,8 +103,8 @@ inline std::uint64_t WyHash(const char* key, std::size_t len, std::uint64_t seed
             // Two overlapping 4-byte reads from head and tail, merged into 64 bits each
             // The (len >> 3) << 2 term picks the mid-point for 4..7 byte inputs so the-
             // -reads don't go out of bounds
-            a = (static_cast<std::uint64_t>(R32(p)) << 32) | R32(p + ((len >> 3) << 2));
-            b = (static_cast<std::uint64_t>(R32(p + len - 4)) << 32) | R32(p + len - 4 - ((len >> 3) << 2));
+            a = (static_cast<std::uint64_t>(Read32(p)) << 32) | Read32(p + ((len >> 3) << 2));
+            b = (static_cast<std::uint64_t>(Read32(p + len - 4)) << 32) | Read32(p + len - 4 - ((len >> 3) << 2));
         }
         else if(len > 0) [[likely]] {
             // 1..3 bytes: pack first, middle, last into a single word
@@ -99,9 +125,9 @@ inline std::uint64_t WyHash(const char* key, std::size_t len, std::uint64_t seed
             std::uint64_t s = seed, see2 = seed;
 
             do {
-                seed = Mix(R64(p) ^ SECRET1, R64(p + 8) ^ seed);
-                s = Mix(R64(p + 16) ^ SECRET2, R64(p + 24) ^ s);
-                see2 = Mix(R64(p + 32) ^ SECRET3, R64(p + 40) ^ see2);
+                seed = Mix(Read64(p) ^ SECRET1, Read64(p + 8) ^ seed);
+                s = Mix(Read64(p + 16) ^ SECRET2, Read64(p + 24) ^ s);
+                see2 = Mix(Read64(p + 32) ^ SECRET3, Read64(p + 40) ^ see2);
                 p += 48;
                 i -= 48;
             } while(i > 48);
@@ -110,14 +136,14 @@ inline std::uint64_t WyHash(const char* key, std::size_t len, std::uint64_t seed
         }
 
         while(i > 16) [[unlikely]] {
-            seed = Mix(R64(p) ^ SECRET1, R64(p + 8) ^ seed);
+            seed = Mix(Read64(p) ^ SECRET1, Read64(p + 8) ^ seed);
             p += 16;
             i -= 16;
         }
 
         // Final two overlapping 8-byte reads consume the tail
-        a = R64(p + i - 16);
-        b = R64(p + i - 8);
+        a = Read64(p + i - 16);
+        b = Read64(p + i - 8);
     }
 
     return Mix(SECRET1 ^ static_cast<std::uint64_t>(len), Mix(a ^ SECRET1, b ^ seed));
@@ -216,69 +242,263 @@ inline constexpr std::uint64_t HashInt64(std::uint64_t x) noexcept
     return Murmur3Mix64(x);
 }
 
-inline constexpr std::uint32_t Djb2(const char* data, std::size_t len) noexcept
-{
-    std::uint32_t hash = 5381u;
-    const char* end = data + len;
+namespace Xxh3Detail {
 
-    while(data < end)
-        hash = ((hash << 5) + hash) ^ static_cast<std::uint8_t>(*data++);
+using Detail::ByteSwap32;
+using Detail::ByteSwap64;
+using Detail::Mix;
+using Detail::Read32;
+using Detail::Read64;
 
-    return hash;
-}
-
-inline std::uint32_t Djb2(StringView str) noexcept
-{
-    return Djb2(str.Data(), str.Size());
-}
-
-inline constexpr std::uint32_t Adler32(const std::uint8_t* data, std::size_t len) noexcept
-{
-    constexpr std::uint32_t MOD = 65521u;
-    std::uint32_t a = 1, b = 0;
-
-    while(len > 0) {
-        std::size_t chunk = len > 5552 ? 5552 : len;
-        len -= chunk;
-
-        while(chunk--) {
-            a += *data++;
-            b += a;
-        }
-
-        a %= MOD;
-        b %= MOD;
-    }
-
-    return (b << 16) | a;
-}
-
-struct RollingHash {
-    static constexpr std::uint64_t BASE = 131ull;
-    static constexpr std::uint64_t MOD = (1ull << 61) - 1; // Mersenne prime
-
-    std::uint64_t hash = 0;
-    std::uint64_t power = 1;
-    std::uint32_t window = 0;
-
-    inline void Push(std::uint8_t byte) noexcept
-    {
-        hash = (hash * BASE + byte) % MOD;
-        power = (power * BASE) % MOD;
-        ++window;
-    }
-
-    inline void Roll(std::uint8_t outgoing, std::uint8_t incoming) noexcept
-    {
-        hash = (hash + MOD - (outgoing * power) % MOD) % MOD;
-        hash = (hash * BASE + incoming) % MOD;
-    }
-
-    inline std::uint64_t Value() const noexcept
-    {
-        return hash;
-    }
+// The reference implementation's default 192-byte secret, byte-identical to xxHash's kSecret
+static constexpr std::uint8_t SECRET[192] = {
+    0xb8, 0xfe, 0x6c, 0x39, 0x23, 0xa4, 0x4b, 0xbe, 0x7c, 0x01, 0x81, 0x2c, 0xf7, 0x21, 0xad, 0x1c,
+    0xde, 0xd4, 0x6d, 0xe9, 0x83, 0x90, 0x97, 0xdb, 0x72, 0x40, 0xa4, 0xa4, 0xb7, 0xb3, 0x67, 0x1f,
+    0xcb, 0x79, 0xe6, 0x4e, 0xcc, 0xc0, 0xe5, 0x78, 0x82, 0x5a, 0xd0, 0x7d, 0xcc, 0xff, 0x72, 0x21,
+    0xb8, 0x08, 0x46, 0x74, 0xf7, 0x43, 0x24, 0x8e, 0xe0, 0x35, 0x90, 0xe6, 0x81, 0x3a, 0x26, 0x4c,
+    0x3c, 0x28, 0x52, 0xbb, 0x91, 0xc3, 0x00, 0xcb, 0x88, 0xd0, 0x65, 0x8b, 0x1b, 0x53, 0x2e, 0xa3,
+    0x71, 0x64, 0x48, 0x97, 0xa2, 0x0d, 0xf9, 0x4e, 0x38, 0x19, 0xef, 0x46, 0xa9, 0xde, 0xac, 0xd8,
+    0xa8, 0xfa, 0x76, 0x3f, 0xe3, 0x9c, 0x34, 0x3f, 0xf9, 0xdc, 0xbb, 0xc7, 0xc7, 0x0b, 0x4f, 0x1d,
+    0x8a, 0x51, 0xe0, 0x4b, 0xcd, 0xb4, 0x59, 0x31, 0xc8, 0x9f, 0x7e, 0xc9, 0xd9, 0x78, 0x73, 0x64,
+    0xea, 0xc5, 0xac, 0x83, 0x34, 0xd3, 0xeb, 0xc3, 0xc5, 0x81, 0xa0, 0xff, 0xfa, 0x13, 0x63, 0xeb,
+    0x17, 0x0d, 0xdd, 0x51, 0xb7, 0xf0, 0xda, 0x49, 0xd3, 0x16, 0x55, 0x26, 0x29, 0xd4, 0x68, 0x9e,
+    0x2b, 0x16, 0xbe, 0x58, 0x7d, 0x47, 0xa1, 0xfc, 0x8f, 0xf8, 0xb8, 0xd1, 0x7a, 0xd0, 0x31, 0xce,
+    0x45, 0xcb, 0x3a, 0x8f, 0x95, 0x16, 0x04, 0x28, 0xaf, 0xd7, 0xfb, 0xca, 0xbb, 0x4b, 0x40, 0x7e,
 };
+
+static constexpr std::uint32_t PRIME32_1 = 0x9E3779B1U;
+static constexpr std::uint32_t PRIME32_2 = 0x85EBCA77U;
+static constexpr std::uint32_t PRIME32_3 = 0xC2B2AE3DU;
+static constexpr std::uint64_t PRIME64_1 = 0x9E3779B185EBCA87ULL;
+static constexpr std::uint64_t PRIME64_2 = 0xC2B2AE3D27D4EB4FULL;
+static constexpr std::uint64_t PRIME64_3 = 0x165667B19E3779F9ULL;
+static constexpr std::uint64_t PRIME64_4 = 0x85EBCA77C2B2AE63ULL;
+static constexpr std::uint64_t PRIME64_5 = 0x27D4EB2F165667C5ULL;
+static constexpr std::uint64_t PRIME_MX1 = 0x165667919E3779F9ULL;
+static constexpr std::uint64_t PRIME_MX2 = 0x9FB21C651E98DF25ULL;
+
+static constexpr int STRIPE_LEN = 64;
+static constexpr int ACC_NB = 8;
+static constexpr int SECRET_SIZE = 192;
+static constexpr int SECRET_CONSUME_RATE = 8;
+static constexpr int NB_ROUNDS = (SECRET_SIZE - STRIPE_LEN) / SECRET_CONSUME_RATE;
+
+inline std::uint64_t Xxh64Avalanche(std::uint64_t h) noexcept
+{
+    h ^= h >> 33;
+    h *= PRIME64_2;
+    h ^= h >> 29;
+    h *= PRIME64_3;
+    h ^= h >> 32;
+    return h;
+}
+
+inline std::uint64_t Avalanche(std::uint64_t h) noexcept
+{
+    h ^= h >> 37;
+    h *= PRIME_MX1;
+    h ^= h >> 32;
+    return h;
+}
+
+inline std::uint64_t Rrmxmx(std::uint64_t h, std::uint64_t len) noexcept
+{
+    h ^= std::rotl(h, 49) ^ std::rotl(h, 24);
+    h *= PRIME_MX2;
+    h ^= (h >> 35) + len;
+    h *= PRIME_MX2;
+    h ^= h >> 28;
+    return h;
+}
+
+inline std::uint64_t Len0(std::uint64_t seed) noexcept
+{
+    return Xxh64Avalanche(seed ^ (Read64(SECRET + 56) ^ Read64(SECRET + 64)));
+}
+
+inline std::uint64_t Len1to3(const std::uint8_t* in, std::size_t len, std::uint64_t seed) noexcept
+{
+    const std::uint8_t c1 = in[0], c2 = in[len >> 1], c3 = in[len - 1];
+    const auto combined = static_cast<std::uint32_t>((c1 << 16) | (c2 << 24) | c3 | (len << 8));
+    const std::uint64_t bitflip = static_cast<std::uint64_t>(Read32(SECRET) ^ Read32(SECRET + 4)) + seed;
+    return Xxh64Avalanche(static_cast<std::uint64_t>(combined) ^ bitflip);
+}
+
+inline std::uint64_t Len4to8(const std::uint8_t* in, std::size_t len, std::uint64_t seed) noexcept
+{
+    seed ^= static_cast<std::uint64_t>(ByteSwap32(static_cast<std::uint32_t>(seed))) << 32;
+    const std::uint64_t bitflip = (Read64(SECRET + 8) ^ Read64(SECRET + 16)) - seed;
+    const std::uint32_t input1 = Read32(in);
+    const std::uint32_t input2 = Read32(in + len - 4);
+    const std::uint64_t input64 = input2 + (static_cast<std::uint64_t>(input1) << 32);
+    return Rrmxmx(input64 ^ bitflip, len);
+}
+
+inline std::uint64_t Len9to16(const std::uint8_t* in, std::size_t len, std::uint64_t seed) noexcept
+{
+    const std::uint64_t bitflip1 = (Read64(SECRET + 24) ^ Read64(SECRET + 32)) + seed;
+    const std::uint64_t bitflip2 = (Read64(SECRET + 40) ^ Read64(SECRET + 48)) - seed;
+    const std::uint64_t lo = Read64(in) ^ bitflip1;
+    const std::uint64_t hi = Read64(in + len - 8) ^ bitflip2;
+    const std::uint64_t acc = len + ByteSwap64(lo) + hi + Mix(lo, hi);
+    return Avalanche(acc);
+}
+
+inline std::uint64_t Len0to16(const std::uint8_t* in, std::size_t len, std::uint64_t seed) noexcept
+{
+    if(len > 8)
+        return Len9to16(in, len, seed);
+    if(len >= 4)
+        return Len4to8(in, len, seed);
+    if(len)
+        return Len1to3(in, len, seed);
+
+    return Len0(seed);
+}
+
+inline std::uint64_t Mix16B(const std::uint8_t* in, const std::uint8_t* secret, std::uint64_t seed) noexcept
+{
+    const std::uint64_t lo = Read64(in), hi = Read64(in + 8);
+    return Mix(lo ^ (Read64(secret) + seed), hi ^ (Read64(secret + 8) - seed));
+}
+
+inline std::uint64_t Len17to128(const std::uint8_t* in, std::size_t len, std::uint64_t seed) noexcept
+{
+    std::uint64_t acc = len * PRIME64_1;
+
+    if(len > 32) {
+        if(len > 64) {
+            if(len > 96) {
+                acc += Mix16B(in + 48, SECRET + 96, seed);
+                acc += Mix16B(in + len - 64, SECRET + 112, seed);
+            }
+            acc += Mix16B(in + 32, SECRET + 64, seed);
+            acc += Mix16B(in + len - 48, SECRET + 80, seed);
+        }
+        acc += Mix16B(in + 16, SECRET + 32, seed);
+        acc += Mix16B(in + len - 32, SECRET + 48, seed);
+    }
+    acc += Mix16B(in, SECRET, seed);
+    acc += Mix16B(in + len - 16, SECRET + 16, seed);
+
+    return Avalanche(acc);
+}
+
+inline std::uint64_t Len129to240(const std::uint8_t* in, std::size_t len, std::uint64_t seed) noexcept
+{
+    std::uint64_t acc = len * PRIME64_1;
+    const int rounds = static_cast<int>(len / 16);
+
+    for(int i = 0; i < 8; ++i)
+        acc += Mix16B(in + 16 * i, SECRET + 16 * i, seed);
+
+    acc = Avalanche(acc);
+
+    for(int i = 8; i < rounds; ++i)
+        acc += Mix16B(in + 16 * i, SECRET + 16 * (i - 8) + 3, seed);
+
+    acc += Mix16B(in + len - 16, SECRET + 136 - 17, seed);
+    return Avalanche(acc);
+}
+
+inline void Accumulate512(std::uint64_t* acc, const std::uint8_t* in, const std::uint8_t* secret) noexcept
+{
+    for(int i = 0; i < ACC_NB; ++i) {
+        const std::uint64_t dataVal = Read64(in + 8 * i);
+        const std::uint64_t dataKey = dataVal ^ Read64(secret + 8 * i);
+        acc[i ^ 1] += dataVal;
+        acc[i] += static_cast<std::uint32_t>(dataKey) * static_cast<std::uint64_t>(static_cast<std::uint32_t>(dataKey >> 32));
+    }
+}
+
+inline void ScrambleAcc(std::uint64_t* acc, const std::uint8_t* secret) noexcept
+{
+    for(int i = 0; i < ACC_NB; ++i) {
+        acc[i] ^= acc[i] >> 47;
+        acc[i] ^= Read64(secret + 8 * i);
+        acc[i] *= PRIME32_1;
+    }
+}
+
+inline void Accumulate(std::uint64_t* acc, const std::uint8_t* in, const std::uint8_t* secret,
+                       std::size_t nbStripes) noexcept
+{
+    for(std::size_t n = 0; n < nbStripes; ++n)
+        Accumulate512(acc, in + n * STRIPE_LEN, secret + n * SECRET_CONSUME_RATE);
+}
+
+inline std::uint64_t Mix2Accs(const std::uint64_t* acc, const std::uint8_t* secret) noexcept
+{
+    return Mix(acc[0] ^ Read64(secret), acc[1] ^ Read64(secret + 8));
+}
+
+inline std::uint64_t MergeAccs(const std::uint64_t* acc, const std::uint8_t* secret, std::uint64_t start) noexcept
+{
+    std::uint64_t result = start;
+    for(int i = 0; i < 4; ++i)
+        result += Mix2Accs(acc + 2 * i, secret + 16 * i);
+
+    return Avalanche(result);
+}
+
+// Derives a per-seed secret for the long-input path (real XXH3 never reuses the raw default-
+// -secret once seed != 0); each 16-byte pair of the default secret gets +seed/-seed applied
+inline void InitCustomSecret(std::uint8_t* out, std::uint64_t seed) noexcept
+{
+    for(int i = 0; i < SECRET_SIZE / 16; ++i) {
+        const std::uint64_t lo = Read64(SECRET + i * 16) + seed;
+        const std::uint64_t hi = Read64(SECRET + i * 16 + 8) - seed;
+        std::memcpy(out + i * 16, &lo, 8);
+        std::memcpy(out + i * 16 + 8, &hi, 8);
+    }
+}
+
+inline std::uint64_t HashLong(const std::uint8_t* in, std::size_t len, std::uint64_t seed) noexcept
+{
+    std::uint8_t customSecret[SECRET_SIZE];
+    const std::uint8_t* secret = SECRET;
+    if(seed != 0) {
+        InitCustomSecret(customSecret, seed);
+        secret = customSecret;
+    }
+
+    std::uint64_t acc[ACC_NB] = {PRIME32_3, PRIME64_1, PRIME64_2, PRIME64_3, PRIME64_4, PRIME32_2, PRIME64_5, PRIME32_1};
+
+    const std::size_t nbBlocks = (len - 1) / (STRIPE_LEN * NB_ROUNDS);
+    for(std::size_t n = 0; n < nbBlocks; ++n) {
+        Accumulate(acc, in + n * STRIPE_LEN * NB_ROUNDS, secret, NB_ROUNDS);
+        ScrambleAcc(acc, secret + SECRET_SIZE - STRIPE_LEN);
+    }
+
+    const std::size_t nbStripes = ((len - 1) - (STRIPE_LEN * NB_ROUNDS * nbBlocks)) / STRIPE_LEN;
+    Accumulate(acc, in + nbBlocks * STRIPE_LEN * NB_ROUNDS, secret, nbStripes);
+
+    Accumulate512(acc, in + len - STRIPE_LEN, secret + SECRET_SIZE - STRIPE_LEN - 7);
+
+    return MergeAccs(acc, secret + 11, static_cast<std::uint64_t>(len) * PRIME64_1);
+}
+
+} // namespace Xxh3Detail
+
+inline std::uint64_t Xxh3(const char* data, std::size_t len, std::uint64_t seed = 0) noexcept
+{
+    using namespace Xxh3Detail;
+    const auto* in = reinterpret_cast<const std::uint8_t*>(data);
+
+    if(len <= 16)
+        return Len0to16(in, len, seed);
+    if(len <= 128)
+        return Len17to128(in, len, seed);
+    if(len <= 240)
+        return Len129to240(in, len, seed);
+
+    return HashLong(in, len, seed);
+}
+
+inline std::uint64_t Xxh3(StringView str, std::uint64_t seed = 0) noexcept
+{
+    return Xxh3(str.Data(), str.Size(), seed);
+}
 
 } // namespace Hasher
 

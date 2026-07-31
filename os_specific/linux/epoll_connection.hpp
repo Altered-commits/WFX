@@ -166,8 +166,8 @@ private: // Epoll dispatch
     void HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t ev, std::uint16_t gen);
     void HandleClientEpollIn(ClientCtx* ctx);
     void HandleEndpointEpollIn(EndpointCtx* ctx);
-    void HandleClientWriteReady(ClientCtx* ctx, std::uint32_t ev);
-    void HandleEndpointWriteReady(EndpointCtx* ctx, std::uint32_t ev);
+    void HandleClientWriteReady(ClientCtx* ctx);
+    void HandleEndpointWriteReady(EndpointCtx* ctx);
 
 private: // Handshake
     void HandleClientHandshake(ClientCtx* ctx, std::uint32_t ev);

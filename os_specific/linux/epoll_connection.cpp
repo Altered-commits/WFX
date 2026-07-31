@@ -2626,7 +2626,7 @@ void EpollConnectionHandler::HandleClientEvent(ClientCtx* ctx, std::uint32_t ev,
 
     // Re-check: HandleClientEpollIn may have closed this slot
     if((ev & EPOLLOUT) && ctx->generationId == gen)
-        HandleClientWriteReady(ctx, ev);
+        HandleClientWriteReady(ctx);
 }
 
 void EpollConnectionHandler::HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t ev, std::uint16_t gen)
@@ -2679,7 +2679,7 @@ void EpollConnectionHandler::HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t
 
     // Re-check: HandleEndpointEpollIn may have closed this slot
     if((ev & EPOLLOUT) && ctx->generationId == gen)
-        HandleEndpointWriteReady(ctx, ev);
+        HandleEndpointWriteReady(ctx);
 }
 
 // Single EPOLLIN dispatch point for clients, routes by eventType
@@ -2760,7 +2760,7 @@ void EpollConnectionHandler::HandleEndpointEpollIn(EndpointCtx* ctx)
     }
 }
 
-void EpollConnectionHandler::HandleClientWriteReady(ClientCtx* ctx, std::uint32_t /*ev*/)
+void EpollConnectionHandler::HandleClientWriteReady(ClientCtx* ctx)
 {
     WFX_TRACE();
 
@@ -2780,7 +2780,7 @@ void EpollConnectionHandler::HandleClientWriteReady(ClientCtx* ctx, std::uint32_
     }
 }
 
-void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx, std::uint32_t ev)
+void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx)
 {
     WFX_TRACE();
 
@@ -3727,6 +3727,11 @@ void EpollConnectionHandler::FireOnConnect(EndpointCtx* slotCtx, EndpointEntry& 
     EnterState(slotCtx, EventType::EVENT_ENDPOINT_ONCONNECT);
     slotCtx->inOnConnectPhase = 1;
 
+    // onConnect is guaranteed non-null here, FireOnConnect only runs when HandleEndpointHandshake-
+    // -saw eventType == EVENT_ENDPOINT_ONCONNECT, which TryHandshake only sets when isSideConnection-
+    // -|| onConnect was true, and the isSideConnection branch above this call already ruled itself-
+    // -out. The analyzer can't see that cross-branch invariant through EnterState
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     desc.onConnect(handle, slotCtx->slotState, onDone.asyncComplete, onDone.userData);
 }
 
@@ -4352,9 +4357,8 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
     // letting a concurrent SendPayload lease the same slot out from under it
     const bool hasWaitingClient = ctx->clientCtx || (ctx->pendingStreams && !ctx->pendingStreams->empty());
 
-    if(ctx->eventType == EventType::EVENT_CONNECT || ctx->eventType == EventType::EVENT_ENDPOINT_HANDSHAKE)
-        RefreshExpiry(ctx, meta.config.connectTimeoutSeconds);
-    else if(ctx->isSideConnection)
+    if(ctx->eventType == EventType::EVENT_CONNECT || ctx->eventType == EventType::EVENT_ENDPOINT_HANDSHAKE ||
+       ctx->isSideConnection)
         RefreshExpiry(ctx, meta.config.connectTimeoutSeconds);
     else if(hasWaitingClient)
         RefreshExpiry(ctx, meta.config.requestTimeoutSeconds);

@@ -291,6 +291,11 @@ run_one() {
         output=$("$CLANG_TIDY" "${TIDY_ARGS[@]}" "$file" 2>&1) || status=$?
     fi
 
+    # Clang's diagnostics engine prints its own "N warnings generated." tally per-
+    # -translation unit it processes internally, unrelated to clang-tidy's own findings-
+    # -and not suppressed by --quiet, strip it so only real findings show
+    output=$(printf '%s\n' "$output" | grep -vE '^[0-9]+ warnings? generated\.$' || true)
+
     printf '%s' "$output" > "$RESULT_DIR/$idx.out"
     if [ "$status" -ne 0 ] || printf '%s' "$output" | grep -qE '(warning|error): '; then
         : > "$RESULT_DIR/$idx.fail"

@@ -39,6 +39,17 @@ const CryptoApiExt1* GetCryptoApiExt1()
 
         CryptoImpl::RandomBytes,
         CryptoImpl::ConstantTimeEquals,
+
+        CryptoImpl::AsymKeyLoad,
+        CryptoImpl::AsymKeyGenerate,
+        CryptoImpl::AsymKeyFromRsaPublic,
+        CryptoImpl::AsymKeyFromEcPublic,
+        CryptoImpl::AsymKeyPemLen,
+        CryptoImpl::AsymKeyExport,
+        CryptoImpl::AsymKeyFree,
+        CryptoImpl::AsymSigLen,
+        CryptoImpl::AsymSign,
+        CryptoImpl::AsymVerify,
     };
     // clang-format on
 

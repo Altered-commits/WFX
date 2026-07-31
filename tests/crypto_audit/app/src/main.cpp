@@ -10,6 +10,8 @@
 #include <wfx/http.hpp>
 #include <wfx/memory.hpp>
 #include <wfx/utils/crypto.hpp>
+#include <wfx/utils/encoding.hpp>
+#include <wfx/utils/jwk.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -104,6 +106,44 @@ WFX::CryptoAeadAlgo AeadAlgoFromHeader(WFX::Request& req)
     if(v == "chacha")
         return WFX::CryptoChaCha20Poly1305;
     return WFX::CryptoAesGcm;
+}
+
+WFX::CryptoAsymKeyType KeyTypeFromHeader(WFX::Request& req)
+{
+    std::string_view v;
+    if(!req.GetHeader("X-Type", v))
+        return WFX::CryptoRsaKey;
+    if(v == "ec_p256")
+        return WFX::CryptoEcP256Key;
+    if(v == "ec_p384")
+        return WFX::CryptoEcP384Key;
+    if(v == "ed25519")
+        return WFX::CryptoEd25519Key;
+    return WFX::CryptoRsaKey;
+}
+
+WFX::CryptoAsymScheme SchemeFromHeader(WFX::Request& req)
+{
+    std::string_view v;
+    if(!req.GetHeader("X-Scheme", v))
+        return WFX::CryptoRs256;
+    if(v == "rs384")
+        return WFX::CryptoRs384;
+    if(v == "rs512")
+        return WFX::CryptoRs512;
+    if(v == "ps256")
+        return WFX::CryptoPs256;
+    if(v == "ps384")
+        return WFX::CryptoPs384;
+    if(v == "ps512")
+        return WFX::CryptoPs512;
+    if(v == "es256")
+        return WFX::CryptoEs256;
+    if(v == "es384")
+        return WFX::CryptoEs384;
+    if(v == "ed25519")
+        return WFX::CryptoEd25519;
+    return WFX::CryptoRs256;
 }
 
 template <typename T> void WriteStatusHex(WFX::Response& res, WFX::CryptoStatus status, const T& data)
@@ -348,4 +388,185 @@ WFX_GET("/crypto/consttime", [](WFX::Request req, WFX::Response res) {
     res.Status(200);
     auto w = WFX::ImJson(res);
     w.Write("equal", WFX::ConstantTimeEquals(a, b));
+})
+
+// vvv Asymmetric vvv
+// X-Key/X-Sig always travel hex-encoded as headers (even a 4096-bit RSA PEM fits well under
+// max_header_size), the message being signed/verified is the raw POST body so it can be driven
+// up to max_body_size for overflow/truncation checks independent of key size
+WFX_POST("/crypto/asym/keygen", [](WFX::Request req, WFX::Response res) {
+    const auto type = KeyTypeFromHeader(req);
+    const std::uint32_t bits = UintHeader(req, "X-Bits", 2048);
+
+    auto [s, key] = WFX::AsymKey::Generate(type, bits);
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("status", static_cast<std::uint64_t>(s));
+    if(s != WFX::CryptoOk) {
+        w.Write("private_pem", WFX::String{});
+        w.Write("public_pem", WFX::String{});
+        return;
+    }
+
+    auto [ps, priv] = key.ExportPrivate();
+    auto [qs, pub] = key.ExportPublic();
+    w.Write("private_pem", ps == WFX::CryptoOk
+                                ? ToHex(std::string_view(reinterpret_cast<const char*>(priv.data()), priv.size()))
+                                : WFX::String{});
+    w.Write("public_pem", qs == WFX::CryptoOk
+                               ? ToHex(std::string_view(reinterpret_cast<const char*>(pub.data()), pub.size()))
+                               : WFX::String{});
+})
+
+WFX_POST("/crypto/asym/sign", [](WFX::Request req, WFX::Response res) {
+    const WFX::String keyPem = HexHeader(req, "X-Key");
+    const auto scheme = SchemeFromHeader(req);
+
+    auto [ls, key] = WFX::AsymKey::Load(keyPem, true);
+    if(ls != WFX::CryptoOk) {
+        WriteStatusHex(res, ls, WFX::Vector<std::uint8_t>{});
+        return;
+    }
+
+    auto [s, sig] = key.Sign(scheme, req.Body());
+    WriteStatusHex(res, s, sig);
+})
+
+WFX_POST("/crypto/asym/verify", [](WFX::Request req, WFX::Response res) {
+    const WFX::String keyPem = HexHeader(req, "X-Key");
+    const WFX::String sig = HexHeader(req, "X-Sig");
+    const auto scheme = SchemeFromHeader(req);
+
+    auto [ls, key] = WFX::AsymKey::Load(keyPem, false);
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    if(ls != WFX::CryptoOk) {
+        w.Write("status", static_cast<std::uint64_t>(ls));
+        return;
+    }
+
+    const auto status = key.Verify(scheme, req.Body(), sig);
+    w.Write("status", static_cast<std::uint64_t>(status));
+})
+
+// Loads X-Key (PEM, private or public per X-KeyIsPrivate) then re-exports per X-ExportPrivate -
+// exercises AsymKeyPemLen/AsymKeyExport directly, including the public-only-handle mismatch case
+WFX_POST("/crypto/asym/export", [](WFX::Request req, WFX::Response res) {
+    const WFX::String keyPem = HexHeader(req, "X-Key");
+    const bool keyIsPrivate = UintHeader(req, "X-KeyIsPrivate", 0) != 0;
+    const bool exportPrivate = UintHeader(req, "X-ExportPrivate", 0) != 0;
+
+    auto [ls, key] = WFX::AsymKey::Load(keyPem, keyIsPrivate);
+    if(ls != WFX::CryptoOk) {
+        WriteStatusHex(res, ls, WFX::Vector<std::uint8_t>{});
+        return;
+    }
+
+    auto [s, out] = exportPrivate ? key.ExportPrivate() : key.ExportPublic();
+    WriteStatusHex(res, s, out);
+})
+
+// N travels as the raw POST body (not a header) specifically so an oversized/malicious modulus
+// can be driven up to max_body_size, X-E stays a header since a public exponent is always tiny
+WFX_POST("/crypto/asym/from-rsa-public", [](WFX::Request req, WFX::Response res) {
+    const WFX::String e = HexHeader(req, "X-E");
+
+    auto [s, key] = WFX::AsymKey::FromRsaPublic(req.Body(), e);
+    if(s != WFX::CryptoOk) {
+        WriteStatusHex(res, s, WFX::Vector<std::uint8_t>{});
+        return;
+    }
+
+    auto [es, pub] = key.ExportPublic();
+    WriteStatusHex(res, es, pub);
+})
+
+WFX_POST("/crypto/asym/from-ec-public", [](WFX::Request req, WFX::Response res) {
+    std::string_view curveStr;
+    req.GetHeader("X-Curve", curveStr);
+    const auto curve = curveStr == "p384" ? WFX::CryptoEcP384Key : WFX::CryptoEcP256Key;
+
+    const WFX::String x = HexHeader(req, "X-X");
+    const WFX::String y = HexHeader(req, "X-Y");
+
+    auto [s, key] = WFX::AsymKey::FromEcPublic(curve, x, y);
+    if(s != WFX::CryptoOk) {
+        WriteStatusHex(res, s, WFX::Vector<std::uint8_t>{});
+        return;
+    }
+
+    auto [es, pub] = key.ExportPublic();
+    WriteStatusHex(res, es, pub);
+})
+
+// vvv JWK vvv
+// JWKS JSON is the raw POST body (supports an oversized/hostile body up to max_body_size), kid
+// stays a plain (non-hex) header since it's just a JSON string identifier the tests control
+WFX_POST("/jwk/load", [](WFX::Request req, WFX::Response res) {
+    std::string_view kid;
+    req.GetHeader("X-Kid", kid);
+
+    auto [s, key] = WFX::LoadJwk(req.Body(), kid);
+    if(s != WFX::CryptoOk) {
+        WriteStatusHex(res, s, WFX::Vector<std::uint8_t>{});
+        return;
+    }
+
+    auto [es, pub] = key.ExportPublic();
+    WriteStatusHex(res, es, pub);
+})
+
+// vvv Encoding vvv
+WFX_POST("/encoding/base64/encode", [](WFX::Request req, WFX::Response res) {
+    const bool urlSafe = UintHeader(req, "X-Urlsafe", 0) != 0;
+    const bool padded = UintHeader(req, "X-Padded", 1) != 0;
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("b64", WFX::Base64Encode(req.Body(), urlSafe, padded));
+})
+
+WFX_POST("/encoding/base64/decode", [](WFX::Request req, WFX::Response res) {
+    auto [ok, out] = WFX::Base64Decode(req.Body());
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("ok", ok);
+    w.Write("hex", ok ? ToHex(std::string_view(reinterpret_cast<const char*>(out.data()), out.size()))
+                       : WFX::String{});
+})
+
+WFX_POST("/encoding/hex/encode", [](WFX::Request req, WFX::Response res) {
+    const bool upper = UintHeader(req, "X-Upper", 0) != 0;
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("hex", WFX::HexEncode(req.Body(), upper));
+})
+
+WFX_POST("/encoding/hex/decode", [](WFX::Request req, WFX::Response res) {
+    auto [ok, out] = WFX::HexDecode(req.Body());
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("ok", ok);
+    w.Write("hex", ok ? WFX::HexEncode(std::string_view(reinterpret_cast<const char*>(out.data()), out.size()))
+                       : WFX::String{});
+})
+
+WFX_POST("/encoding/url/encode", [](WFX::Request req, WFX::Response res) {
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("url", WFX::UrlEncode(req.Body()));
+})
+
+WFX_POST("/encoding/url/decode", [](WFX::Request req, WFX::Response res) {
+    auto [ok, out] = WFX::UrlDecode(req.Body());
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("ok", ok);
+    w.Write("hex", ok ? ToHex(out) : WFX::String{});
 })
