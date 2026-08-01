@@ -73,7 +73,8 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
 void CoreEngine::Listen(const std::string& host, std::uint16_t port)
 {
     connHandler_->Initialize(host, port);
-    connHandler_->SetEngineCallback([this](ClientCtx* ctx) { this->HandleRequest(ctx); });
+    connHandler_->SetEngineCallbacks([this](ClientCtx* ctx) { this->HandleRequest(ctx); },
+                                     [this](ClientCtx* ctx) { this->HandleClose(ctx); });
     connHandler_->Run();
 }
 
@@ -132,6 +133,7 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
                 ctx->routeStartUs = NowUs();
 
             auto& reqInfo = *ctx->requestInfo;
+
             auto connHeader = reqInfo.headers.GetHeader("Connection");
             auto connMask = HandleConnectionHeader(connHeader);
 
@@ -164,6 +166,21 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             res.SetRWBuffer(&ctx->rwBuffer);
             res.SetVersion(reqInfo.version);
             res.SetShouldClose(shouldClose);
+
+            // Connection limit is a capacity refusal (503); request limit is an actual rate-
+            // -limit (429). Neither is a protocol error, so both go through the normal response-
+            // -path and honor shouldClose above, instead of force-closing a connection the client-
+            // -asked to keep alive
+            switch(AllowRequest(ctx)) {
+                case RateLimitResult::CONNECTION_LIMIT:
+                    HandleError(ctx, HttpStatus::SERVICE_UNAVAILABLE, "503: Connection limit exceeded");
+                    goto __HandleResponse;
+                case RateLimitResult::REQUEST_LIMIT:
+                    HandleError(ctx, HttpStatus::TOO_MANY_REQUESTS, "429: Rate limit exceeded");
+                    goto __HandleResponse;
+                default:
+                    break;
+            }
 
             // Public file shortcut
             if(reqInfo.path.starts_with("/public/")) {
@@ -421,6 +438,41 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
     }
 
     return mask;
+}
+
+RateLimitResult CoreEngine::AllowRequest(ClientCtx* ctx)
+{
+    // Resolve + count against ConnectionLimiter once per connection, on its very first request
+    if(!ctx->ipAcquired) {
+        ctx->connInfo = IpUtils::ResolveClientIp(ctx->connInfo, ctx->requestInfo->headers, config_.ipConfig);
+
+        if(!connectionLimiter_.AllowConnection(ctx->connInfo))
+            return RateLimitResult::CONNECTION_LIMIT;
+
+        ctx->ipAcquired = 1;
+    }
+
+    // Own bit, own retry: Acquire() can fail on a full tracked-identity cap independently of-
+    // -ConnectionLimiter, and that failure is transient, not one-shot like ipAcquired above
+    if(!ctx->rateLimiterAcquired) {
+        if(!requestRateLimiter_.Acquire(ctx->connInfo))
+            return RateLimitResult::REQUEST_LIMIT;
+
+        ctx->rateLimiterAcquired = 1;
+    }
+
+    return requestRateLimiter_.AllowRequest(ctx->connInfo) ? RateLimitResult::ALLOWED : RateLimitResult::REQUEST_LIMIT;
+}
+
+void CoreEngine::HandleClose(ClientCtx* ctx)
+{
+    // Both bits are only ever cleared by ClientCtx::Reset(), right after this call returns, on-
+    // -slot recycle. Each release is gated on its own bit, mirroring which Acquire() succeeded
+    if(ctx->ipAcquired)
+        connectionLimiter_.ReleaseConnection(ctx->connInfo);
+
+    if(ctx->rateLimiterAcquired)
+        requestRateLimiter_.Release(ctx->connInfo);
 }
 
 void CoreEngine::HandleUserDLLInjection(const char* dllPath)

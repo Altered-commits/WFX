@@ -98,10 +98,15 @@ using CryptoConstantTimeEqualsFn = bool (*)(const std::uint8_t* a, const std::ui
 // vvv Asymmetric Crypto vvv
 enum class CryptoAsymKeyType : std::uint8_t { RSA = 0, EC_P256, EC_P384, ED25519 };
 enum class CryptoAsymScheme : std::uint8_t {
-    RS256 = 0, RS384, RS512, // RSASSA-PKCS1-v1_5
-    PS256, PS384, PS512,     // RSASSA-PSS, salt length == digest length
-    ES256, ES384,            // ECDSA P-256/P-384, raw fixed-width R||S, not ASN.1 DER
-    ED25519                  // Pure EdDSA (RFC 8032), signs the whole message directly
+    RS256 = 0,
+    RS384,
+    RS512, // RSASSA-PKCS1-v1_5
+    PS256,
+    PS384,
+    PS512, // RSASSA-PSS, salt length == digest length
+    ES256,
+    ES384,  // ECDSA P-256/P-384, raw fixed-width R||S, not ASN.1 DER
+    ED25519 // Pure EdDSA (RFC 8032), signs the whole message directly
 };
 
 // Fixed signature lengths (bytes). RSA schemes have none here, theirs is always rsaBits/8
@@ -125,8 +130,8 @@ using CryptoAsymKeyFromEcPublicFn = void* (*)(CryptoAsymKeyType curve, const std
 using CryptoAsymKeyPemLenFn = std::uint32_t (*)(void* key, bool exportPrivate);
 
 // exportPrivate=true fails with INVALID_ARG if the handle only holds public key material
-using CryptoAsymKeyExportFn = CryptoStatus (*)(void* key, bool exportPrivate, std::uint8_t* out,
-                                               std::uint32_t outCap, std::uint32_t* outLen);
+using CryptoAsymKeyExportFn = CryptoStatus (*)(void* key, bool exportPrivate, std::uint8_t* out, std::uint32_t outCap,
+                                               std::uint32_t* outLen);
 using CryptoAsymKeyFreeFn = void (*)(void* key);
 
 // Exact signature size for this key+scheme pair, so a caller can size a buffer without guessing-

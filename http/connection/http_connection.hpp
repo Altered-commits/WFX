@@ -91,7 +91,7 @@ enum class EndpointState : std::uint8_t {
 // Forward declare it so compilers won't cry
 struct ClientCtx;
 
-using ReceiveCallback = std::function<void(ClientCtx*)>;
+using ClientCtxCallback = std::function<void(ClientCtx*)>;
 
 struct FileInfo {
     int fd = -1;        // Linux file descriptor
@@ -236,7 +236,9 @@ struct ClientCtx : public ConnectionTag {
             std::uint16_t isAsyncTimerOperation : 1;
             std::uint16_t isShuttingDown : 1;
             std::uint16_t streamChunked : 1;
-            std::uint16_t reserved : 6;
+            std::uint16_t ipAcquired : 1; // set once connInfo holds the resolved IP and ConnectionLimiter counted it
+            std::uint16_t rateLimiterAcquired : 1; // set once RequestRateLimiter has counted this connection too
+            std::uint16_t reserved : 4;
         };
         std::uint16_t flags = 0;
     }; // 2 bytes
@@ -270,7 +272,7 @@ struct ClientCtx : public ConnectionTag {
     FileInfo fileInfo = {};                       // 24 bytes
     Shared::StreamGenerator streamGenerator = {}; // 24 bytes
 
-    WFXIpAddress connInfo = {};            // 20 bytes
+    WFXIpAddress connInfo = {};            // 20 bytes, wire IP until ipAcquired, then the resolved IP for both limiters
     WFXSocket socket = WFX_INVALID_SOCKET; // 4 | 8 bytes depending on OS
 
 public:
@@ -324,7 +326,7 @@ struct HttpConnectionHandler {
     virtual ~HttpConnectionHandler() = default;
 
     virtual void Initialize(const std::string& host, std::uint16_t port) = 0;
-    virtual void SetEngineCallback(ReceiveCallback onData) = 0;
+    virtual void SetEngineCallbacks(ClientCtxCallback onData, ClientCtxCallback onClose) = 0;
     virtual std::uint16_t AllocateEndpoint(const char* host, Shared::EndpointDesc desc,
                                            Shared::EndpointConfig config) = 0;
 

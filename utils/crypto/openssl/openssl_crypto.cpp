@@ -715,7 +715,7 @@ void* AsymKeyFromEcPublic(Shared::CryptoAsymKeyType curve, const std::uint8_t* x
     if(!x || xLen == 0 || !y || yLen == 0)
         return nullptr;
 
-    const char* groupName = curve == Shared::CryptoAsymKeyType::EC_P256 ? "prime256v1"
+    const char* groupName = curve == Shared::CryptoAsymKeyType::EC_P256   ? "prime256v1"
                             : curve == Shared::CryptoAsymKeyType::EC_P384 ? "secp384r1"
                                                                           : nullptr;
     if(!groupName)
@@ -814,7 +814,8 @@ std::uint32_t AsymSigLen(void* key, Shared::CryptoAsymScheme scheme)
 
     if(AsymSchemeIsEc(scheme))
         return scheme == Shared::CryptoAsymScheme::ES256 ? Shared::CRYPTO_ECDSA_P256_SIG_LEN
-                                                          : Shared::CRYPTO_ECDSA_P384_SIG_LEN;
+                                                         : Shared::CRYPTO_ECDSA_P384_SIG_LEN;
+
     if(scheme == Shared::CryptoAsymScheme::ED25519)
         return Shared::CRYPTO_ED25519_SIG_LEN;
 

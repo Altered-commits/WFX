@@ -92,6 +92,22 @@ void HttpOpenSSL::InitServerContext()
     if(!SSL_CTX_check_private_key(serverCtx_))
         LogOpenSSLError("Private key does not match certificate");
 
+    // Inbound mTLS, active only when client_ca_path is configured: verifies inbound-
+    // -client certs against that CA and requires one be presented
+    if(!sslConfig.clientCaPath.empty()) {
+        if(SSL_CTX_load_verify_locations(serverCtx_, sslConfig.clientCaPath.c_str(), nullptr) != 1)
+            LogOpenSSLError("Failed to load client CA certificate for server ctx");
+
+        // Sent to the client in the handshake's CertificateRequest so it can pick a-
+        // -matching cert when it holds more than one
+        if(STACK_OF(X509_NAME)* clientCaNames = SSL_load_client_CA_file(sslConfig.clientCaPath.c_str()))
+            SSL_CTX_set_client_CA_list(serverCtx_, clientCaNames);
+        else
+            LogOpenSSLError("Failed to build client CA name list for server ctx");
+
+        SSL_CTX_set_verify(serverCtx_, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
+    }
+
     // Server-side session cache: server automatically stores and looks up sessions
     // SSL_SESS_CACHE_SERVER is the correct mode for inbound connections
     if(sslConfig.enableServerSessionCache) {
@@ -183,13 +199,13 @@ void HttpOpenSSL::InitClientContext()
         logger.Fatal("[HttpOpenSSL]: Failed to create client SSL_CTX");
 
     // Always load system CAs so public internet endpoints verify correctly
-    // If user also specifies ca_cert_path (for internal/self-signed CAs like mkcert),-
+    // If user also specifies outbound_ca_path (for internal/self-signed CAs like mkcert),-
     // -it is added on top
     if(SSL_CTX_set_default_verify_paths(clientCtx_) != 1)
         LogOpenSSLError("Failed to load default system CA certificates for client ctx");
 
-    if(!sslConfig.caCertPath.empty()) {
-        if(SSL_CTX_load_verify_locations(clientCtx_, sslConfig.caCertPath.c_str(), nullptr) != 1)
+    if(!sslConfig.outboundCaPath.empty()) {
+        if(SSL_CTX_load_verify_locations(clientCtx_, sslConfig.outboundCaPath.c_str(), nullptr) != 1)
             LogOpenSSLError("Failed to load configured CA certificate for client ctx");
     }
 

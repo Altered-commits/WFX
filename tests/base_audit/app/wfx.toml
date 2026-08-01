@@ -8,9 +8,7 @@ preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure
 
 # TUNED FOR TORTURE (see ../README.md). Big send buffer so /big buffers ~1 MiB and applies real
 # memory pressure under a RAM cap; recv buffer >= max_body_size so a full body fits then overflows
-# cleanly; tight timeouts so slowloris/slow-body/idle get reaped within a short run; per-IP cap and
-# rate limiter cranked wide open because ALL siege traffic is from 127.0.0.1 and would otherwise be
-# throttled before it ever stressed the server. (The limiter itself wants a separate, dedicated run.)
+# cleanly; tight timeouts so slowloris/slow-body/idle get reaped within a short run
 [Network]
 send_buffer_max              = 1100000  # ~1.05 MiB: the /big body is exactly 1 MiB but headers add ~200-500
                                #          bytes on top; 1 MiB was tight enough that AppendWriteData failed
@@ -32,17 +30,22 @@ header_timeout               = 5       # Max time for entire header to arrive (s
 body_timeout                 = 5       # Max time for entire body to arrive (slow-body reap)
 idle_timeout                 = 10      # Max idle time before reap
 max_connections              = 100000     # Total concurrent cap (reachable -> exhaustion testable)
-max_connections_per_ip       = 100000     # = max_connections: single-IP siege must use every slot
-max_request_burst_per_ip     = 100000000  # Effectively off for localhost siege
-max_requests_per_ip_per_sec  = 100000000  # Effectively off for localhost siege
 
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
+# Per-IP cap and rate limiter cranked wide open because ALL siege traffic is from 127.0.0.1 and
+# would otherwise be throttled before it ever stressed the server (the limiter itself wants a
+# separate, dedicated run)
+[IP]
+max_connections_per_ip       = 100000     # = max_connections: single-IP siege must use every slot
+max_request_burst_per_ip     = 100000000  # Effectively off for localhost siege
+max_requests_per_ip_per_sec  = 100000000  # Effectively off for localhost siege
+
 [SSL]
 cert_path                   = "..."           # Path to the server certificate (PEM format)
 key_path                    = "..."           # Path to the private key corresponding to the certificate
-ca_cert_path                = ""              # Path to the CA certificate for client verification (PEM format)
+outbound_ca_path            = ""              # Extra CA to trust for outbound TLS (PEM format)
 tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
                                            # ^^^ Colon-separated TLSv1.3 ciphers in preference order
 tls12_ciphers               = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"

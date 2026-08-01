@@ -79,13 +79,6 @@ static constexpr const char* SERVICE_UNAVAILABLE = "HTTP/1.1 503 Service Unavail
                                                    "\r\n"
                                                    "Service Unavailable";
 
-static constexpr const char* TOO_MANY_REQUESTS = "HTTP/1.1 429 Too Many Requests\r\n"
-                                                 "Content-Type: text/plain; charset=UTF-8\r\n"
-                                                 "Connection: close\r\n"
-                                                 "Content-Length: 18\r\n"
-                                                 "\r\n"
-                                                 "Too Many Requests";
-
 } // namespace HttpError
 } // namespace WFX::Http
 

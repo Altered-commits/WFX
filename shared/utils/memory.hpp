@@ -159,8 +159,7 @@ using UnorderedSet = std::unordered_set<T, H, E, Allocator<T>>;
 // Ordered
 template <typename K, typename V, typename C = std::less<K>>
 using Map = std::map<K, V, C, Allocator<std::pair<const K, V>>>;
-template <typename T, typename C = std::less<T>>
-using Set = std::set<T, C, Allocator<T>>;
+template <typename T, typename C = std::less<T>> using Set = std::set<T, C, Allocator<T>>;
 
 } // namespace WFX::Shared
 

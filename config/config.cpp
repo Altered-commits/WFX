@@ -27,20 +27,30 @@ void Config::LoadCoreSettings(std::string_view path)
         auto tbl = toml::parse_file(path);
 
         // vvv Project vvv
-        ExtractStringArrayOrFatal(tbl, "Project", "middleware_list", projectConfig.middlewareList);
+        ExtractStringArray(tbl, "Project", "middleware_list", projectConfig.middlewareList, true);
 
         // vvv Build vvv
-        ExtractValueOrFatal(tbl, "Build", "dir_name", buildConfig.buildDir);
-        ExtractValueOrFatal(tbl, "Build", "preferred_config", buildConfig.buildType);
-        ExtractValueOrFatal(tbl, "Build", "preferred_generator", buildConfig.buildGenerator);
+        ExtractValue(tbl, "Build", "dir_name", buildConfig.buildDir, true);
+        ExtractValue(tbl, "Build", "preferred_config", buildConfig.buildType, true);
+        ExtractValue(tbl, "Build", "preferred_generator", buildConfig.buildGenerator, true);
 
         // vvv ENV vvv
-        ExtractValueOrFatal(tbl, "ENV", "env_path", envConfig.envPath);
+        ExtractValue(tbl, "ENV", "env_path", envConfig.envPath, true);
+
+        // vvv IP vvv
+        ExtractValue(tbl, "IP", "max_connections_per_ip", ipConfig.maxConnectionsPerIp);
+        ExtractValue(tbl, "IP", "max_request_burst_per_ip", ipConfig.maxRequestBurstSize);
+        ExtractValue(tbl, "IP", "max_requests_per_ip_per_sec", ipConfig.maxTokensPerSecond);
+        ExtractValue(tbl, "IP", "max_tracked_identities", ipConfig.maxTrackedIdentities);
+        ExtractValue(tbl, "IP", "real_ip_header", ipConfig.realIpHeader);
+        ExtractValue(tbl, "IP", "real_ip_recursive", ipConfig.realIpRecursive);
+        ExtractStringArray(tbl, "IP", "trusted_proxies", ipConfig.trustedProxies);
 
         // vvv SSL vvv
-        ExtractValueOrFatal(tbl, "SSL", "cert_path", sslConfig.certPath);
-        ExtractValueOrFatal(tbl, "SSL", "key_path", sslConfig.keyPath);
-        ExtractValueOrFatal(tbl, "SSL", "ca_cert_path", sslConfig.caCertPath);
+        ExtractValue(tbl, "SSL", "cert_path", sslConfig.certPath, true);
+        ExtractValue(tbl, "SSL", "key_path", sslConfig.keyPath, true);
+        ExtractValue(tbl, "SSL", "outbound_ca_path", sslConfig.outboundCaPath);
+        ExtractValue(tbl, "SSL", "client_ca_path", sslConfig.clientCaPath);
 
         ExtractValue(tbl, "SSL", "tls13_ciphers", sslConfig.tls13Ciphers);
         ExtractValue(tbl, "SSL", "tls12_ciphers", sslConfig.tls12Ciphers);
@@ -66,9 +76,6 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Network", "body_timeout", networkConfig.bodyTimeout);
         ExtractValue(tbl, "Network", "idle_timeout", networkConfig.idleTimeout);
         ExtractValue(tbl, "Network", "max_connections", networkConfig.maxConnections);
-        ExtractValue(tbl, "Network", "max_connections_per_ip", networkConfig.maxConnectionsPerIp);
-        ExtractValue(tbl, "Network", "max_request_burst_per_ip", networkConfig.maxRequestBurstSize);
-        ExtractValue(tbl, "Network", "max_requests_per_ip_per_sec", networkConfig.maxTokensPerSecond);
 
         // vvv OS Specific vvv
 #ifdef WFX_PLATFORM_LINUX

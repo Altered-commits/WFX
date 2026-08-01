@@ -7,32 +7,40 @@ preferred_config    = "Debug"          # Active build configuration (must match 
 preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure the build directory
 
 [Network]
-send_buffer_max              = 16384   # Max total send buffer size per connection (in bytes)
-send_buffer_incr             = 4096    # Buffer growth step (in bytes)
-recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
-recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
+send_buffer_max              = 65536   # /health only, no large responses needed
+send_buffer_incr             = 16384   # Buffer growth step (in bytes)
+recv_buffer_max               = 65536  # No large bodies expected
+recv_buffer_incr             = 8192    # Buffer growth step (in bytes)
 header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
 max_header_size              = 8192    # Max total size of all headers (in bytes)
 max_header_count             = 64      # Max number of headers allowed
-max_body_size                = 8192    # Max size of request body (in bytes)
+max_body_size                = 8192    # No large bodies expected
 header_timeout               = 15      # Max time limit for entire header to arrive (in seconds)
-body_timeout                 = 20      # Max time limit for entire body to arrive (in seconds)
-idle_timeout                 = 40      # Max time limit for a connection to stay idle (in seconds)
-max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
+body_timeout                 = 15      # Max time limit for entire body to arrive (in seconds)
+idle_timeout                 = 20      # Max time limit for a connection to stay idle (in seconds)
+max_connections              = 4096    # Total concurrent cap, well above anything a phase opens at once
 
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
+# Deliberately small and permanent (unlike base_audit's wide-open [IP]): this whole app exists
+# only to exercise real-IP resolution + ConnectionLimiter + RequestRateLimiter, so every phase
+# runs against the same tight config rather than patching wfx.toml and restarting mid-run.
+# max_tracked_identities is small on purpose, so the LRU eviction phase can fill it without
+# needing thousands of distinct identities
 [IP]
-max_connections_per_ip       = 20      # Per-IP connection cap
-max_request_burst_per_ip     = 10      # Initial request tokens per IP
-max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
+max_connections_per_ip       = 3                   # Small, deterministic connection cap per identity
+max_request_burst_per_ip     = 5                   # Small, deterministic burst size
+max_requests_per_ip_per_sec  = 2                   # Slow enough a test loop can't refill mid-run
+max_tracked_identities       = 64                  # BitmapPool rounds any value up to a multiple of 64, so this is the real minimum cap
+real_ip_header               = "X-Forwarded-For"   # Header trusted for the real client IP
+real_ip_recursive            = true                # Walk the XFF chain past trusted hops
+trusted_proxies               = ["127.0.0.1/32"]   # Only the loopback test client is a trusted proxy
 
 [SSL]
-cert_path                   = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/good.pem"   # mkcert leaf cert (patched to absolute by the harness)
-key_path                    = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/good-key.pem"    # mkcert leaf key  (patched to absolute by the harness)
-outbound_ca_path            = "/home/atomic/.local/share/mkcert/rootCA.pem"              # Empty -> client verifies against the system trust store, where `mkcert -install` placed the root CA that signed the mock's cert
-
+cert_path                   = "..."           # Path to the server certificate (PEM format)
+key_path                    = "..."           # Path to the private key corresponding to the certificate
+outbound_ca_path            = ""              # Extra CA to trust for outbound TLS (PEM format) [Keep empty if not used]
 tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
                                            # ^^^ Colon-separated TLSv1.3 ciphers in preference order
 tls12_ciphers               = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
@@ -51,8 +59,10 @@ accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts
 connection_threads = "auto"  # IOCP worker thread count
 request_threads    = "all"   # Threads executing user handlers
 
+# worker_processes pinned to 1: ConnectionLimiter/RequestRateLimiter state lives in one worker's
+# memory, never shared across workers, so a deterministic test needs exactly one of them
 [Linux]
-worker_processes        = 1      # TLS AUDIT: single worker for deterministic reproduction
+worker_processes        = 1      # Single worker, deterministic limiter state
 worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
 backlog                 = 1024   # Max pending connections in OS listen queue
 
@@ -70,7 +80,7 @@ min_level         = 2          # Minimum level to emit (0->trace, 1->debug, 2->i
 enable_stdout     = false      # Write to stdout
 enable_colors     = false      # ANSI colors on stdout (auto-disabled if not a tty)
 enable_timestamps = true       # Prepend [HH:MM:SS.mmm] to each line
-enable_file       = true       # TLS AUDIT: on so the harness log-follower can tail worker/crash logs
+enable_file       = true       # Write to log files
 max_file_size     = 16777216   # Max log file size before rotation (in bytes) [if enable_file = true]
 max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
 

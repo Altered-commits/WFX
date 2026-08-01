@@ -137,7 +137,7 @@ def persona_available(cfg, cert):
 def patch_ssl_paths(cfg):
     """Point the server cert at the mkcert 'good' leaf, and pin the outbound
     client's CA trust explicitly at the mkcert root instead of leaving
-    ca_cert_path empty (see ensure_certs). Doesn't weaken any refusal test:
+    outbound_ca_path empty (see ensure_certs). Doesn't weaken any refusal test:
     hostname/expiry/downgrade checks are independent of the trust anchor."""
     toml = os.path.join(cfg.app_dir, "wfx.toml")
     with open(toml) as f:
@@ -147,7 +147,7 @@ def patch_ssl_paths(cfg):
     s = re.sub(r'(?m)^(\s*cert_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % good, s)
     s = re.sub(r'(?m)^(\s*key_path\s*=\s*)"[^"]*"',  lambda m: m.group(1) + '"%s"' % key, s)
     if ca:
-        s = re.sub(r'(?m)^(\s*ca_cert_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % ca, s)
+        s = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % ca, s)
     with open(toml, "w") as f:
         f.write(s)
     term.log("patch", "server cert -> %s | client CA trust -> %s" % (good, ca or "(system store)"))

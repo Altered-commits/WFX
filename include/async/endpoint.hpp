@@ -333,8 +333,7 @@ struct StreamNextAwaitable : public AwaitableBase<StreamNextAwaitable<TReq, TRes
 
 public:
     StreamNextAwaitable(std::uint16_t idx, const TReq* r, bool isFirst, std::uint64_t pinned) noexcept
-        : AwaitableBase<StreamNextAwaitable<TReq, TRes>>{}, req(r), first(isFirst), endpointIdx(idx),
-          pinnedSlot(pinned)
+        : AwaitableBase<StreamNextAwaitable<TReq, TRes>>{}, req(r), first(isFirst), endpointIdx(idx), pinnedSlot(pinned)
     {}
 
     bool await_suspend(std::coroutine_handle<> h) noexcept

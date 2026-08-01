@@ -6,7 +6,6 @@
 
 #include "config/config.hpp"
 #include "http/connection/http_connection.hpp"
-#include "http/limits/ip_limiter/ip_limiter.hpp"
 #include "http/ssl/http_ssl.hpp"
 #include "utils/diagnostics/metric_tracer.hpp"
 #include "utils/fileops/filecache.hpp"
@@ -28,7 +27,7 @@
 
 namespace WFX::OSSpecific {
 
-using namespace WFX::Http;   // For 'HttpConnectionHandler', 'ReceiveCallback', 'ClientCtx', ...
+using namespace WFX::Http;   // For 'HttpConnectionHandler', 'ClientCtxCallback', 'ClientCtx', ...
 using namespace WFX::Utils;  // For 'Logger', 'RWBuffer', ...
 using namespace WFX::Core;   // For 'Config'
 using namespace WFX::Shared; // For 'EndpointStatus', 'AsyncData', ...
@@ -82,7 +81,7 @@ public:
 
 public: // Initializing
     void Initialize(const std::string& host, std::uint16_t port) override;
-    void SetEngineCallback(ReceiveCallback onData) override;
+    void SetEngineCallbacks(ClientCtxCallback onData, ClientCtxCallback onClose) override;
     std::uint16_t AllocateEndpoint(const char* host, EndpointDesc desc, EndpointConfig config) override;
     std::uint16_t EndpointCount() const override;
     StringView EndpointHostAt(std::uint16_t endpointIdx) const override;
@@ -304,8 +303,8 @@ private: // Singletons / config
     WorkerMetrics* metrics_ = MetricTracer::Current();
     EndpointMetrics* endpointMetrics_ = MetricTracer::EndpointSlots(MetricTracer::WorkerIndex());
 
-    IpLimiter ipLimiter_;
-    ReceiveCallback onReceive_ = {};
+    ClientCtxCallback onReceive_ = {};
+    ClientCtxCallback onClose_ = {};
     std::atomic<bool> running_ = true;
     bool useHttps_ = false;
 

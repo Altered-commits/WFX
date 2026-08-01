@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Altered-commits
 #
-# Single entry point for running the WFX audits (base, endpoint, tls, crypto),
+# Single entry point for running the WFX audits (base, endpoint, tls, crypto, ip),
 # locally or in CI.
 #
 # This script does NOT build wfx. It assumes a wfx binary already exists,
@@ -11,8 +11,8 @@
 # cmake/ninja build, the same way you would before running any audit by hand.
 #
 # Usage:
-#   tests/run_audits.sh                  run all four audits, one after another
-#   tests/run_audits.sh --audit base     run one audit only: base, endpoint, tls, crypto
+#   tests/run_audits.sh                  run all five audits, one after another
+#   tests/run_audits.sh --audit base     run one audit only: base, endpoint, tls, crypto, ip
 #   tests/run_audits.sh --ci             forward --ci to every audit that runs
 #   tests/run_audits.sh --audit endpoint --phase streaming
 #                                        run a single phase, needs --audit since phase
@@ -22,9 +22,9 @@
 #   tests/run_audits.sh --audit tls -- --wfx-logs all
 #                                        anything after -- is passed through as-is
 #
-# Locally, run it with no --audit and it goes through all four in sequence,
+# Locally, run it with no --audit and it goes through all five in sequence,
 # which is what you want on a dev machine. In GitHub Actions, --audit is set
-# to one name per matrix job, so the four run as separate parallel jobs
+# to one name per matrix job, so the five run as separate parallel jobs
 # instead, see .github/workflows/audit_check.yml.
 
 set -euo pipefail
@@ -90,12 +90,14 @@ declare -A AUDIT_DIRS=(
     [endpoint]="endpoint_audit"
     [tls]="tls_audit"
     [crypto]="crypto_audit"
+    [ip]="ip_audit"
 )
 declare -A AUDIT_SCRIPTS=(
     [base]="base_audit.py"
     [endpoint]="endpoint_audit.py"
     [tls]="tls_audit.py"
     [crypto]="crypto_audit.py"
+    [ip]="ip_audit.py"
 )
 
 # Every audit's --wfx defaults to "wfx" on PATH. The binary itself lands at
@@ -111,7 +113,7 @@ run_one() {
     local name="$1"
     local dir="${AUDIT_DIRS[$name]:-}"
     if [[ -z "$dir" ]]; then
-        echo "Unknown audit: $name (expected one of: base, endpoint, tls, crypto)" >&2
+        echo "Unknown audit: $name (expected one of: base, endpoint, tls, crypto, ip)" >&2
         return 1
     fi
 
@@ -137,7 +139,7 @@ if [[ -n "$audit" ]]; then
 fi
 
 failed=()
-for name in base endpoint tls crypto; do
+for name in base endpoint tls crypto ip; do
     rc=0
     run_one "$name" || rc=$?
 

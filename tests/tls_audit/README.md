@@ -85,7 +85,7 @@ Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resou
    the mkcert CA with `-days -1` (backdated `notAfter`; portable across OpenSSL
    versions, unlike the `-not_before`/`-not_after` flags which are OpenSSL-3+ only).
    `tls12` reuses the `good` cert with the mock server capped at TLS 1.2.
-2. Pins the WFX client's `ca_cert_path` directly at the mkcert root CA file
+2. Pins the WFX client's `outbound_ca_path` directly at the mkcert root CA file
    (instead of leaving it empty and relying on `mkcert -install` having reached
    the OS's OpenSSL trust store, which needs sudo on Linux and may silently not
    happen). This makes `good`'s "must accept" outcome deterministic without

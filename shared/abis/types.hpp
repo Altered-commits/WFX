@@ -241,8 +241,7 @@ using EndpointOnDisconnectFn = void (*)(void* slotState, DisconnectReason reason
 // -slot itself is left alone (still mid-request, real response completes normally). handle is-
 // -read-only + OpenSideConnection only (see AbortSlotHandle), Send/Receive on it directly is illegal-
 // -here. Never fires for multiplexed slots or a request already mid-Stream()
-using EndpointOnAbortFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone,
-                                   void* onDoneUd);
+using EndpointOnAbortFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd);
 
 // State allocation for slot state, parse state and output. create's ctx is userCtx for slot-
 // -state, slotState for per-request state. reset clears parse state between keep-alive requests;-
@@ -300,7 +299,7 @@ static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be s
 
 struct EndpointConfig {
     std::uint32_t connLimit;             // Max simultaneous connections (next 64 aligned) in the slot pool
-    std::uint32_t auxConnLimit;          // Max simultaneous OpenSideConnection()'s (next 64 aligned); 0 = disabled, no pool allocated
+    std::uint32_t auxConnLimit;          // Max simultaneous side connections (next 64 aligned); 0 = disabled
     std::uint32_t dnsRefreshSeconds;     // 0 = respect actual DNS TTL, N = override with N seconds
     std::uint16_t connectTimeoutSeconds; // TCP+TLS+onConnect must complete within this window
     std::uint16_t requestTimeoutSeconds; // Send+receive cycle must complete within this window
@@ -373,8 +372,7 @@ struct EndpointMetrics {
     std::uint64_t slotsInUse = 0; // Gauge, current leases against connLimit
 };
 static_assert(sizeof(EndpointMetrics) == 136, "'EndpointMetrics' must be exactly 136 bytes");
-static_assert(std::is_standard_layout_v<EndpointMetrics>,
-              "'EndpointMetrics' must be standard layout");
+static_assert(std::is_standard_layout_v<EndpointMetrics>, "'EndpointMetrics' must be standard layout");
 
 // Latency lives in its own array, mapped only when [Metrics] latency is on
 // Production wants to know what happened, a perf run wants to know how long it took, and the-

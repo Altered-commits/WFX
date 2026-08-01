@@ -544,8 +544,9 @@ private: // Helper functions
 
         Vector<std::uint8_t> out(pemLen);
         std::uint32_t written = 0;
-        const CryptoStatus status = Core::CryptoApiExt1()->asymKeyExport(
-            ctx_, exportPrivate, out.data(), static_cast<std::uint32_t>(out.size()), &written);
+        const CryptoStatus status =
+            Core::CryptoApiExt1()->asymKeyExport(ctx_, exportPrivate, out.data(),
+                                                 static_cast<std::uint32_t>(out.size()), &written);
 
         if(status == CryptoOk)
             out.resize(written);

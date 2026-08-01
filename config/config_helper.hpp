@@ -42,7 +42,9 @@ inline toml::node_view<const toml::node> ResolveTomlPath(const toml::table& tbl,
 }
 
 // vvv Helper Functions vvv
-template <typename T> bool ExtractValue(const toml::table& tbl, const char* section, const char* field, T& target)
+// 'fatal' is the only thing distinguishing what used to be two near-identical functions per shape
+template <typename T>
+bool ExtractValue(const toml::table& tbl, const char* section, const char* field, T& target, bool fatal = false)
 {
     auto node = ResolveTomlPath(tbl, section);
     if(node && node.is_table()) {
@@ -52,41 +54,35 @@ template <typename T> bool ExtractValue(const toml::table& tbl, const char* sect
         }
     }
 
-    Utils::GetLogger().Warn("[Config]: Missing or invalid entry: [", section, "] ", field,
-                            ". Using default value: ", target);
+    if(fatal)
+        Utils::GetLogger().Fatal("[Config]: Missing or invalid entry: [", section, "] ", field, '.');
+    else
+        Utils::GetLogger().Warn("[Config]: Missing or invalid entry: [", section, "] ", field,
+                                ". Using default value: ", target);
     return false;
 }
 
-template <typename T>
-void ExtractValueOrFatal(const toml::table& tbl, const char* section, const char* field, T& target)
+// A non-string element inside the array is always fatal regardless of 'fatalIfMissing', that-
+// -case is a genuine syntax error, not an absent-and-therefore-optional field
+inline void ExtractStringArray(const toml::table& tbl, const char* section, const char* field,
+                               std::vector<std::string>& target, bool fatalIfMissing = false)
 {
-    auto node = ResolveTomlPath(tbl, section);
-    if(node && node.is_table()) {
-        if(auto val = node[field].value<T>()) {
-            target = *val;
-            return;
-        }
+    auto arr = tbl[section][field].as_array();
+    if(!arr) {
+        if(fatalIfMissing)
+            Utils::GetLogger().Fatal("[Config]: Missing or invalid array: [", section, "] ", field, '.');
+        return;
     }
 
-    Utils::GetLogger().Fatal("[Config]: Missing or invalid entry: [", section, "] ", field, '.');
-}
-
-inline void ExtractStringArrayOrFatal(const toml::table& tbl, const char* section, const char* field,
-                                      std::vector<std::string>& target)
-{
-    auto& logger = Utils::GetLogger();
-
-    if(auto arr = tbl[section][field].as_array()) {
-        target.clear();
-        for(const auto& val : *arr) {
-            if(auto s = val.value<std::string>())
-                target.emplace_back(*s);
-            else
-                logger.Fatal("[Config]: Non-string value in [", section, "] ", field, " array");
-        }
+    std::vector<std::string> parsed;
+    for(const auto& val : *arr) {
+        if(auto s = val.value<std::string>())
+            parsed.emplace_back(*s);
+        else
+            Utils::GetLogger().Fatal("[Config]: Non-string value in [", section, "] ", field, " array");
     }
-    else
-        logger.Fatal("[Config]: Missing or invalid array: [", section, "] ", field, '.');
+
+    target = std::move(parsed);
 }
 
 } // namespace WFX::Core::ConfigHelpers

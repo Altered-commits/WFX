@@ -204,7 +204,7 @@ namespace WFX {
 //   inline const auto MyEp = WFX::Endpoint<MyReq, MyRes, &MyOnConnect, &MyOnAbort>{ ... };
 // -----------------------------------------------------------------------
 template <typename TReq, typename TRes, Async::UserOnConnectFn OnConnect = nullptr,
-         Async::UserOnAbortFn OnAbort = nullptr>
+          Async::UserOnAbortFn OnAbort = nullptr>
 using Endpoint = Async::Resolve<TReq, TRes, OnConnect, OnAbort>;
 
 // -----------------------------------------------------------------------
