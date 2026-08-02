@@ -26,7 +26,7 @@ struct RequestRateLimiterEntry {
 };
 
 // Sentinel index meaning "no node", used by both the free-standing pool index and the LRU links
-constexpr std::uint32_t kNoLimiterNode = 0xFFFFFFFFu;
+constexpr std::uint32_t K_NO_LIMITER_NODE = 0xFFFFFFFFu;
 
 // Fixed-address pool node (BitmapPool never moves a live slot). 'prev'/'next' thread an intrusive-
 // -doubly-linked LRU list by index rather than pointer, since indices stay valid across HashShard-
@@ -34,8 +34,8 @@ constexpr std::uint32_t kNoLimiterNode = 0xFFFFFFFFu;
 struct RequestRateLimiterNode {
     WFXIpAddress key;
     RequestRateLimiterEntry entry;
-    std::uint32_t prev = kNoLimiterNode;
-    std::uint32_t next = kNoLimiterNode;
+    std::uint32_t prev = K_NO_LIMITER_NODE;
+    std::uint32_t next = K_NO_LIMITER_NODE;
 };
 
 // Resolved-IP keyed: token-bucket request rate limiting. Unlike ConnectionLimiter, an entry's-
@@ -89,8 +89,8 @@ private:
     Utils::BitmapPool<RequestRateLimiterNode> pool_;
     Utils::HashShard<WFXIpAddress, std::uint32_t> index_; // Resolved IP -> pool_ slot index
 
-    std::uint32_t head_ = kNoLimiterNode; // Most-recently-touched entry
-    std::uint32_t tail_ = kNoLimiterNode; // Least-recently-touched entry, first eviction candidate
+    std::uint32_t head_ = K_NO_LIMITER_NODE; // Most-recently-touched entry
+    std::uint32_t tail_ = K_NO_LIMITER_NODE; // Least-recently-touched entry, first eviction candidate
 };
 
 } // namespace WFX::Http

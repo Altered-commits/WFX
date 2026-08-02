@@ -314,8 +314,8 @@ template <typename K, typename V> bool HashShard<K, V>::Insert(const K& key, con
         if(static_cast<float>(size_) / capacity_ >= KLOAD_FACTOR_GROW)
             (void)Resize();
 
-        std::size_t mask = capacity_ - 1;
-        std::size_t hash = WFXHash(key);
+        const std::size_t mask = capacity_ - 1;
+        const std::size_t hash = WFXHash(key);
         const std::size_t idx = hash & mask;
         std::size_t probe = 0;
 

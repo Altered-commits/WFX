@@ -18,32 +18,32 @@ void RequestRateLimiter::Unlink(std::uint32_t idx)
 {
     RequestRateLimiterNode* node = pool_.GetPtr(idx);
 
-    if(node->prev != kNoLimiterNode)
+    if(node->prev != K_NO_LIMITER_NODE)
         pool_.GetPtr(node->prev)->next = node->next;
     else
         head_ = node->next;
 
-    if(node->next != kNoLimiterNode)
+    if(node->next != K_NO_LIMITER_NODE)
         pool_.GetPtr(node->next)->prev = node->prev;
     else
         tail_ = node->prev;
 
-    node->prev = kNoLimiterNode;
-    node->next = kNoLimiterNode;
+    node->prev = K_NO_LIMITER_NODE;
+    node->next = K_NO_LIMITER_NODE;
 }
 
 void RequestRateLimiter::LinkFront(std::uint32_t idx)
 {
     RequestRateLimiterNode* node = pool_.GetPtr(idx);
-    node->prev = kNoLimiterNode;
+    node->prev = K_NO_LIMITER_NODE;
     node->next = head_;
 
-    if(head_ != kNoLimiterNode)
+    if(head_ != K_NO_LIMITER_NODE)
         pool_.GetPtr(head_)->prev = idx;
 
     head_ = idx;
 
-    if(tail_ == kNoLimiterNode)
+    if(tail_ == K_NO_LIMITER_NODE)
         tail_ = idx;
 }
 
@@ -76,10 +76,10 @@ RequestRateLimiterNode* RequestRateLimiter::FindOrCreate(const WFXIpAddress& ip,
         // -no live connection on it. Walk from the LRU end (tail_) towards the MRU end (head_),-
         // -skipping any entry a connection is still holding open (refCount > 0)
         std::uint32_t victim = tail_;
-        while(victim != kNoLimiterNode && pool_.GetPtr(victim)->entry.refCount > 0)
+        while(victim != K_NO_LIMITER_NODE && pool_.GetPtr(victim)->entry.refCount > 0)
             victim = pool_.GetPtr(victim)->prev;
 
-        if(victim == kNoLimiterNode)
+        if(victim == K_NO_LIMITER_NODE)
             return nullptr; // Every tracked identity has a live connection right now, nothing to evict
 
         idx = victim;

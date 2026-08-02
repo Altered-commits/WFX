@@ -61,8 +61,17 @@ _build     = net.request
 _body_of   = net.body
 _status_of = net.status
 
-def tls_send(host, port, payload, rtimeout=6.0, ctimeout=4.0, sni="localhost"):
-    return net.send(host, port, payload, rtimeout=rtimeout, ctimeout=ctimeout, tls=True, sni=sni)
+# WFX runs this whole suite with client_ca_path set (see patch_ssl_paths), so every call below
+# needs a client cert or WFX refuses the handshake before HTTP is even in play. Defaulting to the
+# trusted one here means every existing call site gets it for free, and mTLS refusal vectors pass
+# an explicit certfile/keyfile (or None) to override it
+CLIENT_CERT = os.path.join(HERE, "certs", "client-good.pem")
+CLIENT_KEY  = os.path.join(HERE, "certs", "client-good-key.pem")
+
+def tls_send(host, port, payload, rtimeout=6.0, ctimeout=4.0, sni="localhost",
+            certfile=CLIENT_CERT, keyfile=CLIENT_KEY):
+    return net.send(host, port, payload, rtimeout=rtimeout, ctimeout=ctimeout, tls=True, sni=sni,
+                    certfile=certfile, keyfile=keyfile)
 
 # Certs: small and portable, no chain-building, no OpenSSL-3-only flags
 def _ossl(args):
@@ -126,6 +135,91 @@ def ensure_certs(cfg):
     if "good" in avail:
         avail.add("tls12")  # reuses the good cert
 
+    # vvv Client certificates, presented BACK to WFX for the inbound mTLS phase vvv
+    # This suite's own mkcert CA plays both roles: WFX already trusts it for verifying itself as an
+    # outbound client (outbound_ca_path above), and now also trusts it for verifying US as an
+    # inbound client (client_ca_path, see patch_ssl_paths). Separate OpenSSL contexts, no conflict
+    if os.path.exists(ca) and os.path.exists(cakey):
+        # client-good: signed by the trusted CA, must be ACCEPTED. tls_send() defaults to this,
+        # so its absence would silently break every other phase too - required, not best-effort
+        if _ossl(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", p("client-good-key.pem"),
+                  "-subj", "/CN=mtls-good-client", "-out", p("client-good.csr")]).returncode == 0:
+            signed = _ossl(["x509", "-req", "-in", p("client-good.csr"), "-CA", ca, "-CAkey", cakey,
+                            "-CAcreateserial", "-out", p("client-good.pem"), "-days", "365"])
+            if signed.returncode == 0:
+                avail.add("client-good")
+        if "client-good" not in avail:
+            raise RuntimeError("could not generate the 'client-good' cert (mkcert CA broken?)")
+
+        # client-expired: same trusted CA, backdated notAfter -> must be REFUSED
+        if _ossl(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", p("client-expired-key.pem"),
+                  "-subj", "/CN=mtls-expired-client", "-out", p("client-expired.csr")]).returncode == 0:
+            signed = _ossl(["x509", "-req", "-in", p("client-expired.csr"), "-CA", ca, "-CAkey", cakey,
+                            "-CAcreateserial", "-out", p("client-expired.pem"), "-days", "-1"])
+            if signed.returncode == 0:
+                avail.add("client-expired")
+
+        # client-viaint: leaf signed by an intermediate CA, itself signed by a DEDICATED root - not
+        # the mkcert one. Verified independently with a plain `openssl verify` (not assumed): the
+        # mkcert root is built with pathlen:0, so it refuses to ever be the root of an intermediate
+        # CA by mkcert's own design - reusing it here would fail regardless of what WFX does. WFX
+        # only ever loads the roots it's given, never fetches a missing intermediate itself - a
+        # client sending the leaf alone must be REFUSED, leaf+intermediate together must be
+        # ACCEPTED. Proves real chain building, not just "an issuer name that looks familiar"
+        chainroot_ok = _ossl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", p("chainroot-key.pem"),
+                             "-out", p("chainroot.pem"), "-days", "365", "-subj", "/CN=mtls-chain-test-root",
+                             "-addext", "basicConstraints=critical,CA:true,pathlen:1",
+                             "-addext", "keyUsage=critical,keyCertSign,cRLSign"]).returncode == 0
+
+        if chainroot_ok:
+            int_ext = p("int-ext.cnf")
+            with open(int_ext, "w") as f:
+                f.write("basicConstraints=critical,CA:true\nkeyUsage=critical,keyCertSign,cRLSign\n")
+            if _ossl(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", p("client-int-key.pem"),
+                      "-subj", "/CN=mtls-test-intermediate-ca", "-out", p("client-int.csr")]).returncode == 0:
+                signed_int = _ossl(["x509", "-req", "-in", p("client-int.csr"), "-CA", p("chainroot.pem"),
+                                    "-CAkey", p("chainroot-key.pem"), "-CAcreateserial",
+                                    "-out", p("client-int.pem"), "-days", "365", "-extfile", int_ext])
+                if signed_int.returncode == 0 and _ossl(
+                    ["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", p("client-viaint-key.pem"),
+                     "-subj", "/CN=mtls-viaint-client", "-out", p("client-viaint.csr")]).returncode == 0:
+                    signed_leaf = _ossl(["x509", "-req", "-in", p("client-viaint.csr"), "-CA", p("client-int.pem"),
+                                        "-CAkey", p("client-int-key.pem"), "-CAcreateserial",
+                                        "-out", p("client-viaint.pem"), "-days", "365"])
+                    if signed_leaf.returncode == 0:
+                        avail.add("client-viaint")
+                        with open(p("client-viaint-chain.pem"), "w") as out:
+                            out.write(open(p("client-viaint.pem")).read())
+                            out.write(open(p("client-int.pem")).read())
+                        avail.add("client-viaint-chain")
+
+                        # client_ca_path must trust BOTH roots at once: the mkcert one (client-good/
+                        # -expired/-otherca's counterpart) and this dedicated chain-test one
+                        with open(p("client-ca-bundle.pem"), "w") as out:
+                            out.write(open(ca).read())
+                            out.write(open(p("chainroot.pem")).read())
+                        cfg.client_ca_bundle = p("client-ca-bundle.pem")
+    else:
+        term.log("certs", _yellow("mkcert CA key not found, mTLS client-cert vectors skipped"))
+
+    # client-otherca: signed by a WHOLLY DIFFERENT throwaway CA, never loaded into client_ca_path
+    # -> must be REFUSED (untrusted issuer, independent of the trusted-CA vectors above)
+    if _ossl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", p("otherca-key.pem"),
+              "-out", p("otherca.pem"), "-days", "365", "-subj", "/CN=mtls-other-ca"]).returncode == 0:
+        if _ossl(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", p("client-otherca-key.pem"),
+                  "-subj", "/CN=mtls-otherca-client", "-out", p("client-otherca.csr")]).returncode == 0:
+            signed = _ossl(["x509", "-req", "-in", p("client-otherca.csr"), "-CA", p("otherca.pem"),
+                            "-CAkey", p("otherca-key.pem"), "-CAcreateserial",
+                            "-out", p("client-otherca.pem"), "-days", "365"])
+            if signed.returncode == 0:
+                avail.add("client-otherca")
+
+    # client-selfsigned: self-signed, no CA at all -> must be REFUSED
+    if _ossl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", p("client-selfsigned-key.pem"),
+              "-out", p("client-selfsigned.pem"), "-days", "365",
+              "-subj", "/CN=mtls-selfsigned-client"]).returncode == 0:
+        avail.add("client-selfsigned")
+
     term.log("certs", _green("personas available: %s" % ", ".join(sorted(avail))))
     cfg.avail = avail
     if "good" not in avail:
@@ -138,7 +232,11 @@ def patch_ssl_paths(cfg):
     """Point the server cert at the mkcert 'good' leaf, and pin the outbound
     client's CA trust explicitly at the mkcert root instead of leaving
     outbound_ca_path empty (see ensure_certs). Doesn't weaken any refusal test:
-    hostname/expiry/downgrade checks are independent of the trust anchor."""
+    hostname/expiry/downgrade checks are independent of the trust anchor.
+
+    Also turns inbound mTLS ON for the whole run (client_ca_path -> the mkcert root, bundled with
+    the dedicated chain-test root when that vector is available), which is why tls_send() defaults
+    to presenting a client cert - see CLIENT_CERT above."""
     toml = os.path.join(cfg.app_dir, "wfx.toml")
     with open(toml) as f:
         s = f.read()
@@ -148,9 +246,13 @@ def patch_ssl_paths(cfg):
     s = re.sub(r'(?m)^(\s*key_path\s*=\s*)"[^"]*"',  lambda m: m.group(1) + '"%s"' % key, s)
     if ca:
         s = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % ca, s)
+        if "client-good" in cfg.avail:
+            client_ca = getattr(cfg, "client_ca_bundle", "") or ca
+            s = re.sub(r'(?m)^(\s*client_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % client_ca, s)
     with open(toml, "w") as f:
         f.write(s)
-    term.log("patch", "server cert -> %s | client CA trust -> %s" % (good, ca or "(system store)"))
+    term.log("patch", "server cert -> %s | client CA trust -> %s | inbound mTLS -> %s"
+            % (good, ca or "(system store)", "on" if "client-good" in cfg.avail else "off"))
 
 # Mock context
 class Mock:
@@ -333,6 +435,73 @@ def phase_protocol(ctx):
     r = drive(cfg, "/ok", ep="tls12", rtimeout=12)
     p.check("TLS 1.2 downgrade refused", is_err(r),
           "client accepted a TLS 1.2 downgrade (ep=%r)" % (r and r.get("ep")), security=True)
+
+# PHASE: inbound mTLS (client_ca_path), the opposite direction from every other phase in this
+# file - here WE are the client presenting a cert, and WFX's OWN listener is what does the
+# verifying. No mock involved: every vector here dials WFX directly on cfg.port
+#
+# This is why tls_send() defaults to the trusted client cert (CLIENT_CERT/CLIENT_KEY above) -
+# client_ca_path is on for the whole suite (see patch_ssl_paths), so every other phase's calls
+# would refuse at the handshake without it. Refusal is proven the same way phase_verify proves it
+# for the outbound side: the call itself returns nothing, because WFX drops the connection at the
+# TLS layer before any HTTP response exists (HandleClientHandshake -> Close, no alert-visible
+# response body to inspect, just a dead socket)
+def phase_mtls(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("mtls")
+
+    if "client-good" not in cfg.avail:
+        p.check("inbound mTLS vectors (skipped, no client CA)", True)
+        return
+
+    cd = cfg.cert_dir
+    def cert(name):
+        return os.path.join(cd, name + ".pem"), os.path.join(cd, name + "-key.pem")
+
+    # Baseline: the same trusted cert every other phase relies on implicitly via tls_send()'s
+    # default, checked explicitly here so a broken default reads as "mtls" failing, not the
+    # entire rest of the suite failing at once
+    r = tls_send(cfg.host, cfg.port, _build("GET", "/health"))
+    p.check("trusted client cert accepted", _status_of(r) == 200, "status=%r" % _status_of(r))
+
+    # The crown jewel: FAIL_IF_NO_PEER_CERT is the entire point of requiring a client cert
+    # Refusal here doesn't reliably surface as wrap_socket() raising (net.send() -> None): unlike
+    # the outbound side (WFX validates the PEER's cert mid-handshake, so it bails before its own
+    # Finished), here WFX is the one deciding, and only after the audit has already sent its own
+    # Certificate/Finished - wrap_socket() on our side often returns fine, and the rejection alert
+    # only surfaces on the first read afterwards, which _drain() swallows into b"" rather than
+    # raising. So the real signal is "no successful HTTP response", not "send() returned None"
+    r = tls_send(cfg.host, cfg.port, _build("GET", "/health"), certfile=None, keyfile=None)
+    p.check("no client cert refused", _status_of(r) != 200,
+          "server answered without a client cert (status=%r), mTLS is not actually required" % _status_of(r),
+          security=True)
+
+    refuse = [
+        ("client-otherca",    "client cert signed by an untrusted CA refused"),
+        ("client-selfsigned", "self-signed client cert refused"),
+        ("client-expired",    "expired client cert refused"),
+    ]
+    for name, label in refuse:
+        if name not in cfg.avail:
+            p.check(label + " (skipped, no cert)", True)
+            continue
+        certfile, keyfile = cert(name)
+        r = tls_send(cfg.host, cfg.port, _build("GET", "/health"), certfile=certfile, keyfile=keyfile)
+        p.check(label, _status_of(r) != 200,
+              "server ACCEPTED it (status=%r), inbound auth bypass possible" % _status_of(r), security=True)
+
+    # Chain building: client_ca_path only loads the root, WFX can't fetch a missing intermediate
+    # itself - a leaf alone must fail even though it ultimately chains to a trusted root
+    if "client-viaint" in cfg.avail:
+        leaf, leafkey = cert("client-viaint")
+        r = tls_send(cfg.host, cfg.port, _build("GET", "/health"), certfile=leaf, keyfile=leafkey)
+        p.check("intermediate-signed leaf without the intermediate refused", _status_of(r) != 200,
+              "server accepted an unbuildable chain (status=%r)" % _status_of(r), security=True)
+
+        chain = os.path.join(cd, "client-viaint-chain.pem")
+        r = tls_send(cfg.host, cfg.port, _build("GET", "/health"), certfile=chain, keyfile=leafkey)
+        p.check("intermediate-signed leaf WITH the intermediate accepted", _status_of(r) == 200,
+              "status=%r" % _status_of(r))
 
 def phase_framing(ctx):
     cfg, mock = ctx.cfg, ctx.mock
@@ -528,6 +697,7 @@ class TlsAudit(common.Suite):
         "handshake":  phase_handshake,
         "verify":     phase_verify,
         "protocol":   phase_protocol,
+        "mtls":       phase_mtls,
         "framing":    phase_framing,
         "desync":     phase_desync,
         "inject":     phase_inject,
@@ -544,10 +714,20 @@ class TlsAudit(common.Suite):
         ensure_certs(cfg)
         patch_ssl_paths(cfg)
 
-    # WFX serves HTTPS here, so the audit speaks TLS to it for everything, /health included
+    # WFX serves HTTPS here, so the audit speaks TLS to it for everything, /health included. And
+    # since patch_ssl_paths turns client_ca_path on for the whole server, that includes the boot-
+    # readiness probe itself - common.tls_probe presents no client cert, so it would be refused at
+    # the handshake exactly like phase_mtls's "no cert" vector, reading as a boot crash rather than
+    # what it actually is
     def build_server(self, cfg):
+        def mtls_probe(probeCfg, timeout):
+            raw = net.send(probeCfg.host, probeCfg.port, net.request("GET", "/health"),
+                           rtimeout=timeout, ctimeout=timeout, tls=True,
+                           certfile=CLIENT_CERT, keyfile=CLIENT_KEY)
+            return net.status(raw) == 200
+
         return common.Server(cfg, flags=("--use-https", "--https-port-override"),
-                             probe=common.tls_probe, label="/health (HTTPS)")
+                             probe=mtls_probe, label="/health (HTTPS)")
 
     def setup(self, ctx):
         ctx.resources["mock"] = Mock(ctx.cfg)

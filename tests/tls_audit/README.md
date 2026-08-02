@@ -1,12 +1,21 @@
 # WFX TLS Audit
 
-Adversarial audit of WFX's **outbound HttpEndpoint over TLS**: the surface the
-endpoint audit never touches (it runs the client plaintext against a literal-IP
-mock). This drives `WFX::HttpEndpoint` with `EpTlsRequire` against a small,
-hostile TLS mock and attacks the client's certificate/protocol verification with a
+Adversarial audit of both directions of WFX's TLS trust: the **outbound
+HttpEndpoint client** (the surface `endpoint_audit` never touches, since it runs
+the client plaintext against a literal-IP mock) and WFX's **own inbound mTLS**
+(`client_ca_path`, untested anywhere else in this repo).
+
+Outbound: drives `WFX::HttpEndpoint` with `EpTlsRequire` against a small, hostile
+TLS mock and attacks the client's certificate/protocol verification with a
 man-in-the-middle mindset: an untrusted cert, a hostname-mismatched cert, an
 expired cert, and a protocol-downgraded server. The client **must refuse every
 one of them**: accepting any is a MitM hole.
+
+Inbound (`mtls` phase): the audit itself becomes the client and dials WFX
+directly, which runs this whole suite with `client_ca_path` set. A connection
+with no client cert, an untrusted-CA cert, a self-signed cert, an expired cert,
+or a leaf whose intermediate WFX was never given **must all be refused** -
+accepting any of them turns "client cert required" into decoration.
 
 ## Scope: this suite vs `tests/endpoint_audit`
 
@@ -64,6 +73,23 @@ never be delivered as a complete response, and (`resumption` phase) verifying th
 outbound client actually resumes a cached TLS session after a forced reconnect,
 not just that it completes handshakes.
 
+### Inbound (`mtls` phase)
+
+The whole suite runs with `client_ca_path` set, so this table is what the audit
+itself presents back to WFX. `client-good` is the default for every call in
+every other phase (see `tls_send()`) - without it, this suite's entire non-mtls
+corpus would fail at the handshake, not just this phase.
+
+| Client cert | Signed by | WFX must |
+|---|---|---|
+| `client-good` | trusted CA (mkcert root) | **accept** |
+| *(none)* | - | **refuse** (`SSL_VERIFY_FAIL_IF_NO_PEER_CERT`) |
+| `client-otherca` | a different, untrusted CA | **refuse** |
+| `client-selfsigned` | itself | **refuse** |
+| `client-expired` | trusted CA, `notAfter` in the past | **refuse** |
+| `client-viaint` (leaf only) | an intermediate WFX was never given | **refuse** (can't build the chain) |
+| `client-viaint` + intermediate | same intermediate, sent alongside the leaf | **accept** |
+
 ## Run
 
 ```bash
@@ -76,7 +102,7 @@ python3 tls_audit.py --list-phases        # list phases and exit
 python3 tls_audit.py --ci                 # no colors, GitHub Actions log groups and error annotations
 ```
 
-Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resource`, `resumption`, `upgrade`.
+Phases: `handshake`, `verify`, `protocol`, `mtls`, `framing`, `desync`, `inject`, `resource`, `resumption`, `upgrade`.
 
 ### What it does
 
@@ -84,21 +110,25 @@ Phases: `handshake`, `verify`, `protocol`, `framing`, `desync`, `inject`, `resou
    `selfsigned` via **openssl** (self-signed), `expired` via **openssl** signed by
    the mkcert CA with `-days -1` (backdated `notAfter`; portable across OpenSSL
    versions, unlike the `-not_before`/`-not_after` flags which are OpenSSL-3+ only).
-   `tls12` reuses the `good` cert with the mock server capped at TLS 1.2.
+   `tls12` reuses the `good` cert with the mock server capped at TLS 1.2. The same
+   mkcert CA also signs the `client-*` certs for the `mtls` phase (`client-good`,
+   `client-expired`, `client-viaint` + a throwaway intermediate); `client-otherca`
+   and `client-selfsigned` are rolled independently, on purpose.
 2. Pins the WFX client's `outbound_ca_path` directly at the mkcert root CA file
    (instead of leaving it empty and relying on `mkcert -install` having reached
    the OS's OpenSSL trust store, which needs sudo on Linux and may silently not
    happen). This makes `good`'s "must accept" outcome deterministic without
    weakening any refusal test: hostname/expiry/downgrade checks are independent
-   of the trust anchor.
+   of the trust anchor. `client_ca_path` is pinned at the same root, turning
+   inbound mTLS on for the whole run.
 3. Boots the mock (one TLS listener per persona) and the app (`wfx run --use-https
    --https-port-override`), tailing WFX's worker/master logs and crash dumps
    **live** so a boot-time SIGSEGV prints as it happens, before revival truncates
    the log file. The mock's own stdout/stderr is streamed too (prefixed `[mock]`),
    so a listener that fails to bind or load its cert is visible immediately instead
    of silently masquerading as a WFX bug.
-4. Runs the handshake / verify / protocol / framing / desync / inject / resource /
-   resumption / upgrade phases over TLS.
+4. Runs the handshake / verify / protocol / mtls / framing / desync / inject /
+   resource / resumption / upgrade phases over TLS.
 
 ### Exit codes
 
