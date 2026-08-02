@@ -181,6 +181,29 @@ bool ClientCtx::IsAsyncOperation() const
     return asyncData.asyncComplete != nullptr;
 }
 
+bool ClientCtx::GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize, std::uint32_t minSize)
+{
+    const char* oldData = rwBuffer.GetReadData();
+
+    if(!rwBuffer.GrowReadBuffer(growSize, maxSize, minSize))
+        return false;
+
+    const char* newData = rwBuffer.GetReadData();
+    if(newData == oldData)
+        return true;
+
+    // requestInfo can be null this early (no header data parsed yet on a fresh connection) and-
+    // -path can still be its default/empty view (headers not fully parsed yet either), neither-
+    // -holds anything to rebase in that case
+    if(requestInfo && !requestInfo->path.empty()) {
+        const std::ptrdiff_t delta = newData - oldData;
+        requestInfo->path = std::string_view(requestInfo->path.data() + delta, requestInfo->path.size());
+        requestInfo->headers.RebasePointers(delta);
+    }
+
+    return true;
+}
+
 // vvv Endpoint Context Methods vvv
 void EndpointCtx::Reset()
 {

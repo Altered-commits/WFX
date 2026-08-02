@@ -26,8 +26,7 @@ bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from, std::siz
                   std::string_view& outLine);
 bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos);
 std::string_view Trim(std::string_view sv);
-bool PrepareForBody(ClientCtx* ctx, const char* data, HttpRequest& request, std::size_t headerEnd,
-                    std::size_t contentLen, std::uint32_t maxBufferSize);
+bool PrepareForBody(ClientCtx* ctx, std::size_t headerEnd, std::size_t contentLen, std::uint32_t maxBufferSize);
 
 // vvv Function definitions vvv
 HttpParseState Parse(ClientCtx* ctx)
@@ -134,7 +133,7 @@ HttpParseState Parse(ClientCtx* ctx)
 
                 if(hasExpectHeader) {
                     // Set the state so the next time parser returns to this, it knows to parse body not header
-                    if(!PrepareForBody(ctx, data, request, headerEnd, contentLen, maxBufferSize))
+                    if(!PrepareForBody(ctx, headerEnd, contentLen, maxBufferSize))
                         return HttpParseState::PARSE_ERROR;
 
                     ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
@@ -149,7 +148,7 @@ HttpParseState Parse(ClientCtx* ctx)
                     // Still waiting for more body data
                     if(availableBody < contentLen) {
                         // In INCOMPLETE_BODY, this means: wait until ctx.dataLength >= trackBytes
-                        if(!PrepareForBody(ctx, data, request, headerEnd, contentLen, maxBufferSize))
+                        if(!PrepareForBody(ctx, headerEnd, contentLen, maxBufferSize))
                             return HttpParseState::PARSE_ERROR;
 
                         ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
@@ -305,27 +304,15 @@ bool ParseBody(const char* data, std::size_t size, std::size_t& pos, std::size_t
     return true;
 }
 
-bool PrepareForBody(ClientCtx* ctx, const char* data, HttpRequest& request, std::size_t headerEnd,
-                    std::size_t contentLen, std::uint32_t maxBufferSize)
+bool PrepareForBody(ClientCtx* ctx, std::size_t headerEnd, std::size_t contentLen, std::uint32_t maxBufferSize)
 {
     ctx->trackBytes = static_cast<std::uint32_t>(headerEnd + contentLen);
     ctx->expectedBodyLength = static_cast<std::uint32_t>(contentLen);
 
     // Grow to the final size in one step instead of however many 'growSize' increments the-
-    // -receive loop would take
-    if(!ctx->rwBuffer.GrowReadBuffer(1, maxBufferSize, ctx->trackBytes))
-        return false;
-
-    // request.path/headers were already parsed as views into 'data'; rebase them if the grow-
-    // -above just relocated the buffer
-    const char* newData = ctx->rwBuffer.GetReadData();
-    if(newData != data) {
-        const std::ptrdiff_t delta = newData - data;
-        request.path = std::string_view(request.path.data() + delta, request.path.size());
-        request.headers.RebasePointers(delta);
-    }
-
-    return true;
+    // -receive loop would take. 'ClientCtx::GrowReadBuffer' rebases request.path/headers itself-
+    // -if this relocates the buffer, so nothing further to do here
+    return ctx->GrowReadBuffer(1, maxBufferSize, ctx->trackBytes);
 }
 
 // vvv Helpers vvv

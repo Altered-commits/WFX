@@ -152,13 +152,7 @@ struct ConnectionTag {
 };
 
 // Per-stream entry for a multiplexed slot (mirrors CoalesceWaiter's shape below, including-
-// -the generationId staleness guard). Owned by EndpointCtx::pendingStreams; erased on-
-// -completion (parse() reports a non-zero completedKey for it). Only populated when the-
-// -endpoint's EndpointDesc::hasCapacity is set; non-multiplexed slots never touch this
-// Completion delivery reuses clientCtx->asyncData (set once by SendPayload), same as the-
-// -single-slot path and CoalesceWaiter, so no separate AsyncData copy is stored here. No-
-// -outputObj field: the protocol owns per-stream output internally and hands it over via-
-// -EndpointDesc::takeStreamOutput when the stream completes (or is abandoned early)
+// -the generationId staleness guard)
 struct PendingStream {
     ClientCtx* clientCtx = nullptr;
     void* parseState = nullptr;
@@ -287,6 +281,10 @@ public:
     ConnectionState GetConnectionState() const;
 
     bool IsAsyncOperation() const;
+
+    // Single entry point for growing 'rwBuffer's read side: a grow can relocate the buffer,-
+    // -invalidating any 'requestInfo->path'/'headers' views already parsed into it
+    bool GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize, std::uint32_t minSize = 0);
 };
 static_assert(sizeof(ClientCtx) <= 184, "'ClientCtx' must be <= 184 bytes");
 

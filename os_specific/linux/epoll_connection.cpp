@@ -124,8 +124,19 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
     while(true) {
         ValidRegion region = rwBuffer.GetWritableReadRegion();
         if(!region.ptr || region.len == 0) {
-            if(!rwBuffer.GrowReadBuffer(config_.networkConfig.readBufferIncSize,
-                                        config_.networkConfig.maxReadBufferSize)) {
+            // ClientCtx routes through its own GrowReadBuffer, which rebases anything the parser-
+            // -may have already pointed into the old buffer. This loop stays agnostic to what that-
+            // -is, it just defers to ClientCtx instead of touching rwBuffer directly for that case
+            const bool grew = [&] {
+                if constexpr(std::is_same_v<Ctx, ClientCtx>)
+                    return ctx->GrowReadBuffer(config_.networkConfig.readBufferIncSize,
+                                               config_.networkConfig.maxReadBufferSize);
+                else
+                    return rwBuffer.GrowReadBuffer(config_.networkConfig.readBufferIncSize,
+                                                   config_.networkConfig.maxReadBufferSize);
+            }();
+
+            if(!grew) {
                 // Fatal for one endless response, but not where bytes drain piece by piece
                 // Stop reading and leave the rest in the socket so TCP stalls the sender
                 if constexpr(std::is_same_v<Ctx, EndpointCtx>) {

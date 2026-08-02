@@ -23,10 +23,14 @@ max_connections              = 2000    # Max total concurrent connections (Round
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
+# Cranked wide open, same as the other three audits: every phase drives dozens of HTTPS
+# calls from the single test-runner IP (127.0.0.1), left at production-tight defaults this
+# self-throttles partway through the run and every later phase reads as a cascade of failures
+# indistinguishable from a real bug (is_ok()/is_err() can't tell "rate-limited" from "call failed")
 [IP]
-max_connections_per_ip       = 20      # Per-IP connection cap
-max_request_burst_per_ip     = 10      # Initial request tokens per IP
-max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
+max_connections_per_ip       = 512     # Single-IP (127.0.0.1) harness traffic must not be throttled
+max_request_burst_per_ip     = 512     # Initial request tokens per IP
+max_requests_per_ip_per_sec  = 512     # Refill rate (tokens per second per IP)
 
 [SSL]
 cert_path                   = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/good.pem"   # mkcert leaf cert (patched to absolute by the harness)
