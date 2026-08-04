@@ -255,7 +255,7 @@ private: // Helper Functions
 
     void Comma()
     {
-        std::uint64_t bit = 1ull << depth_;
+        const std::uint64_t bit = 1ull << depth_;
         if(commas_ & bit)
             Raw(",", 1);
 
@@ -358,13 +358,13 @@ private: // Helper Functions
                     // -JSON that strict parsers reject outright
                     auto uc = static_cast<unsigned char>(*p);
                     if(uc < 0x20) {
-                        static constexpr char hex[] = "0123456789abcdef";
+                        static constexpr char HEX[] = "0123456789abcdef";
                         uBuf[0] = '\\';
                         uBuf[1] = 'u';
                         uBuf[2] = '0';
                         uBuf[3] = '0';
-                        uBuf[4] = hex[(uc >> 4) & 0xF];
-                        uBuf[5] = hex[uc & 0xF];
+                        uBuf[4] = HEX[(uc >> 4) & 0xF];
+                        uBuf[5] = HEX[uc & 0xF];
                         esc = uBuf;
                         el = 6;
                     }

@@ -4,7 +4,7 @@
 #
 # WFX HttpEndpoint audit
 #
-# Boots a hostile mock upstream (upstream.py) and the WFX endpoint test app, then
+# Boots a hostile mock upstream (http_upstream.py) and the WFX endpoint test app, then
 # drives 150+ adversarial vectors THROUGH WFX at the mock and asserts the client-
 # side parser/serializer in include/wfx/endpoint/http.hpp behaves: never crashes,
 # never hangs past its timeout, never mis-frames one response into another, never
@@ -22,6 +22,8 @@
 import itertools
 import json
 import os
+import re
+import socket
 import subprocess
 import sys
 import threading
@@ -35,10 +37,18 @@ from common import net, term
 
 _green, _red, _yellow = term.green, term.red, term.yellow
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+
 # Mirrors EndpointStatus in shared/abis/types.hpp, keep in sync
 EP_SUCCESS           = 0
 EP_POOL_EXHAUSTED    = 6
-EP_INTERNAL          = 10   # parse / protocol error surfaces here
+EP_CONNECT_FAILURE   = 8
+EP_SSL_FAILURE       = 9
+EP_INTERNAL          = 10   # parse / protocol error surfaces here; also where SmtpOnConnect's
+                            # co_return EpFatal lands for every non-timeout handshake refusal
+                            # (bad cert, wrong AUTH creds, STARTTLS-stripping, ...): the coroutine
+                            # only ever returns EpReady/EpFatal, so the engine's generic connect-
+                            # -failure funnel is what classifies it, not a per-cause SMTP status
 EP_SERIALIZE         = 11
 EP_HANDSHAKE_TIMEOUT = 13
 EP_REQ_TIMEOUT       = 14
@@ -56,7 +66,7 @@ class Mock:
         self.proc = None
 
     def start(self):
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "upstream.py")
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "http_upstream.py")
         cmd = [sys.executable, script, "--host", self.cfg.host, "--port", str(self.cfg.up_port),
               "--proto-port", str(self.cfg.proto_port), "--sp-port", str(self.cfg.sp_port)]
         term.log("mock", "starting: %s" % " ".join(cmd))
@@ -139,6 +149,194 @@ class Mock:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
 
+# vvv SMTP mock (smtp_upstream.py), driving WFX::SmtpEndpoint vvv
+#
+# One persona per fixed port, mirroring tls_audit's PERSONAS table: (name, port, cert basename,
+# mock opts, expect). Every port and persona name here MUST match the WFX::SmtpEndpoint
+# declarations in app/src/main.cpp, they are compiled in, not passed on the command line
+SMTP_CONTROL_PORT = 8199
+
+SMTP_PERSONAS = [
+    # Happy paths
+    ("good",                8100, "good", {},                                          "accept"),
+    ("auth_login_only",     8101, "good", {"auth_mechanisms": "LOGIN"},                 "accept"),
+    # CVE-2011-0411 / CVE-2026-41319 class: plaintext spliced in right after the STARTTLS
+    # go-ahead. A correct client discards whatever's already buffered before the TLS wrap;
+    # anything still unread on the wire corrupts the handshake's own read and fails closed,
+    # so this is a refusal, not a transaction that goes through
+    ("inject",              8103, "good", {"inject": "MAIL FROM:<mitm@evil>\r\n"},       "refuse"),
+    # Handshake-phase refusals: server never offers STARTTLS, or protocol/cert/auth is hostile
+    ("no_starttls",         8102, "good",       {"starttls": "0"},           "refuse"),
+    ("selfsigned",          8104, "selfsigned", {},                          "refuse"),
+    ("wronghost",           8105, "wronghost",  {},                          "refuse"),
+    ("expired",             8106, "expired",    {},                         "refuse"),
+    ("auth_fail",           8107, "good",       {"auth_fail": "1"},          "refuse"),
+    ("no_auth_mechs",       8108, "good",       {"auth_mechanisms": ""},     "refuse"),
+    ("mismatched_code",     8109, "good",       {"mismatched_code": "1"},    "refuse"),
+    ("malformed_greeting",  8116, "good",       {"malformed_greeting": "1"}, "refuse"),
+    ("drop_greeting",       8117, "good",       {"drop_after": "greeting"},               "refuse"),
+    ("drop_pre_handshake",  8118, "good",       {"drop_after": "starttls_pre_handshake"}, "refuse"),
+    ("drop_starttls",       8119, "good",       {"drop_after": "starttls"},               "refuse"),
+    ("drop_auth",           8120, "good",       {"drop_after": "auth"},                   "refuse"),
+    ("drop_data_prompt",    8121, "good",       {"drop_after": "data_prompt"},            "refuse"),
+    # Hang/DoS-shaped personas: never complete on their own, only the client's own timeout
+    # ends these. Driven with the short-budget Smtp_hang endpoint (see main.cpp), not the
+    # default one, or each of these would cost a full connectTimeoutSeconds
+    ("flood_greeting",      8110, "good", {"flood_at": "greeting"},        "hang"),
+    ("flood_ehlo2",         8111, "good", {"flood_at": "ehlo2"},           "hang"),
+    ("huge_line_greeting",  8112, "good", {"huge_line_at": "greeting"},    "hang"),
+    ("huge_line_ehlo2",     8113, "good", {"huge_line_at": "ehlo2"},       "hang"),
+    ("slow_trickle",        8114, "good", {"slow_trickle": "0.05"},        "hang"),
+    ("silent_data",         8115, "good", {"silent_after": "DATA"},        "hang"),
+]
+
+def _ossl(args):
+    return subprocess.run(["openssl"] + args, capture_output=True, text=True)
+
+def smtp_persona_available(cfg, cert):
+    return cert in cfg.smtp_avail
+
+def ensure_smtp_certs(cfg):
+    """SMTP TLS certs for the STARTTLS mock: good / selfsigned / wronghost / expired, all plain
+    openssl (endpoint_audit has never depended on mkcert, and STARTTLS trust doesn't need a
+    browser-trusted cert, just one this suite's own CA signs). Every other persona above reuses
+    the 'good' cert, since they exercise protocol behavior rather than certificate trust."""
+    cd = cfg.cert_dir
+    os.makedirs(cd, exist_ok=True)
+
+    def p(x):
+        return os.path.join(cd, x)
+
+    ca_ok = _ossl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", p("ca-key.pem"),
+                   "-out", p("ca.pem"), "-days", "365", "-subj", "/CN=smtp-audit-test-ca",
+                   "-addext", "basicConstraints=critical,CA:true",
+                   "-addext", "keyUsage=critical,keyCertSign,cRLSign"]).returncode == 0
+    if not ca_ok:
+        raise RuntimeError("could not generate the SMTP audit's throwaway CA (openssl broken?)")
+    cfg.smtp_ca_path = p("ca.pem")
+
+    def sign(name, subj, san, days="365"):
+        csr, ext = p(name + ".csr"), p(name + "-ext.cnf")
+        with open(ext, "w") as f:
+            f.write("subjectAltName=%s\n" % san)
+        made_csr = _ossl(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", p(name + "-key.pem"),
+                          "-subj", subj, "-out", csr]).returncode == 0
+        signed = made_csr and _ossl(["x509", "-req", "-in", csr, "-CA", p("ca.pem"), "-CAkey", p("ca-key.pem"),
+                                     "-CAcreateserial", "-out", p(name + ".pem"), "-days", days,
+                                     "-extfile", ext]).returncode == 0
+        return signed and os.path.exists(p(name + ".pem"))
+
+    avail = set()
+    if sign("good", "/CN=127.0.0.1", "IP:127.0.0.1"):
+        avail.add("good")
+    if sign("wronghost", "/CN=evil.example", "DNS:evil.example"):
+        avail.add("wronghost")
+    # -days -1 backdates notAfter to yesterday: portable across OpenSSL versions, unlike
+    # -not_before/-not_after which are OpenSSL 3.0+ only (same trick tls_audit's ensure_certs uses)
+    if sign("expired", "/CN=127.0.0.1", "IP:127.0.0.1", days="-1"):
+        avail.add("expired")
+    if _ossl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", p("selfsigned-key.pem"),
+              "-out", p("selfsigned.pem"), "-days", "365", "-subj", "/CN=127.0.0.1",
+              "-addext", "subjectAltName=IP:127.0.0.1"]).returncode == 0:
+        avail.add("selfsigned")
+
+    term.log("smtp-certs", _green("personas available: %s" % ", ".join(sorted(avail))))
+    cfg.smtp_avail = avail
+    if "good" not in avail:
+        raise RuntimeError("could not generate the SMTP audit's 'good' cert")
+
+def patch_smtp_ssl_path(cfg):
+    """Points outbound_ca_path at the SMTP audit's throwaway CA so the 'good' persona's STARTTLS
+    cert is trusted. endpoint_audit's HTTP mock is plaintext, so this path is otherwise unused and
+    patching it doesn't weaken or affect any existing HTTP phase."""
+    toml = os.path.join(cfg.app_dir, "wfx.toml")
+    with open(toml) as f:
+        s = f.read()
+    s = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % cfg.smtp_ca_path, s)
+    with open(toml, "w") as f:
+        f.write(s)
+    term.log("patch", "outbound TLS CA trust -> %s" % cfg.smtp_ca_path)
+
+class SmtpMock:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.proc = None
+        self._reader = None
+        self.ports = {name: port for name, port, cert, opts, expect in SMTP_PERSONAS
+                     if smtp_persona_available(cfg, cert)}
+
+    def start(self):
+        cd = self.cfg.cert_dir
+        cmd = [sys.executable, os.path.join(HERE, "smtp_upstream.py"), "--host", self.cfg.host,
+              "--control-port", str(SMTP_CONTROL_PORT)]
+        for name, port, cert, opts, expect in SMTP_PERSONAS:
+            if not smtp_persona_available(self.cfg, cert):
+                continue
+            spec = "name=%s,port=%d,cert=%s,key=%s" % (name, port, os.path.join(cd, cert + ".pem"),
+                                                       os.path.join(cd, cert + "-key.pem"))
+            for k, v in opts.items():
+                spec += ",%s=%s" % (k, v)
+            cmd += ["--listen", spec]
+
+        term.log("smtp-mock", "starting %d SMTP listeners" % len(self.ports))
+        # Stream output instead of discarding it, same reasoning as tls_audit's Mock: a listener
+        # thread that fails to bind or load its cert prints a traceback, and swallowing that makes
+        # a broken TEST FIXTURE indistinguishable from a real WFX bug
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, bufsize=1)
+        self._reader = threading.Thread(target=self._drain, daemon=True)
+        self._reader.start()
+
+        good_port = self.ports.get("good", 8100)
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            try:
+                s = socket.create_connection((self.cfg.host, good_port), timeout=1.0)
+                s.close()
+                term.log("smtp-mock", _green("SMTP mock up"))
+                return
+            except OSError:
+                time.sleep(0.1)
+        raise RuntimeError("SMTP mock never came up on :%d, see [smtp-mock] output above" % good_port)
+
+    def _drain(self):
+        try:
+            for line in self.proc.stdout:
+                line = line.rstrip()
+                if line:
+                    print("%s %s" % (term.cyan("[smtp-mock]"), line), flush=True)
+        except (OSError, ValueError):
+            pass
+
+    def _control(self, cmd):
+        try:
+            s = socket.create_connection((self.cfg.host, SMTP_CONTROL_PORT), timeout=3.0)
+            s.sendall((cmd + "\n").encode())
+            buf = b""
+            while b"\n" not in buf:
+                d = s.recv(65536)
+                if not d:
+                    break
+                buf += d
+            s.close()
+            return json.loads(buf.split(b"\n", 1)[0].decode())
+        except (OSError, ValueError):
+            return {}
+
+    def stats(self, name):
+        return self._control("STATS %s" % name)
+
+    def reset(self, name):
+        self._control("RESET %s" % name)
+
+    def stop(self):
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+
 # Driving WFX
 # Staged responses are keyed by a unique id so a replay can never pick up a previous one
 _sid = itertools.count(1)
@@ -194,6 +392,44 @@ def inject(cfg, mode, body, ep="default"):
         return json.loads(_body_of(raw))
     except Exception:
         return None
+
+# /smtp/send + /smtp/inject: driving WFX::SmtpEndpoint. rtimeout defaults are generous on
+# purpose - the "hang" personas below only fail once WFX's own connectTimeoutSeconds/
+# requestTimeoutSeconds (5s each on the fast personas, see main.cpp's SmtpCfgFast) fires, and the
+# timeout timer itself only ticks once every 5s (INVOKE_TIMEOUT_COOLDOWN), so the observed wait
+# can run up to budget + one tick of slack
+def smtp_send(cfg, persona="good", from_addr=None, from_name=None, to_addr=None, to_name=None,
+              subject=None, reply_to=None, body=b"hello", rtimeout=20.0):
+    headers = {"X-Persona": persona}
+    for hdr, val in (("X-From", from_addr), ("X-FromName", from_name), ("X-To", to_addr),
+                     ("X-ToName", to_name), ("X-Subject", subject), ("X-ReplyTo", reply_to)):
+        if val is not None:
+            headers[hdr] = val
+    raw = raw_send(cfg.host, cfg.port, _build("POST", "/smtp/send", headers, body), rtimeout=rtimeout)
+    if not raw or _status_of(raw) != 200:
+        return None
+    try:
+        return json.loads(_body_of(raw))
+    except Exception:
+        return None
+
+def smtp_inject(cfg, field, payload, rtimeout=20.0):
+    raw = raw_send(cfg.host, cfg.port, _build("POST", "/smtp/inject", {"X-Field": field}, payload), rtimeout=rtimeout)
+    if not raw or _status_of(raw) != 200:
+        return None
+    try:
+        return json.loads(_body_of(raw))
+    except Exception:
+        return None
+
+def smtp_ok(r, stage="done"):
+    return bool(r) and r.get("ep") == EP_SUCCESS and r.get("stage") == stage
+
+def smtp_err(r):
+    return bool(r) and r.get("ep") != EP_SUCCESS
+
+def smtp_errc(r, code):
+    return bool(r) and r.get("ep") == code
 
 # /metrics: the per-endpoint metrics table (WFX::GetEndpointMetricsAt et al).
 # Several endpoint instances share the same host, so the metrics phase asserts on
@@ -1162,7 +1398,7 @@ def phase_lifecycle(ctx):
 # HttpEndpoint (every other phase) structurally cannot exercise any of this:
 # HTTP/1.1 has no connection handshake and no concept of concurrent requests
 # sharing one connection. app/src/main.cpp's ProtoGood/Bad/Slow/Reset instances
-# drive the raw primitive against proto_upstream.py's second listener instead
+# drive the raw primitive against http_upstream.py's second listener instead
 #
 # The two security-shaped guarantees this phase actually cares about:
 #   - a request must never be served over a connection whose handshake did not
@@ -1936,6 +2172,183 @@ def phase_abort(ctx):
           "r=%r old_conn=%d" % (r1, conn_before))
     p.check("worker healthy after never-responding-backend timeout", _wfx_healthy(cfg) and mock.ping())
 
+# vvv WFX::SmtpEndpoint phases vvv
+#
+# Every persona here is driven through /smtp/send or /smtp/inject against the smtp_upstream.py
+# mock (see SMTP_PERSONAS above). Refusal checks assert the exact EndpointStatus where the code
+# path is unambiguous (traced directly against os_specific/linux/epoll_connection.cpp, not
+# guessed): a co_return EpFatal from SmtpOnConnect with no timeout involved always surfaces as
+# EP_INTERNAL (the engine's generic connect-failure funnel, DisconnectReasonToStatus's default
+# case), a connect-phase hang surfaces as EP_HANDSHAKE_TIMEOUT, and a hang on an already-
+# -established connection (mid-transaction) surfaces as EP_REQ_TIMEOUT
+
+def _smtp_skip(p, label):
+    p.check(label + " (skipped, no cert)", True)
+
+def phase_smtp_handshake(ctx):
+    cfg, mock = ctx.cfg, ctx.smtp_mock
+    p = ctx.phase("smtp_handshake")
+
+    r = smtp_send(cfg, "good", body=b"hello world")
+    p.check("good: full transaction round-trips", smtp_ok(r), "r=%r" % r)
+    p.check("good: final SMTP code is 250", bool(r) and r.get("code") == 250, "r=%r" % r)
+
+    st = mock.stats("good")
+    p.check("good: mock recorded a completed TLS handshake", st.get("handshakes", 0) >= 1, "stats=%r" % st)
+    p.check("good: mock recorded a successful AUTH", st.get("auth_ok", 0) >= 1, "stats=%r" % st)
+
+    # RFC 5321 4.5.2 dot-stuffing round trip: a body line starting with '.' must survive the
+    # client's stuffing + the mock's un-stuffing byte-for-byte, not be swallowed as though it
+    # were the DATA terminator
+    mock.reset("good")
+    body = b"Hello\n.leading dot line\nEnd"
+    r2 = smtp_send(cfg, "good", body=body)
+    p.check("good: dot-stuffed body round-trips", smtp_ok(r2), "r=%r" % r2)
+    st2 = mock.stats("good")
+    bodies = st2.get("bodies", [])
+    p.check("good: mock received exactly one DATA body", len(bodies) == 1, "bodies=%r" % bodies)
+    got = bodies[-1] if bodies else ""
+    p.check("good: leading-dot line preserved, not swallowed as the terminator",
+          "\r\n.leading dot line\r\n" in got, "got=%r" % got)
+
+def phase_smtp_auth(ctx):
+    cfg, mock = ctx.cfg, ctx.smtp_mock
+    p = ctx.phase("smtp_auth")
+
+    r = smtp_send(cfg, "auth_login_only")
+    p.check("auth_login_only: AUTH LOGIN fallback succeeds when PLAIN isn't offered", smtp_ok(r), "r=%r" % r)
+    st = mock.stats("auth_login_only")
+    p.check("auth_login_only: mock recorded AUTH LOGIN success", st.get("auth_ok", 0) >= 1, "stats=%r" % st)
+
+    r = smtp_send(cfg, "auth_fail")
+    p.check("auth_fail: wrong credentials refused", smtp_errc(r, EP_INTERNAL), "r=%r" % r)
+    p.check("auth_fail: refused at the mail stage (handshake never completed)",
+          bool(r) and r.get("stage") == "mail", "r=%r" % r)
+    st = mock.stats("auth_fail")
+    p.check("auth_fail: mock recorded the failed AUTH", st.get("auth_fail", 0) >= 1, "stats=%r" % st)
+    p.check("auth_fail: client never treated it as authenticated", st.get("auth_ok", 0) == 0, "stats=%r" % st)
+
+    r = smtp_send(cfg, "no_auth_mechs")
+    p.check("no_auth_mechs: refused rather than falling back to an unimplemented mechanism",
+          smtp_errc(r, EP_INTERNAL), "r=%r" % r)
+
+def phase_smtp_starttls(ctx):
+    cfg, mock = ctx.cfg, ctx.smtp_mock
+    p = ctx.phase("smtp_starttls")
+
+    r = smtp_send(cfg, "no_starttls")
+    p.check("no_starttls: client never falls back to plaintext AUTH",
+          smtp_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+    st = mock.stats("no_starttls")
+    p.check("no_starttls: mock never even saw a TLS handshake attempt",
+          st.get("handshakes", 0) == 0, "stats=%r" % st)
+
+    # CVE-2011-0411 / CVE-2026-41319 class: plaintext spliced in right after the STARTTLS
+    # go-ahead. A correct client discards what's already buffered before the TLS wrap; anything
+    # still unread on the wire corrupts the handshake's own read and fails closed. The security
+    # bar is that the injected bytes are never trusted, not that the handshake survives them
+    mock.reset("inject")
+    r = smtp_send(cfg, "inject", body=b"still fine")
+    p.check("inject: fails closed rather than falling back to plaintext",
+          smtp_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+    st = mock.stats("inject")
+    p.check("inject: pre-TLS plaintext injection never reaches an authenticated session",
+          st.get("auth_ok", 0) == 0 and not st.get("bodies"), "stats=%r" % st, security=True)
+
+    r = smtp_send(cfg, "mismatched_code")
+    p.check("mismatched_code: spliced-response continuation line refused, not silently accepted",
+          smtp_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+
+    r = smtp_send(cfg, "malformed_greeting")
+    p.check("malformed_greeting: non-SMTP banner refused", smtp_errc(r, EP_INTERNAL), "r=%r" % r)
+
+def phase_smtp_certs(ctx):
+    cfg, mock = ctx.cfg, ctx.smtp_mock
+    p = ctx.phase("smtp_certs")
+    labels = {
+        "selfsigned": "untrusted self-signed STARTTLS cert refused",
+        "wronghost":  "hostname-mismatch STARTTLS cert refused",
+        "expired":    "expired STARTTLS cert refused",
+    }
+    for name, port, cert, opts, expect in SMTP_PERSONAS:
+        if name not in labels:
+            continue
+        if not smtp_persona_available(cfg, cert):
+            _smtp_skip(p, labels[name])
+            continue
+        r = smtp_send(cfg, name)
+        p.check(labels[name], smtp_err(r), "client ACCEPTED it (r=%r), MitM possible" % r, security=True)
+        st = mock.stats(name)
+        p.check(name + ": client bailed at the TLS layer", st.get("hs_fail", 0) >= 1,
+              "stats=%r (want at least one failed handshake)" % st, security=True)
+
+def phase_smtp_resource(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("smtp_resource")
+
+    # Connect-phase hangs: response flood / oversized unterminated lines / byte-at-a-time
+    # trickling across the whole handshake. Two legitimate ways this can resolve, both proving
+    # the client never actually hangs: LineResponse's own maxResponseLines/maxResponseLineBytes
+    # caps reject a malformed/oversized line fast (EP_INTERNAL, faster than any timeout), or -
+    # when the hostile stream doesn't trip those caps in time - connectTimeoutSeconds ends it
+    # (EP_HANDSHAKE_TIMEOUT). Which one fires is a race between two independent defenses, not
+    # something worth pinning down to one exact code
+    hang_handshake = ("flood_greeting", "flood_ehlo2", "huge_line_greeting", "huge_line_ehlo2", "slow_trickle")
+    for name in hang_handshake:
+        r = smtp_send(cfg, name, rtimeout=15.0)
+        p.check(name + ": hostile handshake refused rather than hanging forever",
+              smtp_errc(r, EP_INTERNAL) or smtp_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
+
+    # Post-connect hang: the mock authenticates normally, then goes silent forever the moment
+    # DATA arrives. requestTimeoutSeconds, not connectTimeoutSeconds, is what has to catch this
+    r = smtp_send(cfg, "silent_data", rtimeout=15.0)
+    p.check("silent_data: mid-transaction hang times out via requestTimeoutSeconds",
+          smtp_errc(r, EP_REQ_TIMEOUT), "r=%r" % r)
+    p.check("silent_data: times out at the data_start stage",
+          bool(r) and r.get("stage") == "data_start", "r=%r" % r)
+
+def phase_smtp_drops(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("smtp_drops")
+
+    handshake_drops = ("drop_greeting", "drop_pre_handshake", "drop_starttls", "drop_auth")
+    for name in handshake_drops:
+        r = smtp_send(cfg, name)
+        p.check(name + ": abrupt close during the handshake refused cleanly",
+              smtp_errc(r, EP_INTERNAL), "r=%r" % r)
+        p.check(name + ": refused at the mail stage", bool(r) and r.get("stage") == "mail", "r=%r" % r)
+
+    # Drops after DATA's "354 go-ahead" but before the body is sent: the handshake and MAIL/
+    # RCPT both already succeeded, this is a live-connection drop, not a connect failure
+    r = smtp_send(cfg, "drop_data_prompt")
+    p.check("drop_data_prompt: abrupt close after the DATA prompt refused, not hung",
+          smtp_err(r), "r=%r" % r)
+
+def phase_smtp_inject(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("smtp_inject")
+
+    vectors = {
+        "mailfrom": b"attacker@evil.com>\r\nRCPT TO:<victim@x>\r\nDATA\r\nsmuggled\r\n.\r\nMAIL FROM:<x",
+        "rcptto":   b"victim@x>\r\nDATA\r\nsmuggled\r\n.\r\nMAIL FROM:<x",
+        "fromname": b"Evil\r\nBcc: attacker@evil.com",
+        "toname":   b"Evil\r\nBcc: attacker@evil.com",
+        "subject":  b"innocuous\r\nBcc: attacker@evil.com",
+        "replyto":  b"attacker@evil.com\r\nBcc: attacker@evil.com",
+        "body":     b"line one\x00line two", # NUL only, CR/LF is legitimate body line structure
+    }
+    for field, payload in vectors.items():
+        r = smtp_inject(cfg, field, payload)
+        p.check(field + ": CR/LF/NUL injection refused at the serializer",
+              smtp_errc(r, EP_SERIALIZE), "r=%r" % r, security=True)
+
+    # heloName: operator config today, not per-request input, but screened anyway (see smtp.hpp's
+    # SmtpOnConnect comment) - CPython's smtplib had a real CVE through this exact parameter
+    # (local_hostname, bpo-30585). A poisoned heloName must never even open the connection
+    r = smtp_send(cfg, "heloinject", rtimeout=10.0)
+    p.check("heloName: CRLF-poisoned EHLO identity refused before any byte reaches the wire",
+          smtp_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+
 class EndpointAudit(common.Suite):
     name = "endpoint_audit"
     description = "WFX HttpEndpoint audit"
@@ -1961,6 +2374,13 @@ class EndpointAudit(common.Suite):
         "upgrade":    phase_upgrade,
         "metrics":    phase_metrics,
         "abort":      phase_abort,
+        "smtp_handshake": phase_smtp_handshake,
+        "smtp_auth":      phase_smtp_auth,
+        "smtp_starttls":  phase_smtp_starttls,
+        "smtp_certs":     phase_smtp_certs,
+        "smtp_resource":  phase_smtp_resource,
+        "smtp_drops":     phase_smtp_drops,
+        "smtp_inject":    phase_smtp_inject,
     }
 
     def add_arguments(self, parser):
@@ -1984,9 +2404,15 @@ class EndpointAudit(common.Suite):
                 term.log("runner", _yellow("NOTE: %s=%d must match %s (default %d), the port is baked in "
                                         "at compile time" % (flag, port, source, default)))
 
+        cfg.cert_dir = os.path.join(HERE, "certs")
+        ensure_smtp_certs(cfg)
+        patch_smtp_ssl_path(cfg)
+
     def setup(self, ctx):
         ctx.resources["mock"] = Mock(ctx.cfg)
         ctx.mock.start()
+        ctx.resources["smtp_mock"] = SmtpMock(ctx.cfg)
+        ctx.smtp_mock.start()
 
     def before_phases(self, ctx):
         cfg, mock = ctx.cfg, ctx.mock
@@ -2012,6 +2438,8 @@ class EndpointAudit(common.Suite):
     def teardown(self, ctx):
         if "mock" in ctx.resources:
             ctx.mock.stop()
+        if "smtp_mock" in ctx.resources:
+            ctx.smtp_mock.stop()
 
 if __name__ == "__main__":
     common.run(EndpointAudit)

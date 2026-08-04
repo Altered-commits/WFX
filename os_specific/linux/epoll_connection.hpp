@@ -104,7 +104,7 @@ public: // Endpoint operations
     EndpointStatus StreamNextImpl(ClientCtx* clientCtx, const void* req);
     const void* StreamChunk(ClientCtx* clientCtx) override;
     void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, AsyncData asyncData) override;
-    void SlotReceive(EndpointCtx* slotCtx, AsyncData asyncData) override;
+    void SlotReceive(EndpointCtx* slotCtx, std::uint32_t consumed, AsyncData asyncData) override;
     void SlotUpgradeTls(EndpointCtx* slotCtx, AsyncData asyncData) override;
     StringView NegotiatedProtocol(EndpointCtx* slotCtx) override;
     void Close(EndpointCtx* ctx, bool forceClose = false, DisconnectReason reason = DisconnectReason::ERROR) override;

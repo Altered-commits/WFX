@@ -13,14 +13,14 @@ template <typename T> struct [[nodiscard]] Task {
     using promise_type = Promise<T>;
     using HandleType = std::coroutine_handle<promise_type>;
 
-    HandleType handle_;
+    HandleType handle;
 
 public:
-    Task(HandleType h) : handle_(h)
+    Task(HandleType h) : handle(h)
     {}
-    Task(Task&& o) noexcept : handle_(o.handle_)
+    Task(Task&& o) noexcept : handle(o.handle)
     {
-        o.handle_ = nullptr;
+        o.handle = nullptr;
     }
     ~Task() = default;
 
@@ -31,31 +31,34 @@ public:
 public:
     void Resume()
     {
-        if(handle_ && !handle_.done())
-            handle_.resume();
+        if(handle && !handle.done())
+            handle.resume();
     }
 
     void SetCompletion(AsyncCompleteFn cb, void* ud)
     {
-        if(handle_) {
-            handle_.promise().onDone_ = cb;
-            handle_.promise().onDoneUd_ = ud;
+        if(handle) {
+            handle.promise().onDone = cb;
+            handle.promise().onDoneUd = ud;
         }
     }
 };
 
 // 'get_return_object' definitions
+// NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
 inline Task<void> Promise<void>::get_return_object()
 {
     return Task<void>{std::coroutine_handle<Promise<void>>::from_promise(*this)};
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
 inline Task<Shared::MiddlewareAction> Promise<Shared::MiddlewareAction>::get_return_object()
 {
     return Task<Shared::MiddlewareAction>{
         std::coroutine_handle<Promise<Shared::MiddlewareAction>>::from_promise(*this)};
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
 inline Task<Shared::ConnectResult> Promise<Shared::ConnectResult>::get_return_object()
 {
     return Task<Shared::ConnectResult>{std::coroutine_handle<Promise<Shared::ConnectResult>>::from_promise(*this)};

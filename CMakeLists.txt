@@ -185,6 +185,28 @@ target_link_libraries(wfx PRIVATE
 )
 
 # -----------------------------
+# Header completeness check (include/misc/header_check.cpp)
+#
+# Nothing under engine/, http/, os_specific/, etc. ever includes include/wfx/*. Those exist
+# purely for user .so builds and tests/*/app/ is excluded from scripts/tidy.sh's file scan
+# (it only walks *.cpp outside tests/). Without a real translation unit somewhere else, neither
+# the compiler nor clang-tidy ever actually see that code. This target exists only so both do,
+# compiled the same way a real user .so sees it: WFX_ENGINE_BUILD is deliberately NOT defined
+# for it, unlike the wfx target above.
+#
+# EXCLUDE_FROM_ALL: compile_commands.json (what tidy.sh needs) is emitted at CMake CONFIGURE
+# time for every target regardless of this flag, so this only has to exist, not be built by
+# default. Without it, a plain './scripts/install.sh' (cmake --build with no --target) would
+# compile this too, on every install, for a target nothing ever links against. Build it
+# on demand with 'cmake --build build --target wfx_header_check' to actually verify it compiles.
+# -----------------------------
+add_library(wfx_header_check OBJECT EXCLUDE_FROM_ALL include/misc/header_check.cpp)
+target_include_directories(wfx_header_check PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+# -----------------------------
 # Build summary
 # -----------------------------
 message(STATUS "==================== WFX Build Summary ====================")

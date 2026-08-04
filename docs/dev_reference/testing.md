@@ -97,7 +97,7 @@ would report a false-positive "leak."
     Single entry point for running one or all audits, locally or from CI.
 
 - `tests/base_audit/`, `tests/endpoint_audit/`, `tests/tls_audit/`, `tests/crypto_audit/`  
-    One audit each: the harness script, its own `README.md`, its `app/` test project, and (for `endpoint_audit`/`tls_audit`) a mock upstream script (`upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
+    One audit each: the harness script, its own `README.md`, its `app/` test project, and (for `endpoint_audit`/`tls_audit`) one or more mock upstream scripts (`http_upstream.py` / `smtp_upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
 
 - `.github/workflows/audit_check.yml`  
     Downloads the `wfx` binary artifact from `compile_check.yml` and runs the four audits as a parallel CI matrix.

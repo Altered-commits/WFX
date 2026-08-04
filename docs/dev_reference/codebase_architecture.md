@@ -76,7 +76,7 @@ This page describes the top-level layout of the WFX repository.
     - `install.sh` - Installs WFX to `~/.wfx`, builds / updates from source, and adds the binary to PATH. `--local-debug` (contributor mode) symlinks `~/.wfx/src` to the checkout and builds Debug with ASan+UBSan on; `--local-release` does the same symlink but builds an optimized Release with sanitizers off (perf testing); the plain end-user path (no flags) does a real clone and an optimized Release build.
     - `uninstall.sh` - Removes `~/.wfx` entirely and cleans up PATH entries from shell configs.
     - `format.sh` - Runs clang-format across the codebase. Supports `--dry-run` for CI validation and `--files` for targeted formatting.
-    - `tidy.sh` - Runs clang-tidy static analysis, self-caching results (`tidy_cache.py`) and parallelized across jobs. Supports `--changed` (only files changed vs `main`) and `--fix` (apply auto-fixes).
+    - `tidy.sh` - Runs clang-tidy static analysis, self-caching results (`py/tidy_cache.py`) and parallelized across jobs. Supports `--changed` (only files changed vs `main`) and `--fix` (apply auto-fixes).
 
 - `.ciignore`  
     Defines file patterns that do not trigger CI when changed. Works together with `filter_check.yml`. If every file changed in a commit matches a pattern in this file, the build is skipped.

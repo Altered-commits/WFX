@@ -1010,14 +1010,14 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
         auto& rwBuf = slotCtx->rwBuffer;
         if(!rwBuf.IsWriteInitialized() && !rwBuf.InitWriteBuffer(config_.networkConfig.maxSendBufferSize)) {
             FinalizeEndpointRequest(slotCtx, meta, false);
-            ReleaseEndpoint(slotCtx);
+            Close(slotCtx, true);
             return EndpointStatus::BUFFER_ERROR;
         }
 
         const EndpointStatus sr = SerializeSingleSlot(slotCtx, meta, req);
         if(sr != EndpointStatus::SUCCESS) {
             FinalizeEndpointRequest(slotCtx, meta, false);
-            ReleaseEndpoint(slotCtx);
+            Close(slotCtx, true);
             return sr;
         }
 
@@ -1238,13 +1238,33 @@ void EpollConnectionHandler::SlotSend(EndpointCtx* slotCtx, const void* data, st
     }
 }
 
-void EpollConnectionHandler::SlotReceive(EndpointCtx* slotCtx, AsyncData asyncData)
+void EpollConnectionHandler::SlotReceive(EndpointCtx* slotCtx, std::uint32_t consumed, AsyncData asyncData)
 {
     auto fireFailure = [&](SlotStatus status) {
         const AsyncResult fail{nullptr, 0, {.slotStatus = status}, AsyncStatus::IO_FAILURE};
         if(asyncData.asyncComplete)
             asyncData.asyncComplete(asyncData.userData, fail);
     };
+
+    // Trims bytes already used out of the PREVIOUS Receive() result, so a multi-round-trip-
+    // -handshake doesn't get the same response redelivered. Kept local rather than calling-
+    // -ConsumeParsedBytes: that helper Close()s the slot on a bad value, here fireFailure does
+    if(consumed > 0) {
+        auto& rwBuf = slotCtx->rwBuffer;
+        auto* readMeta = rwBuf.GetReadMeta();
+
+        if(consumed > readMeta->dataLength) {
+            logger_.Error("[Epoll]: 'SlotReceive' consumed=", consumed, " exceeds dataLength=", readMeta->dataLength);
+            fireFailure(SlotStatus::IO_ERROR);
+            return;
+        }
+
+        const std::uint32_t remaining = readMeta->dataLength - consumed;
+        if(remaining > 0)
+            std::memmove(rwBuf.GetReadData(), rwBuf.GetReadData() + consumed, remaining);
+
+        readMeta->dataLength = remaining;
+    }
 
     // EnsureReadReady closes the slot on allocation failure, but the caller's coroutine is-
     // -suspended waiting on this asyncData: without firing it here that coroutine never resumes
@@ -1294,6 +1314,10 @@ void EpollConnectionHandler::SlotUpgradeTls(EndpointCtx* slotCtx, AsyncData asyn
         return;
     }
 
+    // Discards whatever's left in rwBuffer from the previous SlotReceive() call (e.g. the "220"-
+    // -line's unconsumed tail), so it can't be replayed as though it arrived after the upgrade
+    slotCtx->rwBuffer.ClearReadBuffer();
+
     slotCtx->sslConn =
         sslHandler_->WrapClient(slotCtx->socket, meta.hostname.c_str(),
                                 std::string_view{meta.config.alpnProtocols.data, meta.config.alpnProtocols.length},
@@ -1306,12 +1330,6 @@ void EpollConnectionHandler::SlotUpgradeTls(EndpointCtx* slotCtx, AsyncData asyn
     }
 
     slotCtx->SetEndpointState(EndpointState::ENDPOINT_SECURE);
-
-    // Discard everything buffered before the upgrade (CVE-2011-0411 / CVE-2026-41319). A MITM can-
-    // -append plaintext after the server's go-ahead byte; carrying those bytes across the upgrade-
-    // -would let them be parsed afterwards as though the authenticated peer had sent them. Anything-
-    // -legitimately pending at this point is a protocol violation by the server anyway
-    slotCtx->rwBuffer.ClearReadBuffer();
 
     // Park on the handshake state and let HandleEndpointHandshake drive it to completion, rather-
     // -than stepping it here: that keeps one handshake implementation, and avoids resuming the-

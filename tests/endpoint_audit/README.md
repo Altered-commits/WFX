@@ -1,11 +1,12 @@
 # WFX Endpoint Audit
 
 Adversarial correctness and security testing for **outbound** connections:
-`WFX::HttpEndpoint`, and the raw `WFX::Endpoint<>` primitive it's built on
-(`include/wfx/endpoint/base.hpp`, `include/wfx/endpoint/http.hpp`).
+`WFX::HttpEndpoint`, `WFX::SmtpEndpoint`, and the raw `WFX::Endpoint<>`
+primitive they're both built on (`include/wfx/endpoint/base.hpp`,
+`include/wfx/endpoint/http.hpp`, `include/wfx/endpoint/smtp.hpp`).
 
 Where `tests/base_audit` tortures WFX as an inbound **server**, this suite
-tortures it as a **client**, in two parts:
+tortures it as a **client**, in four parts:
 
 - **HTTP/1.1** (`WFX::HttpEndpoint`): stands up a fully hostile upstream and
   fires 300+ attack vectors *through* WFX at it, asserting the client-side
@@ -13,6 +14,12 @@ tortures it as a **client**, in two parts:
   mis-frames one response into the next, never smuggles a request, never leaks
   one request's data into another, and never lets a malicious upstream poison a
   pooled keep-alive connection.
+- **SMTP** (`WFX::SmtpEndpoint`): drives full `EHLO`/`STARTTLS`/`EHLO`/`AUTH`/
+  `MAIL`/`RCPT`/`DATA` transactions against a second, dedicated hostile mock
+  (one listener per persona), covering the handshake state machine, both AUTH
+  mechanisms, STARTTLS injection/downgrade attacks, cert rejection, connect-
+  and mid-transaction hangs, abrupt drops at every handshake stage, and
+  CR/LF/NUL injection through every caller-supplied field.
 - **Raw protocol** (`WFX::Endpoint<>` directly): HTTP/1.1 has no connection
   handshake and no concept of concurrent requests sharing one connection, so a
   second, tiny hand-rolled protocol drives `onConnect`, `onDisconnect`, and
@@ -51,6 +58,13 @@ plaintext so it needs no certificates.
 The rule of thumb: if a vector needs a handshake to *succeed*, it lives in
 `tls_audit`; if it only needs one to be *attempted*, it lives here.
 
+`WFX::SmtpEndpoint`'s STARTTLS surface doesn't fit that split: it's an
+in-band upgrade of an already-open plaintext connection, never TLS from the
+first byte, so it never matches `tls_audit`'s `EpTlsRequire` model in the
+first place. Its whole TLS surface, including certificate rejection
+(`smtp_certs`), lives entirely in this suite instead, using `smtp_upstream.py`'s
+own cert generation rather than `tls_audit`'s.
+
 The suite deliberately thinks like an attacker: beyond the legal-matrix and
 malformed-input corpora, it drives request smuggling, CRLF injection,
 keep-alive **poisoning** (via oversized bodies, chunked framing, and no-body
@@ -88,7 +102,7 @@ python3 endpoint_audit.py --ci
 
 The runner:
 
-1. launches `upstream.py` (the hostile mock) on `127.0.0.1:8091`, plus its
+1. launches `http_upstream.py` (the hostile mock) on `127.0.0.1:8091`, plus its
    second raw-protocol listener on `127.0.0.1:8092`,
 2. `wfx run app --detach` (builds and boots the client app),
 3. drives every vector through WFX and collects findings,
@@ -129,15 +143,16 @@ The runner:
 |------|---------|
 | `0` | All vectors passed |
 | `1` | Correctness failure, or the WFX worker died during the run |
-| `2` | **Security** finding: a desync, response-smuggle, request-injection, auth-bypass, or multiplex-bleed defeat |
+| `2` | **Security** finding: a desync, response-smuggle, request-injection, auth-bypass, STARTTLS injection/downgrade, or multiplex-bleed defeat |
 
 ---
 
 ## Architecture
 
 ```
-audit (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)  --HTTP--------> mock: upstream.py
-        |                             WFX app (/proto/*)       --raw proto--> mock: proto listener
+audit (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)     --HTTP------> mock: http_upstream.py
+        |                             WFX app (/proto/*)          --raw proto-> mock: proto listener
+        |                             WFX app (/smtp/send, /inject) --SMTP----> mock: smtp_upstream.py (one listener per persona)
         +----------------- stages raw response bytes, reads counters ---------------+
 ```
 
@@ -166,7 +181,20 @@ audit (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)  --HTTP--------> mo
   (+ `/reset`) exposes per-`DisconnectReason` counters set from the app's own
   `onDisconnect` callback.
 
-- **`upstream.py`**: a deliberately thin, raw-socket **byte oracle**, with two
+  A third, separate pair drives `WFX::SmtpEndpoint`: `/smtp/send` (`X-Persona`
+  selects one of `SmtpEndpointOf`'s 24 instances, one per `smtp_upstream.py`
+  listener, `X-From`/`X-FromName`/`X-To`/`X-ToName`/`X-Subject`/`X-ReplyTo`
+  headers feed `DataBody`, the POST body is the message body so it can carry
+  raw CR/LF for dot-stuffing tests) drives a full `MAIL FROM`/`RCPT TO`/`DATA`
+  transaction end to end and reflects the result as JSON (`{"ep", "stage",
+  "code", "success"}`, `stage` is `"reserve"|"mail"|"rcpt"|"data_start"|
+  "data_body"|"done"`, pinpointing which command the failure happened on).
+  `/smtp/inject` (POST, `X-Field` selects which caller-supplied field the raw
+  request body is fed into) is the only way to smuggle raw CR/LF/NUL past
+  `SmtpTransaction`'s own typed methods, the same role `/inject` plays for
+  HTTP.
+
+- **`http_upstream.py`**: a deliberately thin, raw-socket **byte oracle**, with two
   listeners. The HTTP one (300+ attacks live in the audit; the mock just puts
   exact bytes on the wire) has these key primitives:
   - **staging**: the audit `POST`s an arbitrary raw response blob to
@@ -193,6 +221,21 @@ audit (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)  --HTTP--------> mo
   the multiplexing tests need. `/ctl/protoconns` (on the HTTP listener) counts
   connections accepted by this second listener.
 
+- **`smtp_upstream.py`**: unlike `http_upstream.py`'s single staged-response
+  model, hostility here is **one fixed listener per persona** (`SMTP_PERSONAS`
+  in the audit, one port each, all compiled into `app/src/main.cpp` as
+  separate `SmtpEndpoint` instances, see [`SMTP_PERSONAS`](endpoint_audit.py)
+  for the full table). Each listener runs the real greeting/`EHLO`/`STARTTLS`/
+  `EHLO`/`AUTH`/`MAIL`/`RCPT`/`DATA` state machine, with one option flipped:
+  refuse `STARTTLS`, splice plaintext right after the go-ahead, serve a
+  self-signed/hostname-mismatched/expired cert, fail `AUTH` on purpose, flood
+  or drip-feed a response to induce a hang, or drop the connection at a named
+  stage. A separate control listener (`127.0.0.1:8199`) answers `STATS
+  <persona>` / `RESET <persona>` with per-persona counters (`handshakes`,
+  `hs_fail`, `auth_ok`, `auth_fail`, `bodies`, ...), which is how the audit
+  proves not just that WFX *reacted* correctly but that the mock's own side
+  of the exchange got exactly as far as expected, no further.
+
 ---
 
 ## What gets attacked (phases)
@@ -218,6 +261,13 @@ audit (endpoint_audit.py) --HTTP--> WFX app (/call, /inject)  --HTTP--------> mo
 | **push** | Server-initiated messages on an idle slot (`onPush`) | pushes arriving while a request is in flight go to `parse()`, never `onPush`, a partial push parks instead of spinning or wedging the slot, a flood is drained incrementally rather than buffered whole, an undecodable push closes the slot and the endpoint recovers |
 | **streaming** | Bounded-memory chunked delivery (`Stream` / `StreamHandle`) | both `CHUNK_READY` families (server-driven and fetch-driven), a checksum over 200 chunks proving no chunk is dropped or duplicated, **peak RSS tracks one chunk, not the total**, abandonment mid-stream reclaims the slot, and two concurrent streams never cross-deliver |
 | **upgrade** | In-band TLS (`UpgradeToTLS`) | a server refusing the upgrade must fail closed when the protocol requires TLS, and upgrading an already-wrapped connection must be refused rather than wrapping twice. The plaintext-discard half of this surface needs a real handshake, so it lives in `tls_audit` |
+| **smtp_handshake** | The full happy-path handshake and transaction | `good` persona round-trips a complete `MAIL`/`RCPT`/`DATA` transaction with a final 250, mock records a completed TLS handshake and successful AUTH, and a dot-stuffed body (a leading `.` line) survives client-side stuffing + mock-side un-stuffing byte-for-byte, not swallowed as the `DATA` terminator |
+| **smtp_auth** | `AUTH PLAIN` / `AUTH LOGIN` selection and failure | `AUTH LOGIN` fallback succeeds when the server doesn't offer `PLAIN`, wrong credentials are refused at the mail stage with the mock recording the failed AUTH and never an AUTH success, and a server offering neither implemented mechanism is refused rather than the client guessing at CRAM-MD5 or similar |
+| **smtp_starttls** | STARTTLS enforcement and **injection/downgrade** (security) | a server that never advertises `STARTTLS` never gets a plaintext `AUTH` fallback (mock never even sees a handshake attempt), the CVE-2011-0411/CVE-2026-41319-class `inject` persona (plaintext spliced in right after the `"220 Ready to start TLS"` go-ahead) fails closed and the injected bytes never reach an authenticated session, a spliced-response continuation line with a mismatched status code is refused rather than silently accepted, and a non-SMTP banner is refused |
+| **smtp_certs** | STARTTLS certificate rejection (security) | untrusted self-signed, hostname-mismatched, and expired certs are all refused, with the mock confirming the client actually bailed at the TLS layer (a failed handshake recorded on the mock's side, not just a client-side error code) |
+| **smtp_resource** | Handshake and mid-transaction hangs never block forever | a response flood, an oversized unterminated line, and byte-at-a-time trickling during the handshake all resolve via either `LineResponse`'s own line/line-count caps or `connectTimeoutSeconds`, whichever fires first; a mock that authenticates normally then goes silent forever on `DATA` is caught by `requestTimeoutSeconds` instead |
+| **smtp_drops** | Abrupt disconnects at every handshake stage | a drop after the greeting, before the handshake, mid-STARTTLS, or mid-AUTH is refused cleanly at the mail stage; a drop after `DATA`'s `354` go-ahead (handshake and MAIL/RCPT already succeeded) is a live-connection failure, not a connect failure, and is refused without hanging |
+| **smtp_inject** | CR/LF/NUL injection through every caller-supplied field (security) | `MailFrom`/`RcptTo`/`DataBody`'s `fromName`/`toName`/`subject`/`replyTo`/`body` fields and the operator-configured `heloName` are all screened and rejected at the serializer before a single byte reaches the wire, the same SMTP analogue of HTTP header/request-line injection `serialize`'s vectors cover for the HTTP path |
 
 Vectors marked **security** in the report cause exit code `2` if they trip: a
 tripped desync, smuggle, injection, bleed, leak, or auth-bypass means a

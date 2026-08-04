@@ -346,7 +346,7 @@ struct HttpConnectionHandler {
     virtual Shared::EndpointStatus SendPayload(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
                                                Shared::AsyncData asyncData, std::uint64_t pinnedSlot = 0) = 0;
     virtual void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, Shared::AsyncData asyncData) = 0;
-    virtual void SlotReceive(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
+    virtual void SlotReceive(EndpointCtx* slotCtx, std::uint32_t consumed, Shared::AsyncData asyncData) = 0;
     virtual void SlotUpgradeTls(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
     virtual std::uint64_t ReserveSlot(std::uint16_t endpointIdx) = 0;
     virtual void ReleaseSlot(std::uint64_t pinnedSlot) = 0;

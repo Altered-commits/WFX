@@ -178,10 +178,12 @@ public: // Main Functions
         return entries_.empty();
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - range-based for requires this exact spelling
     auto begin() const noexcept
     {
         return entries_.begin();
     }
+    // NOLINTNEXTLINE(readability-identifier-naming) - range-based for requires this exact spelling
     auto end() const noexcept
     {
         return entries_.end();

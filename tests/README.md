@@ -52,7 +52,7 @@ tests/
   run_audits.sh       single entry point
   <name>_audit/
     <name>_audit.py   the suite
-    upstream.py       mock backend, if it needs one
+    <protocol>_upstream.py  mock backend, if it needs one
     app/              the WFX app under test (C++)
     README.md         what this suite covers and why
 ```

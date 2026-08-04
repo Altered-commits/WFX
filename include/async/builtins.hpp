@@ -18,17 +18,19 @@ public:
     {}
 
 public:
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
-        handle_ = h;
+        handle = h;
 
         // Passed by engine, guaranteed
         void* connCtx = Core::HttpApiExt1()->getGlobalPtrData();
-        bool scheduled = Core::AsyncApiExt1()->registerAsyncTimer(connCtx, delayMs, {this, OnComplete, OnDestroy});
+        const bool scheduled =
+            Core::AsyncApiExt1()->registerAsyncTimer(connCtx, delayMs, {this, OnComplete, OnDestroy});
 
         // On failure, resume the coroutine so user can handle the error
         if(!scheduled) {
-            result_.status = WFX::Shared::AsyncStatus::TIMER_FAILURE;
+            result.status = WFX::Shared::AsyncStatus::TIMER_FAILURE;
             return false;
         }
 
@@ -37,9 +39,10 @@ public:
     }
 
     // Return status
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     AsyncStatus await_resume() const noexcept
     {
-        return result_.status;
+        return result.status;
     }
 };
 
@@ -70,22 +73,28 @@ public:
         : AwaitableBase{}, slotInternal(impl), data(d), size(s)
     {}
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
-        handle_ = h;
+        handle = h;
         Core::EndpointApiExt1()->slotSend(slotInternal, data, size, {this, OnComplete, OnDestroy});
         return true;
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     Shared::SlotStatus await_resume() const noexcept
     {
-        return ResolveSlotStatus(result_);
+        return ResolveSlotStatus(result);
     }
 };
 
-// co_await handle.Receive() inside onConnect coroutines
+// co_await handle.Receive(consumed) inside onConnect coroutines
 // Suspends the coroutine, arms the slot for the next read, resumes when data arrives
 // Buffer pointer is only valid until the next SlotReceive call
+//
+// 'consumed' trims that many bytes off the front of the read buffer first: how much of the-
+// -PREVIOUS result was already used. Default 0. A handshake reading more than once (STARTTLS-
+// -EHLO/EHLO/AUTH, ...) must pass it, or the next call redelivers the same bytes
 struct SlotReceiveResult {
     Shared::SlotStatus status;
     const char* buf;
@@ -94,25 +103,29 @@ struct SlotReceiveResult {
 
 struct SlotReceiveAwaitable : public AwaitableBase<SlotReceiveAwaitable> {
     void* slotInternal;
+    std::uint32_t consumed;
 
 public:
-    explicit SlotReceiveAwaitable(void* impl) noexcept : AwaitableBase{}, slotInternal(impl)
+    explicit SlotReceiveAwaitable(void* impl, std::uint32_t consumedBytes = 0) noexcept
+        : AwaitableBase{}, slotInternal(impl), consumed(consumedBytes)
     {}
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
-        handle_ = h;
-        Core::EndpointApiExt1()->slotReceive(slotInternal, {this, OnComplete, OnDestroy});
+        handle = h;
+        Core::EndpointApiExt1()->slotReceive(slotInternal, consumed, {this, OnComplete, OnDestroy});
         return true;
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     SlotReceiveResult await_resume() const noexcept
     {
-        const Shared::SlotStatus status = ResolveSlotStatus(result_);
+        const Shared::SlotStatus status = ResolveSlotStatus(result);
         if(status != Shared::SlotStatus::OK)
             return {status, nullptr, 0};
 
-        return {status, static_cast<const char*>(result_.data), result_.dataLen};
+        return {status, static_cast<const char*>(result.data), result.dataLen};
     }
 };
 
@@ -126,16 +139,18 @@ public:
     explicit SlotUpgradeTlsAwaitable(void* impl) noexcept : AwaitableBase{}, slotInternal(impl)
     {}
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
-        handle_ = h;
+        handle = h;
         Core::EndpointApiExt1()->slotUpgradeTls(slotInternal, {this, OnComplete, OnDestroy});
         return true;
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     Shared::SlotStatus await_resume() const noexcept
     {
-        return ResolveSlotStatus(result_);
+        return ResolveSlotStatus(result);
     }
 };
 

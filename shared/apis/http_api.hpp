@@ -134,8 +134,11 @@ using StreamChunkApiFn = const void* (*)(void* clientCtx);
 // Slot-level operations, all valid only from inside an onConnect coroutine
 // slotUpgradeTls wraps a still-plaintext slot in TLS, for protocols that negotiate encryption-
 // -in-band (Postgres SSLRequest, SMTP STARTTLS, ...) instead of at connect time
+// slotReceive's 'consumed' is how many bytes of the PREVIOUS Receive() result the caller already-
+// -used; trimmed from the front of the read buffer before this read is armed, so a multi-round-
+// -trip handshake (STARTTLS EHLO/EHLO/AUTH, ...) never gets an earlier response redelivered
 using SlotSendApiFn = void (*)(void* endpointCtx, const void* data, std::uint32_t size, AsyncData onComplete);
-using SlotReceiveApiFn = void (*)(void* endpointCtx, AsyncData onComplete);
+using SlotReceiveApiFn = void (*)(void* endpointCtx, std::uint32_t consumed, AsyncData onComplete);
 using SlotUpgradeTlsApiFn = void (*)(void* endpointCtx, AsyncData onComplete);
 
 // Empty unless the slot is TLS and its handshake finished

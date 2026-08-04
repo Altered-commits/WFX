@@ -3,7 +3,7 @@
 //
 // Endpoint audit target. Unlike the inbound torture app, every route here turns
 // an *inbound* request into an *outbound* WFX::HttpEndpoint call against the
-// scriptable mock upstream (upstream.py, pinned at 127.0.0.1:UPSTREAM_PORT) and
+// scriptable mock upstream (http_upstream.py, pinned at 127.0.0.1:UPSTREAM_PORT) and
 // reflects the result back as JSON the harness can assert on:
 //
 //   { "ep": <EndpointStatus int>,          // 0 == SUCCESS, see shared/abis/types.hpp
@@ -30,16 +30,21 @@
 //
 // Further down (search "Raw-protocol endpoint") this file also drives the RAW
 // WFX::Endpoint<> primitive directly against a tiny hand-rolled text protocol
-// (proto_upstream.py's second listener, PROTO_UPSTREAM) to cover onConnect,
+// (http_upstream.py's second listener, PROTO_UPSTREAM) to cover onConnect,
 // onDisconnect, and multiplexing, three things HttpEndpoint structurally
 // cannot exercise, since HTTP/1.1 has no connection handshake and no concept
 // of concurrent requests sharing one connection.
+//
+// This file also drives WFX::SmtpEndpoint against a second, hostile mock (smtp_upstream.py,
+// one persona per fixed port) via /smtp/send and /smtp/inject. See the comment above each
+// route for its request/response shape.
 
 #include <wfx/http.hpp>
 #include <wfx/memory.hpp>
 #include <wfx/telemetry.hpp>
 #include <wfx/utils/hash.hpp>
 #include <wfx/endpoint/http.hpp>
+#include <wfx/endpoint/smtp.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -50,7 +55,7 @@
 #include <vector>
 
 // The mock upstream is pinned here at COMPILE time (HttpEndpoint bakes host:port
-// into the instance). The harness MUST launch upstream.py on this exact port; it
+// into the instance). The harness MUST launch http_upstream.py on this exact port; it
 // is also mirrored in endpoint_audit.py as UPSTREAM_PORT.
 #define UPSTREAM "127.0.0.1:8091"
 
@@ -166,8 +171,7 @@ inline const auto EpPrewarm = WFX::HttpEndpoint{UPSTREAM, WFX::HttpEndpointConfi
 // HttpEndpoint can't exercise any of this: HTTP/1.1 has no connection handshake
 // and no concept of concurrent requests sharing one connection. This section
 // drives the RAW WFX::Endpoint<> primitive directly against a tiny hand-rolled
-// text protocol spoken by proto_upstream.py (upstream.py's second listener,
-// PROTO_UPSTREAM):
+// text protocol spoken by http_upstream.py's second listener (PROTO_UPSTREAM):
 //
 //   - onConnect: a one-line "AUTH <token>\n" handshake, once per physical
 //     connection. "good" succeeds, "bad" is rejected, "slow" stalls past
@@ -450,7 +454,7 @@ const ProtoEp* ProtoEndpointOf(std::string_view name) noexcept
 } // namespace
 
 // ---------------------------------------------------------------------------
-// Third protocol ("SP"), spoken to upstream.py's sp listener on SP_UPSTREAM.
+// Third protocol ("SP"), spoken to http_upstream.py's sp listener on SP_UPSTREAM.
 //
 // Proto above sets hasCapacity, so it is permanently on the multiplexed path.
 // Slot pinning and streaming are single-slot-only by construction, and onPush
@@ -931,6 +935,106 @@ inline const SpAbortBadCloseEp SpAbortBadClose{
     }
 };
 
+// -----------------------------------------------------------------------
+// WFX::SmtpEndpoint against the hostile SMTP mock (smtp_upstream.py). One instance per
+// persona, port and name both compiled in here and mirrored in endpoint_audit.py's
+// SMTP_PERSONAS table, keep them in sync. Credentials match smtp_upstream.py's
+// _check_auth defaults.
+//
+// Two config budgets: SmtpCfg() for personas that fail (or succeed) immediately, SmtpCfgFast()
+// for the ones that never answer on their own (flood/huge-line/slow-trickle/silent-hang), so
+// those phases cost a few seconds each instead of the full default timeout.
+// -----------------------------------------------------------------------
+static WFX::SmtpEndpointConfig SmtpCfg(std::uint16_t connectTimeout = 8, std::uint16_t requestTimeout = 8) noexcept
+{
+    return WFX::SmtpEndpointConfig{
+        .connLimit             = 4,
+        .connectTimeoutSeconds = connectTimeout,
+        .requestTimeoutSeconds = requestTimeout,
+        .maxReconnectAttempts  = 0, // every call here is client-waited, background retry never applies
+        .username              = "audituser",
+        .password              = "audit-pass-123",
+        .heloName               = "endpoint-audit.wfx.test",
+    };
+}
+static WFX::SmtpEndpointConfig SmtpCfgFast() noexcept
+{
+    // 5, not lower: EndpointConfig.connectTimeoutSeconds/requestTimeoutSeconds must be >=
+    // INVOKE_TIMEOUT_COOLDOWN (5, the timeout timer's own tick period) or the engine refuses
+    // to boot (see epoll_connection.cpp's BuildEndpoint-time Fatal check)
+    return SmtpCfg(5, 5);
+}
+
+inline const auto Smtp_good               = WFX::SmtpEndpoint{"127.0.0.1:8100", SmtpCfg()};
+// Dedicated pool for /smtp/inject, same mock persona/port as Smtp_good but never touched by
+// /smtp/send. /smtp/send's "good" transactions never call Quit(), so a successful one leaves its
+// connection pooled and still alive (ReturnEndpointToPool); Begin() has no way to tell a pooled-
+// -alive slot from a genuinely fresh one, so phase_smtp_inject could silently inherit a connection
+// left over from phase_smtp_handshake's earlier /smtp/send "good" calls instead of a clean one
+inline const auto Smtp_good_injectroute   = WFX::SmtpEndpoint{"127.0.0.1:8100", SmtpCfg()};
+inline const auto Smtp_auth_login_only    = WFX::SmtpEndpoint{"127.0.0.1:8101", SmtpCfg()};
+inline const auto Smtp_inject             = WFX::SmtpEndpoint{"127.0.0.1:8103", SmtpCfg()};
+inline const auto Smtp_no_starttls        = WFX::SmtpEndpoint{"127.0.0.1:8102", SmtpCfg()};
+inline const auto Smtp_selfsigned         = WFX::SmtpEndpoint{"127.0.0.1:8104", SmtpCfg()};
+inline const auto Smtp_wronghost          = WFX::SmtpEndpoint{"127.0.0.1:8105", SmtpCfg()};
+inline const auto Smtp_expired            = WFX::SmtpEndpoint{"127.0.0.1:8106", SmtpCfg()};
+inline const auto Smtp_auth_fail          = WFX::SmtpEndpoint{"127.0.0.1:8107", SmtpCfg()};
+inline const auto Smtp_no_auth_mechs      = WFX::SmtpEndpoint{"127.0.0.1:8108", SmtpCfg()};
+inline const auto Smtp_mismatched_code    = WFX::SmtpEndpoint{"127.0.0.1:8109", SmtpCfg()};
+inline const auto Smtp_malformed_greeting = WFX::SmtpEndpoint{"127.0.0.1:8116", SmtpCfg()};
+inline const auto Smtp_drop_greeting      = WFX::SmtpEndpoint{"127.0.0.1:8117", SmtpCfg()};
+inline const auto Smtp_drop_pre_handshake = WFX::SmtpEndpoint{"127.0.0.1:8118", SmtpCfg()};
+inline const auto Smtp_drop_starttls      = WFX::SmtpEndpoint{"127.0.0.1:8119", SmtpCfg()};
+inline const auto Smtp_drop_auth          = WFX::SmtpEndpoint{"127.0.0.1:8120", SmtpCfg()};
+inline const auto Smtp_drop_data_prompt   = WFX::SmtpEndpoint{"127.0.0.1:8121", SmtpCfg()};
+
+inline const auto Smtp_flood_greeting     = WFX::SmtpEndpoint{"127.0.0.1:8110", SmtpCfgFast()};
+inline const auto Smtp_flood_ehlo2        = WFX::SmtpEndpoint{"127.0.0.1:8111", SmtpCfgFast()};
+inline const auto Smtp_huge_line_greeting = WFX::SmtpEndpoint{"127.0.0.1:8112", SmtpCfgFast()};
+inline const auto Smtp_huge_line_ehlo2    = WFX::SmtpEndpoint{"127.0.0.1:8113", SmtpCfgFast()};
+inline const auto Smtp_slow_trickle       = WFX::SmtpEndpoint{"127.0.0.1:8114", SmtpCfgFast()};
+inline const auto Smtp_silent_data        = WFX::SmtpEndpoint{"127.0.0.1:8115", SmtpCfgFast()};
+
+// heloName itself carries a CRLF-injection attempt. Points at the 'good' mock port, but the
+// connection is never actually opened, SmtpOnConnect's HasInjectionBytes(opts->heloName) check
+// fails before the first byte is sent (see smtp.hpp). Not part of SMTP_PERSONAS: no mock
+// listener needs to exist for this one, the wire is never touched
+inline const auto Smtp_heloinject = WFX::SmtpEndpoint{"127.0.0.1:8100", WFX::SmtpEndpointConfig{
+    .connLimit             = 1,
+    .connectTimeoutSeconds = 5,
+    .requestTimeoutSeconds = 5,
+    .maxReconnectAttempts  = 0,
+    .username              = "audituser",
+    .password              = "audit-pass-123",
+    .heloName              = "evil\r\nMAIL FROM:<hacked@evil>",
+}};
+
+static const WFX::SmtpEndpoint* SmtpEndpointOf(std::string_view e) noexcept
+{
+    if(e == "auth_login_only")    return &Smtp_auth_login_only;
+    if(e == "inject")             return &Smtp_inject;
+    if(e == "no_starttls")        return &Smtp_no_starttls;
+    if(e == "selfsigned")         return &Smtp_selfsigned;
+    if(e == "wronghost")          return &Smtp_wronghost;
+    if(e == "expired")            return &Smtp_expired;
+    if(e == "auth_fail")          return &Smtp_auth_fail;
+    if(e == "no_auth_mechs")      return &Smtp_no_auth_mechs;
+    if(e == "mismatched_code")    return &Smtp_mismatched_code;
+    if(e == "malformed_greeting") return &Smtp_malformed_greeting;
+    if(e == "drop_greeting")      return &Smtp_drop_greeting;
+    if(e == "drop_pre_handshake") return &Smtp_drop_pre_handshake;
+    if(e == "drop_starttls")      return &Smtp_drop_starttls;
+    if(e == "drop_auth")          return &Smtp_drop_auth;
+    if(e == "drop_data_prompt")   return &Smtp_drop_data_prompt;
+    if(e == "flood_greeting")     return &Smtp_flood_greeting;
+    if(e == "flood_ehlo2")        return &Smtp_flood_ehlo2;
+    if(e == "huge_line_greeting") return &Smtp_huge_line_greeting;
+    if(e == "huge_line_ehlo2")    return &Smtp_huge_line_ehlo2;
+    if(e == "slow_trickle")       return &Smtp_slow_trickle;
+    if(e == "silent_data")        return &Smtp_silent_data;
+    if(e == "heloinject")         return &Smtp_heloinject;
+    return &Smtp_good;
+}
 
 // Result reflection
 
@@ -952,6 +1056,12 @@ static void Emit(WFX::Request& req, WFX::Response& res, WFX::Shared::EndpointSta
             j.Write("hdr", out->GetHeader(want, hv) ? hv : std::string_view{});
         }
     }
+}
+
+// EndpointStatus -> the plain int JsonWriter can actually take an overload for
+static std::uint64_t EpJ(WFX::Shared::EndpointStatus s) noexcept
+{
+    return static_cast<std::uint64_t>(static_cast<unsigned>(s));
 }
 
 // Small unsigned header values (counts, sizes). Header-driven like every other
@@ -1112,6 +1222,196 @@ WFX_POST("/inject", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 
     auto pr = co_await ep->Send(std::move(r));
     Emit(req, res, pr.first, pr.second);
+    co_return;
+})
+
+// WFX::SmtpEndpoint, driven end to end: MAIL FROM -> RCPT TO -> DATA -> body, all on one
+// Reserve()'d connection. Stops at the first stage that fails, transport or protocol level.
+//
+//   X-Persona  which SmtpEndpointOf() persona (default "good")
+//   X-From / X-FromName / X-To / X-ToName / X-Subject / X-ReplyTo   (all optional, sane defaults)
+//   body       the message body (POST body, not a header, so it can carry raw CR/LF for-
+//              -dot-stuffing round-trip tests)
+//
+//   { "ep": <EndpointStatus int>, "stage": "reserve"|"mail"|"rcpt"|"data_start"|"data_body"|"done",
+//     "code": <SMTP reply code>, "success": <bool> }        // code/success only when ep == 0
+WFX_POST("/smtp/send", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    std::string_view personaName = "good";
+    req.GetHeader("X-Persona", personaName);
+
+    std::string_view fromAddr = "sender@wfx.test", fromName{}, toAddr = "recipient@wfx.test",
+                     toName{}, subject = "audit", replyTo{};
+    req.GetHeader("X-From", fromAddr);
+    req.GetHeader("X-FromName", fromName);
+    req.GetHeader("X-To", toAddr);
+    req.GetHeader("X-ToName", toName);
+    req.GetHeader("X-Subject", subject);
+    req.GetHeader("X-ReplyTo", replyTo);
+    std::string_view body = req.Body();
+
+    const WFX::SmtpEndpoint* ep = SmtpEndpointOf(personaName);
+    auto tx = ep->Begin();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+
+    if(!tx.IsValid()) {
+        j.Write("ep", EpJ(WFX::EpPoolExhausted));
+        j.Write("stage", std::string_view{"reserve"});
+        co_return;
+    }
+
+    auto [s1, r1] = co_await tx.MailFrom(fromAddr);
+    if(s1 != WFX::EpOk) {
+        j.Write("ep", EpJ(s1));
+        j.Write("stage", std::string_view{"mail"});
+        co_return;
+    }
+    j.Write("code", r1->code);
+    j.Write("success", r1->Success());
+    if(!r1->Success()) {
+        j.Write("ep", EpJ(WFX::EpOk));
+        j.Write("stage", std::string_view{"mail"});
+        co_return;
+    }
+
+    auto [s2, r2] = co_await tx.RcptTo(toAddr);
+    if(s2 != WFX::EpOk) {
+        j.Write("ep", EpJ(s2));
+        j.Write("stage", std::string_view{"rcpt"});
+        co_return;
+    }
+    j.Write("code", r2->code);
+    j.Write("success", r2->Success());
+    if(!r2->Success()) {
+        j.Write("ep", EpJ(WFX::EpOk));
+        j.Write("stage", std::string_view{"rcpt"});
+        co_return;
+    }
+
+    auto [s3, r3] = co_await tx.DataStart();
+    if(s3 != WFX::EpOk) {
+        j.Write("ep", EpJ(s3));
+        j.Write("stage", std::string_view{"data_start"});
+        co_return;
+    }
+    j.Write("code", r3->code);
+    j.Write("success", r3->Continue());
+    if(!r3->Continue()) {
+        j.Write("ep", EpJ(WFX::EpOk));
+        j.Write("stage", std::string_view{"data_start"});
+        co_return;
+    }
+
+    auto [s4, r4] = co_await tx.DataBody(fromAddr, fromName, toAddr, toName, subject, body, replyTo);
+    if(s4 != WFX::EpOk) {
+        j.Write("ep", EpJ(s4));
+        j.Write("stage", std::string_view{"data_body"});
+        co_return;
+    }
+    j.Write("ep", EpJ(WFX::EpOk));
+    j.Write("code", r4->code);
+    j.Write("success", r4->Success());
+    j.Write("stage", std::string_view{r4->Success() ? "done" : "data_body"});
+    co_return;
+})
+
+// Serialize-side injection probe for the SMTP client, mirrors HTTP's /inject: the injection
+// screen (Smtp::Detail::HasInjectionBytes) only rejects CR/LF/NUL bytes that an HTTP *header*
+// could never carry in the first place, so the hostile payload travels as the POST body and
+// this route splices it into whichever field X-Field names. Always against the 'good' persona;
+// fields ahead of the one under test get clean placeholder values so the run reaches it.
+//
+//   X-Field  mailfrom | rcptto | fromname | toname | subject | replyto | body   (default mailfrom)
+//   body     the hostile payload (may contain CR/LF/NUL)
+//
+//   { "ep": <EndpointStatus int>, "stage": "mail"|"rcpt"|"data_start"|"data_body",
+//     "code": <SMTP reply code>, "success": <bool> }   // code/success only on a clean-step stage;
+//                                                       // EpSerializeError (11) is the correct
+//                                                       // refusal on the field-under-test's stage
+WFX_POST("/smtp/inject", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    std::string_view field = "mailfrom";
+    req.GetHeader("X-Field", field);
+    std::string_view raw = req.Body();
+
+    auto tx = Smtp_good_injectroute.Begin();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    if(!tx.IsValid()) {
+        j.Write("ep", EpJ(WFX::EpPoolExhausted));
+        j.Write("stage", std::string_view{"reserve"});
+        co_return;
+    }
+
+    std::string_view mailFrom = (field == "mailfrom") ? raw : std::string_view{"sender@wfx.test"};
+    auto [s1, r1] = co_await tx.MailFrom(mailFrom);
+    if(field == "mailfrom") {
+        j.Write("ep", EpJ(s1));
+        j.Write("stage", std::string_view{"mail"});
+        co_return;
+    }
+    if(s1 != WFX::EpOk) {
+        j.Write("ep", EpJ(s1));
+        j.Write("stage", std::string_view{"mail"});
+        co_return;
+    }
+    if(!r1->Success()) {
+        j.Write("ep", EpJ(WFX::EpOk));
+        j.Write("stage", std::string_view{"mail"});
+        j.Write("code", r1->code);
+        j.Write("success", false);
+        co_return;
+    }
+
+    std::string_view rcptTo = (field == "rcptto") ? raw : std::string_view{"recipient@wfx.test"};
+    auto [s2, r2] = co_await tx.RcptTo(rcptTo);
+    if(field == "rcptto") {
+        j.Write("ep", EpJ(s2));
+        j.Write("stage", std::string_view{"rcpt"});
+        co_return;
+    }
+    if(s2 != WFX::EpOk) {
+        j.Write("ep", EpJ(s2));
+        j.Write("stage", std::string_view{"rcpt"});
+        co_return;
+    }
+    if(!r2->Success()) {
+        j.Write("ep", EpJ(WFX::EpOk));
+        j.Write("stage", std::string_view{"rcpt"});
+        j.Write("code", r2->code);
+        j.Write("success", false);
+        co_return;
+    }
+
+    auto [s3, r3] = co_await tx.DataStart();
+    if(s3 != WFX::EpOk) {
+        j.Write("ep", EpJ(s3));
+        j.Write("stage", std::string_view{"data_start"});
+        co_return;
+    }
+    if(!r3->Continue()) {
+        j.Write("ep", EpJ(WFX::EpOk));
+        j.Write("stage", std::string_view{"data_start"});
+        j.Write("code", r3->code);
+        j.Write("success", false);
+        co_return;
+    }
+
+    std::string_view fromName = (field == "fromname") ? raw : std::string_view{};
+    std::string_view toName   = (field == "toname")   ? raw : std::string_view{};
+    std::string_view subject  = (field == "subject")  ? raw : std::string_view{"audit"};
+    std::string_view replyTo  = (field == "replyto")  ? raw : std::string_view{};
+    std::string_view body     = (field == "body")     ? raw : std::string_view{"hello"};
+
+    auto [s4, r4] = co_await tx.DataBody("sender@wfx.test", fromName, "recipient@wfx.test", toName,
+                                         subject, body, replyTo);
+    j.Write("ep", EpJ(s4));
+    j.Write("stage", std::string_view{"data_body"});
+    if(s4 == WFX::EpOk) {
+        j.Write("code", r4->code);
+        j.Write("success", r4->Success());
+    }
     co_return;
 })
 

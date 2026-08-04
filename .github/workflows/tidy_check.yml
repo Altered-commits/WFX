@@ -47,7 +47,7 @@ jobs:
             -DWFX_ENABLE_ASAN=ON
           cmake --build build
 
-      # scripts/tidy_cache.py skips re-analyzing files unchanged since a prior-
+      # scripts/py/tidy_cache.py skips re-analyzing files unchanged since a prior-
       # -run (see the script's docstring for how it keys results). This is what-
       # -actually persists across CI runs, so restore/save it same as build/
       - name: Restore clang-tidy result cache

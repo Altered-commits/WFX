@@ -62,6 +62,7 @@ nav:
     - Endpoint:
       - Overview: api_reference/endpoint/overview.md
       - HTTP: api_reference/endpoint/http.md
+      - SMTP: api_reference/endpoint/smtp.md
   - Developer Reference:
     - Overview: dev_reference/overview.md
     - Architecture: dev_reference/architecture.md

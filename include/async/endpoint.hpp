@@ -27,15 +27,17 @@ public:
     explicit SlotOpenSideConnectionAwaitable(void* impl) noexcept : AwaitableBase{}, ownerImpl(impl)
     {}
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
-        handle_ = h;
+        handle = h;
         Core::EndpointApiExt1()->openSideConnection(ownerImpl, {this, OnComplete, OnDestroy});
         return true;
     }
 
     // Defined out-of-line below, once SlotHandle is a complete type
     struct Result;
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     Result await_resume() const noexcept;
 };
 
@@ -51,9 +53,10 @@ public:
         return SlotSendAwaitable{raw.impl, data, size};
     }
 
-    SlotReceiveAwaitable Receive() const noexcept
+    // consumed: bytes of the PREVIOUS Receive() result already used, see SlotReceiveAwaitable
+    SlotReceiveAwaitable Receive(std::uint32_t consumed = 0) const noexcept
     {
-        return SlotReceiveAwaitable{raw.impl};
+        return SlotReceiveAwaitable{raw.impl, consumed};
     }
 
     // Wraps this still-plaintext connection in TLS, for protocols that negotiate encryption-
@@ -93,16 +96,17 @@ struct SlotOpenSideConnectionAwaitable::Result {
     SlotHandle handle;
 };
 
+// NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
 inline SlotOpenSideConnectionAwaitable::Result SlotOpenSideConnectionAwaitable::await_resume() const noexcept
 {
-    const Shared::SlotStatus status = ResolveSlotStatus(result_);
+    const Shared::SlotStatus status = ResolveSlotStatus(result);
     if(status != Shared::SlotStatus::OK)
         return {status, SlotHandle{}};
 
     const auto* api = Core::EndpointApiExt1();
 
     EndpointSlotHandle raw{};
-    raw.impl = result_.data;
+    raw.impl = result.data;
     raw.close = api->closeSideConnection;
     raw.negotiatedProtocol = api->negotiatedProtocol;
     return {status, SlotHandle{raw}};
@@ -175,7 +179,7 @@ public: // Operators
     {
         return ptr_ != nullptr;
     }
-    T* get() const noexcept
+    T* Get() const noexcept
     {
         return ptr_;
     }
@@ -205,34 +209,35 @@ struct SendPayloadAwaitable : public AwaitableBase<SendPayloadAwaitable<TReq, TR
     TReq req;
     EndpointStatus syncStatus{};
     std::uint16_t endpointIdx{0};
-    EndpointDestroyStateFn destroyOutput_{nullptr};
-    std::uint64_t pinnedSlot_{0}; // 0 = pool-routed, else the ReservedSlot this was issued from
+    EndpointDestroyStateFn destroyOutput{nullptr};
+    std::uint64_t pinnedSlot{0}; // 0 = pool-routed, else the ReservedSlot this was issued from
 
 public:
     SendPayloadAwaitable(std::uint16_t idx, TReq r, EndpointDestroyStateFn destroy,
                          std::uint64_t pinnedSlot = 0) noexcept
         : AwaitableBase<SendPayloadAwaitable<TReq, TRes>>{}, req(std::move(r)), endpointIdx(idx),
-          destroyOutput_(destroy), pinnedSlot_(pinnedSlot)
+          destroyOutput(destroy), pinnedSlot(pinnedSlot)
     {}
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
-        this->handle_ = h;
+        this->handle = h;
 
         EndpointStatus s =
             Core::EndpointApiExt1()->sendPayload(Core::HttpApiExt1()->getGlobalPtrData(), endpointIdx,
                                                  static_cast<const void*>(&req),
                                                  {this, AwaitableBase<SendPayloadAwaitable<TReq, TRes>>::OnComplete,
                                                   AwaitableBase<SendPayloadAwaitable<TReq, TRes>>::OnDestroy},
-                                                 pinnedSlot_);
+                                                 pinnedSlot);
 
         // Synchronous failure, engine could not start the operation. Resume immediately
         if(s != EndpointStatus::PENDING) {
             // Preserve the real reason
             syncStatus = s;
 
-            this->result_.status = AsyncStatus::IO_FAILURE;
-            this->result_.data = nullptr;
+            this->result.status = AsyncStatus::IO_FAILURE;
+            this->result.data = nullptr;
 
             return false;
         }
@@ -241,17 +246,18 @@ public:
         return true;
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     std::pair<EndpointStatus, EndpointOutput<TRes>> await_resume() noexcept
     {
         // Synchronous failure. Return the actual engine status
-        if(this->result_.status == AsyncStatus::IO_FAILURE && syncStatus != EndpointStatus::SUCCESS)
+        if(this->result.status == AsyncStatus::IO_FAILURE && syncStatus != EndpointStatus::SUCCESS)
             return {syncStatus, EndpointOutput<TRes>{}};
 
         // Async failure (engine fired IO_FAILURE via HandleAsyncCallback)
-        if(this->result_.status != AsyncStatus::COMPLETED)
-            return {this->result_.endpointStatus, EndpointOutput<TRes>{}};
+        if(this->result.status != AsyncStatus::COMPLETED)
+            return {this->result.endpointStatus, EndpointOutput<TRes>{}};
 
-        return {EndpointStatus::SUCCESS, EndpointOutput<TRes>{static_cast<TRes*>(this->result_.data), destroyOutput_}};
+        return {EndpointStatus::SUCCESS, EndpointOutput<TRes>{static_cast<TRes*>(this->result.data), destroyOutput}};
     }
 };
 
@@ -271,7 +277,7 @@ using UserOnConnectFn = Task<ConnectResult> (*)(SlotHandle, void*);
 template <UserOnConnectFn UserFn>
 void EraseOnConnectImpl(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd) noexcept
 {
-    SlotHandle sh{handle};
+    const SlotHandle sh{handle};
     auto task = UserFn(sh, slotState);
     task.SetCompletion(onDone, onDoneUd);
     task.Resume();
@@ -296,7 +302,7 @@ using UserOnAbortFn = Task<void> (*)(AbortSlotHandle, void*);
 template <UserOnAbortFn UserFn>
 void EraseOnAbortImpl(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd) noexcept
 {
-    AbortSlotHandle sh{handle};
+    const AbortSlotHandle sh{handle};
     auto task = UserFn(sh, slotState);
     task.SetCompletion(onDone, onDoneUd);
     task.Resume();
@@ -336,9 +342,10 @@ public:
         : AwaitableBase<StreamNextAwaitable<TReq, TRes>>{}, req(r), first(isFirst), endpointIdx(idx), pinnedSlot(pinned)
     {}
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
-        this->handle_ = h;
+        this->handle = h;
 
         const AsyncData onDone{this, AwaitableBase<StreamNextAwaitable<TReq, TRes>>::OnComplete,
                                AwaitableBase<StreamNextAwaitable<TReq, TRes>>::OnDestroy};
@@ -357,13 +364,14 @@ public:
         // Either a chunk was already buffered, the stream ended, or it failed. All three resume-
         // -immediately: suspending would strand the coroutine, since no callback is coming
         syncStatus = s;
-        this->result_.status = (s == EndpointStatus::CHUNK_AVAILABLE || s == EndpointStatus::SUCCESS)
-                                   ? AsyncStatus::COMPLETED
-                                   : AsyncStatus::IO_FAILURE;
+        this->result.status = (s == EndpointStatus::CHUNK_AVAILABLE || s == EndpointStatus::SUCCESS)
+                                  ? AsyncStatus::COMPLETED
+                                  : AsyncStatus::IO_FAILURE;
 
         return false;
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     StreamChunk<TRes> await_resume() const noexcept
     {
         // Synchronous chunk: the engine left it in the slot's output object rather than firing-
@@ -380,13 +388,13 @@ public:
         if(syncStatus == EndpointStatus::SUCCESS)
             return {EndpointStatus::SUCCESS, nullptr, true};
 
-        if(this->result_.status != AsyncStatus::COMPLETED)
-            return {syncStatus != EndpointStatus::PENDING ? syncStatus : this->result_.endpointStatus, nullptr, true};
+        if(this->result.status != AsyncStatus::COMPLETED)
+            return {syncStatus != EndpointStatus::PENDING ? syncStatus : this->result.endpointStatus, nullptr, true};
 
         // PENDING on a delivered result means "chunk, more to come"; SUCCESS means the stream ended
         // A null chunk is terminal either way, for the same reason as the synchronous path above
-        const auto* chunk = static_cast<const TRes*>(this->result_.data);
-        const bool isFinal = this->result_.endpointStatus != EndpointStatus::PENDING || chunk == nullptr;
+        const auto* chunk = static_cast<const TRes*>(this->result.data);
+        const bool isFinal = this->result.endpointStatus != EndpointStatus::PENDING || chunk == nullptr;
 
         return {EndpointStatus::SUCCESS, chunk, isFinal};
     }

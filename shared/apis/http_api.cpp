@@ -230,9 +230,9 @@ const EndpointAPIExt1* GetEndpointAPIExt1()
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
             GlobalEndpointDataExt1.connHandler->SlotSend(ctx, data, size, asyncData);
         },
-        [](void* endpointCtx, AsyncData asyncData) -> void {
+        [](void* endpointCtx, std::uint32_t consumed, AsyncData asyncData) -> void {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
-            GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, asyncData);
+            GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, consumed, asyncData);
         },
         [](void* endpointCtx, AsyncData asyncData) -> void {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
