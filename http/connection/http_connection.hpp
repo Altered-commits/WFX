@@ -45,8 +45,8 @@ struct WFXIpAddress {
 };
 static_assert(sizeof(WFXIpAddress) == 20, "'WFXIpAddress' must be exactly 20 bytes");
 
-// Might be weird to define it here but its important, these states are further used in-
-// -both connection backend and parser so yeah
+// Might be weird to define it here but it's important, these states are further used in both
+// connection backend and parser so yeah.
 enum class HttpParseState : std::uint8_t {
     PARSE_INCOMPLETE_HEADERS, // Header end sequence (\r\n\r\n) not found yet
     PARSE_INCOMPLETE_BODY,    // Buffering body (Content-Length not fully received)
@@ -145,14 +145,14 @@ struct AsyncTrack {
     }
 };
 
-// Simply to assert that eventType must exist in anything related to connection-
-// -and must be the first member as well (offset == 0)
+// Simply to assert that eventType must exist in anything related to connection and must be the
+// first member as well (offset == 0).
 struct ConnectionTag {
     EventType eventType = EventType::EVENT_ACCEPT; // 1 byte
 };
 
-// Per-stream entry for a multiplexed slot (mirrors CoalesceWaiter's shape below, including-
-// -the generationId staleness guard)
+// Per-stream entry for a multiplexed slot (mirrors CoalesceWaiter's shape below, including the
+// generationId staleness guard).
 struct PendingStream {
     ClientCtx* clientCtx = nullptr;
     void* parseState = nullptr;
@@ -253,11 +253,11 @@ struct ClientCtx : public ConnectionTag {
     HttpRequest* requestInfo = nullptr;   // 8 bytes
     HttpResponse* responseInfo = nullptr; // 8 bytes
 
-    // Monotonic microsecond stamps for latency, both 0 until stamped. Only written when [Metrics]-
-    // -latency is on, so the two clock reads they cost are never paid otherwise. routeStartUs is-
-    // -set when the request is dispatched; endpointStartUs when this client issues an outbound-
-    // -request, and holds for whichever endpoint path (single-slot, streaming, multiplexed) serves-
-    // -it, since a client only ever has one endpoint call in flight
+    // Monotonic microsecond stamps for latency, both 0 until stamped. Only written when [Metrics]
+    // latency is on, so the two clock reads they cost are never paid otherwise. routeStartUs is
+    // set when the request is dispatched; endpointStartUs when this client issues an outbound
+    // request, and holds for whichever endpoint path (single-slot, streaming, multiplexed) serves
+    // it, since a client only ever has one endpoint call in flight.
     std::uint64_t routeStartUs = 0;    // 8 bytes
     std::uint64_t endpointStartUs = 0; // 8 bytes
 
@@ -282,8 +282,8 @@ public:
 
     bool IsAsyncOperation() const;
 
-    // Single entry point for growing 'rwBuffer's read side: a grow can relocate the buffer,-
-    // -invalidating any 'requestInfo->path'/'headers' views already parsed into it
+    // Single entry point for growing 'rwBuffer's read side: a grow can relocate the buffer,
+    // invalidating any 'requestInfo->path'/'headers' views already parsed into it.
     bool GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize, std::uint32_t minSize = 0);
 };
 static_assert(sizeof(ClientCtx) <= 184, "'ClientCtx' must be <= 184 bytes");
@@ -328,8 +328,8 @@ struct HttpConnectionHandler {
     virtual std::uint16_t AllocateEndpoint(const char* host, Shared::EndpointDesc desc,
                                            Shared::EndpointConfig config) = 0;
 
-    // Registration data read back when metrics are scraped. Count is the number of allocated-
-    // -endpoints, HostAt returns an empty view for an out-of-range index
+    // Registration data read back when metrics are scraped. Count is the number of allocated
+    // endpoints, HostAt returns an empty view for an out-of-range index.
     virtual std::uint16_t EndpointCount() const = 0;
     virtual Shared::StringView EndpointHostAt(std::uint16_t endpointIdx) const = 0;
 
@@ -355,8 +355,8 @@ struct HttpConnectionHandler {
     virtual void CloseSideConnection(EndpointCtx* auxCtx) = 0;
     virtual Shared::EndpointStatus StreamNext(ClientCtx* clientCtx, const void* req, Shared::AsyncData asyncData) = 0;
     virtual const void* StreamChunk(ClientCtx* clientCtx) = 0;
-    // Empty if the slot isn't TLS or the handshake hasn't completed yet. Not HTTP-specific: any-
-    // -ALPN-aware protocol can call this from onConnect to decide how to speak on this connection
+    // Empty if the slot isn't TLS or the handshake hasn't completed yet. Not HTTP-specific: any
+    // ALPN-aware protocol can call this from onConnect to decide how to speak on this connection.
     virtual Shared::StringView NegotiatedProtocol(EndpointCtx* slotCtx) = 0;
     virtual void Close(EndpointCtx* ctx, bool forceClose = false,
                        Shared::DisconnectReason reason = Shared::DisconnectReason::ERROR) = 0;

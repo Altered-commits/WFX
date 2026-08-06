@@ -11,8 +11,8 @@ namespace WFX::Http {
 using namespace WFX::Utils;  // For 'Logger'
 using namespace WFX::Shared; // For every single abi type
 
-// Appends one path segment onto an accumulator with exactly one '/' between them, so joining a-
-// -group prefix and a route path never doubles or drops a slash
+// Appends one path segment onto an accumulator with exactly one '/' between them, so joining a
+// group prefix and a route path never doubles or drops a slash.
 static void JoinPath(std::string& acc, std::string_view seg)
 {
     if(!acc.empty() && acc.back() == '/')

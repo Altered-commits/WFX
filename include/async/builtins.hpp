@@ -18,7 +18,7 @@ public:
     {}
 
 public:
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         handle = h;
@@ -39,7 +39,7 @@ public:
     }
 
     // Return status
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     AsyncStatus await_resume() const noexcept
     {
         return result.status;
@@ -51,8 +51,8 @@ inline SleepForAwaitable SleepFor(std::uint32_t delayMs)
     return SleepForAwaitable{delayMs};
 }
 
-// Every slot operation reports through AsyncResult::slotStatus. A failure that never set one-
-// -(a generic engine-side I/O failure) still has to read as a failure, not as OK
+// Every slot operation reports through AsyncResult::slotStatus. A failure that never set one
+// (a generic engine-side I/O failure) still has to read as a failure, not as OK.
 inline Shared::SlotStatus ResolveSlotStatus(const AsyncResult& r) noexcept
 {
     if(r.status == AsyncStatus::COMPLETED)
@@ -73,7 +73,7 @@ public:
         : AwaitableBase{}, slotInternal(impl), data(d), size(s)
     {}
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         handle = h;
@@ -81,7 +81,7 @@ public:
         return true;
     }
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     Shared::SlotStatus await_resume() const noexcept
     {
         return ResolveSlotStatus(result);
@@ -92,9 +92,9 @@ public:
 // Suspends the coroutine, arms the slot for the next read, resumes when data arrives
 // Buffer pointer is only valid until the next SlotReceive call
 //
-// 'consumed' trims that many bytes off the front of the read buffer first: how much of the-
-// -PREVIOUS result was already used. Default 0. A handshake reading more than once (STARTTLS-
-// -EHLO/EHLO/AUTH, ...) must pass it, or the next call redelivers the same bytes
+// 'consumed' trims that many bytes off the front of the read buffer first: how much of the
+// PREVIOUS result was already used. Default 0. A handshake reading more than once (STARTTLS
+// EHLO/EHLO/AUTH, ...) must pass it, or the next call redelivers the same bytes.
 struct SlotReceiveResult {
     Shared::SlotStatus status;
     const char* buf;
@@ -110,7 +110,7 @@ public:
         : AwaitableBase{}, slotInternal(impl), consumed(consumedBytes)
     {}
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         handle = h;
@@ -118,7 +118,7 @@ public:
         return true;
     }
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     SlotReceiveResult await_resume() const noexcept
     {
         const Shared::SlotStatus status = ResolveSlotStatus(result);
@@ -130,8 +130,8 @@ public:
 };
 
 // co_await handle.UpgradeToTLS() inside onConnect coroutines
-// For protocols that negotiate encryption in-band: the probe runs on the raw socket via-
-// -Send/Receive, then this wraps the same connection in TLS before the rest of the handshake
+// For protocols that negotiate encryption in-band: the probe runs on the raw socket via
+// Send/Receive, then this wraps the same connection in TLS before the rest of the handshake.
 struct SlotUpgradeTlsAwaitable : public AwaitableBase<SlotUpgradeTlsAwaitable> {
     void* slotInternal;
 
@@ -139,7 +139,7 @@ public:
     explicit SlotUpgradeTlsAwaitable(void* impl) noexcept : AwaitableBase{}, slotInternal(impl)
     {}
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         handle = h;
@@ -147,7 +147,7 @@ public:
         return true;
     }
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     Shared::SlotStatus await_resume() const noexcept
     {
         return ResolveSlotStatus(result);

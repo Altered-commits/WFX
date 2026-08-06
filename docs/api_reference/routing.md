@@ -38,7 +38,7 @@ WFX_POST("/login", [](WFX::Request req, WFX::Response res) {
 
 `WFX_GET(path, handler)` / `WFX_POST(path, handler)` - macros corresponding to HTTP methods.
 
-- `path` - the route path as a string literal. Supports dynamic segments (see below).
+- `path` - the route path as a string literal. Supports typed dynamic segments (e.g. `/users/<id:uint>`) - see [Path Segments](request_and_response.md) for the full syntax and how to read them.
 - `handler` - a callable object or lambda with signature **`void(WFX::Request, WFX::Response)`**.
 
 ---
@@ -82,8 +82,8 @@ Each route can have its own middleware stack, which is executed in order before 
 
 **Key Points**:
 
-- Middleware must be provided either via `WFX_MW_LIST` or using `MakeMiddlewareFromFunctions`.  
-- Even if the route uses only a single middleware function, it must be wrapped with one of these helpers.  
+- Middleware must be provided via `WFX_MW_LIST`, using the `_EX` variant of the route macro (`WFX_GET_EX`, `WFX_POST_EX`).  
+- Even if the route uses only a single middleware function, it must still be wrapped in `WFX_MW_LIST`.  
 
 **Example**:
 
@@ -95,16 +95,6 @@ Each route can have its own middleware stack, which is executed in order before 
 WFX_GET_EX(
     "/secure",
     WFX_MW_LIST(AuthMiddleware, SecurityMiddleware, ...),
-    [](WFX::Request req, WFX::Response res) { 
-        res.SendText("Protected content"); 
-    }
-);
-
-// Or
-
-WFX_GET_EX(
-    "/secure",
-    MakeMiddlewareFromFunctions(AuthMiddleware, SecurityMiddleware, ...),
     [](WFX::Request req, WFX::Response res) { 
         res.SendText("Protected content"); 
     }
@@ -122,9 +112,9 @@ The signature is identical to a normal route, except the lambda returns an async
 
 ```cpp
 /*
- * NOTE: This header is mandatory when using any builtin async utilities-
- *       -such as functions like 'SleepFor'. It also brings in the core-
- *       -async machinery, including 'WFX::Coro' and related types
+ * NOTE: This header is mandatory when using any builtin async utilities such as
+ * functions like 'SleepFor'. It also brings in the core async machinery,
+ * including 'WFX::Coro' and related types.
  */
 #include <wfx/async.hpp>
 #include <wfx/http.hpp>

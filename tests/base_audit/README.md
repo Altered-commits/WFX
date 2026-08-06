@@ -25,6 +25,8 @@ python3 base_audit.py
 python3 base_audit.py --phase security
 python3 base_audit.py --phase features
 python3 base_audit.py --phase forms
+python3 base_audit.py --phase metrics
+python3 base_audit.py --phase soak
 python3 base_audit.py --phase chaos
 
 # Every WFX log line, not just crash dumps
@@ -43,7 +45,7 @@ python3 base_audit.py --ci
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `chaos` |
+| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `metrics`, `soak`, `chaos` |
 | `--host HOST` | `127.0.0.1` | Server hostname |
 | `--port N` | `8080` | HTTP port |
 | `--wfx PATH` | `wfx` | Path to the wfx binary |
@@ -168,6 +170,26 @@ Exit code 2 if header injection lands, 1 for other failures.
 
 ---
 
+### METRICS
+
+Drives known request counts through `/status/<code:uint>` (one status class each)
+and `/health`, then confirms `/metrics` reflects exactly what was driven: per-route
+request counts, status-class buckets, byte counters, and latency histogram samples,
+with `/health` traffic never bleeding into `/status`'s counters or vice versa.
+
+Exit code 1 for any mismatch.
+
+### SOAK
+
+2000 sequential requests over one keep-alive connection, rotating across five
+routes with different body shapes, checking every response's status and body
+match exactly. Regression coverage for read/write buffer reuse across many
+requests on the same connection, not just a handful.
+
+Exit code 1 on any mismatch or connection failure.
+
+---
+
 ### CHAOS
 
 6 scenarios. Each is followed by a recovery wait and a full 52-route
@@ -209,17 +231,15 @@ every user-facing feature.
 | `/violate/204body` | 204 with body: must return 500 |
 | `/violate/conn` | Sets `Connection` header: engine-owned, must return 500 |
 | `/violate/recommit` | Calls `Commit()` twice: must return 500 |
-| `/metrics` | Live crash / restart / RSS counters as JSON |
+| `/metrics` | Live crash / restart / RSS / per-route counters as JSON |
+| `/status/<code:uint>` | Returns the given status code: `metrics` phase's status-class workhorse |
 | `/items/<id:uint>` | Dynamic `:uint` segment |
 | `/items/signed/<id:int>` | Dynamic `:int` segment (negative values) |
 | `/greet/<name:string>` | Dynamic `:string` segment |
 | `/uuid/<id:uuid>` | Dynamic `:uuid` segment |
 | `/api/v1/status` | Group-prefixed flat path |
 | `/api/v1/item/<id:uint>` | Group-prefixed path with dynamic segment |
-| `/mw/injected` | `MwContinue`: adds `X-Route-MW: hit` |
-| `/mw/blocked` | `MwBreak`: returns 403, handler skipped |
-| `/mw/skipnext` | `MwSkipNext`: second middleware skipped |
-| `/ctx` | Context: MW writes `uid=42`, handler echoes it |
+| `/mw/injected`, `/mw/blocked`, `/mw/skipnext`, `/ctx` | Middleware/context targets, see the FEATURES table above |
 | `/async/sleep` | Async coroutine + `WFX::SleepFor(25ms)` |
 | `/json/im` | `WFX::ImJson` streaming JSON |
 | `/json/rm` | `WFX::RmJson` DOM-then-serialise JSON |

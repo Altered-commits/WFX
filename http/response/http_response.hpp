@@ -104,9 +104,9 @@ private:
     bool EnsureBodyOpen();      // Writes CL slot + \r\n separator, switch phase to BODY. False if rejected
     void InjectContentLength(); // Writes the fixed-width CL header line, saves 'clOffset_'
 
-    // Response-contract enforcement. A handler that violates the build rules (write after commit,-
-    // -body on a bodyless status, header after body, etc.) does not get its bad output forwarded
-    // The response is destroyed and replaced with a 500 naming the violation
+    // Response-contract enforcement. A handler that violates the build rules (write after commit,
+    // body on a bodyless status, header after body, etc.) does not get its bad output forwarded.
+    // The response is destroyed and replaced with a 500 naming the violation.
     void AbortContractViolation(const char* what);
     bool RejectIfCommitted(const char* caller);
 

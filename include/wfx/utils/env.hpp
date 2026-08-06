@@ -7,16 +7,16 @@
 // -----------------------------------------------------------------------
 // wfx/utils/env.hpp
 // Thin typed wrappers over std::getenv for the obviously-common cases.
-// Anything more specific (floats, enums, lists, validation) is left to the-
-// -caller, plain std::getenv still works directly for that
+// Anything more specific (floats, enums, lists, validation) is left to the
+// caller, plain std::getenv still works directly for that
 //
 // Provides:
 //   WFX::GetEnvString(name, defaultValue = {})
 //   WFX::GetEnvBool(name, defaultValue)
 //   WFX::GetEnvInt(name, defaultValue)
 //
-// All three fall back to defaultValue on an unset variable AND on a value-
-// -that doesn't parse for the requested type, they don't distinguish the two
+// All three fall back to defaultValue on an unset variable AND on a value
+// that doesn't parse for the requested type, they don't distinguish the two
 // -----------------------------------------------------------------------
 
 #include <cctype>

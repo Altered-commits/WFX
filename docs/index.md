@@ -30,7 +30,7 @@ hide:
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Outbound Endpoint client</p>
-<p class="wfx-card-body">Pooled outbound connections with DNS refresh, retry, coalescing, multiplexing, connection pinning, and chunked streaming. Ships with an HTTP client; other protocols are a serialize/parse pair away.</p>
+<p class="wfx-card-body">Pooled outbound connections with DNS refresh, retry, coalescing, multiplexing, connection pinning, and chunked streaming. Ships with HTTP and SMTP clients; other protocols are a serialize/parse pair away.</p>
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Middleware</p>

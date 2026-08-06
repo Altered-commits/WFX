@@ -62,8 +62,8 @@ bool ExtractValue(const toml::table& tbl, const char* section, const char* field
     return false;
 }
 
-// A non-string element inside the array is always fatal regardless of 'fatalIfMissing', that-
-// -case is a genuine syntax error, not an absent-and-therefore-optional field
+// A non-string element inside the array is always fatal regardless of 'fatalIfMissing', that
+// case is a genuine syntax error, not an absent-and-therefore-optional field.
 inline void ExtractStringArray(const toml::table& tbl, const char* section, const char* field,
                                std::vector<std::string>& target, bool fatalIfMissing = false)
 {

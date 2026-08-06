@@ -54,21 +54,21 @@ struct IPConfig {
     std::uint32_t maxRequestBurstSize = 10;
     std::uint32_t maxTokensPerSecond = 5;
 
-    // Cap on distinct resolved identities RequestRateLimiter tracks at once. Its entries persist-
-    // -across connection close (unlike ConnectionLimiter's), so this bounds memory instead. The-
-    // -least-recently-touched identity is evicted once the cap is reached
+    // Cap on distinct resolved identities RequestRateLimiter tracks at once. Its entries persist
+    // across connection close (unlike ConnectionLimiter's), so this bounds memory instead. The
+    // least-recently-touched identity is evicted once the cap is reached.
     std::uint32_t maxTrackedIdentities = 24 * 1024;
 
-    // X-Forwarded-For-style comma-separated chains only: walk right-to-left past trusted hops-
-    // -to find the real client instead of taking the header's value as-is
+    // X-Forwarded-For-style comma-separated chains only: walk right-to-left past trusted hops
+    // to find the real client instead of taking the header's value as-is.
     bool realIpRecursive = false;
 
-    // Header to trust for the real client IP (e.g. "CF-Connecting-IP"). Empty disables real-IP-
-    // -resolution entirely: every limiter always uses the raw peer IP
+    // Header to trust for the real client IP (e.g. "CF-Connecting-IP"). Empty disables real-IP
+    // resolution entirely: every limiter always uses the raw peer IP.
     std::string realIpHeader;
 
-    // CIDR blocks allowed to set 'realIpHeader'. Empty means nothing matches, so the header is-
-    // -never honored even if 'realIpHeader' is set (fails safe by construction)
+    // CIDR blocks allowed to set 'realIpHeader'. Empty means nothing matches, so the header is
+    // never honored even if 'realIpHeader' is set (fails safe by construction).
     std::vector<std::string> trustedProxies;
 };
 

@@ -832,8 +832,8 @@ bool TemplateEngine::GenerateCxxFromIR(TranspilationContext& ctx, const std::str
     }
 
     // Yeah man this shits getting out of hand atp
-    // Honestly fuck performance here not even going to bother, lets just hope compiler-
-    // -optimizes this shit of a code
+    // Honestly fuck performance here not even going to bother, lets just hope compiler
+    // optimizes this shit of a code
     IOContext ioCtx{std::move(outFile), ctx.chunkSize};
     const auto& irCode = ctx.ir;
     bool needEndingBrace = false;

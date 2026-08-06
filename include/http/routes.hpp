@@ -65,7 +65,8 @@
     struct WFX_CONCAT(WFXGroupStart_, id) {                                                                            \
         WFX_CONCAT(WFXGroupStart_, id)()                                                                               \
         {                                                                                                              \
-            WFX::Shared::__WFXDeferredSimple.emplace_back([] { WFX::Core::HttpApiExt1()->pushRoutePrefix(path); });    \
+            WFX::Core::__WFXDeferred.emplace_back(                                                                     \
+                [] { WFX::Core::HttpApiExt1()->pushRoutePrefix(WFX::Shared::StringView::FromCString(path)); });        \
         }                                                                                                              \
     } WFX_CONCAT(WFXGroupStartInst_, id);                                                                              \
     }
@@ -75,7 +76,7 @@
     struct WFX_CONCAT(WFXGroupEnd_, id) {                                                                              \
         WFX_CONCAT(WFXGroupEnd_, id)()                                                                                 \
         {                                                                                                              \
-            WFX::Shared::__WFXDeferredSimple.emplace_back([] { WFX::Core::HttpApiExt1()->popRoutePrefix(); });         \
+            WFX::Core::__WFXDeferred.emplace_back([] { WFX::Core::HttpApiExt1()->popRoutePrefix(); });                 \
         }                                                                                                              \
     } WFX_CONCAT(WFXGroupEndInst_, id);                                                                                \
     }

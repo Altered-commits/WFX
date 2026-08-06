@@ -165,7 +165,7 @@ struct EndpointConfig {
     EndpointTLSConfig tlsConfig;
     std::uint32_t prewarm;
     std::uint32_t maxConcurrentStreams; // multiplexing, see below. 0/1 = exclusive slot
-    StringView alpnProtocols;           // wire-encoded ALPN list, empty offers nothing extra
+    StringView alpnProtocols;           // wire-encoded ALPN list, empty defaults to offering http/1.1 only
 };
 ```
 
@@ -182,7 +182,7 @@ struct EndpointConfig {
 | `tlsConfig` | TLS mode, see [below](#tls-mode) |
 | `prewarm` | Connections to open eagerly on startup |
 | `maxConcurrentStreams` | Cap on requests sharing one slot, see [Multiplexing](#multiplexing-advanced) |
-| `alpnProtocols` | ALPN protocols to offer during the TLS handshake |
+| `alpnProtocols` | ALPN protocols to offer during the TLS handshake; empty defaults to offering `http/1.1` only |
 
 !!! important
     - These are validated at startup and the server refuses to start if any are
@@ -580,7 +580,7 @@ ParseResult Parse(void* /*slotState*/, void* parseStateVoid, const char* buf, st
         return isEof ? ParseResult::ERROR : ParseResult::INCOMPLETE;
 
     out->value = parseState->pending.substr(0, pos);
-    return ParseResult::DONE;
+    return WFX::EpParseDone;
 }
 
 inline const auto Kv = WFX::Endpoint<KvReq, KvRes, &Authenticate>{ // Authenticate: see onConnect handshakes
@@ -1073,8 +1073,8 @@ ParseResult Parse(void* slotStateVoid, void* parseState, const char* buf, std::u
     state->inFlight--;
     *completedKey = id; // tells the engine this particular stream just finished
 
-    // The connection itself stays open for other in-flight streams, so this-
-    // -frame being done does not mean there is nothing left to read
+    // The connection itself stays open for other in-flight streams, so this
+    // frame being done does not mean there is nothing left to read
     return ParseResult::INCOMPLETE;
 }
 

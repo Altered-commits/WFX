@@ -25,9 +25,9 @@ bool ParseIpAddress(std::string_view text, WFXIpAddress& out)
     if(inet_pton(AF_INET, addrBuf, &parsed.ip.v4) == 1)
         parsed.type = AF_INET;
     else if(inet_pton(AF_INET6, addrBuf, &parsed.ip.v6) == 1) {
-        // ::ffff:a.b.c.d is the same address as a.b.c.d wherever it can appear (a dual-stack peer,-
-        // -or a proxy writing it into a forwarding header): collapse it to AF_INET here, or every-
-        // -CIDR match and the /24-vs-/64 NormalizeIp split below keys on the wrong family for it
+        // ::ffff:a.b.c.d is the same address as a.b.c.d wherever it can appear (a dual-stack peer,
+        // or a proxy writing it into a forwarding header): collapse it to AF_INET here, or every
+        // CIDR match and the /24-vs-/64 NormalizeIp split below keys on the wrong family for it.
         if(IN6_IS_ADDR_V4MAPPED(&parsed.ip.v6)) {
             in_addr v4;
             std::memcpy(&v4, &parsed.ip.v6.s6_addr[12], sizeof(v4));
@@ -95,10 +95,10 @@ WFXIpAddress NormalizeIp(const WFXIpAddress& ip)
 {
     WFXIpAddress out = ip;
 
-    // Both limiters funnel every key through here, and WFXIpAddress::operator== (and by-
-    // -extension HashShard's key equality) includes 'port'. A limiter identity is never-
-    // -port-specific, so the canonical key this function produces always zeroes it, rather-
-    // -than trusting every caller to have already left it at 0
+    // Both limiters funnel every key through here, and WFXIpAddress::operator== (and by extension
+    // HashShard's key equality) includes 'port'. A limiter identity is never port-specific, so the
+    // canonical key this function produces always zeroes it, rather than trusting every caller to
+    // have already left it at 0.
     out.port = 0;
 
     if(ip.type == AF_INET)
@@ -131,9 +131,9 @@ WFXIpAddress ResolveClientIp(const WFXIpAddress& peerIp, const RequestHeaders& h
 
     std::string_view candidate = headerValue;
 
-    // X-Forwarded-For-style chains ("client, proxy1, proxy2"): walk right-to-left past hops that-
-    // -are themselves trusted proxies, stopping at the first untrusted (real client) hop. If the-
-    // -whole chain is trusted proxies, the leftmost (closest-to-client) hop is used as a best effort
+    // X-Forwarded-For-style chains ("client, proxy1, proxy2"): walk right-to-left past hops that
+    // are themselves trusted proxies, stopping at the first untrusted (real client) hop. If the
+    // whole chain is trusted proxies, the leftmost (closest-to-client) hop is used as a best effort.
     if(ipConfig.realIpRecursive) {
         while(true) {
             const std::size_t comma = candidate.rfind(',');
@@ -146,10 +146,10 @@ WFXIpAddress ResolveClientIp(const WFXIpAddress& peerIp, const RequestHeaders& h
                 break;
             }
 
-            // Whole chain trusted, this was its last (leftmost) hop: 'candidate' must become the-
-            // -already-TRIMMED 'hop', or a leading/trailing space on this token survives into the-
-            // -ParseIpAddress call below (inet_pton rejects whitespace), silently falling back to-
-            // -peerIp instead of the intended best-effort leftmost hop
+            // Whole chain trusted, this was its last (leftmost) hop: 'candidate' must become the
+            // already-TRIMMED 'hop', or a leading/trailing space on this token survives into the
+            // ParseIpAddress call below (inet_pton rejects whitespace), silently falling back to
+            // peerIp instead of the intended best-effort leftmost hop.
             if(comma == std::string_view::npos) {
                 candidate = hop;
                 break;

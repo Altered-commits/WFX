@@ -254,10 +254,10 @@ private: // Storage
          {"elif", TagType::ELIF},         {"else", TagType::ELSE},       {"endif", TagType::ENDIF},
          {"for", TagType::FOR},           {"endfor", TagType::ENDFOR}};
 
-    // CRITICAL WARNING: The data in this map MUST be treated as immutable after initial-
-    // -population. Internal engine code may store string_views that point directly to the-
-    // -'fullPath' strings contained here. Modifying this map at runtime (e.g., adding,-
-    // -removing, or reloading templates) will cause dangling pointers and crash the server
+    // CRITICAL WARNING: The data in this map MUST be treated as immutable after initial
+    // population. Internal engine code may store string_views that point directly to the
+    // 'fullPath' strings contained here. Modifying this map at runtime (e.g., adding,
+    // removing, or reloading templates) will cause dangling pointers and crash the server.
     std::unordered_map<std::string, TemplateMeta> templates_;
 };
 

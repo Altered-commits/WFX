@@ -966,8 +966,8 @@ void CrashTracer::Install(const char* logDir) noexcept
             GlobalLogDir[i] = def[i];
     }
 
-    // Under ASan, its own SIGSEGV/SIGABRT handler is more useful than ours (prints the actual-
-    // -allocation/free site)
+    // Under ASan, its own SIGSEGV/SIGABRT handler is more useful than ours (prints the actual
+    // allocation/free site).
 #ifndef WFX_ASAN_BUILD
 #if defined(WFX_PLATFORM_POSIX)
     InstallPosix();

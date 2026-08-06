@@ -192,9 +192,9 @@ bool ClientCtx::GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize, st
     if(newData == oldData)
         return true;
 
-    // requestInfo can be null this early (no header data parsed yet on a fresh connection) and-
-    // -path can still be its default/empty view (headers not fully parsed yet either), neither-
-    // -holds anything to rebase in that case
+    // requestInfo can be null this early (no header data parsed yet on a fresh connection) and
+    // path can still be its default/empty view (headers not fully parsed yet either), neither
+    // holds anything to rebase in that case.
     if(requestInfo && !requestInfo->path.empty()) {
         const std::ptrdiff_t delta = newData - oldData;
         requestInfo->path = std::string_view(requestInfo->path.data() + delta, requestInfo->path.size());
@@ -214,8 +214,8 @@ void EndpointCtx::Reset()
     isShuttingDown = 0;
     inOnConnectPhase = 0;
     isAwaitingReconnect = 0;
-    // Any reservation dies with the connection; leaving this set would let a stale handle-
-    // -resolve to this slot again once it's recycled
+    // Any reservation dies with the connection; leaving this set would let a stale handle
+    // resolve to this slot again once it's recycled.
     isReserved = 0;
     isStreaming = 0;
     needsFetch = 0;

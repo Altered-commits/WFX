@@ -27,6 +27,10 @@ sanitizer output to tell "the test failed" apart from "the worker died".
 Run the debug build unless you have a reason not to. Sanitizer reports are wired into the run
 (see *Diagnosing a failure*), and without them a memory bug shows up as a bare `exit code 1`.
 
+**Adding or removing a phase?** Re-check that suite's own README against `--list-phases` before
+merging. Every sub-README's phase table is hand-maintained, and it has fallen behind the actual
+`phases` dict more than once.
+
 ## Exit codes
 
 Identical for every suite, so CI can key on them.

@@ -64,22 +64,22 @@ HttpParseState Parse(ClientCtx* ctx)
         case HttpParseState::PARSE_INCOMPLETE_HEADERS: {
             std::size_t headerEnd = 0;
 
-            // Even if we werent able to find header end, update trackBytes so we don't start reading-
-            // -from beginning everytime.
+            // Even if we weren't able to find the header end, update trackBytes so we don't start
+            // reading from the beginning every time.
             if(!SafeFindHeaderEnd(data, size, trackBytes, headerEnd)) {
-                // Even if we haven't reached the end of header, check if the data we received exceeds-
-                // -header limit. If it does, GG
+                // Even if we haven't reached the end of the header, check if the data we received
+                // exceeds the header limit. If it does, GG.
                 if(size > maxHeaderTotalSize)
                     return HttpParseState::PARSE_ERROR;
 
-                // Back off up to 3 bytes: \r\n\r\n can straddle two reads, and jumping straight-
-                // -to 'size' would permanently skip past a straddling match
+                // Back off up to 3 bytes: \r\n\r\n can straddle two reads, and jumping straight
+                // to 'size' would permanently skip past a straddling match.
                 trackBytes = (size >= 3) ? size - 3 : 0;
                 return HttpParseState::PARSE_INCOMPLETE_HEADERS;
             }
 
-            // We found the end of the headers. Now check if the total header size-
-            // -(from 'GET /...' to '\r\n\r\n') exceeds the limit
+            // We found the end of the headers. Now check if the total header size
+            // (from 'GET /...' to '\r\n\r\n') exceeds the limit.
             if(headerEnd > maxHeaderTotalSize)
                 return HttpParseState::PARSE_ERROR;
 
@@ -309,9 +309,9 @@ bool PrepareForBody(ClientCtx* ctx, std::size_t headerEnd, std::size_t contentLe
     ctx->trackBytes = static_cast<std::uint32_t>(headerEnd + contentLen);
     ctx->expectedBodyLength = static_cast<std::uint32_t>(contentLen);
 
-    // Grow to the final size in one step instead of however many 'growSize' increments the-
-    // -receive loop would take. 'ClientCtx::GrowReadBuffer' rebases request.path/headers itself-
-    // -if this relocates the buffer, so nothing further to do here
+    // Grow to the final size in one step instead of however many 'growSize' increments the
+    // receive loop would take. 'ClientCtx::GrowReadBuffer' rebases request.path/headers itself
+    // if this relocates the buffer, so nothing further to do here.
     return ctx->GrowReadBuffer(1, maxBufferSize, ctx->trackBytes);
 }
 

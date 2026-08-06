@@ -30,8 +30,8 @@ public: // vvv Constructor and Destructor vvv
         pool_ = Shared::NewArray<T>(slots_);
         bitmap_ = Shared::NewArray<std::uint64_t>(words_);
 
-        // numSlots == 0 is a deliberate empty pool (AllocSlot then always returns nullptr), not a-
-        // -failure: Alloc(0) itself returns nullptr, so only fail loud when slots were actually requested
+        // numSlots == 0 is a deliberate empty pool (AllocSlot then always returns nullptr), not a
+        // failure: Alloc(0) itself returns nullptr, so only fail loud when slots were actually requested.
         if(slots_ > 0 && (!pool_ || !bitmap_))
             GetLogger().Fatal("[BitmapPool]: Failed to create pools (Allocation returned nullptr)");
     }

@@ -6,12 +6,12 @@
 
 // -----------------------------------------------------------------------
 // wfx/memory.hpp
-// User-facing wrappers over the engine's allocator. Implementation lives in-
-// -shared/utils/memory.hpp (shared between engine and user code, dual-mode-
-// -via WFX_ENGINE_BUILD); this header is just the public include path.
+// User-facing wrappers over the engine's allocator. Implementation lives in
+// shared/utils/memory.hpp (shared between engine and user code, dual-mode
+// via WFX_ENGINE_BUILD); this header is just the public include path.
 //
-// The engine and every user-space allocation should come from the same-
-// -allocator, so prefer these over raw new/delete/malloc in user-space code.
+// The engine and every user-space allocation should come from the same
+// allocator, so prefer these over raw new/delete/malloc in user-space code.
 //
 // Provides:
 //   WFX::Alloc(size)          : raw allocation, like malloc

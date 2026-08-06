@@ -13,7 +13,7 @@ static AsyncAPIDataExt1 GlobalAsyncDataExt1;
 const AsyncAPIExt1* GetAsyncAPIExt1()
 {
     // clang-format off
-    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
     static const AsyncAPIExt1 GlobalAsyncAPIExt1 = {
         // vvv Async Functions vvv
         [](void* ctx, std::uint32_t delayMs, AsyncData asyncData) { // RegisterAsyncTimer

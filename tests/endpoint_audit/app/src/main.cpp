@@ -655,8 +655,8 @@ WFX::EpAbortCoro SpOnAbort(WFX::AbortSlotHandle h, void* slotStateVoid)
     if(n > 0)
         co_await side.Send(buf, static_cast<std::uint32_t>(n));
 
-    // leakAux deliberately skips this, to prove connectTimeoutSeconds reclaims a side-
-    // -connection whose caller forgot (or, here, chose not) to Close() it
+    // leakAux deliberately skips this, to prove connectTimeoutSeconds reclaims a side
+    // connection whose caller forgot (or, here, chose not) to Close() it.
     if(!st->leakAux)
         side.Close();
 
@@ -666,8 +666,8 @@ WFX::EpAbortCoro SpOnAbort(WFX::AbortSlotHandle h, void* slotStateVoid)
 // Hostile/buggy protocol simulation: a real onAbort author will get this wrong at least
 // once. Closes the side connection TWICE and keeps using the handle afterward. The engine
 // must survive this (bump generationId before freeing, same discipline every other
-// pool-recycle path already uses), never double-free the aux slot or corrupt a DIFFERENT-
-// -side connection that gets handed that same slot in the meantime
+// pool-recycle path already uses), never double-free the aux slot or corrupt a DIFFERENT
+// side connection that gets handed that same slot in the meantime.
 WFX::EpAbortCoro SpOnAbortDoubleClose(WFX::AbortSlotHandle h, void* slotStateVoid)
 {
     auto* st = static_cast<SpSlotState*>(slotStateVoid);
@@ -869,11 +869,11 @@ const SpEp* SpEndpointOf(std::string_view name) noexcept
 } // namespace
 
 // --- onAbort: graceful cancel over a side connection when the client bails --------
-// connLimit=4 so overlapping primaries can be in flight at once (needed to drive-
-// -auxConnLimit=1 into exhaustion on purpose, plus headroom for a tight sequential-
-// -leak-reclaim test). connectTimeoutSeconds=5 is the engine's own hard floor-
-// -(must be >= the timer tick interval, INVOKE_TIMEOUT_COOLDOWN) - the reclaim-
-// -test just waits it out rather than fighting it
+// connLimit=4 so overlapping primaries can be in flight at once (needed to drive
+// auxConnLimit=1 into exhaustion on purpose, plus headroom for a tight sequential
+// leak-reclaim test). connectTimeoutSeconds=5 is the engine's own hard floor
+// (must be >= the timer tick interval, INVOKE_TIMEOUT_COOLDOWN) - the reclaim
+// test just waits it out rather than fighting it.
 inline const SpAbortEp SpAbort{
     SP_UPSTREAM, SpDesc("abort:0:0"),
     WFX::EndpointConfig{
@@ -902,9 +902,9 @@ inline const SpAbortEp SpAbortNoAux{
     }
 };
 
-// Mock stalls 1s before answering AUTH. Gives the audit a window to abandon the-
-// -client while onConnect is still running, proving onAbort never fires while-
-// -inOnConnectPhase is set (it would steal onConnect's asyncData mid-flight)
+// Mock stalls 1s before answering AUTH. Gives the audit a window to abandon the
+// client while onConnect is still running, proving onAbort never fires while
+// inOnConnectPhase is set (it would steal onConnect's asyncData mid-flight).
 inline const SpAbortEp SpAbortMidConnect{
     SP_UPSTREAM, SpDesc("abortmidconnect:0:0"),
     WFX::EndpointConfig{
@@ -968,8 +968,8 @@ static WFX::SmtpEndpointConfig SmtpCfgFast() noexcept
 inline const auto Smtp_good               = WFX::SmtpEndpoint{"127.0.0.1:8100", SmtpCfg()};
 // Dedicated pool for /smtp/inject, same mock persona/port as Smtp_good but never touched by
 // /smtp/send. /smtp/send's "good" transactions never call Quit(), so a successful one leaves its
-// connection pooled and still alive (ReturnEndpointToPool); Begin() has no way to tell a pooled-
-// -alive slot from a genuinely fresh one, so phase_smtp_inject could silently inherit a connection
+// connection pooled and still alive (ReturnEndpointToPool); Begin() has no way to tell a pooled
+// alive slot from a genuinely fresh one, so phase_smtp_inject could silently inherit a connection
 // left over from phase_smtp_handshake's earlier /smtp/send "good" calls instead of a clean one
 inline const auto Smtp_good_injectroute   = WFX::SmtpEndpoint{"127.0.0.1:8100", SmtpCfg()};
 inline const auto Smtp_auth_login_only    = WFX::SmtpEndpoint{"127.0.0.1:8101", SmtpCfg()};
@@ -1230,8 +1230,8 @@ WFX_POST("/inject", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 //
 //   X-Persona  which SmtpEndpointOf() persona (default "good")
 //   X-From / X-FromName / X-To / X-ToName / X-Subject / X-ReplyTo   (all optional, sane defaults)
-//   body       the message body (POST body, not a header, so it can carry raw CR/LF for-
-//              -dot-stuffing round-trip tests)
+//   body       the message body (POST body, not a header, so it can carry raw CR/LF for
+//              dot-stuffing round-trip tests)
 //
 //   { "ep": <EndpointStatus int>, "stage": "reserve"|"mail"|"rcpt"|"data_start"|"data_body"|"done",
 //     "code": <SMTP reply code>, "success": <bool> }        // code/success only when ep == 0
@@ -1716,9 +1716,9 @@ WFX_GET("/sp/rss", [](WFX::Request, WFX::Response res) {
     j.Write("pid", static_cast<std::uint64_t>(self.pid));
 })
 
-// Per-endpoint metrics, summed across workers, each tagged with its host. Several endpoint-
-// -instances share the same host (all the UPSTREAM ones), so the metrics phase asserts on the-
-// -aggregate delta across every slot rather than trying to map a slot back to one instance.
+// Per-endpoint metrics, summed across workers, each tagged with its host. Several endpoint
+// instances share the same host (all the UPSTREAM ones), so the metrics phase asserts on the
+// aggregate delta across every slot rather than trying to map a slot back to one instance.
 // ev.host is a Shared::StringView, written directly via the JsonWriter StringView overload
 WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     const bool latencyOn = WFX::MetricsLatencyEnabled();

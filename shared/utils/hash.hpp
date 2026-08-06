@@ -34,9 +34,9 @@ inline std::uint64_t Read64(const std::uint8_t* p) noexcept
     return v;
 }
 
-// Every mainstream compiler (GCC, Clang, MSVC, ICX) pattern-matches this exact shift-mask-
-// -sequence into a single native bswap instruction, so this costs nothing over a compiler-
-// -specific builtin while staying portable to any standards-conforming compiler
+// Every mainstream compiler (GCC, Clang, MSVC, ICX) pattern-matches this exact shift-mask
+// sequence into a single native bswap instruction, so this costs nothing over a compiler-specific
+// builtin while staying portable to any standards-conforming compiler.
 inline constexpr std::uint32_t ByteSwap32(std::uint32_t x) noexcept
 {
     return ((x & 0x000000FFu) << 24) | ((x & 0x0000FF00u) << 8) | ((x & 0x00FF0000u) >> 8) | ((x & 0xFF000000u) >> 24);
@@ -100,8 +100,8 @@ inline std::uint64_t WyHash(const char* key, std::size_t len, std::uint64_t seed
     if(len <= 16) [[likely]] {
         if(len >= 4) [[likely]] {
             // Two overlapping 4-byte reads from head and tail, merged into 64 bits each
-            // The (len >> 3) << 2 term picks the mid-point for 4..7 byte inputs so the-
-            // -reads don't go out of bounds
+            // The (len >> 3) << 2 term picks the mid-point for 4..7 byte inputs so the reads
+            // don't go out of bounds.
             a = (static_cast<std::uint64_t>(Read32(p)) << 32) | Read32(p + ((len >> 3) << 2));
             b = (static_cast<std::uint64_t>(Read32(p + len - 4)) << 32) | Read32(p + len - 4 - ((len >> 3) << 2));
         }
@@ -119,8 +119,8 @@ inline std::uint64_t WyHash(const char* key, std::size_t len, std::uint64_t seed
         std::size_t i = len;
 
         if(i > 48) [[unlikely]] {
-            // Three independent accumulators keep the pipeline busy across-
-            // -iterations, hiding multiply latency on out-of-order CPUs
+            // Three independent accumulators keep the pipeline busy across iterations, hiding
+            // multiply latency on out-of-order CPUs.
             std::uint64_t s = seed, see2 = seed;
 
             do {
@@ -440,8 +440,8 @@ inline std::uint64_t MergeAccs(const std::uint64_t* acc, const std::uint8_t* sec
     return Avalanche(result);
 }
 
-// Derives a per-seed secret for the long-input path (real XXH3 never reuses the raw default-
-// -secret once seed != 0); each 16-byte pair of the default secret gets +seed/-seed applied
+// Derives a per-seed secret for the long-input path (real XXH3 never reuses the raw default
+// secret once seed != 0); each 16-byte pair of the default secret gets +seed/-seed applied.
 inline void InitCustomSecret(std::uint8_t* out, std::uint64_t seed) noexcept
 {
     for(int i = 0; i < SECRET_SIZE / 16; ++i) {

@@ -24,8 +24,8 @@ FileMetaStatus FileMeta::Load()
     if(fileSize > ALLOC_THRESHOLD)
         return FileMetaStatus::TOO_LARGE;
 
-    // Ik this looks weird but what caller must do for a 'CORRUPTED'-
-    // -type is invalidate cache and rebuild it pretty much
+    // Ik this looks weird but what caller must do for a 'CORRUPTED'
+    // type is invalidate cache and rebuild it pretty much.
     if(fileSize == 0)
         return FileMetaStatus::CORRUPTED;
 

@@ -9,7 +9,7 @@ namespace WFX::Shared {
 const MemoryAPIExt1* GetMemoryAPIExt1()
 {
     // clang-format off
-    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
     static const MemoryAPIExt1 GlobalMemoryAPIExt1 = {
         [](std::uint64_t size) { // AllocFn
             return Alloc(size);

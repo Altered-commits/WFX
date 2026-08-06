@@ -8,8 +8,8 @@
 namespace WFX::Utils {
 namespace MetricTracer {
 
-// Rounds up to the next 64-byte boundary so each array, and each worker block, starts on its own-
-// -cache line and no two workers ever share one
+// Rounds up to the next 64-byte boundary so each array, and each worker block, starts on its own
+// cache line and no two workers ever share one.
 static std::size_t Align64(std::size_t n) noexcept
 {
     return (n + 63) & ~static_cast<std::size_t>(63);
@@ -20,8 +20,8 @@ bool Create(int workerCount, std::uint16_t maxRoutes, std::uint16_t maxEndpoints
     if(workerCount <= 0)
         return false;
 
-    // sizeof(WorkerMetrics) is a multiple of 64, so the route array starts 64-aligned. Every array-
-    // -after it is placed on the next 64-byte boundary, which also fixes the block stride
+    // sizeof(WorkerMetrics) is a multiple of 64, so the route array starts 64-aligned. Every array
+    // after it is placed on the next 64-byte boundary, which also fixes the block stride.
     std::size_t offset = sizeof(Shared::WorkerMetrics);
 
     GlobalRouteOffset = offset;
@@ -200,8 +200,8 @@ Shared::EndpointMetrics AggregateEndpoint(std::uint16_t endpointIdx) noexcept
     return out;
 }
 
-// Latency histograms add elementwise: a percentile computed off the summed buckets is the same as-
-// -over the merged raw samples, so summing across workers loses nothing
+// Latency histograms add elementwise: a percentile computed off the summed buckets is the same as
+// over the merged raw samples, so summing across workers loses nothing.
 static Shared::LatencyMetrics AggregateLatency(std::uint16_t idx, std::uint16_t cap,
                                                Shared::LatencyMetrics* (*slots)(int)) noexcept
 {

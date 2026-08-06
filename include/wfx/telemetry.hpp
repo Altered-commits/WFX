@@ -9,8 +9,8 @@
 // Zero-alloc logging and metrics for user code.
 //
 // Logging crosses the ABI boundary as a single null-terminated string.
-// Metrics live in a shared mmap, one slot per worker, and are returned as-
-// -plain structs. Per-worker slots are reached by index, aggregates sum them
+// Metrics live in a shared mmap, one slot per worker, and are returned as
+// plain structs. Per-worker slots are reached by index, aggregates sum them
 //
 // Provides:
 //   WFX::LogTrace  / WFX::LogDebug  / WFX::LogInfo
@@ -135,8 +135,8 @@ LogFmt(char* p, char* end, T value) noexcept
 }
 
 // -----------------------------------------------------------------------
-// Formats args into a stack buffer, crosses ABI boundary once via a-
-// -single (const char*) call. 'lvl' maps directly to LogFn index
+// Formats args into a stack buffer, crosses ABI boundary once via a
+// single (const char*) call. 'lvl' maps directly to LogFn index
 // -----------------------------------------------------------------------
 template <typename... Args> inline void LogEmit(int lvl, Args&&... args) noexcept
 {
@@ -293,9 +293,9 @@ inline Shared::SelfMetrics GetProcessMetricsAll() noexcept
 }
 
 // vvv Route / Endpoint metrics vvv
-// Routes and endpoints are indexed densely from 0. Counts come from registration, so they are-
-// -stable for the process, and each getter sums that slot across every worker with its identity-
-// -(route path/method, endpoint host) attached. An out of range index returns a zeroed view
+// Routes and endpoints are indexed densely from 0. Counts come from registration, so they are
+// stable for the process, and each getter sums that slot across every worker with its identity
+// (route path/method, endpoint host) attached. An out of range index returns a zeroed view
 inline std::uint16_t RouteMetricCount() noexcept
 {
     const auto* api = Core::UtilsApiExt1();
@@ -332,8 +332,8 @@ inline Shared::EndpointMetricsView GetEndpointMetricsAt(std::uint16_t endpoint) 
     return api->getEndpointMetricsAt(endpoint);
 }
 
-// Latency histograms live in their own array, mapped only when [Metrics] latency is on. Check-
-// -MetricsLatencyEnabled() first, the buckets are all zero when it is off
+// Latency histograms live in their own array, mapped only when [Metrics] latency is on. Check
+// MetricsLatencyEnabled() first, the buckets are all zero when it is off
 inline bool MetricsLatencyEnabled() noexcept
 {
     const auto* api = Core::UtilsApiExt1();
@@ -381,8 +381,8 @@ struct LatencyStats {
 
 namespace Detail {
 
-// Representative value of a bucket: the midpoint of the octave sub-range it covers. Bucket i sits in-
-// -octave k = i / 8 (range [2^k, 2^(k+1))) at sub-bucket s = i % 8 of width 2^k / 8
+// Representative value of a bucket: the midpoint of the octave sub-range it covers. Bucket i sits
+// in octave k = i / 8 (range [2^k, 2^(k+1))) at sub-bucket s = i % 8 of width 2^k / 8
 inline std::uint64_t LatencyBucketMidpointUs(std::uint32_t idx) noexcept
 {
     const std::uint32_t k = idx / 8;

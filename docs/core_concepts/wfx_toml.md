@@ -69,7 +69,7 @@ max_body_size                = 8192    # 32-bit Unsigned Integer (In bytes)
 max_header_count             = 64      # 16-bit Unsigned Integer
 header_timeout               = 15      # 16-bit Unsigned Integer (In seconds)
 body_timeout                 = 20      # 16-bit Unsigned Integer (In seconds)
-idle_timeout                 = 40      # 16-bit Unsigned Integer (In seconds)
+idle_timeout                 = 60      # 16-bit Unsigned Integer (In seconds)
 max_connections              = 2000    # 32-bit Unsigned Integer
 ```
 
@@ -197,7 +197,7 @@ enable_client_session_cache = true            # Boolean (true or false)
 enable_ktls                 = false           # Boolean (true or false)
 server_session_cache_size   = 4096            # 64-bit Unsigned Integer (In bytes)
 client_session_cache_size   = 1024            # 64-bit Unsigned Integer (In bytes)
-min_proto_version           = 3               # 8-bit Unsigned Integer (1 - 3 only)
+min_proto_version           = 2               # 8-bit Unsigned Integer (1 - 3 only)
 security_level              = 2               # Integer (0 - 5 only)
 ```
 
@@ -267,7 +267,7 @@ Socket and worker configuration for **Linux systems only**. All settings in this
 
 ```toml
 [Linux]
-worker_processes        = 2     # 32-bit Unsigned Integer
+worker_processes        = 4     # 32-bit Unsigned Integer
 worker_shutdown_timeout = 5     # 16-bit Unsigned Integer (In seconds)
 backlog                 = 1024  # 32-bit Unsigned Integer
 ```

@@ -12,12 +12,12 @@
 
 namespace WFX::Http {
 
-// What a metrics index refers to, held once per process rather than per worker: registration runs-
-// -identically in every worker, so only the counters need to be shared
+// What a metrics index refers to, held once per process rather than per worker: registration runs
+// identically in every worker, so only the counters need to be shared.
 //
-// The path is joined with its group prefixes and owned here, because a grouped route's full path-
-// -(WFX_GROUP_START prefix + WFX_GET path) never exists as one contiguous literal. The join happens-
-// -once at registration, so two routes named /list under different groups stay distinct
+// The path is joined with its group prefixes and owned here, because a grouped route's full path
+// (WFX_GROUP_START prefix + WFX_GET path) never exists as one contiguous literal. The join happens
+// once at registration, so two routes named /list under different groups stay distinct.
 struct RouteIdentity {
     std::string path;
     Shared::HttpMethod method = Shared::HttpMethod::GET;
@@ -62,8 +62,8 @@ private:
     // Indexed by TrieNode::metricsIdx
     std::vector<RouteIdentity> identities_;
 
-    // Group prefixes joined so far, e.g. "/api/v1" inside nested WFX_GROUP_START blocks. The stack-
-    // -records the length to truncate back to on each PopRouteGroup
+    // Group prefixes joined so far, e.g. "/api/v1" inside nested WFX_GROUP_START blocks. The stack
+    // records the length to truncate back to on each PopRouteGroup.
     std::string groupPrefix_;
     std::vector<std::size_t> groupLenStack_;
 

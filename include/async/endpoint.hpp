@@ -17,9 +17,9 @@ using namespace WFX::Shared;
 // Fwd declare stuff
 struct SlotHandle;
 
-// co_await handle.OpenSideConnection() inside onConnect/onAbort. Opens a second, throwaway-
-// -connection to the same endpoint (Postgres CancelRequest, MySQL COM_PROCESS_KILL, ...). The-
-// -returned SlotHandle supports Send/Receive/UpgradeToTLS like any other, plus Close()
+// co_await handle.OpenSideConnection() inside onConnect/onAbort. Opens a second, throwaway
+// connection to the same endpoint (Postgres CancelRequest, MySQL COM_PROCESS_KILL, ...). The
+// returned SlotHandle supports Send/Receive/UpgradeToTLS like any other, plus Close()
 struct SlotOpenSideConnectionAwaitable : public AwaitableBase<SlotOpenSideConnectionAwaitable> {
     void* ownerImpl;
 
@@ -27,7 +27,7 @@ public:
     explicit SlotOpenSideConnectionAwaitable(void* impl) noexcept : AwaitableBase{}, ownerImpl(impl)
     {}
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         handle = h;
@@ -37,12 +37,12 @@ public:
 
     // Defined out-of-line below, once SlotHandle is a complete type
     struct Result;
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     Result await_resume() const noexcept;
 };
 
-// Typed wrapper over EndpointSlotHandle passed into onConnect-
-// -coroutines. Exposes co_await Send(...) and co_await Receive()
+// Typed wrapper over EndpointSlotHandle passed into onConnect coroutines.
+// Exposes co_await Send(...) and co_await Receive()
 // The underlying impl pointer is the slot's context, type-erased at the ABI boundary
 struct SlotHandle {
     EndpointSlotHandle raw;
@@ -59,31 +59,31 @@ public:
         return SlotReceiveAwaitable{raw.impl, consumed};
     }
 
-    // Wraps this still-plaintext connection in TLS, for protocols that negotiate encryption-
-    // -in-band (Postgres SSLRequest, SMTP STARTTLS). Probe with Send/Receive first, then call-
-    // -this only if the server agreed. The endpoint must be configured plaintext, otherwise-
-    // -the engine already wrapped it at connect time and this fails with EpSlotInvalidState
+    // Wraps this still-plaintext connection in TLS, for protocols that negotiate encryption
+    // in-band (Postgres SSLRequest, SMTP STARTTLS). Probe with Send/Receive first, then call
+    // this only if the server agreed. The endpoint must be configured plaintext, otherwise
+    // the engine already wrapped it at connect time and this fails with EpSlotInvalidState.
     SlotUpgradeTlsAwaitable UpgradeToTLS() const noexcept
     {
         return SlotUpgradeTlsAwaitable{raw.impl};
     }
 
-    // Empty if this slot isn't TLS or the handshake hasn't completed. Any-
-    // -ALPN-aware protocol can call this to decide how to speak on this connection
+    // Empty if this slot isn't TLS or the handshake hasn't completed. Any
+    // ALPN-aware protocol can call this to decide how to speak on this connection.
     StringView NegotiatedProtocol() const noexcept
     {
         return raw.negotiatedProtocol(raw.impl);
     }
 
-    // Opens a second, throwaway connection to the same endpoint. Valid from onConnect and-
-    // -onAbort alike (onAbort only gets this via AbortSlotHandle, not the full SlotHandle)
+    // Opens a second, throwaway connection to the same endpoint. Valid from onConnect and
+    // onAbort alike (onAbort only gets this via AbortSlotHandle, not the full SlotHandle)
     SlotOpenSideConnectionAwaitable OpenSideConnection() const noexcept
     {
         return SlotOpenSideConnectionAwaitable{raw.impl};
     }
 
-    // Closes a side connection early. No-op on a primary handle (raw.close is null there,-
-    // -only a side connection's handle gets a real one)
+    // Closes a side connection early. No-op on a primary handle (raw.close is null there,
+    // only a side connection's handle gets a real one)
     void Close() const noexcept
     {
         if(raw.close)
@@ -113,10 +113,10 @@ inline SlotOpenSideConnectionAwaitable::Result SlotOpenSideConnectionAwaitable::
 }
 
 // Restricted handle passed into onAbort coroutines: OpenSideConnection + NegotiatedProtocol only
-// The primary slot is still mid-request (EVENT_ENDPOINT_RECV) when onAbort fires, so driving-
-// -Send/Receive/UpgradeToTLS on it directly is illegal (crashes or corrupts the real response-
-// -in flight). This is a compile-time restriction, not a runtime guard, since there's no safe-
-// -general meaning for it. A protocol that needs to talk must go through OpenSideConnection()
+// The primary slot is still mid-request (EVENT_ENDPOINT_RECV) when onAbort fires, so driving
+// Send/Receive/UpgradeToTLS on it directly is illegal (crashes or corrupts the real response
+// in flight). This is a compile-time restriction, not a runtime guard, since there's no safe
+// general meaning for it. A protocol that needs to talk must go through OpenSideConnection()
 struct AbortSlotHandle {
     EndpointSlotHandle raw;
 
@@ -189,18 +189,16 @@ private: // Storage
     EndpointDestroyStateFn destroy_ = nullptr;
 };
 
-// Returned by Resolve::SendPayload. Suspends the calling route-
-// -handler coroutine, registers itself as the async completion-
-// -target on the client context, then calls the engine's SendPayload
+// Returned by Resolve::SendPayload. Suspends the calling route handler coroutine, registers
+// itself as the async completion target on the client context, then calls the engine's
+// SendPayload
 //
-// Owns the request by value so it stays alive across the Send()/Get()/-
-// -Post()-style helper chains a caller may build on top of Resolve,-
-// -only takes the address of the owned copy in await_suspend(), by which-
-// -point this awaitable is at its final, non-relocating address
+// Owns the request by value so it stays alive across the Send()/Get()/Post()-style helper
+// chains a caller may build on top of Resolve, only takes the address of the owned copy in
+// await_suspend(), by which point this awaitable is at its final, non-relocating address
 //
-// On synchronous failure (pool exhausted etc.) it resumes-
-// -immediately so the caller can inspect the status without-
-// -suspending at all
+// On synchronous failure (pool exhausted etc.) it resumes immediately so the caller can
+// inspect the status without suspending at all
 //
 // On success the result is an EndpointOutput<TRes> (an RAII owner)
 // It is valid for as long as the variable is in scope
@@ -219,7 +217,7 @@ public:
           destroyOutput(destroy), pinnedSlot(pinnedSlot)
     {}
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         this->handle = h;
@@ -246,7 +244,7 @@ public:
         return true;
     }
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     std::pair<EndpointStatus, EndpointOutput<TRes>> await_resume() noexcept
     {
         // Synchronous failure. Return the actual engine status
@@ -262,18 +260,18 @@ public:
 };
 
 // User facing onConnect function pointer type
-// The user writes: Task<ConnectResult> MyConnect(SlotHandle, void*)-
-// -and passes &MyConnect as the OnConnect template argument to Resolve
+// The user writes: Task<ConnectResult> MyConnect(SlotHandle, void*) and
+// passes &MyConnect as the OnConnect template argument to Resolve
 using UserOnConnectFn = Task<ConnectResult> (*)(SlotHandle, void*);
 
 // Compile-time ABI erasure for the onConnect coroutine
-// Takes the user's typed function pointer as a non-type template-
-// -parameter and produces a stateless static wrapper matching the-
-// -ABI signature EndpointOnConnectFn. Each distinct user function-
-// -gets its own instantiation with its own function pointer
+// Takes the user's typed function pointer as a non-type template
+// parameter and produces a stateless static wrapper matching the
+// ABI signature EndpointOnConnectFn. Each distinct user function
+// gets its own instantiation with its own function pointer
 //
-// constexpr nullptr specialization: returns nullptr directly so-
-// -the engine skips the onConnect phase for simple protocols
+// constexpr nullptr specialization: returns nullptr directly so
+// the engine skips the onConnect phase for simple protocols
 template <UserOnConnectFn UserFn>
 void EraseOnConnectImpl(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd) noexcept
 {
@@ -292,10 +290,10 @@ template <UserOnConnectFn UserFn> constexpr EndpointOnConnectFn GetErasedOnConne
 }
 
 // User facing onAbort function pointer type
-// The user writes: Task<void> MyAbort(AbortSlotHandle, void*)-
-// -and passes &MyAbort as the OnAbort template argument to Resolve
-// No ConnectResult-style verdict: the original slot's fate is decided by its own ongoing-
-// -receive/parse/timeout cycle, not by what onAbort returns
+// The user writes: Task<void> MyAbort(AbortSlotHandle, void*) and
+// passes &MyAbort as the OnAbort template argument to Resolve
+// No ConnectResult-style verdict: the original slot's fate is decided by its own ongoing
+// receive/parse/timeout cycle, not by what onAbort returns
 using UserOnAbortFn = Task<void> (*)(AbortSlotHandle, void*);
 
 // Compile-time ABI erasure for the onAbort coroutine, same pattern as EraseOnConnectImpl/GetErasedOnConnect
@@ -316,9 +314,9 @@ template <UserOnAbortFn UserFn> constexpr EndpointOnAbortFn GetErasedOnAbort() n
         return &EraseOnAbortImpl<UserFn>;
 }
 
-// One chunk of a streamed response. data borrows the engine's output object and stays valid-
-// -only until the next Next(), which is what keeps peak memory at one chunk instead of the-
-// -whole response. Copy anything you need to outlive the loop iteration
+// One chunk of a streamed response. data borrows the engine's output object and stays valid
+// only until the next Next(), which is what keeps peak memory at one chunk instead of the
+// whole response. Copy anything you need to outlive the loop iteration
 // done marks the final delivery, at which point data is null and the slot is back in the pool
 template <typename TRes> struct StreamChunk {
     EndpointStatus status = EndpointStatus::SUCCESS;
@@ -326,9 +324,9 @@ template <typename TRes> struct StreamChunk {
     bool done = false;
 };
 
-// Returned by StreamHandle::Next(). The first Next() sends the request, later ones pull the-
-// -following chunk; when the engine can satisfy one from already-buffered bytes it says so-
-// -and this never suspends, mirroring SendPayloadAwaitable's synchronous path
+// Returned by StreamHandle::Next(). The first Next() sends the request, later ones pull the
+// following chunk; when the engine can satisfy one from already-buffered bytes it says so
+// and this never suspends, mirroring SendPayloadAwaitable's synchronous path
 template <typename TReq, typename TRes>
 struct StreamNextAwaitable : public AwaitableBase<StreamNextAwaitable<TReq, TRes>> {
     const TReq* req;
@@ -342,7 +340,7 @@ public:
         : AwaitableBase<StreamNextAwaitable<TReq, TRes>>{}, req(r), first(isFirst), endpointIdx(idx), pinnedSlot(pinned)
     {}
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     bool await_suspend(std::coroutine_handle<> h) noexcept
     {
         this->handle = h;
@@ -350,8 +348,8 @@ public:
         const AsyncData onDone{this, AwaitableBase<StreamNextAwaitable<TReq, TRes>>::OnComplete,
                                AwaitableBase<StreamNextAwaitable<TReq, TRes>>::OnDestroy};
 
-        // The opening request is an ordinary send; the engine only learns this is a stream when-
-        // -parse() first returns a CHUNK_* result, so nothing extra is needed on the send side
+        // The opening request is an ordinary send; the engine only learns this is a stream when
+        // parse() first returns a CHUNK_* result, so nothing extra is needed on the send side
         const EndpointStatus s =
             first ? Core::EndpointApiExt1()->sendPayload(Core::HttpApiExt1()->getGlobalPtrData(), endpointIdx,
                                                          static_cast<const void*>(req), onDone, pinnedSlot)
@@ -361,8 +359,8 @@ public:
         if(s == EndpointStatus::PENDING)
             return true;
 
-        // Either a chunk was already buffered, the stream ended, or it failed. All three resume-
-        // -immediately: suspending would strand the coroutine, since no callback is coming
+        // Either a chunk was already buffered, the stream ended, or it failed. All three resume
+        // immediately: suspending would strand the coroutine, since no callback is coming
         syncStatus = s;
         this->result.status = (s == EndpointStatus::CHUNK_AVAILABLE || s == EndpointStatus::SUCCESS)
                                   ? AsyncStatus::COMPLETED
@@ -371,17 +369,17 @@ public:
         return false;
     }
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
     StreamChunk<TRes> await_resume() const noexcept
     {
-        // Synchronous chunk: the engine left it in the slot's output object rather than firing-
-        // -a callback, so ask for it now that the coroutine is safely past its suspend point
+        // Synchronous chunk: the engine left it in the slot's output object rather than firing
+        // a callback, so ask for it now that the coroutine is safely past its suspend point
         if(syncStatus == EndpointStatus::CHUNK_AVAILABLE) {
             const auto* chunk =
                 static_cast<const TRes*>(Core::EndpointApiExt1()->streamChunk(Core::HttpApiExt1()->getGlobalPtrData()));
 
-            // A null chunk here would otherwise read as "more to come, but nothing yet" and spin-
-            // -the caller's loop forever, so it terminates the stream instead
+            // A null chunk here would otherwise read as "more to come, but nothing yet" and spin
+            // the caller's loop forever, so it terminates the stream instead
             return {EndpointStatus::SUCCESS, chunk, chunk == nullptr};
         }
 
@@ -400,8 +398,8 @@ public:
     }
 };
 
-// Drives a chunked response. Hold it across the whole loop: it owns the request, which-
-// -cursor/paging protocols need handed back on every Next() to build their continuation
+// Drives a chunked response. Hold it across the whole loop: it owns the request, which
+// cursor/paging protocols need handed back on every Next() to build their continuation
 //
 //   auto stream = ep.Stream(req);
 //   while(true) {
@@ -436,13 +434,13 @@ private: // Storage
     bool first_ = true;
 };
 
-// RAII owner of a connection pinned via Resolve::Reserve(). Every SendPayload through it runs-
-// -on that one connection instead of whatever the pool hands out, which is what makes-
-// -connection-scoped protocol state (an open transaction, a LISTEN subscription) work at all
+// RAII owner of a connection pinned via Resolve::Reserve(). Every SendPayload through it runs
+// on that one connection instead of whatever the pool hands out, which is what makes
+// connection-scoped protocol state (an open transaction, a LISTEN subscription) work at all
 //
-// Releases on destruction, so an early co_return or a thrown exception can't leak the pin. The-
-// -underlying slot can still die on its own (server hangup, idle timeout); the handle detects-
-// -that and later sends fail with EpInvalidKey rather than landing on an unrelated connection
+// Releases on destruction, so an early co_return or a thrown exception can't leak the pin. The
+// underlying slot can still die on its own (server hangup, idle timeout); the handle detects
+// that and later sends fail with EpInvalidKey rather than landing on an unrelated connection
 template <typename TReq, typename TRes> class ReservedSlot {
 public:
     ReservedSlot(std::uint16_t idx, std::uint64_t handle, EndpointDestroyStateFn destroy) noexcept
@@ -494,8 +492,8 @@ public:
         return {endpointIdx_, std::move(req), handle_};
     }
 
-    // Idempotent, also runs on destruction. Safe to call mid-request: the engine hands the-
-    // -connection back once that request finishes rather than yanking it out from under it
+    // Idempotent, also runs on destruction. Safe to call mid-request: the engine hands the
+    // connection back once that request finishes rather than yanking it out from under it
     void Release() noexcept
     {
         if(handle_ == 0)
@@ -511,8 +509,8 @@ private: // Storage
     EndpointDestroyStateFn destroyOutput_ = nullptr;
 };
 
-// Constructed once at namespace scope before Run(). Registers the endpoint with the engine-
-// -via the deferred init vector and stores the assigned index for use in SendPayload calls
+// Constructed once at namespace scope before Run(). Registers the endpoint with the engine
+// via the deferred init vector and stores the assigned index for use in SendPayload calls
 //
 // Pass EndpointDesc directly. Leave onConnect = nullptr in the desc (Resolve fills it in from the-
 // OnConnect template parameter so the compiler produces a zero-cost stateless erasing wrapper)
@@ -545,26 +543,26 @@ public:
     Resolve& operator=(Resolve&&) = default;
 
 public:
-    // Takes req by value: the returned awaitable owns it, so it stays valid-
-    // -across however many by-value helper functions (Send/Get/Post/...) a-
-    // -caller layers on top before the co_await site actually suspends
+    // Takes req by value: the returned awaitable owns it, so it stays valid
+    // across however many by-value helper functions (Send/Get/Post/...) a
+    // caller layers on top before the co_await site actually suspends
     SendPayloadAwaitable<TReq, TRes> SendPayload(TReq req) const noexcept
     {
         return {endpointIdx_, std::move(req), destroyOutput_};
     }
 
-    // Pins one connection to the caller so consecutive requests share it, for protocols where-
-    // -that's load-bearing (SQL transactions, LISTEN/NOTIFY). Returns an empty ReservedSlot when-
-    // -the pool is exhausted, check IsValid() before using it. Not available on multiplexed-
-    // -endpoints (hasCapacity set), which already share one connection by design
+    // Pins one connection to the caller so consecutive requests share it, for protocols where
+    // that's load-bearing (SQL transactions, LISTEN/NOTIFY). Returns an empty ReservedSlot when
+    // the pool is exhausted, check IsValid() before using it. Not available on multiplexed
+    // endpoints (hasCapacity set), which already share one connection by design
     ReservedSlot<TReq, TRes> Reserve() const noexcept
     {
         return {endpointIdx_, Core::EndpointApiExt1()->reserveSlot(endpointIdx_), destroyOutput_};
     }
 
-    // Consumes a response in chunks instead of materializing it whole, for results too large to-
-    // -hold in memory. The protocol opts in by returning a CHUNK_* ParseResult; without that-
-    // -this behaves like an ordinary SendPayload that completes on the first Next()
+    // Consumes a response in chunks instead of materializing it whole, for results too large to
+    // hold in memory. The protocol opts in by returning a CHUNK_* ParseResult; without that
+    // this behaves like an ordinary SendPayload that completes on the first Next()
     StreamHandle<TReq, TRes> Stream(TReq req) const noexcept
     {
         return {endpointIdx_, std::move(req), 0};

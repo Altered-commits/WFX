@@ -556,8 +556,8 @@ public: // vvv Object and Array vvv
                 valRef = r.GetOrCreate(src_ + keyStart, klen);
             }
             else {
-                // Escaped key: rewind and parse the full string to get decoded bytes,-
-                // -then insert. Always owned, escaped content differs from src bytes
+                // Escaped key: rewind and parse the full string to get decoded bytes, then insert.
+                // Always owned, escaped content differs from src bytes.
                 pos_ = keyStart - 1; // rewind to opening quote
 
                 JsonNode tmp;
@@ -575,10 +575,10 @@ public: // vvv Object and Array vvv
                 if(!ok)
                     return false;
 
-                // The decoded key already lives in the store (ParseStringEscaped wrote it there)
-                // Insert it by offset, NOT by pointer: GetOrCreate would feed that strs-interior-
-                // -pointer to AllocStr, which reallocs strs and then memcpy's from the freed-
-                // -original (use-after-free), on top of storing the key a second time
+                // The decoded key already lives in the store (ParseStringEscaped wrote it there).
+                // Insert it by offset, NOT by pointer: GetOrCreate would feed that strs-interior
+                // pointer to AllocStr, which reallocs strs and then memcpy's from the freed
+                // original (use-after-free), on top of storing the key a second time.
                 valRef = r.GetOrCreateStored(tmp.U32a(), tmp.U32c());
             }
 

@@ -36,8 +36,8 @@ inline constexpr std::uint32_t CRYPTO_CHA_CHA_NONCE_LEN = 12;
 inline constexpr std::uint32_t CRYPTO_CHA_CHA_TAG_LEN = 16;
 
 // vvv One-shot hashing vvv
-// Digest of [in,inLen) into out. outCap must be >= the algo's digest length (32/48/64 for-
-// -SHA256/384/512), and *outLen receives the actual length written
+// Digest of [in,inLen) into out. outCap must be >= the algo's digest length (32/48/64 for
+// SHA256/384/512), and *outLen receives the actual length written.
 using CryptoHashFn = CryptoStatus (*)(CryptoHashAlgo algo, const std::uint8_t* in, std::uint32_t inLen,
                                       std::uint8_t* out, std::uint32_t outCap, std::uint32_t* outLen);
 
@@ -59,15 +59,15 @@ using CryptoHmacFinalFn = CryptoStatus (*)(void* ctx, std::uint8_t* out, std::ui
 using CryptoHmacDestroyFn = void (*)(void* ctx);
 
 // vvv AEAD vvv
-// Writes ciphertext followed by the auth tag into out (outCap must be >= ptLen + the algo's-
-// -tag length), and *outLen receives the total bytes written
+// Writes ciphertext followed by the auth tag into out (outCap must be >= ptLen + the algo's
+// tag length), and *outLen receives the total bytes written.
 using CryptoAeadEncryptFn = CryptoStatus (*)(CryptoAeadAlgo algo, const std::uint8_t* key, std::uint32_t keyLen,
                                              const std::uint8_t* nonce, std::uint32_t nonceLen, const std::uint8_t* aad,
                                              std::uint32_t aadLen, const std::uint8_t* plaintext, std::uint32_t ptLen,
                                              std::uint8_t* out, std::uint32_t outCap, std::uint32_t* outLen);
 
-// ciphertext must include the trailing tag. Returns AUTH_FAILED (out left untouched) on tag-
-// -mismatch, never releases unauthenticated plaintext
+// ciphertext must include the trailing tag. Returns AUTH_FAILED (out left untouched) on tag
+// mismatch, never releases unauthenticated plaintext.
 using CryptoAeadDecryptFn = CryptoStatus (*)(CryptoAeadAlgo algo, const std::uint8_t* key, std::uint32_t keyLen,
                                              const std::uint8_t* nonce, std::uint32_t nonceLen, const std::uint8_t* aad,
                                              std::uint32_t aadLen, const std::uint8_t* ciphertext, std::uint32_t ctLen,
@@ -84,9 +84,9 @@ using CryptoHkdfFn = CryptoStatus (*)(const std::uint8_t* ikm, std::uint32_t ikm
                                       std::uint32_t saltLen, const std::uint8_t* info, std::uint32_t infoLen,
                                       std::uint8_t* out, std::uint32_t outLen);
 
-// Argon2id password hashing (RFC 9106), writes exactly outLen bytes. memoryKb is the m_cost-
-// -parameter in KiB, iterations is t_cost, parallelism is the lane count. Returns UNSUPPORTED-
-// -if the backend's Argon2 provider isn't available
+// Argon2id password hashing (RFC 9106), writes exactly outLen bytes. memoryKb is the m_cost
+// parameter in KiB, iterations is t_cost, parallelism is the lane count. Returns UNSUPPORTED
+// if the backend's Argon2 provider isn't available.
 using CryptoArgon2idFn = CryptoStatus (*)(const std::uint8_t* password, std::uint32_t passLen, const std::uint8_t* salt,
                                           std::uint32_t saltLen, std::uint32_t iterations, std::uint32_t memoryKb,
                                           std::uint32_t parallelism, std::uint8_t* out, std::uint32_t outLen);
@@ -134,8 +134,8 @@ using CryptoAsymKeyExportFn = CryptoStatus (*)(void* key, bool exportPrivate, st
                                                std::uint32_t* outLen);
 using CryptoAsymKeyFreeFn = void (*)(void* key);
 
-// Exact signature size for this key+scheme pair, so a caller can size a buffer without guessing-
-// -0 if key and scheme don't match
+// Exact signature size for this key+scheme pair, so a caller can size a buffer without guessing;
+// returns 0 if key and scheme don't match.
 using CryptoAsymSigLenFn = std::uint32_t (*)(void* key, CryptoAsymScheme scheme);
 
 // One-shot only, Ed25519 has no incremental signing mode

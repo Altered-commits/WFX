@@ -17,8 +17,8 @@ namespace WFX::Shared {
 // vvv All aliases for clarity vvv
 using LogFn = void (*)(const char* msg);
 
-// Worker slots are traversed by index, so a caller needs the count and, to find itself, its own-
-// -index. Everything per-worker is reachable from those two
+// Worker slots are traversed by index, so a caller needs the count and, to find itself, its own
+// index. Everything per-worker is reachable from those two.
 using GetWorkerCountFn = std::uint16_t (*)();
 using GetWorkerIndexFn = std::uint16_t (*)();
 
@@ -30,9 +30,9 @@ using GetLogMetricsAggregateFn = LogMetrics (*)();
 using GetNetMetricsAggregateFn = NetworkMetrics (*)();
 using GetSelfMetricsAggregateFn = SelfMetrics (*)();
 
-// Route and endpoint metrics are aggregated across workers and returned with their identity-
-// -attached. Latency lives in its own array, mapped only when [Metrics] latency is on, so it has-
-// -its own getters and a flag to tell whether the buckets mean anything
+// Route and endpoint metrics are aggregated across workers and returned with their identity
+// attached. Latency lives in its own array, mapped only when [Metrics] latency is on, so it has
+// its own getters and a flag to tell whether the buckets mean anything.
 using GetRouteMetricCountFn = std::uint16_t (*)();
 using GetEndpointMetricCountFn = std::uint16_t (*)();
 using GetRouteMetricsAtFn = RouteMetricsView (*)(std::uint16_t routeIdx);
@@ -73,8 +73,8 @@ static_assert(std::is_standard_layout<UtilsAPIExt1>::value, "'UTILS_API_EXT1' mu
 // vvv Getter vvv
 const UtilsAPIExt1* GetUtilsAPIExt1();
 
-// Injects the registration data the route/endpoint metric getters read identity from. Called once-
-// -per worker at startup, same as the http and endpoint API tables
+// Injects the registration data the route/endpoint metric getters read identity from. Called once
+// per worker at startup, same as the http and endpoint API tables.
 void InitUtilsAPIExt1(Http::Router* router, Http::HttpConnectionHandler* connHandler);
 
 } // namespace WFX::Shared

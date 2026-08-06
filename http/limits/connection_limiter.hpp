@@ -14,9 +14,9 @@ struct ConnectionLimiterEntry {
     std::uint32_t connectionCount = 0;
 };
 
-// Peer-IP keyed: caps concurrent connections per (normalized) source IP. Entry lifecycle is tied-
-// -1:1 to the connection count itself, created in AllowConnection, erased once the last connection-
-// -from that IP closes via ReleaseConnection
+// Peer-IP keyed: caps concurrent connections per (normalized) source IP. Entry lifecycle is tied
+// 1:1 to the connection count itself, created in AllowConnection, erased once the last connection
+// from that IP closes via ReleaseConnection.
 class ConnectionLimiter {
 public:
     ConnectionLimiter();

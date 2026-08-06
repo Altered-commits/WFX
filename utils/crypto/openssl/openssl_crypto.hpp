@@ -51,10 +51,10 @@ Shared::CryptoStatus Argon2id(const std::uint8_t* password, std::uint32_t passLe
                               std::uint32_t parallelism, std::uint8_t* out, std::uint32_t outLen);
 
 // vvv Misc vvv
-// NOTE: does NOT go through OpenSSL - WFX already has a kernel-backed CSPRNG-
-// -(Utils::RandomPool, getrandom()/dev-urandom) used for SSL key generation, and this-
-// -delegates to that instead of duplicating via OpenSSL's RAND_bytes, so there's exactly-
-// -one source of randomness in the engine
+// NOTE: does NOT go through OpenSSL - WFX already has a kernel-backed CSPRNG
+// (Utils::RandomPool, getrandom()/dev-urandom) used for SSL key generation, and this
+// delegates to that instead of duplicating via OpenSSL's RAND_bytes, so there's exactly
+// one source of randomness in the engine.
 Shared::CryptoStatus RandomBytes(std::uint8_t* out, std::uint32_t len);
 bool ConstantTimeEquals(const std::uint8_t* a, const std::uint8_t* b, std::uint32_t len);
 

@@ -20,8 +20,8 @@
 //   WFX::ConstantTimeEquals(a, b)              : timing-safe comparison for secrets
 //   WFX::AsymKey                               : asymmetric key handle, sign/verify
 //
-// Every function returns {CryptoStatus, result}. Check status == WFX::CryptoOk-
-// -before using the result.
+// Every function returns {CryptoStatus, result}. Check status ==
+// WFX::CryptoOk before using the result.
 // -----------------------------------------------------------------------
 
 #include "core/core.hpp"
@@ -265,11 +265,11 @@ private: // Storage
 };
 
 // vvv AEAD vvv
-// One-shot only (see crypto_types.hpp for why). Input and output both live in memory at-
-// -once, so this is not the right tool for large payloads regardless of the cap below -
-// -real large-data support needs chunked, independently-authenticated framing (libsodium's-
-// -crypto_secretstream is the standard example), not a bigger buffer. The cap exists to-
-// -fail loudly on an accidentally-huge body instead of silently costing 2x its RAM
+// One-shot only (see crypto_types.hpp for why). Input and output both live in memory at once, so
+// this is not the right tool for large payloads regardless of the cap below; real large-data
+// support needs chunked, independently-authenticated framing (libsodium's crypto_secretstream is
+// the standard example), not a bigger buffer. The cap exists to fail loudly on an
+// accidentally-huge body instead of silently costing 2x its RAM
 inline constexpr std::size_t CryptoAeadMaxSize = 64 * 1024 * 1024;
 
 inline std::pair<CryptoStatus, Vector<std::uint8_t>> AeadEncrypt(CryptoAeadAlgo algo, std::string_view key,
@@ -397,9 +397,9 @@ inline std::pair<CryptoStatus, Vector<std::uint8_t>> RandomBytes(std::uint32_t l
     return {status, std::move(out)};
 }
 
-// Length itself isn't treated as secret (comparing it directly is standard practice-
-// -for MAC/token checks). Only the byte-by-byte comparison of equal-length secrets-
-// -needs to be timing-safe
+// Length itself isn't treated as secret (comparing it directly is standard practice
+// for MAC/token checks). Only the byte-by-byte comparison of equal-length secrets
+// needs to be timing-safe
 inline bool ConstantTimeEquals(std::string_view a, std::string_view b)
 {
     if(a.size() != b.size())

@@ -45,10 +45,10 @@ using JsonObject = Shared::JsonObject;
 // Two complementary serializers, pick based on your use case:
 //
 // WFX::ImJson  : Immediate-mode Json (16 bytes, zero heap)
-//                Streams JSON directly into the response buffer as each-
-//                -Write/Obj/Arr call is made. No allocation, no DOM.
-//                Best for large or repetitive payloads where structure-
-//                -is known upfront and throughput is the priority.
+//                Streams JSON directly into the response buffer as each
+//                Write/Obj/Arr call is made. No allocation, no DOM.
+//                Best for large or repetitive payloads where structure
+//                is known upfront and throughput is the priority.
 //
 //   WFX_GET("/json", [](WFX::Request req, WFX::Response res) {
 //       auto w = WFX::ImJson(res);
@@ -59,11 +59,11 @@ using JsonObject = Shared::JsonObject;
 //   })
 //
 // WFX::RmJson  : Retained-mode Json, DOM object (8 bytes, heap-backed)
-//                Builds a full JSON object in memory first, then-
-//                -serializes it in one shot via Write(). Supports nested-
-//                -access, array push, and merge.
-//                Best for dynamic payloads where structure is built-
-//                -conditionally or incrementally.
+//                Builds a full JSON object in memory first, then
+//                serializes it in one shot via Write(). Supports nested
+//                access, array push, and merge.
+//                Best for dynamic payloads where structure is built
+//                conditionally or incrementally.
 //
 //   WFX_GET("/json", [](WFX::Request req, WFX::Response res) {
 //       auto o = WFX::RmJson();
@@ -91,10 +91,10 @@ inline Shared::JsonObject RmJson(std::uint32_t nodeHint, std::uint32_t kvHint, s
 // Parses a JSON body into a JsonObject.
 //
 // view : Controls string storage strategy.
-//        When false, all strings are copied into internal storage and-
-//        -remain valid after the input body is destroyed. When true,-
-//        -strings reference the input body directly, so the body must-
-//        -remain alive.
+//        When false, all strings are copied into internal storage and
+//        remain valid after the input body is destroyed. When true,
+//        strings reference the input body directly, so the body must
+//        remain alive.
 //
 // maxDepth : Maximum allowed nesting depth
 // -----------------------------------------------------------------------

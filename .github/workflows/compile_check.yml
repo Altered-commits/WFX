@@ -1,7 +1,7 @@
 name: WFX Compile Check
 
-# Reusable: invoked by entry.yml AFTER the format check, so this file owns-
-# -ONLY the build logic
+# Reusable: invoked by entry.yml AFTER the format check, so this file owns
+# ONLY the build logic
 on:
   workflow_call:
 
@@ -31,11 +31,11 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake build-essential clang lld ninja-build
 
-    # actions/checkout resets every file's mtime to checkout time, which beats-
-    # -Ninja's mtime-based staleness check against the cached build/ dir below-
-    # -(sources always look newer than cached objects -> full rebuild every run,-
-    # -cache hit or not). Reset mtimes to last-commit time so only actually-
-    # -changed files look new again.
+    # actions/checkout resets every file's mtime to checkout time, which beats
+    # Ninja's mtime-based staleness check against the cached build/ dir below
+    # (sources always look newer than cached objects -> full rebuild every run,
+    # cache hit or not). Reset mtimes to last-commit time so only actually
+    # changed files look new again.
     - name: Restore file mtimes from git history
       run: |
         git ls-files -z | while IFS= read -r -d '' f; do
@@ -62,8 +62,8 @@ jobs:
     - name: Build
       run: cmake --build build
 
-    # Hands the wfx binary to audit_check.yml so it never has to compile. Only the-
-    # -binary, include/ and shared/ are tracked source already in its checkout.
+    # Hands the wfx binary to audit_check.yml so it never has to compile. Only the
+    # binary, include/ and shared/ are tracked source already in its checkout.
     - name: Upload wfx binary for the audit stage
       if: matrix.compiler == 'gcc'
       uses: actions/upload-artifact@v7

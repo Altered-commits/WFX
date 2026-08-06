@@ -48,10 +48,10 @@ static void AppendLiteralAddr(int family, const void* rawAddr, std::uint16_t por
 }
 
 // Handles literal IPs and the well-known 'localhost' hostname without touching DNS at all
-// 'localhost' specifically is NOT guaranteed to be forwardable to a real DNS server. It-
-// -typically only resolves via /etc/hosts at the NSS layer, which res_query bypasses-
-// -entirely. Returns true and populates outAddrs if 'host' was handled here, false if-
-// -the caller should fall through to a real DNS query
+// 'localhost' specifically is NOT guaranteed to be forwardable to a real DNS server. It
+// typically only resolves via /etc/hosts at the NSS layer, which res_query bypasses
+// entirely. Returns true and populates outAddrs if 'host' was handled here, false if
+// the caller should fall through to a real DNS query.
 static bool TryResolveLocal(const char* host, std::uint16_t port, ResolvedAddrs& outAddrs)
 {
     in_addr v4{};
@@ -68,9 +68,9 @@ static bool TryResolveLocal(const char* host, std::uint16_t port, ResolvedAddrs&
     }
 
     if(std::strcmp(host, "localhost") == 0) {
-        // Standard loopback addresses per RFC 6761. Both families, since dual-stack-
-        // -is the common case and round-robin/connect-failure-skip handles either-
-        // -being unreachable on a given system
+        // Standard loopback addresses per RFC 6761. Both families, since dual-stack
+        // is the common case and round-robin/connect-failure-skip handles either
+        // being unreachable on a given system.
         in_addr loopback4{};
         loopback4.s_addr = htonl(INADDR_LOOPBACK);
         AppendLiteralAddr(AF_INET, &loopback4, port, outAddrs);

@@ -33,8 +33,8 @@ inline constexpr char BASE64_URL_ALPHABET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefg
 inline constexpr char HEX_LOWER[] = "0123456789abcdef";
 inline constexpr char HEX_UPPER[] = "0123456789ABCDEF";
 
-// Per-byte properties, one table instead of three since all three are keyed by the same ASCII-
-// -index anyway; base64/hex are 0xFF when the byte isn't a digit in that alphabet
+// Per-byte properties, one table instead of three since all three are keyed by the same ASCII
+// index anyway; base64/hex are 0xFF when the byte isn't a digit in that alphabet
 struct CharInfo {
     std::uint8_t base64;
     std::uint8_t hex;
@@ -138,8 +138,8 @@ inline String Base64Encode(std::string_view data, bool urlSafe = false, bool pad
     return out;
 }
 
-// {false, {}} on an invalid character; trailing '=' is skipped rather than required, so padded-
-// -and unpadded input both work regardless of which alphabet produced them
+// {false, {}} on an invalid character; trailing '=' is skipped rather than required, so padded
+// and unpadded input both work regardless of which alphabet produced them
 inline std::pair<bool, Vector<std::uint8_t>> Base64Decode(std::string_view data)
 {
     std::size_t len = data.size();

@@ -445,10 +445,10 @@ Future support (no code changes required from you):
  *        of this documentation
  */
 WFX_MIDDLEWARE("ParseForm", [](WFX::Request req, WFX::Response res) {
-    if(req.method != WFX::HttpMethod::POST)
+    if(req.Method() != WFX::HttpMethod::POST)
         return WFX::MwContinue;
 
-    LoginFormSchema::CleanedType output;
+    decltype(LoginForm)::CleanedType output;
 
     if(LoginForm.Parse(req, output) != Form::FormError::NONE) {
         res.Status(WFX::HttpStatus::BAD_REQUEST)
@@ -461,12 +461,12 @@ WFX_MIDDLEWARE("ParseForm", [](WFX::Request req, WFX::Response res) {
 });
 
 /*
- * The parsed form data is stored as a tuple in the request context
+ * The parsed form data is stored as a tuple in the request context.
  * Now we can use the stored form as:
  *
  *  // Get the form
- *  auto form = req.GetContext<LoginFormSchema::CleanedType>("login-form");
- *     
+ *  auto form = req.GetContext<decltype(LoginForm)::CleanedType>("login-form");
+ *
  *  // Accesses the first field in declaration order
  *  auto& username = std::get<0>(form);
  */
@@ -485,16 +485,16 @@ What it does:
 
 **Typical Usage**:
 ```cpp
-// Same semantics as the previous example, but the form is parsed directly-
-// -from req.body
+// Same semantics as the previous example, but the form is parsed directly
+// from req.Body().
 //
-// In a real application, you should perform basic sanity checks yourself,-
-// -such as validating the HTTP method (e.g. POST) and ensuring the-
-// -'Content-Type' header is present and correct.
+// In a real application, you should perform basic sanity checks yourself,
+// such as validating the HTTP method (e.g. POST) and ensuring the
+// 'Content-Type' header is present and correct.
 
-LoginFormSchema::CleanedType output;
+decltype(LoginForm)::CleanedType output;
 
-if(LoginForm.ParseStatic(req.body, output) != Form::FormError::NONE) {
+if(LoginForm.ParseStatic(req.Body(), output) != Form::FormError::NONE) {
     // Handle failure
 }
 

@@ -102,8 +102,8 @@ WFX_GET("/violate/recommit", [](WFX::Request, WFX::Response res) {
     res.Write("after commit").Commit();
 })
 
-// Echoes the requested status code back, so the metrics phase can drive each response-
-// -status class (2xx / 3xx / 4xx / 5xx) through one route and check the per-class buckets
+// Echoes the requested status code back, so the metrics phase can drive each response
+// status class (2xx / 3xx / 4xx / 5xx) through one route and check the per-class buckets.
 WFX_GET("/status/<code:uint>", [](WFX::Request req, WFX::Response res) {
     const auto code = static_cast<std::uint16_t>(req.GetSegment(0).AsU64());
     res.Status(code).SendText("s");
@@ -135,9 +135,9 @@ WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     j.Write("crashes", self.crashes);
     j.End();
 
-    // Per-route counters, summed across workers, each tagged with its own path and method
-    // rv.path / HttpMethodToStringView return Shared::StringView, written directly via the-
-    // -JsonWriter StringView overload (no manual std::string_view wrapping)
+    // Per-route counters, summed across workers, each tagged with its own path and method.
+    // rv.path / HttpMethodToStringView return Shared::StringView, written directly via the
+    // JsonWriter StringView overload (no manual std::string_view wrapping).
     const bool latencyOn = WFX::MetricsLatencyEnabled();
     j.Write("latency_enabled", latencyOn);
 
@@ -199,14 +199,18 @@ WFX_GET("/uuid/<id:uuid>", [](WFX::Request req, WFX::Response res) {
 })
 
 
-// Group-prefixed paths (flat)
+// Group-prefixed paths, via WFX_GROUP_START/WFX_GROUP_END
 
-WFX_GET("/api/v1/status", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
+WFX_GROUP_START("/api/v1")
 
-WFX_GET("/api/v1/item/<id:uint>", [](WFX::Request req, WFX::Response res) {
+WFX_GET("/status", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
+
+WFX_GET("/item/<id:uint>", [](WFX::Request req, WFX::Response res) {
     auto seg = req.GetSegment(0);
     res.Status(200).Write(seg.AsU64()).Commit();
 })
+
+WFX_GROUP_END()
 
 
 // Per-route middleware routes

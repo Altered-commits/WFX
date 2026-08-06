@@ -115,28 +115,28 @@ using AllocateEndpointApiFn = std::uint16_t (*)(const char* host, EndpointDesc d
 using SendPayloadApiFn = EndpointStatus (*)(void* clientCtx, std::uint16_t endpointIdx, const void* req,
                                             AsyncData onComplete, std::uint64_t pinnedSlot);
 
-// Pins one connection to the caller across several requests, for protocols where consecutive-
-// -requests must share a connection (SQL transactions, LISTEN/NOTIFY, any sticky session)
-// The handle packs endpointIdx, pool index and the slot's generationId, so one outliving its-
-// -slot (torn down and recycled) is detected rather than left dangling. 0 means reserve failed
+// Pins one connection to the caller across several requests, for protocols where consecutive
+// requests must share a connection (SQL transactions, LISTEN/NOTIFY, any sticky session). The
+// handle packs endpointIdx, pool index, and the slot's generationId, so one outliving its slot
+// (torn down and recycled) is detected rather than left dangling. 0 means reserve failed.
 using ReserveSlotApiFn = std::uint64_t (*)(std::uint16_t endpointIdx);
 using ReleaseSlotApiFn = void (*)(std::uint64_t pinnedSlot);
 
-// Pulls the next chunk of a streamed response. req is the original request, handed back so-
-// -cursor/paging protocols can serialize a continuation from it. Returns CHUNK_AVAILABLE when-
-// -buffered bytes already held one (caller must not suspend), PENDING when it arrives later
+// Pulls the next chunk of a streamed response. req is the original request, handed back so
+// cursor/paging protocols can serialize a continuation from it. Returns CHUNK_AVAILABLE when
+// buffered bytes already held one (caller must not suspend), PENDING when it arrives later.
 using StreamNextApiFn = EndpointStatus (*)(void* clientCtx, const void* req, AsyncData onComplete);
 
-// Borrows the chunk streamNext just produced synchronously (CHUNK_AVAILABLE), which never went-
-// -through a completion callback. Valid until the next streamNext on the same client
+// Borrows the chunk streamNext just produced synchronously (CHUNK_AVAILABLE), which never went
+// through a completion callback. Valid until the next streamNext on the same client.
 using StreamChunkApiFn = const void* (*)(void* clientCtx);
 
-// Slot-level operations, all valid only from inside an onConnect coroutine
-// slotUpgradeTls wraps a still-plaintext slot in TLS, for protocols that negotiate encryption-
-// -in-band (Postgres SSLRequest, SMTP STARTTLS, ...) instead of at connect time
-// slotReceive's 'consumed' is how many bytes of the PREVIOUS Receive() result the caller already-
-// -used; trimmed from the front of the read buffer before this read is armed, so a multi-round-
-// -trip handshake (STARTTLS EHLO/EHLO/AUTH, ...) never gets an earlier response redelivered
+// Slot-level operations, all valid only from inside an onConnect coroutine.
+// slotUpgradeTls wraps a still-plaintext slot in TLS, for protocols that negotiate encryption
+// in-band (Postgres SSLRequest, SMTP STARTTLS, ...) instead of at connect time.
+// slotReceive's 'consumed' is how many bytes of the PREVIOUS Receive() result the caller already
+// used; trimmed from the front of the read buffer before this read is armed, so a multi-round-trip
+// handshake (STARTTLS EHLO/EHLO/AUTH, ...) never gets an earlier response redelivered.
 using SlotSendApiFn = void (*)(void* endpointCtx, const void* data, std::uint32_t size, AsyncData onComplete);
 using SlotReceiveApiFn = void (*)(void* endpointCtx, std::uint32_t consumed, AsyncData onComplete);
 using SlotUpgradeTlsApiFn = void (*)(void* endpointCtx, AsyncData onComplete);
@@ -144,9 +144,9 @@ using SlotUpgradeTlsApiFn = void (*)(void* endpointCtx, AsyncData onComplete);
 // Empty unless the slot is TLS and its handshake finished
 using NegotiatedProtocolApiFn = StringView (*)(void* endpointCtx);
 
-// Opens a second, throwaway connection to the same endpoint (Postgres CancelRequest, MySQL-
-// -COM_PROCESS_KILL, ...). Valid from onConnect and onAbort alike; ownerCtx only resolves which-
-// -endpoint's host/TLS config to dial. onComplete's data is the new slot's impl pointer
+// Opens a second, throwaway connection to the same endpoint (Postgres CancelRequest, MySQL
+// COM_PROCESS_KILL, ...). Valid from onConnect and onAbort alike; ownerCtx only resolves which
+// endpoint's host/TLS config to dial. onComplete's data is the new slot's impl pointer.
 using OpenSideConnectionApiFn = void (*)(void* ownerCtx, AsyncData onComplete);
 
 struct EndpointAPIExt1 {

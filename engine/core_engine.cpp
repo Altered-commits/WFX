@@ -38,8 +38,8 @@ enum ConnectionHeader : std::uint8_t {
     ERROR = 1 << 3,
 };
 
-// Monotonic microseconds for route latency. Stamp and read both go through here, so the base-
-// -cancels out and only the delta matters
+// Monotonic microseconds for route latency. Stamp and read both go through here, so the base
+// cancels out and only the delta matters.
 static std::uint64_t NowUs()
 {
     auto tse = std::chrono::steady_clock::now().time_since_epoch();
@@ -122,13 +122,13 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             return;
 
         case HttpParseState::PARSE_SUCCESS: {
-            // After parsing, ctx->trackBytes becomes the compact state register used by-
-            // -'HandleSuccess' for async resumption IF needed that is
+            // After parsing, ctx->trackBytes becomes the compact state register used by
+            // 'HandleSuccess' for async resumption IF needed that is.
             // For now reset ctx->trackBytes so ctx->trackAsync becomes zeroed out 'HandleSuccess'
             ctx->trackBytes = 0;
 
-            // Stamp request-dispatch time for route latency, read back in RecordRouteMetrics. Gated-
-            // -so the clock read is only paid when latency is on
+            // Stamp request-dispatch time for route latency, read back in RecordRouteMetrics. Gated
+            // so the clock read is only paid when latency is on.
             if(Utils::MetricTracer::LatencyEnabled())
                 ctx->routeStartUs = NowUs();
 
@@ -167,10 +167,10 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             res.SetVersion(reqInfo.version);
             res.SetShouldClose(shouldClose);
 
-            // Connection limit is a capacity refusal (503); request limit is an actual rate-
-            // -limit (429). Neither is a protocol error, so both go through the normal response-
-            // -path and honor shouldClose above, instead of force-closing a connection the client-
-            // -asked to keep alive
+            // Connection limit is a capacity refusal (503); request limit is an actual rate
+            // limit (429). Neither is a protocol error, so both go through the normal response
+            // path and honor shouldClose above, instead of force-closing a connection the client
+            // asked to keep alive.
             switch(AllowRequest(ctx)) {
                 case RateLimitResult::CONNECTION_LIMIT:
                     HandleError(ctx, HttpStatus::SERVICE_UNAVAILABLE, "503: Connection limit exceeded");
@@ -232,8 +232,8 @@ void CoreEngine::HandleResponse(ClientCtx* ctx)
     if(!res.IsCommitted())
         res.Commit();
 
-    // Every completed request converges here (sync, async, 404, public file), so per-route-
-    // -counters are recorded once at this single point
+    // Every completed request converges here (sync, async, 404, public file), so per-route
+    // counters are recorded once at this single point.
     RecordRouteMetrics(ctx);
 
     if(res.IsFile()) {
@@ -286,8 +286,8 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
             return;
         }
 
-        // Update 'eLevel' to be 'RESPONSE' level so the next time this shits called, we-
-        // -directly jump to '__HandleResponse'
+        // Update 'eLevel' to be 'RESPONSE' level so the next time this shits called, we
+        // directly jump to '__HandleResponse'.
         ctx->trackAsync.SetELevel(ExecutionLevel::RESPONSE);
     }
 
@@ -295,21 +295,21 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
     if(node->callback.kind == CallbackKind::SYNC)
         node->callback.sync(userReq, userRes);
 
-    // Async, check if we have executed it entirely right now, if not-
-    // -schedule it for later
+    // Async, check if we have executed it entirely right now, if not
+    // schedule it for later.
     else {
         // Set context (type erased) at http api side before calling async callback
-        // And also erase it after callback is done, if the callback hasn't finished, the-
-        // -scheduler will set the ptr later on when needed, no need to keep a dangling pointer
+        // And also erase it after callback is done, if the callback hasn't finished, the
+        // scheduler will set the ptr later on when needed, no need to keep a dangling pointer.
         httpApi->setGlobalPtrData(static_cast<void*>(ctx));
 
         node->callback.async(userReq, userRes, CoreEngine::OnCoroutineComplete, ctx);
 
         httpApi->setGlobalPtrData(nullptr);
 
-        // If the coroutine already completed synchronously ('final_suspend' already fired the callback),-
-        // -the response is already handled
-        // If still suspended, it will fire later. Either way, we are done here
+        // If the coroutine already completed synchronously ('final_suspend' already fired the callback),
+        // the response is already handled.
+        // If still suspended, it will fire later. Either way, we are done here.
         FinishRequest(ctx);
         return;
     }
@@ -367,9 +367,9 @@ void CoreEngine::RecordRouteMetrics(ClientCtx* ctx)
     rm->status4xx += (code >= 400 && code < 500);
     rm->status5xx += (code >= 500 && code < 600);
 
-    // dataLength is the fully serialized response for buffered bodies. File and stream bodies-
-    // -live outside rwBuffer, so this counts their headers only, the true wire total stays in-
-    // -network.bytesWritten
+    // dataLength is the fully serialized response for buffered bodies. File and stream bodies
+    // live outside rwBuffer, so this counts their headers only, the true wire total stays in
+    // network.bytesWritten.
     if(ctx->rwBuffer.IsWriteInitialized())
         if(const auto* wm = ctx->rwBuffer.GetWriteMeta())
             rm->bytesOut += wm->dataLength;
@@ -452,8 +452,8 @@ RateLimitResult CoreEngine::AllowRequest(ClientCtx* ctx)
         ctx->ipAcquired = 1;
     }
 
-    // Own bit, own retry: Acquire() can fail on a full tracked-identity cap independently of-
-    // -ConnectionLimiter, and that failure is transient, not one-shot like ipAcquired above
+    // Own bit, own retry: Acquire() can fail on a full tracked-identity cap independently of
+    // ConnectionLimiter, and that failure is transient, not one-shot like ipAcquired above.
     if(!ctx->rateLimiterAcquired) {
         if(!requestRateLimiter_.Acquire(ctx->connInfo))
             return RateLimitResult::REQUEST_LIMIT;
@@ -466,8 +466,8 @@ RateLimitResult CoreEngine::AllowRequest(ClientCtx* ctx)
 
 void CoreEngine::HandleClose(ClientCtx* ctx)
 {
-    // Both bits are only ever cleared by ClientCtx::Reset(), right after this call returns, on-
-    // -slot recycle. Each release is gated on its own bit, mirroring which Acquire() succeeded
+    // Both bits are only ever cleared by ClientCtx::Reset(), right after this call returns, on
+    // slot recycle. Each release is gated on its own bit, mirroring which Acquire() succeeded.
     if(ctx->ipAcquired)
         connectionLimiter_.ReleaseConnection(ctx->connInfo);
 
@@ -503,8 +503,8 @@ void CoreEngine::HandleMiddlewareLoading()
 {
     middleware_.LoadMiddlewareFromConfig(config_.projectConfig.middlewareList);
 
-    // After we load the middleware, we no longer need the map thingy as all the stuff is properly loaded-
-    // -inside of middlewareCallbacks_ stack
+    // After we load the middleware, we no longer need the map thingy as all the stuff is properly loaded
+    // inside of middlewareCallbacks_ stack.
     // K I L L
     // I T
     middleware_.DiscardFactoryMap();

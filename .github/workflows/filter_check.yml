@@ -1,8 +1,8 @@
 name: WFX Filter Check
 
-# Reusable: invoked by entry.yml FIRST, before every other check. Diffs the-
-# -pushed/PR'd commits against .ciignore and outputs should_run, so the rest of-
-# -the pipeline can skip entirely on docs-only changes.
+# Reusable: invoked by entry.yml FIRST, before every other check. Diffs the
+# pushed/PR'd commits against .ciignore and outputs should_run, so the rest of
+# the pipeline can skip entirely on docs-only changes.
 on:
   workflow_call:
     outputs:

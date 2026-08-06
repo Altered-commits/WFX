@@ -235,9 +235,9 @@ void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
         return;
     }
 
-    // CR/LF/NUL in either the name or value would let a caller smuggle extra-
-    // -headers or split the response (CWE-113). Reject outright rather than-
-    // -writing attacker controlled bytes straight onto the wire
+    // CR/LF/NUL in either the name or value would let a caller smuggle extra headers or split the
+    // response (CWE-113). Reject outright rather than writing attacker-controlled bytes straight
+    // onto the wire.
     if(HasCRLFOrNull(key) || HasCRLFOrNull(value)) {
         AbortContractViolation("WriteHeader() key/value must not contain CR, LF, or NUL bytes");
         return;
@@ -489,8 +489,8 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
     }
 
     // Static template, just a file send with html content type
-    // Charset is explicit: a browser left to sniff can land on UTF-7, where '+ADw-script+AD4-'-
-    // -decodes to '<script>'
+    // Charset is explicit: a browser left to sniff can land on UTF-7, where '+ADw-script+AD4-'
+    // decodes to '<script>'.
     if(meta->type == TemplateType::STATIC) {
         WriteHeader("Content-Type", "text/html; charset=utf-8");
         WriteFile(meta->filePath, false);
@@ -543,17 +543,18 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
                                     auto& [inFile, ctx, gen, currentType, currentState, currentOffset, maxSize, carry] =
                                         *static_cast<State*>(c);
 
-                                    // So the way we will implement this is simple
-                                    // We will infinite loop and keep calling 'GetState', we will only break out if-
-                                    // -we reached end of state (checked by 'GetState' returning std::monostate) or-
-                                    // -buffer is full, we need to continue it in next loop
+                                    // So the way we will implement this is simple.
+                                    // We will infinite loop and keep calling 'GetState'. We only break out if we
+                                    // reached the end of state (checked by 'GetState' returning std::monostate) or
+                                    // the buffer is full, in which case we continue it in the next loop.
 
                                     std::uint64_t bufferOffset = 0;
                                     char* bufBase = buffer.buffer;
                                     const std::uint64_t bufSize = buffer.size;
 
-                                    // But before we do all the shit i said above, check if we have data remaining from-
-                                    // -previous call, if yes, complete it before moving to the actual 'GetState' stuff
+                                    // But before we do all the stuff described above, check if we have data remaining
+                                    // from the previous call. If we do, complete it before moving to the actual
+                                    // 'GetState' logic.
                                     if(currentType != TemplateChunkType::MONOSTATE) {
                                         if(currentType == TemplateChunkType::FILE) {
                                             const int r = DrainFile(inFile, bufBase, bufSize, bufferOffset,

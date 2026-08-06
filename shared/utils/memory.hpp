@@ -113,8 +113,8 @@ public:
     {}
 
 public: // Functions
-    // Name is dictated by the standard's Allocator named requirement -> std::allocator_traits-
-    // -and every container that takes this as a template arg call it by this exact name
+    // Name is dictated by the standard's Allocator named requirement -> std::allocator_traits
+    // and every container that takes this as a template arg call it by this exact name.
     // NOLINTNEXTLINE(readability-identifier-naming)
     T* allocate(std::size_t n)
     {

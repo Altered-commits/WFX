@@ -72,9 +72,9 @@ RequestRateLimiterNode* RequestRateLimiter::FindOrCreate(const WFXIpAddress& ip,
     if(node)
         idx = pool_.GetIndex(node);
     else {
-        // Pool is at the tracked-identity cap: evict the least-recently-touched entry that has-
-        // -no live connection on it. Walk from the LRU end (tail_) towards the MRU end (head_),-
-        // -skipping any entry a connection is still holding open (refCount > 0)
+        // Pool is at the tracked-identity cap: evict the least-recently-touched entry that has no
+        // live connection on it. Walk from the LRU end (tail_) towards the MRU end (head_),
+        // skipping any entry a connection is still holding open (refCount > 0).
         std::uint32_t victim = tail_;
         while(victim != K_NO_LIMITER_NODE && pool_.GetPtr(victim)->entry.refCount > 0)
             victim = pool_.GetPtr(victim)->prev;
@@ -89,9 +89,9 @@ RequestRateLimiterNode* RequestRateLimiter::FindOrCreate(const WFXIpAddress& ip,
         index_.Erase(node->key);
     }
 
-    // Link into the LRU list only once the index actually holds 'idx' under 'key': linking first-
-    // -and having the index insert fail (OOM) would leave a node Release() can never find by key-
-    // -again, permanently stuck live and unreclaimable
+    // Link into the LRU list only once the index actually holds 'idx' under 'key': linking first
+    // and having the index insert fail (OOM) would leave a node Release() can never find by key
+    // again, permanently stuck live and unreclaimable.
     if(!index_.Insert(key, idx))
         return nullptr;
 
@@ -112,9 +112,9 @@ bool RequestRateLimiter::Acquire(const WFXIpAddress& ip)
     if(!node)
         return false; // Cap reached with every tracked identity live, caller must retry later
 
-    // Only a brand-new identity gets a full bucket. An existing identity re-Acquire()'ing after-
-    // -its refCount already returned to zero keeps whatever tokens it had left, or every reconnect-
-    // -would reset the limiter back to full burst
+    // Only a brand-new identity gets a full bucket. An existing identity re-Acquire()'ing after
+    // its refCount already returned to zero keeps whatever tokens it had left, or every reconnect
+    // would reset the limiter back to full burst.
     if(wasCreated)
         node->entry.bucket.tokens = GetConfig().ipConfig.maxRequestBurstSize;
 
@@ -165,10 +165,10 @@ void RequestRateLimiter::Release(const WFXIpAddress& ip)
     RequestRateLimiterNode* node = pool_.GetPtr(*idxPtr);
     node->entry.refCount -= (node->entry.refCount > 0);
 
-    // No erase-on-refCount-0 here: this entry's bucket must outlive the connection that-
-    // -Acquire()'d it, or reconnecting always finds a freshly-seeded bucket and rate limiting-
-    // -is bypassed entirely. Capacity is bounded via LRU eviction in FindOrCreate instead, which-
-    // -never touches an entry still at refCount > 0
+    // No erase-on-refCount-0 here: this entry's bucket must outlive the connection that
+    // Acquire()'d it, or reconnecting always finds a freshly-seeded bucket and rate limiting is
+    // bypassed entirely. Capacity is bounded via LRU eviction in FindOrCreate instead, which never
+    // touches an entry still at refCount > 0.
 }
 
 } // namespace WFX::Http

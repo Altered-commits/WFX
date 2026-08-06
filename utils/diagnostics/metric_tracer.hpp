@@ -11,10 +11,10 @@
 //   [ WorkerMetrics ][ RouteMetrics x maxRoutes ][ EndpointMetrics x maxEndpoints ]
 //   [ LatencyMetrics x maxRoutes ][ LatencyMetrics x maxEndpoints ]   (last two only when latency is on)
 //
-// The route/endpoint arrays are sized from config at Create() time, before fork, so the count is a-
-// -fixed ceiling rather than the actual number registered. Unused slots never fault in a page, so-
-// -a roomy cap costs address space, not memory. Registration hard-fails past the cap, so an index-
-// -is never out of range and a scrape never reads an uninitialized slot
+// The route/endpoint arrays are sized from config at Create() time, before fork, so the count is a
+// fixed ceiling rather than the actual number registered. Unused slots never fault in a page, so
+// a roomy cap costs address space, not memory. Registration hard-fails past the cap, so an index
+// is never out of range and a scrape never reads an uninitialized slot.
 //
 // Usage:
 //   Master (before fork):
@@ -55,8 +55,8 @@ inline std::uint16_t GlobalMaxEndpoints = 0;
 inline bool GlobalLatencyEnabled = false;
 
 // vvv Lifecycle vvv
-// Call once in master before fork. maxRoutes/maxEndpoints are ceilings, latency toggles the two-
-// -latency arrays on or off entirely
+// Call once in master before fork. maxRoutes/maxEndpoints are ceilings, latency toggles the two
+// latency arrays on or off entirely.
 bool Create(int workerCount, std::uint16_t maxRoutes, std::uint16_t maxEndpoints, bool latency) noexcept;
 void InitWorker(int index) noexcept; // Call in each worker right after fork
 void Destroy() noexcept;             // Call in master on shutdown
@@ -117,8 +117,8 @@ inline Shared::LatencyMetrics* EndpointLatencySlots(int worker) noexcept
 }
 
 // vvv Hot-path helpers for this worker's own counters vvv
-// The bounds check is a safety net: registration already hard-fails past the cap, so a live index-
-// -is always in range
+// The bounds check is a safety net: registration already hard-fails past the cap, so a live index
+// is always in range.
 inline Shared::RouteMetrics* CurrentRoute(std::uint16_t routeIdx) noexcept
 {
     if(routeIdx >= GlobalMaxRoutes)
@@ -155,9 +155,9 @@ inline Shared::LatencyMetrics* CurrentEndpointLatency(std::uint16_t endpointIdx)
     return l ? &l[endpointIdx] : nullptr;
 }
 
-// Maps a microsecond duration to its histogram bucket. Eight linear sub-buckets per power-of-two-
-// -octave, so each bucket is within 12.5% of its own width and a sample dropped at the midpoint is-
-// -within 6.25% of the truth. Durations past the top octave saturate the last bucket
+// Maps a microsecond duration to its histogram bucket. Eight linear sub-buckets per power-of-two
+// octave, so each bucket is within 12.5% of its own width and a sample dropped at the midpoint is
+// within 6.25% of the truth. Durations past the top octave saturate the last bucket.
 inline std::uint32_t LatencyBucketIndex(std::uint64_t us) noexcept
 {
     if(us == 0)
@@ -171,8 +171,8 @@ inline std::uint32_t LatencyBucketIndex(std::uint64_t us) noexcept
     return idx < Shared::LATENCY_BUCKET_COUNT ? idx : Shared::LATENCY_BUCKET_COUNT - 1;
 }
 
-// Record one latency sample into this worker's route/endpoint slot. No-op when latency is off-
-// -(the slot accessor returns null), so callers need not branch on it themselves
+// Record one latency sample into this worker's route/endpoint slot. No-op when latency is off
+// (the slot accessor returns null), so callers need not branch on it themselves.
 inline void RecordRouteLatencyUs(std::uint16_t routeIdx, std::uint64_t us) noexcept
 {
     Shared::LatencyMetrics* l = CurrentRouteLatency(routeIdx);

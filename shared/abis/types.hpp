@@ -39,9 +39,9 @@ enum class AsyncStatus : std::uint8_t {
     INTERNAL_FAILURE
 };
 
-// Shared result for every slot-level operation available inside an onConnect coroutine-
-// -(Send, Receive, UpgradeToTLS). One enum rather than one per operation: the failure modes-
-// -are the same underlying set, and each operation can only produce a subset anyway
+// Shared result for every slot-level operation available inside an onConnect coroutine
+// (Send, Receive, UpgradeToTLS). One enum rather than one per operation: the failure modes
+// are the same underlying set, and each operation can only produce a subset anyway.
 enum class SlotStatus : std::uint8_t {
     OK,           // Operation completed
     BUFFER_ERROR, // Slot's read/write buffer couldn't be allocated or grown
@@ -192,9 +192,9 @@ enum class SerializeResult : std::uint8_t {
     ERROR             // Unrecoverable serialization failure
 };
 
-// CHUNK_* deliver one piece of a response and keep the request in flight. outObj is borrowed-
-// -until the next Next(), so the protocol must reset it on the following parse call, not append:-
-// -reusing one object is what bounds memory to a single chunk regardless of total size
+// CHUNK_* deliver one piece of a response and keep the request in flight. outObj is borrowed
+// until the next Next(), so the protocol must reset it on the following parse call, not append:
+// reusing one object is what bounds memory to a single chunk regardless of total size.
 enum class ParseResult : std::uint8_t {
     INCOMPLETE,          // Need more bytes, call again when data arrives
     CHUNK_READY,         // Chunk ready; more bytes arrive unprompted (MySQL rows, HTTP chunked, etc)
@@ -204,16 +204,16 @@ enum class ParseResult : std::uint8_t {
     ERROR                // Unrecoverable parse failure
 };
 
-// Closes a side connection opened via the endpoint API's openSideConnection. nullptr on a-
-// -primary handle (onConnect's/onAbort's own slot); only a side-connection handle gets a real one
+// Closes a side connection opened via the endpoint API's openSideConnection. nullptr on a
+// primary handle (onConnect's/onAbort's own slot); only a side-connection handle gets a real one.
 using EndpointSlotCloseFn = void (*)(void* endpointCtx);
 
 // Returns the ALPN protocol negotiated on this slot's TLS connection
 // Empty if not TLS or the handshake hasn't completed yet
 using EndpointNegotiatedProtocolFn = StringView (*)(void* endpointCtx);
 
-// Send/Receive go through the endpoint API (SlotSend/SlotReceive) directly,-
-// -SlotHandle::Send/Receive call those rather than a per-slot function pointer here
+// Send/Receive go through the endpoint API (SlotSend/SlotReceive) directly; SlotHandle::Send/Receive
+// call those rather than a per-slot function pointer here.
 struct EndpointSlotHandle {
     void* impl;
     EndpointSlotCloseFn close;
@@ -222,54 +222,54 @@ struct EndpointSlotHandle {
 static_assert(sizeof(EndpointSlotHandle) == 24, "'EndpointSlotHandle' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<EndpointSlotHandle>, "'EndpointSlotHandle' must be standard layout");
 
-// Wire codec, the two every protocol implements. serialize's streamKey is only set when-
-// -hasCapacity is (e.g. an HTTP/2 stream id), else left 0; parse's completedKey mirrors it
+// Wire codec, the two every protocol implements. serialize's streamKey is only set when
+// hasCapacity is (e.g. an HTTP/2 stream id), else left 0; parse's completedKey mirrors it.
 // isEof forbids parse from returning INCOMPLETE, no more bytes are coming
 using EndpointSerializeFn = SerializeResult (*)(void* slotState, const void* req, char* buf, std::uint32_t bufLen,
                                                 std::uint32_t* written, std::uint64_t* streamKey);
 using EndpointParseFn = ParseResult (*)(void* slotState, void* parseState, const char* buf, std::uint32_t len,
                                         std::uint32_t* consumed, void* outObj, bool isEof, std::uint64_t* completedKey);
 
-// Connection lifecycle. onConnect runs before the slot enters the pool (auth handshakes) and-
-// -must eventually call onDone with a ConnectResult; onDisconnect runs on teardown, before-
-// -slotState is destroyed
+// Connection lifecycle. onConnect runs before the slot enters the pool (auth handshakes) and
+// must eventually call onDone with a ConnectResult; onDisconnect runs on teardown, before
+// slotState is destroyed.
 using EndpointOnConnectFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone,
                                      void* onDoneUd);
 using EndpointOnDisconnectFn = void (*)(void* slotState, DisconnectReason reason);
 
-// Fires when a single-slot request's client disconnects, instead of force-closing the slot. The-
-// -slot itself is left alone (still mid-request, real response completes normally). handle is-
-// -read-only + OpenSideConnection only (see AbortSlotHandle), Send/Receive on it directly is illegal-
-// -here. Never fires for multiplexed slots or a request already mid-Stream()
+// Fires when a single-slot request's client disconnects, instead of force-closing the slot. The
+// slot itself is left alone (still mid-request, real response completes normally). handle is
+// read-only + OpenSideConnection only (see AbortSlotHandle); Send/Receive on it directly is illegal
+// here. Never fires for multiplexed slots or a request already mid-Stream().
 using EndpointOnAbortFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd);
 
-// State allocation for slot state, parse state and output. create's ctx is userCtx for slot-
-// -state, slotState for per-request state. reset clears parse state between keep-alive requests;-
-// -without it the engine destroys and recreates instead
+// State allocation for slot state, parse state and output. create's ctx is userCtx for slot
+// state, slotState for per-request state. reset clears parse state between keep-alive requests;
+// without it the engine destroys and recreates instead.
 using EndpointCreateStateFn = void* (*)(void* ctx);
 using EndpointDestroyStateFn = void (*)(void* state);
 using EndpointResetStateFn = void (*)(void* parseState);
 
-// Coalescing, where identical in-flight requests share one backend round trip. coalesceKey-
-// -returns 0 to opt a request out; cloneOutput gives each waiter its own owned copy and is-
-// -REQUIRED whenever coalesceKey is set
+// Coalescing, where identical in-flight requests share one backend round trip. coalesceKey
+// returns 0 to opt a request out; cloneOutput gives each waiter its own owned copy and is
+// REQUIRED whenever coalesceKey is set.
 using EndpointCoalesceKeyFn = std::uint64_t (*)(const void* req);
 using EndpointCloneOutputFn = void* (*)(void* slotState, const void* srcOutput);
 
-// Multiplexing, several concurrent requests over one connection. Non-null hasCapacity enables-
-// -it, and the engine hands a busy slot more work whenever it returns true. takeStreamOutput-
-// -claims a stream's output (null if unfinished) and is REQUIRED alongside it
+// Multiplexing, several concurrent requests over one connection. Non-null hasCapacity enables
+// it, and the engine hands a busy slot more work whenever it returns true. takeStreamOutput
+// claims a stream's output (null if unfinished) and is REQUIRED alongside it.
 using EndpointHasCapacityFn = bool (*)(void* slotState);
 using EndpointTakeStreamOutputFn = void* (*)(void* slotState, std::uint64_t key);
 
-// Server-initiated data with nothing awaiting it (Postgres NOTIFY, Redis pub/sub), so a plain-
-// -callback rather than a coroutine resume. Set *consumed to a complete message's length-
-// -(0 = need more bytes); return false if undecodable, which closes the slot
+// Server-initiated data with nothing awaiting it (Postgres NOTIFY, Redis pub/sub), so a plain
+// callback rather than a coroutine resume. Set *consumed to a complete message's length
+// (0 = need more bytes); return false if undecodable, which closes the slot.
 using EndpointOnPushFn = bool (*)(void* slotState, const char* buf, std::uint32_t len, std::uint32_t* consumed);
 
-// Reports the protocol's own response status so the engine can bucket upstream results per-
-// -endpoint. Only protocols that have such a concept implement it, everything else leaves it null-
-// -and the status counters stay zero
+// Reports the protocol's own response status so the engine can bucket upstream results per
+// endpoint. Only protocols that have such a concept implement it; everything else leaves it null
+// and the status counters stay zero.
 // Returning 0 means "no status for this response" and is not counted
 using EndpointStatusCodeFn = std::uint16_t (*)(const void* outObj);
 
@@ -329,12 +329,12 @@ static_assert(sizeof(LogMetrics) == 48, "'LogMetrics' must be exactly 48 bytes")
 static_assert(std::is_standard_layout_v<LogMetrics>, "'LogMetrics' must be standard layout");
 
 // vvv Per-route and per-endpoint metrics vvv
-// Counters only, kept deliberately small: these are always mapped, so every field here is paid-
-// -for in production. Anything only interesting while chasing a specific bug belongs in a log-
-// -line, not a permanent counter
-// Slots are indexed densely from 0, so the mmap only faults in the pages actually used, and the-
-// -route name is not stored here: it is registration data, identical in every worker, and is-
-// -attached when the metrics are read
+// Counters only, kept deliberately small: these are always mapped, so every field here is paid
+// for in production. Anything only interesting while chasing a specific bug belongs in a log
+// line, not a permanent counter.
+// Slots are indexed densely from 0, so the mmap only faults in the pages actually used, and the
+// route name is not stored here: it is registration data, identical in every worker, and is
+// attached when the metrics are read.
 struct RouteMetrics {
     std::uint64_t requests = 0;
     std::uint64_t status1xx = 0;
@@ -347,11 +347,11 @@ struct RouteMetrics {
 static_assert(sizeof(RouteMetrics) == 56, "'RouteMetrics' must be exactly 56 bytes");
 static_assert(std::is_standard_layout_v<RouteMetrics>, "'RouteMetrics' must be standard layout");
 
-// Errors are split only where the split changes what you would do about it: unreachable host, bad-
-// -TLS, slow upstream and a pool too small are four different fixes. Everything else shares one-
-// -bucket, since narrowing it further is a debugging job rather than a monitoring one
-// The status counters are filled from EndpointDesc::statusCode, so they stay zero for protocols-
-// -that have no such concept
+// Errors are split only where the split changes what you would do about it: unreachable host, bad
+// TLS, slow upstream and a pool too small are four different fixes. Everything else shares one
+// bucket, since narrowing it further is a debugging job rather than a monitoring one.
+// The status counters are filled from EndpointDesc::statusCode, so they stay zero for protocols
+// that have no such concept.
 struct EndpointMetrics {
     std::uint64_t requests = 0;
     std::uint64_t completed = 0;
@@ -375,12 +375,12 @@ static_assert(sizeof(EndpointMetrics) == 136, "'EndpointMetrics' must be exactly
 static_assert(std::is_standard_layout_v<EndpointMetrics>, "'EndpointMetrics' must be standard layout");
 
 // Latency lives in its own array, mapped only when [Metrics] latency is on
-// Production wants to know what happened, a perf run wants to know how long it took, and the-
-// -second question costs two clock reads per request and far more memory than the counters
+// Production wants to know what happened, a perf run wants to know how long it took, and the
+// second question costs two clock reads per request and far more memory than the counters.
 //
-// 24 power-of-two ranges of 8 linear sub-buckets cover 1us to ~16s. A value reported at its-
-// -bucket midpoint is within 6.25% of the truth, which is tight enough to tell a p99 regression-
-// -from noise. Recording is a shift and an increment, percentiles are rebuilt at scrape time
+// 24 power-of-two ranges of 8 linear sub-buckets cover 1us to ~16s. A value reported at its
+// bucket midpoint is within 6.25% of the truth, which is tight enough to tell a p99 regression
+// from noise. Recording is a shift and an increment, percentiles are rebuilt at scrape time.
 inline constexpr std::uint32_t LATENCY_BUCKET_COUNT = 192;
 
 struct LatencyMetrics {
@@ -420,9 +420,9 @@ struct SelfMetrics {
 static_assert(sizeof(SelfMetrics) == 48, "'SelfMetrics' must be exactly 48 bytes");
 static_assert(std::is_standard_layout_v<SelfMetrics>, "'SelfMetrics' must be standard layout");
 
-// Counters plus the identity they belong to, assembled at read time: the counters come from the-
-// -mmap, the identity from registration data. path and host are views into engine-owned strings-
-// -that live for the whole process, so they stay valid for the scraping handler's lifetime
+// Counters plus the identity they belong to, assembled at read time: the counters come from the
+// mmap, the identity from registration data. path and host are views into engine-owned strings
+// that live for the whole process, so they stay valid for the scraping handler's lifetime.
 struct RouteMetricsView {
     StringView path;
     HttpMethod method = HttpMethod::GET;

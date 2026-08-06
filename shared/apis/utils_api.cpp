@@ -9,8 +9,8 @@
 
 namespace WFX::Shared {
 
-// Registration data the route/endpoint getters read identity from. Safe to hold as plain pointers-
-// -for the same reason the http/endpoint tables are: the flow is single threaded and stays that way
+// Registration data the route/endpoint getters read identity from. Safe to hold as plain pointers
+// for the same reason the http/endpoint tables are: the flow is single threaded and stays that way.
 static Http::Router* GlobalMetricsRouter = nullptr;
 static Http::HttpConnectionHandler* GlobalMetricsConnHandler = nullptr;
 
@@ -18,7 +18,7 @@ static Http::HttpConnectionHandler* GlobalMetricsConnHandler = nullptr;
 const UtilsAPIExt1* GetUtilsAPIExt1()
 {
     // clang-format off
-    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
     static const UtilsAPIExt1 GlobalUtilsAPIExt1 = {
         // vvv Logging vvv
         [](const char* m) { Utils::GetLogger().Trace(m); },

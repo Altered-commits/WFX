@@ -14,34 +14,47 @@
 //   WFX::SmtpEndpointConfig : connection pool + credentials + protocol hardening knobs
 //   WFX::SmtpResponse       : status code / text from one transaction command
 //
-// STARTTLS on port 587 only (RFC 3207) (implicit TLS (465) is out of scope). Speaks 7-bit ASCII-
-// -command/response lines (RFC 5321) plus AUTH PLAIN / AUTH LOGIN (RFC 4954), whichever the server-
-// -advertises; CRAM-MD5 and other legacy mechanisms are deliberately not implemented, they exist-
-// -only to protect credentials on an unencrypted line and this client never sends credentials on one.
+// STARTTLS on port 587 only (RFC 3207) (implicit TLS (465) is out
+// of scope). Speaks 7-bit ASCII command/response lines (RFC 5321)
+// plus AUTH PLAIN / AUTH LOGIN (RFC 4954), whichever the server
+// advertises; CRAM-MD5 and other legacy mechanisms are deliberately
+// not implemented, they exist only to protect credentials on an
+// unencrypted line and this client never sends credentials on one.
 //
 // Security posture (every one of these is load-bearing, not incidental):
-//   - AUTH is refused outright if the server never advertised STARTTLS. No silent plaintext-
-//     -fallback exists in this client, ever.
-//   - The pre-TLS EHLO capability list is discarded and re-fetched after the TLS upgrade-
-//     -completes. Trusting the pre-TLS list would let a MITM strip STARTTLS/AUTH capabilities-
-//     -from the wire and force a downgrade (the CVE-2011-0411 / STARTTLS-stripping class).
-//   - Anything buffered before the TLS wrap is discarded by the engine's UpgradeToTLS itself-
-//     -(see EpollConnectionHandler::SlotUpgradeTls), so a response-injection attack (bytes appended-
-//     -after the server's "220 Go ahead" before the handshake completes) can't be replayed as-
-//     -though it arrived over the authenticated channel.
-//   - Every user-suppliable field (envelope addresses, display names, subject, Reply-To) is-
-//     -scanned for CR/LF/NUL before it reaches the wire; a hit fails the call outright rather than-
-//     -emit a partially-escaped command. This is SMTP's analogue of HTTP header/request-line-
-//     -injection: a Subject or address containing "\r\nBcc: attacker@evil" is exactly the kind of-
-//     -forged-header / smuggled-command attack this exists to stop.
-//   - The message body is dot-stuffed (RFC 5321 4.5.2): a body line starting with '.' is escaped-
-//     -to '..' so it can't be mistaken for the DATA terminator, which would otherwise silently-
-//     -truncate the message (a correctness bug as much as a security one).
-//   - Server certificate verification reuses the engine's existing outbound TLS trust decision-
-//     -(EndpointConfig::tlsConfig), the same one tls_audit's phase_verify already exhaustively-
-//     -tests. No SMTP-specific certificate logic exists here to get wrong.
-//   - Multi-line responses are bounded (maxResponseLineBytes / maxResponseLines) so a hostile or-
-//     -compromised relay can't OOM or hang a worker with an endless "250-..." flood.
+//   - AUTH is refused outright if the server never advertised
+//     STARTTLS. No silent plaintext fallback exists in this
+//     client, ever.
+//   - The pre-TLS EHLO capability list is discarded and re-fetched
+//     after the TLS upgrade completes. Trusting the pre-TLS list
+//     would let a MITM strip STARTTLS/AUTH capabilities from the
+//     wire and force a downgrade (the CVE-2011-0411 /
+//     STARTTLS-stripping class).
+//   - Anything buffered before the TLS wrap is discarded by the
+//     engine's UpgradeToTLS itself (see
+//     EpollConnectionHandler::SlotUpgradeTls), so a
+//     response-injection attack (bytes appended after the server's
+//     "220 Go ahead" before the handshake completes) can't be
+//     replayed as though it arrived over the authenticated channel.
+//   - Every user-suppliable field (envelope addresses, display
+//     names, subject, Reply-To) is scanned for CR/LF/NUL before it
+//     reaches the wire; a hit fails the call outright rather than
+//     emit a partially-escaped command. This is SMTP's analogue of
+//     HTTP header/request-line injection: a Subject or address
+//     containing "\r\nBcc: attacker@evil" is exactly the kind of
+//     forged-header / smuggled-command attack this exists to stop.
+//   - The message body is dot-stuffed (RFC 5321 4.5.2): a body
+//     line starting with '.' is escaped to '..' so it can't be
+//     mistaken for the DATA terminator, which would otherwise
+//     silently truncate the message (a correctness bug as much as
+//     a security one).
+//   - Server certificate verification reuses the engine's existing
+//     outbound TLS trust decision (EndpointConfig::tlsConfig), the
+//     same one tls_audit's phase_verify already exhaustively tests.
+//     No SMTP-specific certificate logic exists here to get wrong.
+//   - Multi-line responses are bounded (maxResponseLineBytes /
+//     maxResponseLines) so a hostile or compromised relay can't
+//     OOM or hang a worker with an endless "250-..." flood.
 //
 // -----------------------------------------------------------------------
 // Usage
@@ -58,33 +71,42 @@
 //       if(!tx.IsValid()) { res.Status(WFX::HttpStatus::SERVICE_UNAVAILABLE).SendText("busy"); co_return; }
 //
 //       auto [s1, r1] = co_await tx.MailFrom("noreply@rearc.example");
-//       if(s1 != WFX::EpOk || !r1->Success()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed"); co_return; }
+//       if(s1 != WFX::EpOk || !r1->Success()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed");
+//       co_return; }
 //
 //       auto [s2, r2] = co_await tx.RcptTo("contact@rearc.example");
-//       if(s2 != WFX::EpOk || !r2->Success()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed"); co_return; }
+//       if(s2 != WFX::EpOk || !r2->Success()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed");
+//       co_return; }
 //
 //       auto [s3, r3] = co_await tx.DataStart();
-//       if(s3 != WFX::EpOk || !r3->Continue()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed"); co_return; }
+//       if(s3 != WFX::EpOk || !r3->Continue()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed");
+//       co_return; }
 //
 //       auto [s4, r4] = co_await tx.DataBody("noreply@rearc.example", "ReArc", "contact@rearc.example",
 //                                            "ReArc Contact", enquirySubject, enquiryBody);
-//       if(s4 != WFX::EpOk || !r4->Success()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed"); co_return; }
+//       if(s4 != WFX::EpOk || !r4->Success()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed");
+//       co_return; }
 //
 //       res.SendText("sent");
 //       co_return;
 //   });
 //
-// Each step is awaited explicitly rather than hidden behind one call: the underlying coroutine-
-// -machinery (WFX::Async::Promise<T>) is a closed set of three specializations (void,-
-// -MiddlewareAction, ConnectResult) used by route handlers, middleware and onConnect respectively.
-// It deliberately isn't a generic future/promise framework, so a helper that awaits several-
-// -sub-operations and hands back one aggregate value has nowhere to live except the caller's own-
-// -WFX::Coro. This mirrors Reserve()'s own documented use case (SQL transactions, LISTEN/NOTIFY):-
-// -a multi-command exchange that must stay on one connection is the caller's sequence to drive.
+// Each step is awaited explicitly rather than hidden behind one
+// call: the underlying coroutine machinery (WFX::Async::Promise<T>)
+// is a closed set of three specializations (void, MiddlewareAction,
+// ConnectResult) used by route handlers, middleware and onConnect
+// respectively. It deliberately isn't a generic future/promise
+// framework, so a helper that awaits several sub-operations and
+// hands back one aggregate value has nowhere to live except the
+// caller's own WFX::Coro. This mirrors Reserve()'s own documented
+// use case (SQL transactions, LISTEN/NOTIFY): a multi-command
+// exchange that must stay on one connection is the caller's
+// sequence to drive.
 //
 // -----------------------------------------------------------------------
 
 #include "base.hpp"
+#include "helper.hpp"
 #include "wfx/memory.hpp"
 #include "wfx/utils/encoding.hpp"
 #include <cstring>
@@ -92,66 +114,31 @@
 #include <random>
 #include <string_view>
 
-namespace WFX::Smtp::Detail {
-
-constexpr bool HasInjectionBytes(std::string_view s) noexcept
-{
-    for(const char c : s)
-        if(c == '\r' || c == '\n' || c == '\0')
-            return true;
-
-    return false;
-}
-
-constexpr char ToLowerAscii(char c) noexcept
-{
-    auto uc = static_cast<unsigned char>(c);
-    const unsigned char isUpper = static_cast<unsigned char>(uc - 'A') < 26;
-    return static_cast<char>(uc | static_cast<unsigned char>(isUpper << 5));
-}
-
-inline bool InsensitiveEqual(std::string_view a, std::string_view b) noexcept
-{
-    if(a.size() != b.size())
-        return false;
-
-    for(std::size_t i = 0; i < a.size(); ++i)
-        if(ToLowerAscii(a[i]) != ToLowerAscii(b[i]))
-            return false;
-
-    return true;
-}
-
-inline bool InsensitiveStartsWith(std::string_view s, std::string_view prefix) noexcept
-{
-    return s.size() >= prefix.size() && InsensitiveEqual(s.substr(0, prefix.size()), prefix);
-}
-
-} // namespace WFX::Smtp::Detail
-
 namespace WFX {
 
 // -----------------------------------------------------------------------
-// SMTP status codes this client checks for (RFC 5321 4.2.3), named instead of left as bare-
-// -literals at every comparison site.
+// SMTP status codes this client checks for (RFC 5321 4.2.3), named
+// instead of left as bare literals at every comparison site.
 // -----------------------------------------------------------------------
-inline constexpr std::uint16_t SmtpReady = 220;           // greeting, and "220" to STARTTLS
-inline constexpr std::uint16_t SmtpOk = 250;              // EHLO / MAIL FROM / RCPT TO / QUIT success
-inline constexpr std::uint16_t SmtpStartMailInput = 354;  // DATA's go-ahead to send the message
-inline constexpr std::uint16_t SmtpAuthContinue = 334;    // AUTH LOGIN's Username:/Password: prompts
-inline constexpr std::uint16_t SmtpAuthSuccess = 235;     // AUTH completed
+inline constexpr std::uint16_t SmtpReady = 220;          // greeting, and "220" to STARTTLS
+inline constexpr std::uint16_t SmtpOk = 250;             // EHLO / MAIL FROM / RCPT TO / QUIT success
+inline constexpr std::uint16_t SmtpStartMailInput = 354; // DATA's go-ahead to send the message
+inline constexpr std::uint16_t SmtpAuthContinue = 334;   // AUTH LOGIN's Username:/Password: prompts
+inline constexpr std::uint16_t SmtpAuthSuccess = 235;    // AUTH completed
 
 // -----------------------------------------------------------------------
-// One transaction command. Built by SmtpTransaction's typed methods below, never construct this-
-// -directly from unescaped input, the injection screen lives in Serialize(), keyed off these raw-
-// -fields, exactly once, in one auditable place (mirrors HttpEndpointRequest/HasInjectionBytes).
+// One transaction command. Built by SmtpTransaction's typed methods
+// below, never construct this directly from unescaped input, the
+// injection screen lives in Serialize(), keyed off these raw fields,
+// exactly once, in one auditable place (mirrors
+// HttpEndpointRequest/HasInjectionBytes).
 // -----------------------------------------------------------------------
 enum class SmtpCmdKind : std::uint8_t { MAIL_FROM, RCPT_TO, DATA_START, DATA_BODY, RSET, QUIT };
 
 struct SmtpCmd {
     SmtpCmdKind kind = SmtpCmdKind::QUIT;
-    std::string_view addr;      // MAIL_FROM / RCPT_TO: envelope address
-    std::string_view fromAddr;  // DATA_BODY only, from here down
+    std::string_view addr;     // MAIL_FROM / RCPT_TO: envelope address
+    std::string_view fromAddr; // DATA_BODY only, from here down
     std::string_view fromName;
     std::string_view toAddr;
     std::string_view toName;
@@ -160,8 +147,8 @@ struct SmtpCmd {
     std::string_view replyTo;
 };
 
-// Response to one transaction command. text is the final response line only (multi-line EHLO-
-// -style capability scanning is a separate, onConnect-only concern, see Detail::LineResponse)
+// Response to one transaction command. text is the final response line only (multi-line EHLO
+// style capability scanning is a separate, onConnect-only concern, see Detail::LineResponse)
 struct SmtpResponse {
     std::uint16_t code = 0;
     WFX::String text;
@@ -202,6 +189,8 @@ struct SmtpEndpointConfig {
 // -----------------------------------------------------------------------
 namespace Smtp::Detail {
 
+using namespace WFX::EndpointDetail;
+
 // Shared by every connection to one SmtpEndpoint; lives as long as the owning SmtpEndpoint
 struct SmtpOptions {
     std::string_view heloName;
@@ -229,40 +218,6 @@ inline void DestroySlotState(void* state) noexcept
     Delete(static_cast<SlotState*>(state));
 }
 
-// Bounds-checked append-only cursor, identical shape to HttpEndpoint's BufWriter
-class BufWriter {
-public:
-    BufWriter(char* buf, std::uint32_t cap) noexcept : buf_(buf), cap_(cap)
-    {}
-
-    bool Append(std::string_view s) noexcept
-    {
-        if(s.size() > cap_ - pos_)
-            return false;
-
-        std::memcpy(buf_ + pos_, s.data(), s.size());
-        pos_ += static_cast<std::uint32_t>(s.size());
-        return true;
-    }
-    bool Append(char c) noexcept
-    {
-        if(pos_ >= cap_)
-            return false;
-
-        buf_[pos_++] = c;
-        return true;
-    }
-    std::uint32_t Pos() const noexcept
-    {
-        return pos_;
-    }
-
-private:
-    char* buf_;
-    std::uint32_t cap_;
-    std::uint32_t pos_ = 0;
-};
-
 // Writes "Name <addr>\r\n"-shaped header value, or just "<addr>" when no display name was given
 inline bool AppendAddrHeader(BufWriter& w, std::string_view name, std::string_view addr) noexcept
 {
@@ -276,10 +231,10 @@ inline bool AppendAddrHeader(BufWriter& w, std::string_view name, std::string_vi
     return w.Append("\r\n");
 }
 
-// RFC 5321 4.5.2 dot-stuffing: any body line starting with '.' gets a second '.' prepended, so it-
-// -can never be mistaken for the "\r\n.\r\n" terminator this function's caller appends afterward.-
-// -Normalizes bare '\n' to '\r\n' along the way, since caller-supplied bodies aren't guaranteed to-
-// -already use wire line endings
+// RFC 5321 4.5.2 dot-stuffing: any body line starting with '.' gets a second '.' prepended, so it
+// can never be mistaken for the "\r\n.\r\n" terminator this function's caller appends afterward.
+// Normalizes bare '\n' to '\r\n' along the way, since caller-supplied bodies aren't guaranteed to
+// already use wire line endings
 inline bool AppendDotStuffed(BufWriter& w, std::string_view body) noexcept
 {
     if(body.empty())
@@ -310,22 +265,22 @@ inline bool AppendDotStuffed(BufWriter& w, std::string_view body) noexcept
     return true;
 }
 
-// Date + Message-ID + MIME headers. None of this is caller-influenced (Date comes from the system-
-// -clock, Message-ID from a random source, and the Message-ID domain part from operator-configured-
-// -heloName rather than any per-message field), so none of it needs the injection screen-
-// -Serialize() runs over the caller-supplied fields. heloName itself is still screened here too,-
-// -same reasoning as SmtpOnConnect's check: cheap insurance against the bpo-30585 CVE class-
-// -regardless of who ends up wiring this value in
+// Date + Message-ID + MIME headers. None of this is caller-influenced (Date comes from the system
+// clock, Message-ID from a random source, and the Message-ID domain part from operator-configured
+// heloName rather than any per-message field), so none of it needs the injection screen that
+// Serialize() runs over the caller-supplied fields. heloName itself is still screened here too,
+// same reasoning as SmtpOnConnect's check: cheap insurance against the bpo-30585 CVE class
+// regardless of who ends up wiring this value in
 inline bool AppendGeneratedHeaders(BufWriter& w, std::string_view heloName) noexcept
 {
     if(HasInjectionBytes(heloName)) [[unlikely]]
         return false;
 
     // Date: always rendered in GMT so this never depends on the host's local timezone setting.
-    // std::strftime's signature requires a char* output buffer; there's no String-native way to-
-    // -call it. The format is fixed-width ("Wed, 02 Aug 2026 14:23:01 +0000", 31 chars), so a-
-    // -small stack buffer sized for exactly that is the correct tool here, unlike a buffer sized-
-    // -for arbitrary caller-controlled input
+    // std::strftime's signature requires a char* output buffer; there's no String-native way to
+    // call it. The format is fixed-width ("Wed, 02 Aug 2026 14:23:01 +0000", 31 chars), so a
+    // small stack buffer sized for exactly that is the correct tool here, unlike a buffer sized
+    // for arbitrary caller-controlled input
     {
         const std::time_t now = std::time(nullptr);
         std::tm tmVal{};
@@ -340,13 +295,13 @@ inline bool AppendGeneratedHeaders(BufWriter& w, std::string_view heloName) noex
             return false;
     }
 
-    // Message-ID: RFC 5322 doesn't mandate one, but every real receiving MTA and spam filter-
-    // -expects one. Not a security-sensitive value (it's an opaque tracking id, not a credential-
-    // -or a capability). It only has to avoid colliding with another message's id, not resist-
-    // -prediction, so a fast non-cryptographic PRNG is the right tool. std::random_device seeds-
-    // -it exactly once per worker (a real syscall, done once); every message after that just-
-    // -steps the already-seeded generator in memory, no syscall at all. Calling random_device-
-    // -itself per email would mean 16+ syscalls per send, real overhead under concurrent load
+    // Message-ID: RFC 5322 doesn't mandate one, but every real receiving MTA and spam filter
+    // expects one. Not a security-sensitive value (it's an opaque tracking id, not a credential
+    // or a capability). It only has to avoid colliding with another message's id, not resist
+    // prediction, so a fast non-cryptographic PRNG is the right tool. std::random_device seeds
+    // it exactly once per worker (a real syscall, done once); every message after that just
+    // steps the already-seeded generator in memory, no syscall at all. Calling random_device
+    // itself per email would mean 16+ syscalls per send, real overhead under concurrent load
     {
         thread_local std::mt19937_64 GlobalRng{[] {
             std::random_device rd;
@@ -360,8 +315,7 @@ inline bool AppendGeneratedHeaders(BufWriter& w, std::string_view heloName) noex
         std::memcpy(idBytes + 8, &r1, 8);
 
         const WFX::String idHex = HexEncode(std::string_view(reinterpret_cast<const char*>(idBytes), sizeof(idBytes)));
-        if(!(w.Append("Message-ID: <") && w.Append(idHex) && w.Append('@') && w.Append(heloName) &&
-            w.Append(">\r\n")))
+        if(!(w.Append("Message-ID: <") && w.Append(idHex) && w.Append('@') && w.Append(heloName) && w.Append(">\r\n")))
             return false;
     }
 
@@ -397,12 +351,12 @@ inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoi
 
         case SmtpCmdKind::DATA_BODY:
             if(HasInjectionBytes(req.fromAddr) || HasInjectionBytes(req.fromName) || HasInjectionBytes(req.toAddr) ||
-               HasInjectionBytes(req.toName) || HasInjectionBytes(req.subject) ||
-               HasInjectionBytes(req.replyTo)) [[unlikely]]
+               HasInjectionBytes(req.toName) || HasInjectionBytes(req.subject) || HasInjectionBytes(req.replyTo))
+                [[unlikely]]
                 return Shared::SerializeResult::ERROR;
 
-            // SMTP is not 8-bit/NUL-clean and there is no legitimate reason a text body needs a-
-            // -NUL byte; CR/LF in the body is fine, that's just line structure, handled by dot-stuffing
+            // SMTP is not 8-bit/NUL-clean and there is no legitimate reason a text body needs a
+            // NUL byte; CR/LF in the body is fine, that's just line structure, handled by dot-stuffing
             if(req.body.find('\0') != std::string_view::npos) [[unlikely]]
                 return Shared::SerializeResult::ERROR;
 
@@ -435,10 +389,10 @@ inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoi
     return Shared::SerializeResult::OK;
 }
 
-// Incremental parser for one (possibly multi-line) "CODE-text\r\n"..."CODE text\r\n" response,-
-// -used for the transaction phase (MAIL FROM / RCPT TO / DATA / body). onConnect's handshake reads-
-// -responses through a separate, non-incremental path (LineResponse below) since it talks to the-
-// -raw SlotHandle directly rather than through this Parse()/Serialize() pair
+// Incremental parser for one (possibly multi-line) "CODE-text\r\n"..."CODE text\r\n" response,
+// used for the transaction phase (MAIL FROM / RCPT TO / DATA / body). onConnect's handshake reads
+// responses through a separate, non-incremental path (LineResponse below) since it talks to the
+// raw SlotHandle directly rather than through this Parse()/Serialize() pair
 struct ParseState {
     WFX::String lineAcc;
     std::uint16_t code = 0;
@@ -473,8 +427,8 @@ inline void DestroyOutput(void* p) noexcept
     Delete(static_cast<SmtpResponse*>(p));
 }
 
-// "CODE-text" or "CODE text", returns false on malformed input. finalLine is true for the ' '-
-// -separator (RFC 5321 4.2.1): that's what actually ends a multi-line response
+// "CODE-text" or "CODE text", returns false on malformed input. finalLine is true for the ' '
+// separator (RFC 5321 4.2.1): that's what actually ends a multi-line response
 inline bool ParseResponseLine(std::string_view line, std::uint16_t& code, bool& finalLine,
                               std::string_view& text) noexcept
 {
@@ -522,37 +476,13 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
     };
 
     while(true) {
-        const void* nl = std::memchr(buf + pos, '\n', len - pos);
-        if(!nl) {
-            const std::uint32_t remaining = len - pos;
-            if(st->lineAcc.size() + remaining > lim.maxResponseLineBytes)
-                return finish(Shared::ParseResult::ERROR);
-
-            st->lineAcc.append(buf + pos, remaining);
-            pos = len;
-            return finish(isEof ? Shared::ParseResult::ERROR : Shared::ParseResult::INCOMPLETE);
-        }
-
-        auto lineLenInBuf = static_cast<std::uint32_t>(static_cast<const char*>(nl) - (buf + pos));
         std::string_view line;
-        if(!st->lineAcc.empty()) {
-            if(st->lineAcc.size() + lineLenInBuf > lim.maxResponseLineBytes)
-                return finish(Shared::ParseResult::ERROR);
+        auto status = ReadLine(buf, len, pos, st->lineAcc, lim.maxResponseLineBytes, line);
+        if(status == LineReadStatus::TOO_LONG)
+            return finish(Shared::ParseResult::ERROR);
+        if(status == LineReadStatus::NEED_MORE)
+            return finish(isEof ? Shared::ParseResult::ERROR : Shared::ParseResult::INCOMPLETE);
 
-            st->lineAcc.append(buf + pos, lineLenInBuf);
-            line = st->lineAcc;
-        }
-        else {
-            if(lineLenInBuf > lim.maxResponseLineBytes)
-                return finish(Shared::ParseResult::ERROR);
-
-            line = std::string_view{buf + pos, lineLenInBuf};
-        }
-
-        if(!line.empty() && line.back() == '\r')
-            line.remove_suffix(1);
-
-        pos += lineLenInBuf + 1;
         st->lineAcc.clear();
 
         std::uint16_t lineCode = 0;
@@ -565,8 +495,8 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
         if(++st->lineCount > lim.maxResponseLines) [[unlikely]]
             return finish(Shared::ParseResult::ERROR);
 
-        // Every continuation line must carry the same code as the first: a server (or a MITM)-
-        // -splicing two different responses together is a protocol violation, not tolerated
+        // Every continuation line must carry the same code as the first: a server (or a MITM)
+        // splicing two different responses together is a protocol violation, not tolerated
         if(st->code != 0 && lineCode != st->code) [[unlikely]]
             return finish(Shared::ParseResult::ERROR);
 
@@ -582,8 +512,7 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
 
 inline SmtpOptions BuildOptions(const SmtpEndpointConfig& cfg) noexcept
 {
-    return SmtpOptions{cfg.heloName, cfg.username, cfg.password,
-                       cfg.maxResponseLineBytes, cfg.maxResponseLines};
+    return SmtpOptions{cfg.heloName, cfg.username, cfg.password, cfg.maxResponseLineBytes, cfg.maxResponseLines};
 }
 
 inline EndpointDesc BuildDesc(SmtpOptions* opts) noexcept
@@ -604,15 +533,16 @@ inline EndpointDesc BuildDesc(SmtpOptions* opts) noexcept
 }
 
 // -----------------------------------------------------------------------
-// onConnect: EHLO -> STARTTLS -> re-EHLO -> AUTH. Talks to the raw SlotHandle directly (Send/-
-// -Receive), not through Serialize()/Parse() above. Those exist for the repeatable transaction-
-// -phase, this runs exactly once per connection before it ever enters the pool
+// onConnect: EHLO -> STARTTLS -> re-EHLO -> AUTH. Talks to the raw
+// SlotHandle directly (Send/Receive), not through Serialize()/Parse()
+// above. Those exist for the repeatable transaction phase, this runs
+// exactly once per connection before it ever enters the pool
 // -----------------------------------------------------------------------
 
-// Accumulates one multi-line response from raw Receive() calls. Pure/non-async on purpose: the-
-// -actual co_await loop has to live inline in the onConnect coroutine (see the big comment at the-
-// -top of this file. Promise<T> is a closed set, so a reusable "co_await in a loop, return a-
-// -value" helper coroutine has nowhere to live), this is the part that CAN be factored out
+// Accumulates one multi-line response from raw Receive() calls. Pure/non-async on purpose: the
+// actual co_await loop has to live inline in the onConnect coroutine (see the big comment at the
+// top of this file. Promise<T> is a closed set, so a reusable "co_await in a loop, return a
+// value" helper coroutine has nowhere to live), this is the part that CAN be factored out
 struct LineResponse {
     std::uint16_t code = 0;
     bool hasStartTls = false;
@@ -630,8 +560,8 @@ public:
     }
 
     // Returns false on a protocol violation or a bound exceeded, caller must treat that as fatal.
-    // consumed is always set to how many of 'len' bytes were used, so the caller trims exactly-
-    // -that much before its next Receive() call
+    // consumed is always set to how many of 'len' bytes were used, so the caller trims exactly
+    // that much before its next Receive() call
     bool Feed(const char* buf, std::uint32_t len, std::uint32_t& consumed) noexcept
     {
         auto fail = [&](std::uint32_t p) noexcept {
@@ -641,37 +571,15 @@ public:
 
         std::uint32_t pos = 0;
         while(pos < len) {
-            const void* nl = std::memchr(buf + pos, '\n', len - pos);
-            if(!nl) {
-                const std::uint32_t remaining = len - pos;
-                if(lineAcc_.size() + remaining > lim_->maxResponseLineBytes)
-                    return fail(pos);
-
-                lineAcc_.append(buf + pos, remaining);
+            std::string_view line;
+            auto status = ReadLine(buf, len, pos, lineAcc_, lim_->maxResponseLineBytes, line);
+            if(status == LineReadStatus::TOO_LONG)
+                return fail(pos);
+            if(status == LineReadStatus::NEED_MORE) {
                 consumed = len;
                 return true;
             }
 
-            auto lineLen = static_cast<std::uint32_t>(static_cast<const char*>(nl) - (buf + pos));
-            std::string_view line;
-            if(!lineAcc_.empty()) {
-                if(lineAcc_.size() + lineLen > lim_->maxResponseLineBytes)
-                    return fail(pos);
-
-                lineAcc_.append(buf + pos, lineLen);
-                line = lineAcc_;
-            }
-            else {
-                if(lineLen > lim_->maxResponseLineBytes)
-                    return fail(pos);
-
-                line = std::string_view{buf + pos, lineLen};
-            }
-
-            if(!line.empty() && line.back() == '\r')
-                line.remove_suffix(1);
-
-            pos += lineLen + 1;
             lineAcc_.clear();
 
             std::uint16_t lineCode = 0;
@@ -689,12 +597,11 @@ public:
 
             code = lineCode;
 
-            // Capability lines only matter on an EHLO response; harmless to scan unconditionally-
-            // -elsewhere, nothing else this client sends produces a line spelled "STARTTLS"/"AUTH"
-            if(Smtp::Detail::InsensitiveEqual(text, "STARTTLS"))
+            // Capability lines only matter on an EHLO response; harmless to scan unconditionally
+            // elsewhere, nothing else this client sends produces a line spelled "STARTTLS"/"AUTH"
+            if(InsensitiveEqual(text, "STARTTLS"))
                 hasStartTls = true;
-            else if(Smtp::Detail::InsensitiveStartsWith(text, "AUTH ") ||
-                    Smtp::Detail::InsensitiveStartsWith(text, "AUTH=")) {
+            else if(InsensitiveStartsWith(text, "AUTH ") || InsensitiveStartsWith(text, "AUTH=")) {
                 const std::string_view mechList = text.substr(5);
                 std::size_t p = 0;
                 while(p < mechList.size()) {
@@ -707,9 +614,9 @@ public:
 
                     const std::string_view mech = mechList.substr(start, p - start);
 
-                    if(Smtp::Detail::InsensitiveEqual(mech, "PLAIN"))
+                    if(InsensitiveEqual(mech, "PLAIN"))
                         hasAuthPlain = true;
-                    else if(Smtp::Detail::InsensitiveEqual(mech, "LOGIN"))
+                    else if(InsensitiveEqual(mech, "LOGIN"))
                         hasAuthLogin = true;
                 }
             }
@@ -737,21 +644,21 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 {
     const auto* opts = static_cast<const SlotState*>(slotStateVoid)->options;
 
-    // heloName is operator config today, not per-request input, but CPython's smtplib had a real-
-    // -CRLF-injection CVE through this exact parameter (local_hostname, bpo-30585). Screening it-
-    // -here costs nothing and removes the assumption entirely rather than relying on callers never-
-    // -wiring it from anything less trusted
-    if(Smtp::Detail::HasInjectionBytes(opts->heloName)) [[unlikely]]
+    // heloName is operator config today, not per-request input, but CPython's smtplib had a real
+    // CRLF-injection CVE through this exact parameter (local_hostname, bpo-30585). Screening it
+    // here costs nothing and removes the assumption entirely rather than relying on callers never
+    // wiring it from anything less trusted
+    if(HasInjectionBytes(opts->heloName)) [[unlikely]]
         co_return EpFatal;
 
     // How much of the last Receive() result to trim next time, see SlotHandle::Receive
     std::uint32_t pending = 0;
 
-    // Every response read below follows the same shape: feed Receive() results into a-
-    // -LineResponse until it says Done(). This can't be factored into a shared helper function.
-    // See the file-level comment on why a reusable "co_await in a loop, return a value" coroutine-
-    // -has nowhere to live in this codebase's closed Promise<T> set, so it's inlined per read,-
-    // -seven times, deliberately
+    // Every response read below follows the same shape: feed Receive() results into a
+    // LineResponse until it says Done(). This can't be factored into a shared helper function.
+    // See the file-level comment on why a reusable "co_await in a loop, return a value" coroutine
+    // has nowhere to live in this codebase's closed Promise<T> set, so it's inlined per read,
+    // seven times, deliberately
 #define WFX_SMTP_READ_RESPONSE(varName)                                                                                \
     LineResponse varName{opts};                                                                                        \
     while(!(varName).Done()) {                                                                                         \
@@ -770,8 +677,8 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
             co_return EpFatal;
     }
 
-    // 2. EHLO (pre-TLS), only consulted for STARTTLS capability. Its AUTH line, if any, is-
-    // -deliberately never trusted: see the re-EHLO after the TLS upgrade below
+    // 2. EHLO (pre-TLS), only consulted for STARTTLS capability. Its AUTH line, if any, is
+    // deliberately never trusted: see the re-EHLO after the TLS upgrade below
     {
         WFX::String line = WFX::String("EHLO ") + WFX::String(opts->heloName) + "\r\n";
         if((co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size()))) != EpSlotOk)
@@ -783,9 +690,9 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
         if(ehlo1.code != SmtpOk)
             co_return EpFatal;
 
-        // 3. STARTTLS must be advertised. Refuse outright rather than ever consider a plaintext-
-        // -fallback. This is the entire point of the client existing: no path here ever-
-        // -authenticates without a confirmed TLS upgrade first
+        // 3. STARTTLS must be advertised. Refuse outright rather than ever consider a plaintext
+        // fallback. This is the entire point of the client existing: no path here ever
+        // authenticates without a confirmed TLS upgrade first
         if(!ehlo1.hasStartTls)
             co_return EpFatal;
     }
@@ -799,28 +706,28 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
             co_return EpFatal;
     }
 
-    // Anything buffered at this point is discarded by the engine before the TLS wrap (see-
-    // -EpollConnectionHandler::SlotUpgradeTls's ClearReadBuffer() call). A response-injection-
-    // -attempt (extra plaintext appended right after the "220") can't survive to be read as though-
-    // -it arrived over the now-authenticated channel
+    // Anything buffered at this point is discarded by the engine before the TLS wrap (see
+    // EpollConnectionHandler::SlotUpgradeTls's ClearReadBuffer() call). A response-injection
+    // attempt (extra plaintext appended right after the "220") can't survive to be read as though
+    // it arrived over the now-authenticated channel
     if((co_await h.UpgradeToTLS()) != EpSlotOk)
         co_return EpFatal;
 
-    // ClearReadBuffer() already wiped the buffer above, so any pending trim from startTlsResp-
-    // -(e.g. an injection attempt's extra bytes) is stale now, not real leftover data to trim
+    // ClearReadBuffer() already wiped the buffer above, so any pending trim from startTlsResp
+    // (e.g. an injection attempt's extra bytes) is stale now, not real leftover data to trim
     pending = 0;
 
-    // 4. Re-EHLO over the encrypted channel. The pre-TLS capability list above is never reused-
-    // -past this point. A MITM that stripped STARTTLS/AUTH from it already failed at step 3, and-
-    // -one that let STARTTLS through but lied about AUTH mechanisms gets caught here instead
+    // 4. Re-EHLO over the encrypted channel. The pre-TLS capability list above is never reused
+    // past this point. A MITM that stripped STARTTLS/AUTH from it already failed at step 3, and
+    // one that let STARTTLS through but lied about AUTH mechanisms gets caught here instead
     {
         WFX::String line = WFX::String("EHLO ") + WFX::String(opts->heloName) + "\r\n";
         if((co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size()))) != EpSlotOk)
             co_return EpFatal;
     }
 
-    // 5. AUTH: PLAIN preferred (single round trip), LOGIN as fallback for relays that don't offer-
-    // -PLAIN. Picked from what the server just advertised POST-TLS, never assumed
+    // 5. AUTH: PLAIN preferred (single round trip), LOGIN as fallback for relays that don't offer
+    // PLAIN. Picked from what the server just advertised POST-TLS, never assumed
     bool authPlain, authLogin;
     {
         WFX_SMTP_READ_RESPONSE(ehlo2)
@@ -877,8 +784,8 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
     {
         WFX_SMTP_READ_RESPONSE(authResp)
         // Wrong credentials or a refusal both land here; no retry-with-the-same-credentials loop.
-        // Reconnects go through the engine's own backoff (maxReconnectAttempts), not a tight-
-        // -local one
+        // Reconnects go through the engine's own backoff (maxReconnectAttempts), not a tight
+        // local one
         if(authResp.code != SmtpAuthSuccess)
             co_return EpFatal;
     }
@@ -891,9 +798,10 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 } // namespace Smtp::Detail
 
 // -----------------------------------------------------------------------
-// One MAIL FROM / RCPT TO / DATA exchange, pinned to a single reserved connection. See-
-// -Async::Resolve::Reserve()'s doc comment ("SQL transactions, LISTEN/NOTIFY, any sticky session").-
-// -Always check IsValid() before use: the pool can be exhausted.
+// One MAIL FROM / RCPT TO / DATA exchange, pinned to a single
+// reserved connection. See Async::Resolve::Reserve()'s doc comment
+// ("SQL transactions, LISTEN/NOTIFY, any sticky session"). Always
+// check IsValid() before use: the pool can be exhausted.
 // -----------------------------------------------------------------------
 class SmtpTransaction {
 public:
@@ -918,11 +826,11 @@ public:
     {
         return slot_.SendPayload(SmtpCmd{SmtpCmdKind::DATA_START});
     }
-    // Builds the From/To/Reply-To/Subject headers and a dot-stuffed body internally. Every field-
-    // -is CR/LF/NUL-screened before it reaches the wire (see Serialize()'s DATA_BODY case)
+    // Builds the From/To/Reply-To/Subject headers and a dot-stuffed body internally. Every field
+    // is CR/LF/NUL-screened before it reaches the wire (see Serialize()'s DATA_BODY case)
     auto DataBody(std::string_view fromAddr, std::string_view fromName, std::string_view toAddr,
-                 std::string_view toName, std::string_view subject, std::string_view body,
-                 std::string_view replyTo = {}) const noexcept
+                  std::string_view toName, std::string_view subject, std::string_view body,
+                  std::string_view replyTo = {}) const noexcept
     {
         SmtpCmd cmd{};
         cmd.kind = SmtpCmdKind::DATA_BODY;

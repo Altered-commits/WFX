@@ -27,16 +27,16 @@ struct HttpWFXSSL {
     virtual ~HttpWFXSSL() = default;
 
     // Builds the outbound (client) context if it isn't up yet, returns false if it can't be
-    // Idempotent, and independent of the inbound one: talking TLS to an upstream needs no-
-    // -certificate, so it must not require the server itself to serve HTTPS
-    // In-band upgrades decide this at runtime, which is why it stays callable after construction
+    // Idempotent, and independent of the inbound one: talking TLS to an upstream needs no
+    // certificate, so it must not require the server itself to serve HTTPS.
+    // In-band upgrades decide this at runtime, which is why it stays callable after construction.
     virtual bool EnsureClientContext() = 0;
 
     // Wrap a socket and return opaque handle
     virtual void* Wrap(SSLSocket fd) = 0;
 
-    // alpnList is a wire-encoded ALPN protocol list (same encoding as the engine's hardcoded-
-    // -default); empty = offer hardcoded default (http/1.1 only)
+    // alpnList is a wire-encoded ALPN protocol list (same encoding as the engine's hardcoded
+    // default); empty = offer hardcoded default (http/1.1 only).
     //
     // sessionSlot: caller-owned opaque per-endpoint storage for TLS session resumption
     // May be read (offer for reuse) and/or written (store newly negotiated session)

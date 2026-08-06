@@ -79,8 +79,9 @@ All templates (static or dynamic) are sent via this function.
 - Paths are **relative to the `templates/` folder**.
 - Example:
     ```cpp
-    // templates/index.html exists
-    res.SendTemplate("index.html");
+    // templates/index.html exists. Even a static template with no variables
+    // still needs a context argument, pass an empty one.
+    res.SendTemplate("index.html", WFX::RmJson());
     ```
 
 ### Static vs dynamic templates
@@ -91,13 +92,15 @@ Whether a template is treated as **static** or **dynamic** depends on the constr
 
     - Contain only `include`, `partial`, `extends`, `block`, and `endblock`
     - Fully compiled to pre-rendered HTML
-    - Sent using **zero-copy file send** (no JSON context needed)
+    - Sent using **zero-copy file send** - the JSON context argument is still required by
+      `SendTemplate`'s signature, but its contents are ignored, so pass an empty one
+      (`WFX::RmJson()`)
 
 - **Dynamic templates**:
 
     - Contain `if`, `elif`, `else`, `endif`, `for`, `endfor`, or `var`
     - Compiled into DLLs
-    - Require the JSON parameter of `SendTemplate` for runtime data binding
+    - Actually use the JSON context passed to `SendTemplate` for runtime data binding
 
 ## Constructs
 

@@ -37,8 +37,8 @@ void ConnectionLimiter::ReleaseConnection(const WFXIpAddress& ip)
     auto* entry = connLimits_.Get(key);
 
     if(entry) {
-        // connectionCount is unsigned: never decrement past zero, or an unbalanced release-
-        // -would wrap it to ~4 billion and permanently ban the IP. Erase once it reaches zero
+        // connectionCount is unsigned: never decrement past zero, or an unbalanced release would
+        // wrap it to ~4 billion and permanently ban the IP. Erase once it reaches zero.
         entry->connectionCount -= (entry->connectionCount > 0);
         shouldErase = (entry->connectionCount == 0);
     }

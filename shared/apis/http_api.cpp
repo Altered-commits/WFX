@@ -15,8 +15,8 @@ namespace WFX::Shared {
 
 using namespace WFX::Http; // For 'Router', 'Middleware', ...
 
-// 'GlobalHttpDataExt1.data' Can be set via the http api, the reason why this is safe to set even-
-// -with multiple connections is our entire flow of data is single threaded and will remain that way
+// 'GlobalHttpDataExt1.data' can be set via the http api. It's safe to set even with multiple
+// connections because our entire flow of data is single threaded and will remain that way.
 static HttpAPIDataExt1 GlobalHttpDataExt1;
 static EndpointAPIDataExt1 GlobalEndpointDataExt1;
 
@@ -38,7 +38,7 @@ static HttpResponse* ToRes(void* backend)
 const HttpAPIExt1* GetHttpAPIExt1()
 {
     // clang-format off
-    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
     static const HttpAPIExt1 GlobalHttpAPIExt1 = {
         // vvv Routing vvv
         [](HttpMethod method, StringView path, RouteCallback cb) {  // RegisterRoute
@@ -217,7 +217,7 @@ void InitHttpAPIExt1(Router* extRouter, HttpMiddleware* extMiddleware)
 const EndpointAPIExt1* GetEndpointAPIExt1()
 {
     // clang-format off
-    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
     static const EndpointAPIExt1 GlobalEndpointAPIExt1 = {
         [](const char* host, EndpointDesc desc, EndpointConfig config) -> std::uint16_t {
             return GlobalEndpointDataExt1.connHandler->AllocateEndpoint(host, desc, config);

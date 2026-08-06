@@ -124,10 +124,10 @@ public: // vvv Factory vvv
         if(!str)
             return false;
 
-        // A UUID is exactly 36 chars. Probe the length with a 37-byte cap instead of assuming-
-        // -36: the StringView overload reads s[0..35], so handing it a shorter string would read-
-        // -past the buffer. strnlen stops at the NUL for any proper C-string (the contract here),-
-        // -so a shorter/longer string is rejected without ever touching byte 36
+        // A UUID is exactly 36 chars. Probe the length with a 37-byte cap instead of assuming
+        // 36: the StringView overload reads s[0..35], so handing it a shorter string would read
+        // past the buffer. strnlen stops at the NUL for any proper C-string (the contract here),
+        // so a shorter/longer string is rejected without ever touching byte 36.
         return ::strnlen(str, 37) == 36 && FromString(StringView{str, 36}, out);
     }
 

@@ -6,8 +6,8 @@
 namespace WFX::Utils {
 
 // Heap allocated intentionally as logger must outlive all other globals
-// Static destruction order across translation units is undefined, so any-
-// -global that logs in its destructor would crash if logger destructed first
+// Static destruction order across translation units is undefined, so any
+// global that logs in its destructor would crash if logger destructed first.
 Logger& GetLogger() noexcept
 {
     // NOLINTNEXTLINE(bugprone-unhandled-exception-at-new) - function is noexcept, bad_alloc terminating is intended
@@ -91,9 +91,9 @@ void CircularFileSink::CloseInternal() noexcept
     if(!file_)
         return;
 
-    // Call Close() explicitly before reset so LinuxFile gets fd_ = -1-
-    // -before the unique_ptr destructor runs. This prevents double close-
-    // -if the LinuxFile destructor also calls Close()
+    // Call Close() explicitly before reset so LinuxFile gets fd_ = -1
+    // before the unique_ptr destructor runs. This prevents double close
+    // if the LinuxFile destructor also calls Close().
     file_->Close();
     file_.reset();
 }

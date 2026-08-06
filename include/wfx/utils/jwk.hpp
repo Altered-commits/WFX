@@ -6,9 +6,9 @@
 
 // -----------------------------------------------------------------------
 // wfx/utils/jwk.hpp
-// Turns a JWKS JSON body (RFC 7517, e.g. Cloudflare Access's /cdn-cgi/access/certs) into an-
-// -AsymKey by kid. Kept separate from wfx/utils/crypto.hpp - AsymKey is generic asym crypto,-
-// -this is the JOSE-specific layer built on top of it
+// Turns a JWKS JSON body (RFC 7517, e.g. Cloudflare Access's /cdn-cgi/access/certs) into an
+// AsymKey by kid. Kept separate from wfx/utils/crypto.hpp: AsymKey is generic asym crypto,
+// this is the JOSE-specific layer built on top of it
 //
 // Provides:
 //   WFX::LoadJwk(jwksJson, kid)   : {CryptoStatus, AsymKey}, public key only

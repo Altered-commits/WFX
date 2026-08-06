@@ -202,8 +202,8 @@ void* HmacCreate(Shared::CryptoHashAlgo algo, const std::uint8_t* key, std::uint
     if(!digestName)
         return nullptr;
 
-    // Fetched once per call rather than cached: EVP_MAC_fetch is cheap relative to the-
-    // -HMAC computation itself, and this keeps ownership local (no process-lifetime global)
+    // Fetched once per call rather than cached: EVP_MAC_fetch is cheap relative to the
+    // HMAC computation itself, and this keeps ownership local (no process-lifetime global).
     EVP_MAC* mac = EVP_MAC_fetch(nullptr, "HMAC", nullptr);
     if(!mac)
         return nullptr;
@@ -260,8 +260,8 @@ Shared::CryptoStatus AeadEncrypt(Shared::CryptoAeadAlgo algo, const std::uint8_t
                                  std::uint32_t aadLen, const std::uint8_t* plaintext, std::uint32_t ptLen,
                                  std::uint8_t* out, std::uint32_t outCap, std::uint32_t* outLen)
 {
-    // A null plaintext is only invalid if ptLen says otherwise (empty is a legitimate AEAD-
-    // -input, e.g. an auth-tag-only token). key/nonce always have fixed non-zero lengths per algo
+    // A null plaintext is only invalid if ptLen says otherwise (empty is a legitimate AEAD
+    // input, e.g. an auth-tag-only token). key/nonce always have fixed non-zero lengths per algo.
     if(!key || !nonce || (!plaintext && ptLen != 0) || !out || !outLen)
         return Shared::CryptoStatus::INVALID_ARG;
 
@@ -348,8 +348,8 @@ Shared::CryptoStatus AeadDecrypt(Shared::CryptoAeadAlgo algo, const std::uint8_t
     if(EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_AEAD_SET_TAG, static_cast<int>(tagLen), tagPtr) != 1)
         return Shared::CryptoStatus::INTERNAL_ERROR;
 
-    // EVP_DecryptUpdate above already wrote unauthenticated plaintext into 'out', scrub it-
-    // -before returning on tag failure so the caller can't accidentally read it
+    // EVP_DecryptUpdate above already wrote unauthenticated plaintext into 'out', scrub it
+    // before returning on tag failure so the caller can't accidentally read it.
     if(EVP_DecryptFinal_ex(ctx.get(), out + plaintextLen, &len) != 1) {
         OPENSSL_cleanse(out, actualCtLen);
         return Shared::CryptoStatus::AUTH_FAILED;
@@ -365,8 +365,8 @@ Shared::CryptoStatus AeadDecrypt(Shared::CryptoAeadAlgo algo, const std::uint8_t
 Shared::CryptoStatus Pbkdf2(const std::uint8_t* password, std::uint32_t passLen, const std::uint8_t* salt,
                             std::uint32_t saltLen, std::uint32_t iterations, std::uint8_t* out, std::uint32_t outLen)
 {
-    // Null password/salt/out are only invalid if their length says there's actually data-
-    // -behind them, outLen==0 is a no-op (derive zero bytes), not an error
+    // Null password/salt/out are only invalid if their length says there's actually data
+    // behind them, outLen==0 is a no-op (derive zero bytes), not an error.
     if((!password && passLen != 0) || (!salt && saltLen != 0) || (!out && outLen != 0))
         return Shared::CryptoStatus::INVALID_ARG;
 
@@ -434,8 +434,8 @@ Shared::CryptoStatus Argon2id(const std::uint8_t* password, std::uint32_t passLe
     if(!ctx)
         return Shared::CryptoStatus::INTERNAL_ERROR;
 
-    // OSSL_PARAM_construct_uint32 requires a non-const uint32_t*, so these can't be-
-    // -const despite never being written to after initialization
+    // OSSL_PARAM_construct_uint32 requires a non-const uint32_t*, so these can't be
+    // const despite never being written to after initialization.
     // NOLINTBEGIN(misc-const-correctness)
     std::uint32_t iter = iterations;
     std::uint32_t mem = memoryKb;
@@ -463,8 +463,8 @@ Shared::CryptoStatus Argon2id(const std::uint8_t* password, std::uint32_t passLe
 // vvv Misc vvv
 Shared::CryptoStatus RandomBytes(std::uint8_t* out, std::uint32_t len)
 {
-    // Zero bytes requested is a no-op success, not an error - RandomPool::GetBytes itself rejects-
-    // -len==0 (it's a lower-level, SSL-key-focused utility), so this short-circuits before that
+    // Zero bytes requested is a no-op success, not an error - RandomPool::GetBytes itself rejects
+    // len==0 (it's a lower-level, SSL-key-focused utility), so this short-circuits before that.
     if(len == 0)
         return Shared::CryptoStatus::OK;
 
@@ -601,8 +601,8 @@ static std::uint8_t* EcdsaRawToDer(const std::uint8_t* raw, std::uint32_t rawLen
 
 static bool PublicKeyValid(EVP_PKEY* pkey)
 {
-    // Fromdata/PEM/DER parsing doesn't validate the public component on its own. OpenSSL's docs-
-    // -call this out as required for externally-sourced keys, which covers every key built here
+    // Fromdata/PEM/DER parsing doesn't validate the public component on its own. OpenSSL's docs
+    // call this out as required for externally-sourced keys, which covers every key built here.
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_pkey(nullptr, pkey, nullptr);
     if(!ctx)
         return false;
@@ -617,8 +617,8 @@ void* AsymKeyLoad(const std::uint8_t* keyData, std::uint32_t keyLen, bool isPriv
     if(!keyData || keyLen == 0)
         return nullptr;
 
-    // format/structure left null so the decoder auto-detects PEM vs DER on its own, no manual-
-    // -header sniffing needed
+    // format/structure left null so the decoder auto-detects PEM vs DER on its own, no manual
+    // header sniffing needed.
     EVP_PKEY* pkey = nullptr;
     const int selection = isPrivate ? EVP_PKEY_PRIVATE_KEY : EVP_PKEY_PUBLIC_KEY;
     OSSL_DECODER_CTX* dctx =
@@ -740,9 +740,9 @@ void* AsymKeyFromEcPublic(Shared::CryptoAsymKeyType curve, const std::uint8_t* x
 
 static bool EncodePem(EVP_PKEY* pkey, bool exportPrivate, unsigned char** outData, std::size_t* outLen)
 {
-    // Encodes straight into a freshly OPENSSL_zalloc'd buffer, no BIO involved. Caller frees the-
-    // -returned buffer with OPENSSL_free(). False on failure (e.g. exportPrivate against a public-
-    // -only handle)
+    // Encodes straight into a freshly OPENSSL_zalloc'd buffer, no BIO involved. Caller frees the
+    // returned buffer with OPENSSL_free(). False on failure (e.g. exportPrivate against a public
+    // only handle).
     const int selection = exportPrivate ? EVP_PKEY_KEYPAIR : EVP_PKEY_PUBLIC_KEY;
     const char* structure = exportPrivate ? "PrivateKeyInfo" : "SubjectPublicKeyInfo";
 

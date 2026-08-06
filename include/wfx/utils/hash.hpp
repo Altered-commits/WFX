@@ -6,8 +6,8 @@
 
 // -----------------------------------------------------------------------
 // wfx/utils/hash.hpp
-// Fast, non-cryptographic hashing (hash tables, cache keys). For cryptographic-
-// -hashing (SHA-2, HMAC, etc.) see wfx/utils/crypto.hpp instead
+// Fast, non-cryptographic hashing (hash tables, cache keys). For cryptographic
+// hashing (SHA-2, HMAC, etc.) see wfx/utils/crypto.hpp instead
 //
 // Provides:
 //   WFX::Xxh3(data, seed = 0)                : general-purpose hash, XXH3-64

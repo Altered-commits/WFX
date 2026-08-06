@@ -16,16 +16,16 @@
 //   WFX::HttpEndpointResponseHeaders: dynamic response header list
 //   WFX::HttpEndpointConfig         : connection pool + protocol hardening knobs
 //
-// Speaks HTTP/1.1 only (no h2, no ALPN). Handles keep-alive, chunked-
-// -transfer-encoding, Content-Length and close-delimited bodies,-
-// -HEAD/204/304/1xx no-body responses, HTTP/1.0 default-close. Not handled:-
-// -CONNECT tunneling, protocol upgrades, trailer headers, Transfer-Encoding-
-// -other than plain "chunked".
+// Speaks HTTP/1.1 only (no h2, no ALPN). Handles keep-alive,
+// chunked-transfer-encoding, Content-Length and close-delimited bodies,
+// HEAD/204/304/1xx no-body responses, HTTP/1.0 default-close. Not
+// handled: CONNECT tunneling, protocol upgrades, trailer headers,
+// Transfer-Encoding other than plain "chunked".
 //
-// Request paths/headers are rejected (SerializeResult::ERROR) if they-
-// -contain CR/LF/NUL. Response parsing enforces-
-// -maxHeaderBytes/maxHeaderCount/maxBodyBytes and rejects conflicting or-
-// -ambiguous Content-Length/Transfer-Encoding framing.
+// Request paths/headers are rejected (SerializeResult::ERROR) if they
+// contain CR/LF/NUL. Response parsing enforces
+// maxHeaderBytes/maxHeaderCount/maxBodyBytes and rejects conflicting or
+// ambiguous Content-Length/Transfer-Encoding framing.
 //
 // -----------------------------------------------------------------------
 // Usage
@@ -51,11 +51,11 @@
 //   auto [status, out] = co_await Api.Post("/users", jsonBody, hdrs);
 //
 // Coalescing: dedupe concurrent identical requests into one backend call.
-// Give HttpEndpointConfig::coalesceKey a function deriving a key from a-
-// -request (0 = don't coalesce that request); every waiter still gets its-
-// -own HttpEndpointResponse (deep-cloned on completion). Left null (default),-
-// -none of this is engaged. Raw ABI shape like every other user-supplied-
-// -EndpointDesc callback (cast reqVoid yourself).
+// Give HttpEndpointConfig::coalesceKey a function deriving a key from a
+// request (0 = don't coalesce that request); every waiter still gets its
+// own HttpEndpointResponse (deep-cloned on completion). Left null
+// (default), none of this is engaged. Raw ABI shape like every other
+// user-supplied EndpointDesc callback (cast reqVoid yourself).
 //
 //   std::uint64_t MyCoalesce(const void* reqVoid) {
 //       auto& req = *static_cast<const WFX::HttpEndpointRequest*>(reqVoid);
@@ -75,53 +75,19 @@
 // -----------------------------------------------------------------------
 
 #include "base.hpp"
+#include "helper.hpp"
 #include "wfx/memory.hpp"
 #include "shared/abis/constants.hpp"
 #include <charconv>
 #include <cstring>
 #include <string_view>
 
-// Shared by both the public header list below and the wire codec further-
-// -down, one definition each, kept in Detail to stay out of the public-
-// -WFX:: surface.
-namespace WFX::Http::Detail {
-
-constexpr char ToLowerAscii(char c) noexcept
-{
-    auto uc = static_cast<unsigned char>(c);
-    unsigned char isUpper = static_cast<unsigned char>(uc - 'A') < 26;
-    return static_cast<char>(uc | static_cast<unsigned char>(isUpper << 5));
-}
-
-constexpr bool InsensitiveEqual(std::string_view a, std::string_view b) noexcept
-{
-    if(a.size() != b.size())
-        return false;
-
-    for(std::size_t i = 0; i < a.size(); ++i)
-        if(ToLowerAscii(a[i]) != ToLowerAscii(b[i]))
-            return false;
-
-    return true;
-}
-
-constexpr bool HasInjectionBytes(std::string_view s) noexcept
-{
-    for(char c : s)
-        if(c == '\r' || c == '\n' || c == '\0')
-            return true;
-
-    return false;
-}
-
-} // namespace WFX::Http::Detail
-
 namespace WFX {
 
 // -----------------------------------------------------------------------
-// Case-insensitive header list. Grows as needed, no cap on count (response-
-// -side: bounded separately by HttpEndpointConfig::maxHeaderCount). Backed-
-// -by WFX::Vector; empty until the first Add()/Set().
+// Case-insensitive header list. Grows as needed, no cap on count
+// (response side: bounded separately by HttpEndpointConfig::maxHeaderCount).
+// Backed by WFX::Vector; empty until the first Add()/Set().
 // -----------------------------------------------------------------------
 template <typename StrT> class HttpHeaderList {
 public: // Main Functions
@@ -133,7 +99,7 @@ public: // Main Functions
     void Set(StrT name, StrT value)
     {
         for(auto& e : entries_) {
-            if(Http::Detail::InsensitiveEqual(e.name, name)) {
+            if(EndpointDetail::InsensitiveEqual(e.name, name)) {
                 e.value = std::move(value);
                 return;
             }
@@ -145,7 +111,7 @@ public: // Main Functions
     bool Get(std::string_view name, std::string_view& out) const noexcept
     {
         for(const auto& e : entries_) {
-            if(Http::Detail::InsensitiveEqual(e.name, name)) {
+            if(EndpointDetail::InsensitiveEqual(e.name, name)) {
                 out = std::string_view{e.value};
                 return true;
             }
@@ -178,12 +144,12 @@ public: // Main Functions
         return entries_.empty();
     }
 
-    // NOLINTNEXTLINE(readability-identifier-naming) - range-based for requires this exact spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): range-based for requires this exact spelling.
     auto begin() const noexcept
     {
         return entries_.begin();
     }
-    // NOLINTNEXTLINE(readability-identifier-naming) - range-based for requires this exact spelling
+    // NOLINTNEXTLINE(readability-identifier-naming): range-based for requires this exact spelling.
     auto end() const noexcept
     {
         return entries_.end();
@@ -202,8 +168,8 @@ using HttpEndpointRequestHeaders = HttpHeaderList<std::string_view>;
 using HttpEndpointResponseHeaders = HttpHeaderList<WFX::String>;
 
 // -----------------------------------------------------------------------
-// Outbound request. path/body/headers are caller-owned string_views,-
-// -(must stay alive for the duration of the co_await).
+// Outbound request. path/body/headers are caller-owned string_views
+// (must stay alive for the duration of the co_await).
 // -----------------------------------------------------------------------
 struct HttpEndpointRequest {
     HttpMethod method = HttpMethod::GET;
@@ -213,8 +179,8 @@ struct HttpEndpointRequest {
 };
 
 // -----------------------------------------------------------------------
-// Parsed response. Owned, valid for as long as the enclosing-
-// -EndpointOutput<HttpEndpointResponse> is.
+// Parsed response. Owned, valid for as long as the enclosing
+// EndpointOutput<HttpEndpointResponse> is.
 // -----------------------------------------------------------------------
 struct HttpEndpointResponse {
     std::uint16_t status = 0;
@@ -258,32 +224,33 @@ struct HttpEndpointConfig {
 // -----------------------------------------------------------------------
 namespace Http::Detail {
 
+using namespace WFX::EndpointDetail;
+
 struct HttpEndpointLimits {
     std::uint32_t maxHeaderBytes;
     std::uint32_t maxBodyBytes;
     std::uint16_t maxHeaderCount;
 };
 
-// Shared by every connection to one HttpEndpoint; lives as long as the-
-// -owning HttpEndpoint. Handed to the engine as EndpointDesc::userCtx.
+// Shared by every connection to one HttpEndpoint; lives as long as the owning HttpEndpoint.
+// Handed to the engine as EndpointDesc::userCtx.
 struct HttpEndpointOptions {
     // A VIEW into the caller's hostPort string, NOT a copy and NOT a WFX::String.
     // Two reasons it must be a plain string_view here:
     //   1. A HttpEndpoint is declared at namespace scope (`inline const auto Api =
-    //      -WFX::HttpEndpoint{"host:443"}`), so this is populated during the user-
-    //      -.so's STATIC INITIALIZATION, before the worker runs GetBufferPool().Init().
-    //      A pool-backed WFX::String whose value exceeds the small-string buffer (a-
-    //      -long hostname) would allocate from an uninitialized pool and SIGSEGV.
-    //   2. hostPort is required to be a static / long-lived string anyway (the-
-    //      -deferred AllocateEndpoint captures the same pointer), so a view is safe and-
-    //      -avoids the allocation + copy entirely.
+    //      WFX::HttpEndpoint{"host:443"}`), so this is populated during the user .so's STATIC
+    //      INITIALIZATION, before the worker runs GetBufferPool().Init(). A pool-backed
+    //      WFX::String whose value exceeds the small-string buffer (a long hostname) would
+    //      allocate from an uninitialized pool and SIGSEGV.
+    //   2. hostPort is required to be a static / long-lived string anyway (the deferred
+    //      AllocateEndpoint captures the same pointer), so a view is safe and avoids the
+    //      allocation + copy entirely.
     std::string_view hostHeaderValue;
     HttpEndpointLimits limits;
 };
 
-// Per-connection; survives keep-alive requests. lastMethod is written by-
-// -Serialize() and read by Parse() for the same request (safe: slots here-
-// -are exclusive, one request in flight at a time).
+// Per-connection; survives keep-alive requests. lastMethod is written by Serialize() and read by
+// Parse() for the same request (safe: slots here are exclusive, one request in flight at a time).
 struct SlotState {
     const HttpEndpointOptions* options = nullptr;
     HttpMethod lastMethod = HttpMethod::GET;
@@ -303,8 +270,8 @@ inline void DestroySlotState(void* state) noexcept
     Delete(static_cast<SlotState*>(state));
 }
 
-// Incremental response parser state; reset (not recreated) between-
-// -keep-alive requests on the same slot.
+// Incremental response parser state; reset (not recreated) between keep-alive requests on the
+// same slot.
 enum class ParsePhase : std::uint8_t {
     StatusLine,
     Headers,
@@ -316,9 +283,9 @@ enum class ParsePhase : std::uint8_t {
     BodyUntilClose,
 };
 
-// Chained 1xx responses before a final status line are rejected past this count,-
-// -backstopped anyway by requestTimeoutSeconds, but no reason to let a chatty/malicious-
-// -upstream spin the parser indefinitely within that window
+// Chained 1xx responses before a final status line are rejected past this count, backstopped
+// anyway by requestTimeoutSeconds, but no reason to let a chatty/malicious upstream spin the
+// parser indefinitely within that window.
 inline constexpr std::uint8_t kMaxInformationalResponses = 8;
 
 struct ParseState {
@@ -384,45 +351,6 @@ inline void* CloneOutput(void* /*slotState*/, const void* srcOutputVoid) noexcep
     *clone = src;
     return clone;
 }
-
-// Bounds-checked append-only cursor over the serialize() buffer. Append-
-// -fails cleanly (false) on overflow -> caller returns EpSerBufferTooSmall-
-// -so the engine retries with a larger buffer.
-class BufWriter {
-public:
-    BufWriter(char* buf, std::uint32_t cap) noexcept : buf_(buf), cap_(cap)
-    {}
-
-public: // Main Functions
-    bool Append(std::string_view s) noexcept
-    {
-        if(s.size() > cap_ - pos_)
-            return false;
-
-        std::memcpy(buf_ + pos_, s.data(), s.size());
-        pos_ += static_cast<std::uint32_t>(s.size());
-        return true;
-    }
-
-    bool Append(char c) noexcept
-    {
-        if(pos_ >= cap_)
-            return false;
-
-        buf_[pos_++] = c;
-        return true;
-    }
-
-    std::uint32_t Pos() const noexcept
-    {
-        return pos_;
-    }
-
-private: // Storage
-    char* buf_;
-    std::uint32_t cap_;
-    std::uint32_t pos_ = 0;
-};
 
 inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoid, char* buf, std::uint32_t bufLen,
                                          std::uint32_t* written, std::uint64_t* /*streamKey*/) noexcept
@@ -612,33 +540,17 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
             case ParsePhase::BodyChunkSize:
             case ParsePhase::BodyChunkLineEnd:
             case ParsePhase::BodyChunkTrailer: {
-                const void* nl = std::memchr(buf + pos, '\n', len - pos);
-                if(!nl) {
-                    std::uint32_t remaining = len - pos;
-                    if(st->lineAcc.size() + remaining > lim.maxHeaderBytes)
-                        return finish(EpParseError);
-
-                    st->lineAcc.append(buf + pos, remaining);
-                    pos = len;
-                    return finish(isEof ? EpParseError : EpParseIncomplete);
-                }
-
-                auto lineLenInBuf = static_cast<std::uint32_t>(static_cast<const char*>(nl) - (buf + pos));
+                const std::uint32_t lineStartPos = pos;
                 std::string_view line;
-                if(!st->lineAcc.empty()) {
-                    if(st->lineAcc.size() + lineLenInBuf > lim.maxHeaderBytes)
-                        return finish(EpParseError);
+                auto lineStatus = ReadLine(buf, len, pos, st->lineAcc, lim.maxHeaderBytes, line);
+                if(lineStatus == LineReadStatus::TOO_LONG)
+                    return finish(EpParseError);
+                if(lineStatus == LineReadStatus::NEED_MORE)
+                    return finish(isEof ? EpParseError : EpParseIncomplete);
 
-                    st->lineAcc.append(buf + pos, lineLenInBuf);
-                    line = st->lineAcc;
-                }
-                else
-                    line = std::string_view{buf + pos, lineLenInBuf};
-
-                if(!line.empty() && line.back() == '\r')
-                    line.remove_suffix(1);
-
-                pos += lineLenInBuf + 1;
+                // Bytes this line actually cost on the wire (CRLF included), for the header-size
+                // cap below; ReadLine advanced pos by exactly this many bytes past lineStartPos
+                const std::uint32_t lineLenInBuf = pos - lineStartPos - 1;
 
                 ParsePhase currentPhase = st->phase;
                 if(currentPhase == ParsePhase::StatusLine || currentPhase == ParsePhase::Headers) {
@@ -666,9 +578,9 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
                                       informational;
 
                         if(informational) {
-                            // RFC 7230 3.3.3: a 1xx is its own complete message, reset the-
-                            // -flags its header block set so they can't leak into the response-
-                            // -that follows on the same connection
+                            // RFC 7230 3.3.3: a 1xx is its own complete message, reset the flags
+                            // its header block set so they can't leak into the response that
+                            // follows on the same connection.
                             if(++st->informationalCount > kMaxInformationalResponses)
                                 ok = false;
                             else {
@@ -855,8 +767,7 @@ inline EndpointConfig BuildEndpointConfig(const HttpEndpointConfig& cfg) noexcep
 } // namespace Http::Detail
 
 // -----------------------------------------------------------------------
-// The client. One instance per upstream host, declared at namespace scope-
-// -before Run():
+// The client. One instance per upstream host, declared at namespace scope before Run():
 //
 //   inline const auto Api = WFX::HttpEndpoint{"api.example.com:443"};
 //

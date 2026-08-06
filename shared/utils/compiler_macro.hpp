@@ -82,8 +82,8 @@
 
 // ---------------------------------------------------------------------
 // WFX_ASSUME(cond): Tell the optimizer the condition is always true
-//   Unlike WFX_UNREACHABLE, this takes an expression. The optimizer-
-//   -uses it as a constraint rather than eliminating the block entirely
+//   Unlike WFX_UNREACHABLE, this takes an expression. The optimizer
+//   uses it as a constraint rather than eliminating the block entirely
 // ---------------------------------------------------------------------
 #if defined(_MSC_VER) || defined(__ICL) || defined(__INTEL_COMPILER)
 #define WFX_ASSUME(cond) __assume(cond)

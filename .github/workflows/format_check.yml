@@ -1,7 +1,7 @@
 name: WFX Format Check
 
-# Reusable: invoked by entry.yml AFTER the CI filter, so this file owns ONLY-
-# -the formatting logic
+# Reusable: invoked by entry.yml AFTER the CI filter, so this file owns ONLY
+# the formatting logic
 on:
   workflow_call:
 

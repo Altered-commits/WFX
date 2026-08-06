@@ -91,8 +91,8 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         relPath.erase(0, relPath.find_first_not_of("/\\"));
 
         // Every file is initially written to the static folder, even the dynamic .html files.
-        // After the .html file is completely stripped off static tags, and IF dynamic tags still-
-        // -remain, we move onto stage two of compiling. That is when we use the dynamic folder
+        // After the .html file is completely stripped off static tags, and IF dynamic tags still
+        // remain, we move onto stage two of compiling. That is when we use the dynamic folder.
         std::string outPath = staticOutputDir + "/" + relPath;
 
         // Cache checking
@@ -105,8 +105,8 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                 const TemplateType cachedType = cacheStats->Pop<TemplateType>(offset);
                 const std::size_t cachedSize = cacheStats->Pop<std::size_t>(offset);
 
-                // Cache is only trustworthy if the file is unchanged AND, for dynamic-
-                // -templates, the compiled .so it depends on actually still exists
+                // Cache is only trustworthy if the file is unchanged AND, for dynamic
+                // templates, the compiled .so it depends on actually still exists.
                 const bool cacheValid = diskStats.modifiedNs == cacheStats->modifiedTime &&
                                         (cachedType != TemplateType::DYNAMIC || dynamicLibExists);
 
@@ -240,8 +240,8 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 
 void TemplateEngine::LoadDynamicTemplatesFromLib()
 {
-    // Load the user_templates.[dll/so/dylib] from <project>/build/ if it exists-
-    // -else we just ignore this entirely
+    // Load the user_templates.[dll/so/dylib] from <project>/build/ if it exists
+    // else we just ignore this entirely.
     const std::string inputDir = config_.projectConfig.projectName + STATIC_FOLDER;
     const std::string dllPath = config_.projectConfig.projectName + TEMPLATE_LIB_PATH;
 
@@ -256,8 +256,8 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
     }
 
     // Loop over the templates_ and find the ones with TemplateType::DYNAMIC
-    // It will contain the functions name in 'pathOrName' member, use it to get-
-    // -Generator class inside of .dll/.so
+    // It will contain the functions name in 'pathOrName' member, use it to get
+    // Generator class inside of .dll/.so.
     for(auto& templateMeta : templates_) {
         auto& tmpl = templateMeta.second;
         if(tmpl.type != TemplateType::DYNAMIC)
@@ -434,8 +434,8 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
         while(frame.readOffset < bufLen) {
             bodyView = {bufPtr + frame.readOffset, frame.bytesRead - frame.readOffset};
 
-            // If we are processing a child template (one that extends a parent)-
-            // -or skipUntilFlag is set, we should NOT write any content from it
+            // If we are processing a child template (one that extends a parent)
+            // or skipUntilFlag is set, we should NOT write any content from it.
             isExtending = !ctx.currentExtendsName.empty();
             skipLiterals = isExtending || ctx.skipUntilFlag;
             tagStart = bodyView.find("{%");
@@ -485,8 +485,8 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
             tagEnd = bodyView.find("%}");
 
             // Incomplete tag, carry over for next read
-            // Why use assign? Tags can only span one chunk at max, so either the '{%' or '%}' spans-
-            // -at a single time, not both at the same time
+            // Why use assign? Tags can only span one chunk at max, so either the '{%' or '%}' spans
+            // at a single time, not both at the same time.
             if(tagEnd == std::string::npos) {
                 frame.carry.assign(bodyView.data(), bodyView.size());
                 goto __NextChunk;
@@ -494,8 +494,8 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
 
             tagView = {bodyView.data(), tagEnd + 2};
 
-            // Tag cannot be larger than 'MAX_TAG_LENGTH', so uk people don't just 'accidentally'-
-            // -make it a billion bytes :)
+            // Tag cannot be larger than 'MAX_TAG_LENGTH', so uk people don't just 'accidentally'
+            // make it a billion bytes :)
             if(tagView.size() > MAX_TAG_LENGTH) {
                 logger_.Error("[TemplateEngine].[ParsingError]: IC; Length of the tag: '", tagView,
                               "' crosses the 'MAX_TAG_LENGTH' limit which is ", MAX_TAG_LENGTH);
@@ -522,9 +522,9 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
                     return {TemplateType::FAILURE, 0};
             }
 
-            // An include just pushed a new frame via PushFile() -> stack.emplace_back(),-
-            // -which can reallocate the backing vector and leave 'frame' dangling. Re-fetch-
-            // -it by index before touching it in that case instead of using the stale ref.
+            // An include just pushed a new frame via PushFile() -> stack.emplace_back(),
+            // which can reallocate the backing vector and leave 'frame' dangling. Re-fetch
+            // it by index before touching it in that case instead of using the stale ref.
             if(tagResult == TagResult::CONTROL_TO_ANOTHER_FILE) {
                 TemplateFrame& parentFrame = stack[frameIdx];
                 if(!parentFrame.carry.empty())
@@ -547,8 +547,8 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
     __NextChunk:
         frame.readOffset = 0;
 
-        // Skip the read loop entirely if needed. Also the ';' is there for suppressing compiler warnings-
-        // -because empty label is ig not allowed in cxx version < C++2b
+        // Skip the read loop entirely if needed. Also the ';' is there for suppressing compiler warnings
+        // because empty label is ig not allowed in cxx version < C++2b.
     __ContinueOuterLoop:;
     }
 
@@ -706,8 +706,8 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(CompilationContext& context
                 return TagResult::SUCCESS;
             }
 
-            // Now in another case, we would want to substitute the original content inplace-
-            // -if we couldn't find a replacement above, that is if we are in original parent file now
+            // Now in another case, we would want to substitute the original content inplace
+            // if we couldn't find a replacement above, that is if we are in original parent file now.
             if(context.currentExtendsName.empty()) {
                 context.inBlock = true;
                 return TagResult::SUCCESS;

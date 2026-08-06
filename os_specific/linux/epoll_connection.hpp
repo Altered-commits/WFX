@@ -17,11 +17,10 @@
 #include <atomic>
 #include <type_traits>
 
-// IMPORTANT: these headers are used exclusively for the DNS background-refresh-
-// -mechanism (short-lived std::threads capped by a counting_semaphore, handing-
-// -results back to the epoll thread via a mutex-guarded queue + eventfd). The-
-// -rest of the engine is single-threaded by design and must never need locking;-
-// -do not reach for these outside the DNS refresh path
+// IMPORTANT: these headers are used exclusively for the DNS background-refresh mechanism
+// (short-lived std::threads capped by a counting_semaphore, handing results back to the epoll
+// thread via a mutex-guarded queue + eventfd). The rest of the engine is single-threaded by
+// design and must never need locking; do not reach for these outside the DNS refresh path.
 #include <mutex>
 #include <semaphore>
 
@@ -37,9 +36,9 @@ using ClientPool = BitmapPool<ClientCtx>;
 using EndpointPool = BitmapPool<EndpointCtx>;
 
 // One entry per registered endpoint: metadata + fixed connection pool
-// auxPool backs OpenSideConnection() (Postgres CancelRequest, MySQL COM_PROCESS_KILL, ...), sized-
-// -independently via EndpointConfig::auxConnLimit. 0 is a legitimate empty pool (BitmapPool tolerates-
-// -it), so most endpoints that never use side connections pay nothing extra
+// auxPool backs OpenSideConnection() (Postgres CancelRequest, MySQL COM_PROCESS_KILL, ...), sized
+// independently via EndpointConfig::auxConnLimit. 0 is a legitimate empty pool (BitmapPool
+// tolerates it), so most endpoints that never use side connections pay nothing extra.
 struct EndpointEntry {
     EndpointMetadata meta;
     EndpointPool pool;
@@ -55,8 +54,8 @@ struct EndpointEntry {
     EndpointEntry& operator=(const EndpointEntry&) = delete;
 };
 
-// DNS refresh result, posted from a background resolver thread back to the epoll-
-// -thread via dnsResultEventFd_. One entry per completed refresh
+// DNS refresh result, posted from a background resolver thread back to the epoll thread via
+// dnsResultEventFd_. One entry per completed refresh.
 struct DnsResult {
     bool success;
     std::uint16_t endpointIdx;
@@ -117,18 +116,18 @@ public: // Engine control
     void Stop() override;
 
 private: // Backpressure
-    // True when this slot's bytes drain piece by piece (streaming, or pushes on an idle slot), so-
-    // -a full read buffer means the consumer is behind rather than the peer misbehaving
+    // True when this slot's bytes drain piece by piece (streaming, or pushes on an idle slot), so
+    // a full read buffer means the consumer is behind rather than the peer misbehaving.
     bool IsIncrementallyConsumed(EndpointCtx* slotCtx) const;
 
 private: // TLS
-    // Brings up the outbound SSL context on demand, creating the handler itself if the server is-
-    // -plaintext and nothing has needed TLS yet
+    // Brings up the outbound SSL context on demand, creating the handler itself if the server is
+    // plaintext and nothing has needed TLS yet.
     bool EnsureClientSSL();
 
 private: // Slot state
-    // Single point every 'eventType' write goes through, table-driven against the exact-
-    // -transition graph (kLegalFrom in the .cpp), logger_.Fatal's on an illegal pair
+    // Single point every 'eventType' write goes through, table-driven against the exact
+    // transition graph (kLegalFrom in the .cpp), logger_.Fatal's on an illegal pair.
     void EnterState(ConnectionTag* ctx, EventType next);
 
 private: // Connection management
@@ -136,8 +135,8 @@ private: // Connection management
     EndpointCtx* GetEndpointConnection(std::uint16_t endpointIdx);
     EndpointCtx* GetAuxConnection(std::uint16_t endpointIdx);
 
-    // Opaque pinned-slot handle: endpointIdx | pool index | generationId. Decode returns null-
-    // -for a handle whose slot was since released or recycled, so a stale one can't be used
+    // Opaque pinned-slot handle: endpointIdx | pool index | generationId. Decode returns null
+    // for a handle whose slot was since released or recycled, so a stale one can't be used.
     std::uint64_t EncodeSlotHandle(EndpointCtx* ctx);
     EndpointCtx* DecodeSlotHandle(std::uint64_t pinnedSlot);
 
@@ -145,9 +144,9 @@ private: // Connection management
     void ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason reason = DisconnectReason::ERROR);
     void ReturnEndpointToPool(EndpointCtx* ctx);
 
-    // Lease accounting for multiplexed slots, which keep their pool bit across the idle window-
-    // -(so FindMultiplexableSlot can reuse them) instead of going through ReturnEndpointToPool:-
-    // -drop the in-use count when the last stream drains, reacquire it when a new stream lands
+    // Lease accounting for multiplexed slots, which keep their pool bit across the idle window
+    // (so FindMultiplexableSlot can reuse them) instead of going through ReturnEndpointToPool:
+    // drop the in-use count when the last stream drains, reacquire it when a new stream lands.
     void MultiplexReleaseLeaseIfIdle(EndpointCtx* ctx);
     void MultiplexReacquireLease(EndpointCtx* ctx);
     EndpointCtx* FindMultiplexableSlot(std::uint16_t endpointIdx, EndpointMetadata& meta);
@@ -173,26 +172,26 @@ private: // Handshake
     void HandleEndpointHandshake(EndpointCtx* ctx);
 
 private: // Shared ClientCtx/EndpointCtx templates
-    // Drives one SSL handshake step off its return value: success sets 'onSuccess',-
-    // -WANT_READ/WANT_WRITE sets 'stayState' and waits for the next epoll event
+    // Drives one SSL handshake step off its return value: success sets 'onSuccess',
+    // WANT_READ/WANT_WRITE sets 'stayState' and waits for the next epoll event.
     template <typename Ctx> bool TryHandshake(Ctx* ctx, EventType onSuccess, EventType stayState);
 
-    // Arms EPOLLIN|EPOLLOUT|EPOLLET, or issues EPOLL_CTL_DEL. PackEpollData is overloaded-
-    // -per ctx type; that's the only thing that actually differs between the two
+    // Arms EPOLLIN|EPOLLOUT|EPOLLET, or issues EPOLL_CTL_DEL. PackEpollData is overloaded
+    // per ctx type; that's the only thing that actually differs between the two.
     template <typename Ctx> bool RegisterEpoll(Ctx* ctx, int op);
 
     // Lazily allocates ctx->rwBuffer's read side, closing ctx on allocation failure
     template <typename Ctx> bool EnsureReadReady(Ctx* ctx);
 
-    // Drains the socket until EAGAIN (ET mode). outEof (endpoint only): set true when the-
-    // -peer closed mid-receive instead of closing the slot, so the caller can run one last-
-    // -isEof parse to finalize a close-delimited body
+    // Drains the socket until EAGAIN (ET mode). outEof (endpoint only): set true when the
+    // peer closed mid-receive instead of closing the slot, so the caller can run one last
+    // isEof parse to finalize a close-delimited body.
     template <typename Ctx> bool Receive(Ctx* ctx, bool* outEof = nullptr);
 
-    // Shared SSL-shutdown state machine behind both public Close() overrides. Returns true-
-    // -once synchronous cleanup (RegisterEpoll DEL + Release*) should run now; false means-
-    // -either there was nothing to do, or the event loop must wait for an in-progress-
-    // -shutdown to finish (the shutdown eventType is already armed on ctx in that case)
+    // Shared SSL-shutdown state machine behind both public Close() overrides. Returns true
+    // once synchronous cleanup (RegisterEpoll DEL + Release*) should run now; false means
+    // either there was nothing to do, or the event loop must wait for an in-progress
+    // shutdown to finish (the shutdown eventType is already armed on ctx in that case).
     template <typename Ctx> bool CloseCommon(Ctx* ctx, bool forceClose);
 
 private: // Endpoint validation / DNS
@@ -251,8 +250,8 @@ private: // onConnect
     void FailDeferredRequest(EndpointCtx* ctx, EndpointStatus status);
 
 private: // onAbort / side connections
-    // Fires desc.onAbort. Unlike FireOnConnect, ctx does NOT transition eventType (still-
-    // -mid-request, EVENT_ENDPOINT_RECV); onAbort only ever drives a separate auxPool ctx
+    // Fires desc.onAbort. Unlike FireOnConnect, ctx does NOT transition eventType (still
+    // mid-request, EVENT_ENDPOINT_RECV); onAbort only ever drives a separate auxPool ctx.
     void FireOnAbort(EndpointCtx* ctx, EndpointEntry& entry);
     // Connected (+TLS'd if needed): fires the caller's asyncData with the aux ctx as result.data
     void CompleteAuxConnect(EndpointCtx* auxCtx);
@@ -314,22 +313,22 @@ private: // Constants
     constexpr static std::uint16_t MAX_DISTINCT_ENDPOINTS = std::numeric_limits<std::uint16_t>::max() - 1;
     constexpr static std::uint16_t CLIENT_CONNECTION_TAG = 0xFFFF;
 
-    // Top bit of PackEpollData's 32-bit pool-index half: flags an auxPool ctx so Run() routes to it-
-    // -instead of pool. No realistic pool size gets anywhere near 2^31 slots
+    // Top bit of PackEpollData's 32-bit pool-index half: flags an auxPool ctx so Run() routes to
+    // it instead of pool. No realistic pool size gets anywhere near 2^31 slots.
     constexpr static std::uint32_t AUX_CONNECTION_TAG_BIT = 0x8000'0000u;
 
     constexpr static int INVOKE_TIMEOUT_COOLDOWN = 5;
     constexpr static int INVOKE_TIMEOUT_DELAY = 1;
 
-    // Sane bounds regardless of source: never hammer DNS faster than 5s (protects-
-    // -against a misconfigured/malicious 0-1s TTL), never wait longer than 1hr (bounds-
-    // -staleness even if TTL is absurdly large or userOverride is set very high)
+    // Sane bounds regardless of source: never hammer DNS faster than 5s (protects against a
+    // misconfigured/malicious 0-1s TTL), never wait longer than 1hr (bounds staleness even if
+    // TTL is absurdly large or userOverride is set very high).
     constexpr static std::uint32_t MIN_REFRESH_SECONDS = 5;
     constexpr static std::uint32_t MAX_REFRESH_SECONDS = 3600;
 
-    // Caps concurrent background DNS resolver threads. 32 provides enough parallelism-
-    // -for large deployments (hundreds of endpoints) while staying well within OS thread-
-    // -limits on all supported hardware
+    // Caps concurrent background DNS resolver threads. 32 provides enough parallelism for
+    // large deployments (hundreds of endpoints) while staying well within OS thread limits
+    // on all supported hardware.
     constexpr static std::uint16_t MAX_DNS_THREADS = 32;
     constexpr static std::uint32_t MAX_DNS_RESULT_QUEUE_SIZE = MAX_DNS_THREADS * 2;
 
