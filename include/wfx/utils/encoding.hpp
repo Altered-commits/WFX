@@ -209,7 +209,7 @@ inline String UrlEncode(std::string_view data)
     String out;
     out.reserve(data.size());
 
-    for(char c : data) {
+    for(const char c : data) {
         const auto byte = static_cast<std::uint8_t>(c);
         if(Detail::CHAR_TABLE[byte].urlSafe)
             out.push_back(c);

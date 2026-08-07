@@ -77,12 +77,12 @@ private:
 **Formatting** is enforced via clang-format:
 
 ```bash
-# everything
-bash scripts/format.sh
-
-# specific files only
-bash scripts/format.sh --files path/to/file.cpp path/to/other.hpp
+bash scripts/format.sh              # check everything (dry run, shows diffs)
+bash scripts/format.sh --files path/to/file.cpp path/to/other.hpp  # check specific files only
+bash scripts/format.sh --fix        # apply formatting in-place
 ```
+
+Same convention as `tidy.sh` below: no flag means dry run, `--fix` is what actually writes to disk.
 
 If you have sections with manual alignment or complex macro blocks that clang-format mangles, wrap them with `// clang-format off` and `// clang-format on`. Use it sparingly :)
 

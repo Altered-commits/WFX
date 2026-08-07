@@ -41,6 +41,7 @@ using CryptoAsymScheme = Shared::CryptoAsymScheme;
 using CryptoHashAlgo = Shared::CryptoHashAlgo;
 using CryptoStatus = Shared::CryptoStatus;
 
+// NOLINTBEGIN(readability-identifier-naming)
 inline constexpr auto CryptoOk = CryptoStatus::OK;
 inline constexpr auto CryptoInvalidArg = CryptoStatus::INVALID_ARG;
 inline constexpr auto CryptoBufferTooSmall = CryptoStatus::BUFFER_TOO_SMALL;
@@ -65,6 +66,7 @@ inline constexpr auto CryptoPs512 = CryptoAsymScheme::PS512;
 inline constexpr auto CryptoEs256 = CryptoAsymScheme::ES256;
 inline constexpr auto CryptoEs384 = CryptoAsymScheme::ES384;
 inline constexpr auto CryptoEd25519 = CryptoAsymScheme::ED25519;
+// NOLINTEND(readability-identifier-naming)
 
 // vvv Hashing / HMAC result vvv
 // N is the digest length for the algo that produced it (32/48/64 for SHA256/384/512)
@@ -270,7 +272,7 @@ private: // Storage
 // support needs chunked, independently-authenticated framing (libsodium's crypto_secretstream is
 // the standard example), not a bigger buffer. The cap exists to fail loudly on an
 // accidentally-huge body instead of silently costing 2x its RAM
-inline constexpr std::size_t CryptoAeadMaxSize = 64 * 1024 * 1024;
+inline constexpr std::size_t CryptoAeadMaxSize = 64 * 1024 * 1024; // NOLINT(readability-identifier-naming)
 
 inline std::pair<CryptoStatus, Vector<std::uint8_t>> AeadEncrypt(CryptoAeadAlgo algo, std::string_view key,
                                                                  std::string_view nonce, std::string_view aad,

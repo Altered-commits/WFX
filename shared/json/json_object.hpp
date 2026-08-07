@@ -105,23 +105,20 @@ public: // vvv uint32 aliases into u64a and u64b vvv
     template <typename T> T* BufAs() noexcept
     {
         T* p;
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see the comment
-        // above.
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see above.
         std::memcpy(&p, &u64b, 8);
         return p;
     }
     template <typename T> const T* BufAs() const noexcept
     {
         const T* p;
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see the comment
-        // above.
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see above.
         std::memcpy(&p, &u64b, 8);
         return p;
     }
     template <typename T> void BufSet(T* p) noexcept
     {
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see the comment
-        // above.
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see above.
         std::memcpy(&u64b, &p, 8);
     }
 };

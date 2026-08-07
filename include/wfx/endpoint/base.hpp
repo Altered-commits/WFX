@@ -330,6 +330,7 @@ using EndpointConfig = Shared::EndpointConfig;
 // -----------------------------------------------------------------------
 // TLS mode (set in EndpointConfig::tlsConfig)
 // -----------------------------------------------------------------------
+// NOLINTBEGIN(readability-identifier-naming)
 inline constexpr auto EpTlsAuto = Shared::EndpointTLSConfig::AUTO;
 inline constexpr auto EpTlsRequire = Shared::EndpointTLSConfig::FORCE_REQUIRE;
 inline constexpr auto EpTlsInsecure = Shared::EndpointTLSConfig::FORCE_INSECURE;
@@ -396,6 +397,7 @@ inline constexpr auto EpSlotEpollError = Shared::SlotStatus::EPOLL_ERROR;
 inline constexpr auto EpSlotIoError = Shared::SlotStatus::IO_ERROR;
 inline constexpr auto EpSlotTlsError = Shared::SlotStatus::TLS_ERROR;
 inline constexpr auto EpSlotInvalidState = Shared::SlotStatus::INVALID_STATE;
+// NOLINTEND(readability-identifier-naming)
 
 } // namespace WFX
 

@@ -66,7 +66,7 @@ namespace Detail {
 // Stack buffer size for formatted log lines
 // Matches engine-side 'K_MSG_BUF_SIZE' (lines longer than this are truncated)
 // -----------------------------------------------------------------------
-static constexpr std::size_t kLogBufSize = 1024;
+static constexpr std::size_t LOG_BUF_SIZE = 1024;
 
 // vvv Fmt overloads vvv
 inline char* LogFmt(char* p, char* end, std::string_view sv) noexcept
@@ -144,18 +144,18 @@ template <typename... Args> inline void LogEmit(int lvl, Args&&... args) noexcep
     if(!api)
         return;
 
-    char buf[kLogBufSize];
+    char buf[LOG_BUF_SIZE];
     char* p = buf;
-    char* end = p + kLogBufSize - 1;
+    char* end = p + LOG_BUF_SIZE - 1;
 
     ((p = LogFmt(p, end, std::forward<Args>(args))), ...);
 
     // Signal truncation if we hit the limit
     if(p >= end - 1) {
-        buf[kLogBufSize - 5] = '.';
-        buf[kLogBufSize - 4] = '.';
-        buf[kLogBufSize - 3] = '.';
-        buf[kLogBufSize - 2] = '\0';
+        buf[LOG_BUF_SIZE - 5] = '.';
+        buf[LOG_BUF_SIZE - 4] = '.';
+        buf[LOG_BUF_SIZE - 3] = '.';
+        buf[LOG_BUF_SIZE - 2] = '\0';
     }
     else
         *p = '\0';
@@ -178,6 +178,8 @@ template <typename... Args> inline void LogEmit(int lvl, Args&&... args) noexcep
             break;
         case 5:
             api->logFatal(buf);
+            break;
+        default:
             break;
     }
 }

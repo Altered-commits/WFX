@@ -528,7 +528,7 @@ public:
     Resolve(const char* host, EndpointDesc desc, EndpointConfig config)
     {
         destroyOutput_ = desc.destroyOutput;
-        Core::__WFXDeferred.emplace_back([=, this] {
+        Core::GlobalWFXDeferred.emplace_back([=, this] {
             EndpointDesc d = desc;
             d.onConnect = GetErasedOnConnect<OnConnect>();
             d.onAbort = GetErasedOnAbort<OnAbort>();

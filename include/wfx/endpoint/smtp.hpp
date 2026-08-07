@@ -120,11 +120,11 @@ namespace WFX {
 // SMTP status codes this client checks for (RFC 5321 4.2.3), named
 // instead of left as bare literals at every comparison site.
 // -----------------------------------------------------------------------
-inline constexpr std::uint16_t SmtpReady = 220;          // greeting, and "220" to STARTTLS
-inline constexpr std::uint16_t SmtpOk = 250;             // EHLO / MAIL FROM / RCPT TO / QUIT success
-inline constexpr std::uint16_t SmtpStartMailInput = 354; // DATA's go-ahead to send the message
-inline constexpr std::uint16_t SmtpAuthContinue = 334;   // AUTH LOGIN's Username:/Password: prompts
-inline constexpr std::uint16_t SmtpAuthSuccess = 235;    // AUTH completed
+inline constexpr std::uint16_t SMTP_READY = 220;            // greeting, and "220" to STARTTLS
+inline constexpr std::uint16_t SMTP_OK = 250;               // EHLO / MAIL FROM / RCPT TO / QUIT success
+inline constexpr std::uint16_t SMTP_START_MAIL_INPUT = 354; // DATA's go-ahead to send the message
+inline constexpr std::uint16_t SMTP_AUTH_CONTINUE = 334;    // AUTH LOGIN's Username:/Password: prompts
+inline constexpr std::uint16_t SMTP_AUTH_SUCCESS = 235;     // AUTH completed
 
 // -----------------------------------------------------------------------
 // One transaction command. Built by SmtpTransaction's typed methods
@@ -159,7 +159,7 @@ struct SmtpResponse {
     }
     bool Continue() const noexcept
     {
-        return code == SmtpStartMailInput;
+        return code == SMTP_START_MAIL_INPUT;
     }
 };
 
@@ -673,7 +673,7 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
     // 1. Unsolicited greeting banner
     {
         WFX_SMTP_READ_RESPONSE(greet)
-        if(greet.code != SmtpReady)
+        if(greet.code != SMTP_READY)
             co_return EpFatal;
     }
 
@@ -687,7 +687,7 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 
     {
         WFX_SMTP_READ_RESPONSE(ehlo1)
-        if(ehlo1.code != SmtpOk)
+        if(ehlo1.code != SMTP_OK)
             co_return EpFatal;
 
         // 3. STARTTLS must be advertised. Refuse outright rather than ever consider a plaintext
@@ -702,7 +702,7 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 
     {
         WFX_SMTP_READ_RESPONSE(startTlsResp)
-        if(startTlsResp.code != SmtpReady)
+        if(startTlsResp.code != SMTP_READY)
             co_return EpFatal;
     }
 
@@ -731,7 +731,7 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
     bool authPlain, authLogin;
     {
         WFX_SMTP_READ_RESPONSE(ehlo2)
-        if(ehlo2.code != SmtpOk)
+        if(ehlo2.code != SMTP_OK)
             co_return EpFatal;
 
         authPlain = ehlo2.hasAuthPlain;
@@ -758,7 +758,7 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 
         {
             WFX_SMTP_READ_RESPONSE(loginPrompt)
-            if(loginPrompt.code != SmtpAuthContinue)
+            if(loginPrompt.code != SMTP_AUTH_CONTINUE)
                 co_return EpFatal;
         }
 
@@ -768,7 +768,7 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 
         {
             WFX_SMTP_READ_RESPONSE(passPrompt)
-            if(passPrompt.code != SmtpAuthContinue)
+            if(passPrompt.code != SMTP_AUTH_CONTINUE)
                 co_return EpFatal;
         }
 
@@ -786,7 +786,7 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
         // Wrong credentials or a refusal both land here; no retry-with-the-same-credentials loop.
         // Reconnects go through the engine's own backoff (maxReconnectAttempts), not a tight
         // local one
-        if(authResp.code != SmtpAuthSuccess)
+        if(authResp.code != SMTP_AUTH_SUCCESS)
             co_return EpFatal;
     }
 

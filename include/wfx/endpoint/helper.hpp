@@ -52,7 +52,7 @@ private:
 
 constexpr bool HasInjectionBytes(std::string_view s) noexcept
 {
-    for(char c : s)
+    for(const char c : s)
         if(c == '\r' || c == '\n' || c == '\0')
             return true;
 
@@ -83,7 +83,7 @@ constexpr bool InsensitiveStartsWith(std::string_view s, std::string_view prefix
     return s.size() >= prefix.size() && InsensitiveEqual(s.substr(0, prefix.size()), prefix);
 }
 
-enum class LineReadStatus { NEED_MORE, GOT_LINE, TOO_LONG };
+enum class LineReadStatus : std::uint8_t { NEED_MORE, GOT_LINE, TOO_LONG };
 
 // Reads one '\n'-terminated line starting at buf[pos]. Shared shape behind HTTP status/header
 // lines and SMTP response lines.

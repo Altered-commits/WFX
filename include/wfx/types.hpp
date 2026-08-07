@@ -109,6 +109,7 @@ inline Shared::JsonParseResult ParseJson(std::string_view body, bool view = fals
 //   auto seg = req.GetSegment(0);
 //   if (seg.Tag() == WFX::SegStr) { ... }
 // -----------------------------------------------------------------------
+// NOLINTBEGIN(readability-identifier-naming)
 inline constexpr auto SegEmpty = Shared::SEG_VARIANT_EMPTY;
 inline constexpr auto SegU64 = Shared::SEG_VARIANT_U64;
 inline constexpr auto SegI64 = Shared::SEG_VARIANT_I64;
@@ -161,6 +162,7 @@ inline constexpr auto AsyncNone = Shared::AsyncStatus::NONE;
 inline constexpr auto StreamContinue = Shared::StreamAction::CONTINUE;
 inline constexpr auto StreamDone = Shared::StreamAction::STOP_AND_ALIVE_CONN;
 inline constexpr auto StreamClose = Shared::StreamAction::STOP_AND_CLOSE_CONN;
+// NOLINTEND(readability-identifier-naming)
 
 } // namespace WFX
 

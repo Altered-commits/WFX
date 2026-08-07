@@ -340,6 +340,8 @@ public: // vvv String parsing vvv
             // Must memcpy from a const char* local, &src[pos] is the char's address
             n.tag = JsonTag::STR_VIEW;
             const char* ptr = src_ + pos_;
+
+            // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see above.
             std::memcpy(&n.u64a, &ptr, 8);
             n.U32c() = slen;
         }

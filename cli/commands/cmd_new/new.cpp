@@ -283,7 +283,7 @@ extern "C" {
 
         if(api) {
             WFX::Core::SetMasterApi(api);
-            WFX::Core::__ExecuteAndEraseDeferred();
+            WFX::Core::ExecuteAndEraseDeferred();
 
             registered = true;
         }

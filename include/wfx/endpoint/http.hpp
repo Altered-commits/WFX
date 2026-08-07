@@ -273,20 +273,20 @@ inline void DestroySlotState(void* state) noexcept
 // Incremental response parser state; reset (not recreated) between keep-alive requests on the
 // same slot.
 enum class ParsePhase : std::uint8_t {
-    StatusLine,
-    Headers,
-    BodyContentLength,
-    BodyChunkSize,
-    BodyChunkData,
-    BodyChunkLineEnd,
-    BodyChunkTrailer,
-    BodyUntilClose,
+    STATUS_LINE,
+    HEADERS,
+    BODY_CONTENT_LENGTH,
+    BODY_CHUNK_SIZE,
+    BODY_CHUNK_DATA,
+    BODY_CHUNK_LINE_END,
+    BODY_CHUNK_TRAILER,
+    BODY_UNTIL_CLOSE,
 };
 
 // Chained 1xx responses before a final status line are rejected past this count, backstopped
 // anyway by requestTimeoutSeconds, but no reason to let a chatty/malicious upstream spin the
 // parser indefinitely within that window.
-inline constexpr std::uint8_t kMaxInformationalResponses = 8;
+inline constexpr std::uint8_t MAX_INFORMATIONAL_RESPONSES = 8;
 
 struct ParseState {
     WFX::String lineAcc; // a line that spanned multiple parse() calls
@@ -294,7 +294,7 @@ struct ParseState {
     std::uint32_t headerBytes = 0; // cumulative status line + header block size
     std::uint16_t headerCount = 0;
     std::uint8_t informationalCount = 0; // number of 1xx responses discarded so far
-    ParsePhase phase = ParsePhase::StatusLine;
+    ParsePhase phase = ParsePhase::STATUS_LINE;
     bool chunked = false;
     bool hasContentLength = false;
     bool closeAfter = false; // "Connection: close" seen
@@ -303,7 +303,7 @@ struct ParseState {
 
 inline void ResetParseStateFields(ParseState& s) noexcept
 {
-    s.phase = ParsePhase::StatusLine;
+    s.phase = ParsePhase::STATUS_LINE;
     s.lineAcc.clear();
     s.bodyRemaining = 0;
     s.headerBytes = 0;
@@ -363,7 +363,7 @@ inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoi
 
     state->lastMethod = req.method;
 
-    bool bodyBearing =
+    const bool bodyBearing =
         req.method == HttpMethod::POST || req.method == HttpMethod::PUT || req.method == HttpMethod::PATCH;
 
     char lenBuf[20];
@@ -416,7 +416,7 @@ inline bool ParseStatusLine(std::string_view line, HttpEndpointResponse& res, Pa
     if(line.size() < 12 || line.compare(0, 5, "HTTP/") != 0 || line[6] != '.')
         return false;
 
-    char major = line[5], minor = line[7];
+    const char major = line[5], minor = line[7];
     if(major != '1' || (minor != '0' && minor != '1') || line[8] != ' ')
         return false;
 
@@ -441,7 +441,7 @@ inline bool ParseHeaderLine(std::string_view line, HttpEndpointResponse& res, Pa
     if(colon == std::string_view::npos)
         return false;
 
-    std::string_view name = line.substr(0, colon);
+    const std::string_view name = line.substr(0, colon);
     std::string_view value = line.substr(colon + 1);
 
     while(!value.empty() && (value.front() == ' ' || value.front() == '\t'))
@@ -510,7 +510,7 @@ inline bool ParseHeaderLine(std::string_view line, HttpEndpointResponse& res, Pa
 inline bool ParseChunkSizeLine(std::string_view line, std::uint64_t& sizeOut) noexcept
 {
     auto semi = line.find(';');
-    std::string_view hexPart = semi == std::string_view::npos ? line : line.substr(0, semi);
+    const std::string_view hexPart = semi == std::string_view::npos ? line : line.substr(0, semi);
     if(hexPart.empty())
         return false;
 
@@ -535,11 +535,11 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
 
     while(true) {
         switch(st->phase) {
-            case ParsePhase::StatusLine:
-            case ParsePhase::Headers:
-            case ParsePhase::BodyChunkSize:
-            case ParsePhase::BodyChunkLineEnd:
-            case ParsePhase::BodyChunkTrailer: {
+            case ParsePhase::STATUS_LINE:
+            case ParsePhase::HEADERS:
+            case ParsePhase::BODY_CHUNK_SIZE:
+            case ParsePhase::BODY_CHUNK_LINE_END:
+            case ParsePhase::BODY_CHUNK_TRAILER: {
                 const std::uint32_t lineStartPos = pos;
                 std::string_view line;
                 auto lineStatus = ReadLine(buf, len, pos, st->lineAcc, lim.maxHeaderBytes, line);
@@ -552,8 +552,8 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
                 // cap below; ReadLine advanced pos by exactly this many bytes past lineStartPos
                 const std::uint32_t lineLenInBuf = pos - lineStartPos - 1;
 
-                ParsePhase currentPhase = st->phase;
-                if(currentPhase == ParsePhase::StatusLine || currentPhase == ParsePhase::Headers) {
+                const ParsePhase currentPhase = st->phase;
+                if(currentPhase == ParsePhase::STATUS_LINE || currentPhase == ParsePhase::HEADERS) {
                     st->headerBytes += lineLenInBuf + 1;
                     if(st->headerBytes > lim.maxHeaderBytes)
                         return finish(EpParseError);
@@ -561,81 +561,81 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
 
                 bool ok = true;
 
-                if(currentPhase == ParsePhase::StatusLine) {
+                if(currentPhase == ParsePhase::STATUS_LINE) {
                     ok = ParseStatusLine(line, res, *st);
                     if(ok) {
                         res.headers.Clear();
                         st->headerCount = 0;
-                        st->phase = ParsePhase::Headers;
+                        st->phase = ParsePhase::HEADERS;
                     }
                 }
-                else if(currentPhase == ParsePhase::Headers) {
+                else if(currentPhase == ParsePhase::HEADERS) {
                     if(line.empty()) {
-                        bool informational = res.status >= 100 && res.status < 200;
-                        bool noBody = state->lastMethod == HttpMethod::HEAD ||
-                                      res.status == static_cast<std::uint16_t>(HttpStatus::NO_CONTENT) ||
-                                      res.status == static_cast<std::uint16_t>(HttpStatus::NOT_MODIFIED) ||
-                                      informational;
+                        const bool informational = res.status >= 100 && res.status < 200;
+                        const bool noBody = state->lastMethod == HttpMethod::HEAD ||
+                                            res.status == static_cast<std::uint16_t>(HttpStatus::NO_CONTENT) ||
+                                            res.status == static_cast<std::uint16_t>(HttpStatus::NOT_MODIFIED) ||
+                                            informational;
 
                         if(informational) {
                             // RFC 7230 3.3.3: a 1xx is its own complete message, reset the flags
                             // its header block set so they can't leak into the response that
                             // follows on the same connection.
-                            if(++st->informationalCount > kMaxInformationalResponses)
+                            if(++st->informationalCount > MAX_INFORMATIONAL_RESPONSES)
                                 ok = false;
                             else {
                                 st->chunked = false;
                                 st->hasContentLength = false;
                                 st->closeAfter = false;
-                                st->phase = ParsePhase::StatusLine;
+                                st->phase = ParsePhase::STATUS_LINE;
                             }
                         }
                         else if(noBody) {
-                            bool close = st->closeAfter || st->httpMinor0;
+                            const bool close = st->closeAfter || st->httpMinor0;
                             return finish(close ? EpParseClose : EpParseDone);
                         }
                         else if(st->chunked)
-                            st->phase = ParsePhase::BodyChunkSize;
+                            st->phase = ParsePhase::BODY_CHUNK_SIZE;
                         else if(st->hasContentLength) {
                             if(st->bodyRemaining == 0) {
-                                bool close = st->closeAfter || st->httpMinor0;
+                                const bool close = st->closeAfter || st->httpMinor0;
                                 return finish(close ? EpParseClose : EpParseDone);
                             }
 
-                            std::uint64_t reserveSize =
+                            const std::uint64_t reserveSize =
                                 st->bodyRemaining < lim.maxBodyBytes ? st->bodyRemaining : lim.maxBodyBytes;
                             res.body.reserve(static_cast<std::size_t>(reserveSize));
-                            st->phase = ParsePhase::BodyContentLength;
+                            st->phase = ParsePhase::BODY_CONTENT_LENGTH;
                         }
                         else
-                            st->phase = ParsePhase::BodyUntilClose;
+                            st->phase = ParsePhase::BODY_UNTIL_CLOSE;
                     }
                     else
                         ok = ParseHeaderLine(line, res, *st, lim);
                 }
-                else if(currentPhase == ParsePhase::BodyChunkSize) {
+                else if(currentPhase == ParsePhase::BODY_CHUNK_SIZE) {
                     std::uint64_t chunkSize = 0;
                     ok = ParseChunkSizeLine(line, chunkSize);
                     if(ok) {
                         if(chunkSize == 0)
-                            st->phase = ParsePhase::BodyChunkTrailer;
+                            st->phase = ParsePhase::BODY_CHUNK_TRAILER;
                         else if(chunkSize > lim.maxBodyBytes - res.body.size()) // overflow-safe vs. huge chunkSize
                             ok = false;
                         else {
                             st->bodyRemaining = chunkSize;
-                            st->phase = ParsePhase::BodyChunkData;
+                            st->phase = ParsePhase::BODY_CHUNK_DATA;
                         }
                     }
                 }
-                else if(currentPhase == ParsePhase::BodyChunkLineEnd) {
+                else if(currentPhase == ParsePhase::BODY_CHUNK_LINE_END) {
                     if(!line.empty())
                         ok = false; // malformed chunk terminator
                     else
-                        st->phase = ParsePhase::BodyChunkSize;
+                        st->phase = ParsePhase::BODY_CHUNK_SIZE;
                 }
                 else { // BodyChunkTrailer: discard trailer lines until the blank line
                     if(line.empty()) {
-                        bool close = st->closeAfter || st->httpMinor0;
+                        const bool close = st->closeAfter || st->httpMinor0;
                         return finish(close ? EpParseClose : EpParseDone);
                     }
 
@@ -650,10 +650,10 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
                 continue;
             }
 
-            case ParsePhase::BodyContentLength:
-            case ParsePhase::BodyChunkData: {
-                std::uint32_t avail = len - pos;
-                std::uint64_t take = st->bodyRemaining < avail ? st->bodyRemaining : avail;
+            case ParsePhase::BODY_CONTENT_LENGTH:
+            case ParsePhase::BODY_CHUNK_DATA: {
+                const std::uint32_t avail = len - pos;
+                const std::uint64_t take = st->bodyRemaining < avail ? st->bodyRemaining : avail;
 
                 if(res.body.size() + take > lim.maxBodyBytes)
                     return finish(EpParseError);
@@ -663,20 +663,20 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
                 st->bodyRemaining -= take;
 
                 if(st->bodyRemaining == 0) {
-                    if(st->phase == ParsePhase::BodyChunkData) {
-                        st->phase = ParsePhase::BodyChunkLineEnd;
+                    if(st->phase == ParsePhase::BODY_CHUNK_DATA) {
+                        st->phase = ParsePhase::BODY_CHUNK_LINE_END;
                         continue;
                     }
 
-                    bool close = st->closeAfter || st->httpMinor0;
+                    const bool close = st->closeAfter || st->httpMinor0;
                     return finish(close ? EpParseClose : EpParseDone);
                 }
 
                 return finish(isEof ? EpParseError : EpParseIncomplete);
             }
 
-            case ParsePhase::BodyUntilClose: {
-                std::uint32_t avail = len - pos;
+            case ParsePhase::BODY_UNTIL_CLOSE: {
+                const std::uint32_t avail = len - pos;
                 if(avail > 0) {
                     if(res.body.size() + avail > lim.maxBodyBytes)
                         return finish(EpParseError);
@@ -693,9 +693,9 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* parseStateVoid, cons
 
 inline HttpEndpointOptions BuildEndpointOptions(const char* hostPort, const HttpEndpointConfig& cfg)
 {
-    std::string_view hp{hostPort};
+    const std::string_view hp{hostPort};
     auto colon = hp.rfind(':');
-    std::string_view hostOnly = colon == std::string_view::npos ? hp : hp.substr(0, colon);
+    const std::string_view hostOnly = colon == std::string_view::npos ? hp : hp.substr(0, colon);
 
     std::uint16_t port = 0;
     if(colon != std::string_view::npos) {
@@ -712,7 +712,7 @@ inline HttpEndpointOptions BuildEndpointOptions(const char* hostPort, const Http
         isSecure = (port == 443); // EpTlsAuto
 
     // Omit the port from the Host header only when it's the scheme's default
-    bool defaultPort = isSecure ? (port == 443) : (port == 80);
+    const bool defaultPort = isSecure ? (port == 443) : (port == 80);
 
     HttpEndpointOptions opts{};
     // Full "host:port" when the port is non-default, host-only when it's the scheme default (80/443)

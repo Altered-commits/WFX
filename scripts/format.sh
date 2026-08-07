@@ -5,17 +5,17 @@ set -euo pipefail
 # Project clang-format helper
 #
 # Usage:
-#   ./scripts/format.sh
-#   ./scripts/format.sh --dry-run
-#   ./scripts/format.sh --files path/to/file.cpp path/to/other.hpp
-#   ./scripts/format.sh --dry-run --files path/to/file.cpp
+#   ./scripts/format.sh                      -> check formatting of every project source file
+#   ./scripts/format.sh --fix                -> check AND apply formatting in-place
+#   ./scripts/format.sh --files a.cpp b.hpp  -> check only the given files
+#   ./scripts/format.sh --fix --files a.cpp  -> fix only the given files
 #
 # Modes:
-#   default     -> modifies files in-place
-#   --dry-run   -> validates formatting, shows diff of what clang-format wants
+#   default   -> dry run, shows diff of what clang-format wants, exits non-zero on violations
+#   --fix     -> modifies files in-place
 #
 # Options:
-#   --files     -> run only on the specified files instead of scanning the repo
+#   --files   -> run only on the specified files instead of scanning the repo
 # ---------------------------------------------------------------
 
 # ---------------------------------------------------------------
@@ -50,7 +50,7 @@ error()   { printf "\033[1;31m[FORMAT]\033[0m %s\n" "$*" >&2; exit 1; }
 # ---------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------
-MODE="format"
+MODE="check"
 CUSTOM_FILES=()
 FILES_MODE=0
 
@@ -58,8 +58,8 @@ i=1
 while [ "$i" -le "$#" ]; do
     arg="${!i}"
     case "$arg" in
-        --dry-run)
-            MODE="dry-run"
+        --fix)
+            MODE="fix"
             ;;
         --files)
             FILES_MODE=1
@@ -184,7 +184,7 @@ PROCESSED=0
 for file in "${FILES[@]}"; do
     printf "[%d/%d] %s\n" "$((PROCESSED + 1))" "$FILE_COUNT" "$file"
 
-    if [ "$MODE" = "dry-run" ]; then
+    if [ "$MODE" = "check" ]; then
         FORMATTED=$("$CLANG_FORMAT" "$file")
         ORIGINAL=$(cat "$file")
 
@@ -216,11 +216,11 @@ echo ""
 
 success "Processed files : $PROCESSED"
 
-if [ "$MODE" = "dry-run" ]; then
+if [ "$MODE" = "check" ]; then
     if [ "$FAILURES" -ne 0 ]; then
         echo ""
         warn "Files with violations : $FAILURES"
-        warn "Run './scripts/format.sh' to apply fixes automatically."
+        warn "Run './scripts/format.sh --fix' to apply fixes automatically."
         exit 1
     fi
 
