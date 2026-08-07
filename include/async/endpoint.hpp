@@ -222,7 +222,7 @@ public:
     {
         this->handle = h;
 
-        EndpointStatus s =
+        const EndpointStatus s =
             Core::EndpointApiExt1()->sendPayload(Core::HttpApiExt1()->getGlobalPtrData(), endpointIdx,
                                                  static_cast<const void*>(&req),
                                                  {this, AwaitableBase<SendPayloadAwaitable<TReq, TRes>>::OnComplete,
