@@ -9,6 +9,7 @@
 #include "http/request/http_request.hpp"
 #include "utils/string/string.hpp"
 #include "shared/utils/memory.hpp"
+#include <cstring>
 
 namespace WFX::Http {
 
@@ -239,11 +240,36 @@ bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequ
     if(pathEnd == std::string_view::npos || pathEnd == pathStart)
         return false;
 
-    outRequest.path = std::string_view(data + pathStart, pathEnd - pathStart);
+    const std::string_view rawTarget(data + pathStart, pathEnd - pathStart);
 
-    // Normalize the path, reject if its malformed
-    if(!StringUtils::NormalizeURIPathInplace(outRequest.path))
+    // Split off the query string before normalizing: NormalizeURIPathInplace's slash-collapsing
+    // and '.'/'..' dot-segment resolution is path-traversal defense for the PATH, it has no idea
+    // '?' means anything. Left unsplit, a query value containing a literal '/', '.', or '..' (a
+    // redirect_uri param, anything path-shaped) would get silently mangled by logic that was
+    // never meant to touch it
+    const std::size_t qpos = rawTarget.find('?');
+    std::string_view pathPart = (qpos == std::string_view::npos) ? rawTarget : rawTarget.substr(0, qpos);
+
+    if(!StringUtils::NormalizeURIPathInplace(pathPart))
         return false;
+
+    if(qpos == std::string_view::npos)
+        outRequest.path = pathPart;
+    else {
+        // NormalizeURIPathInplace only ever shrinks (collapses/removes bytes, never adds), and its
+        // loop only ever looked at [0, qpos), so the query bytes are still sitting untouched at
+        // their original offset, just no longer adjacent to the now-shorter path. One memmove
+        // (not memcpy: source and destination can overlap, both inside the same original buffer)
+        // slides them into place right after it, then '?' goes back in the gap between them
+        char* buf = const_cast<char*>(rawTarget.data());
+        const std::size_t newPathLen = pathPart.size();
+        const std::size_t queryLen = rawTarget.size() - (qpos + 1);
+
+        std::memmove(buf + newPathLen + 1, buf + qpos + 1, queryLen);
+        buf[newPathLen] = '?';
+
+        outRequest.path = std::string_view(buf, newPathLen + 1 + queryLen);
+    }
 
     const std::string_view versionStr = line.substr(pathEnd + 1);
     outRequest.version = HttpVersionToEnum(Shared::StringView{versionStr.data(), versionStr.size()});

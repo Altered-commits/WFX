@@ -12,6 +12,57 @@
 
 namespace WFX::Http {
 
+// Parses "key=value&key=value" once (built from Request::QueryParams() below, see Path() for
+// where the raw text comes from) into pairs borrowed straight from that same buffer, no copying.
+// Get() is a plain linear scan rather than a hash map: a real query string almost never carries
+// more than a handful of params, and for that size a flat scan beats a hash map on every axis
+// that matters
+class QueryParams {
+public:
+    explicit QueryParams(std::string_view query) noexcept
+    {
+        for(std::size_t pos = 0; pos <= query.size();) {
+            const auto amp = query.find('&', pos);
+            const std::string_view pair =
+                (amp == std::string_view::npos) ? query.substr(pos) : query.substr(pos, amp - pos);
+
+            if(!pair.empty()) {
+                const auto eq = pair.find('=');
+                const std::string_view k = (eq == std::string_view::npos) ? pair : pair.substr(0, eq);
+                const std::string_view v = (eq == std::string_view::npos) ? std::string_view{} : pair.substr(eq + 1);
+                pairs_.push_back({k, v});
+            }
+
+            if(amp == std::string_view::npos)
+                break;
+            pos = amp + 1;
+        }
+    }
+
+public:
+    // Raw value, still percent-encoded if the client sent it that way. WFX doesn't decode this
+    // for you, same as GetHeader doesn't decode header values, decode it yourself if you need to
+    bool Get(std::string_view key, std::string_view& out) const noexcept
+    {
+        for(const auto& [k, v] : pairs_) {
+            if(k == key) {
+                out = v;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    std::size_t Count() const noexcept
+    {
+        return pairs_.size();
+    }
+
+private:
+    Shared::Vector<std::pair<std::string_view, std::string_view>> pairs_;
+};
+
 /* User side implementation of 'Request'. 'CoreEngine' passes the API */
 class Request {
 public:
@@ -39,6 +90,16 @@ public:
     {
         auto sv = Core::HttpApiExt1()->getBody(backend_);
         return {sv.data, static_cast<std::size_t>(sv.length)};
+    }
+
+    // Path() keeps the raw '?...' suffix as-is. Parses it into a QueryParams once per call, so
+    // if you're reading several keys, call this once and reuse the result rather than calling it
+    // per key
+    QueryParams GetQueryParams() const
+    {
+        const auto path = Path();
+        const auto qpos = path.find('?');
+        return QueryParams(qpos == std::string_view::npos ? std::string_view{} : path.substr(qpos + 1));
     }
 
 public:

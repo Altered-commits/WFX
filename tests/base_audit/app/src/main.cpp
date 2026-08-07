@@ -64,6 +64,24 @@ WFX_POST("/echo-full", [](WFX::Request req, WFX::Response res) {
         .SendText(req.Body());
 })
 
+// Query-string parsing: GetQueryParams()/QueryParams::Get(). Always looks up "v" and also
+// reports how many pairs the parser found overall, so one request can assert on both a specific
+// key's raw (undecoded) value and how the whole set got parsed (duplicate keys, empty segments
+// from stray '&'s collapsing, etc.)
+WFX_GET("/query/echo", [](WFX::Request req, WFX::Response res) {
+    auto qp = req.GetQueryParams();
+
+    std::string_view v;
+    const bool present = qp.Get("v", v);
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("present", present);
+    j.Write("len", static_cast<std::uint64_t>(present ? v.size() : 0));
+    j.Write("value", present ? v : std::string_view{});
+    j.Write("count", static_cast<std::uint64_t>(qp.Count()));
+})
+
 WFX_GET("/big", [](WFX::Request, WFX::Response res) {
     static const WFX::String blob(1u << 20, 'A');
     res.Status(200).SendText(blob);
