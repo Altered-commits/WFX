@@ -12,6 +12,8 @@
 #              integrity, exact body/header size limits, and byte-at-a-time drip sends
 #   forms      WFX::Form: Content-Type matching, field structure, percent-decoding,
 #              validator bounds, decoded-value-into-header injection
+#   query      Request::GetQueryParams(): key lookup, raw (undecoded) values, duplicate
+#              keys, and query values surviving byte-for-byte through path normalization
 #   chaos      worker kills, SIGSTOP/SIGCONT, kill under mixed load
 #
 # Usage:
@@ -1411,6 +1413,143 @@ def phase_forms(ctx):
     ctx.phase("forms").record(findings, security=("FORM_HEADER_INJECT", "FORM_DECODE_BYPASS"),
                               vectors=checks)
 
+# QUERY PARAMS
+#
+# Request::GetQueryParams() / QueryParams::Get(), added alongside a real parser fix: the request
+# line used to be normalized (slash-collapsing, '.'/'..' resolution) as one blob covering BOTH the
+# path and the query string, so a query value shaped like a path ("/foo/../bar", "//evil") got
+# silently mangled by traversal-defense logic that was never meant to touch it. The parser now
+# splits the query off before normalizing and reassembles it byte-for-byte untouched afterward,
+# so the traversal-shaped-value cases below are regression tests for that fix, not just new
+# feature coverage.
+def _query_json(host, port, path, rtimeout=3.0):
+    st, raw = req(host, port, "GET", path, rtimeout=rtimeout)
+    try:
+        return st, json.loads(body_of(raw))
+    except Exception:
+        return st, None
+
+def phase_query(ctx):
+    cfg, srv = ctx.cfg, ctx.server
+    host, port = cfg.host, cfg.port
+    findings = []
+    checks = 0
+
+    def check(name, cond, detail="", tag="QUERY_FAIL"):
+        nonlocal checks
+        checks += 1
+
+        if cond:
+            pr.ok()
+        else:
+            pr.bad()
+            findings.append((tag, "%s: %s" % (name, detail)))
+
+    term.log("query", "started")
+    with term.progress("query", "functional") as pr:
+
+        for name, path, want_present, want_value, want_count in [
+            ("simple present",         "/query/echo?v=hello",        True,  "hello", 1),
+            ("no query string at all", "/query/echo",                False, "",      0),
+            ("empty query string",     "/query/echo?",               False, "",      0),
+            ("key absent",             "/query/echo?x=1",            False, "",      1),
+            ("value found among many","/query/echo?a=1&v=target&b=2",True, "target",3),
+            ("empty value",            "/query/echo?v=",             True,  "",      1),
+            ("bare key, no equals",    "/query/echo?v",               True,  "",      1),
+            ("duplicate keys: first wins", "/query/echo?v=first&v=second", True, "first", 2),
+            ("substring key must not match", "/query/echo?av=99",    False, "",      1),
+            ("leading/trailing empty segments", "/query/echo?&v=1&", True,  "1",     1),
+            ("all-empty segments",     "/query/echo?&&&",             False, "",      0),
+        ]:
+            st, j = _query_json(host, port, path)
+            ok = (st == 200 and j is not None and j.get("present") == want_present
+                  and j.get("count") == want_count
+                  and (not want_present or j.get("value") == want_value))
+            check(name, ok, "status=%s body=%r" % (st, j))
+
+    # Regression coverage for the path/query split fix: a query value shaped like a path must
+    # survive completely untouched, not get collapsed/resolved like a real path would
+    with term.progress("query", "traversal-shaped values") as pr:
+        for name, raw_value in [
+            ("parent-dir segment",  "/foo/../bar"),
+            ("double slash",        "//evil"),
+            ("bare double dot",     ".."),
+            ("bare single dot",     "."),
+            ("dot-slash prefix",    "./x"),
+            ("many collapsing slashes", "a////////b"),
+            ("mixed traversal",     "../../../etc/passwd"),
+        ]:
+            st, j = _query_json(host, port, "/query/echo?v=" + raw_value)
+            ok = st == 200 and j is not None and j.get("present") is True and j.get("value") == raw_value
+            check("survives untouched: %s" % name, ok, "status=%s body=%r (want value=%r)" % (st, j, raw_value),
+                  tag="QUERY_TRAVERSAL_MANGLED")
+
+    # No auto-decoding: WFX doesn't decode query values for you, same as it doesn't decode
+    # header values, so '+' and '%XX' must come back exactly as they arrived on the wire
+    with term.progress("query", "no-auto-decode") as pr:
+        st, j = _query_json(host, port, "/query/echo?v=a+b")
+        check("'+' stays literal, not decoded to space", st == 200 and j and j.get("value") == "a+b",
+              "st=%s j=%r" % (st, j))
+
+        st, j = _query_json(host, port, "/query/echo?v=%20")
+        check("'%20' stays literal, not decoded to space", st == 200 and j and j.get("value") == "%20",
+              "st=%s j=%r" % (st, j))
+
+    # Path normalization must still work normally when a query string follows it
+    with term.progress("query", "path+query interaction") as pr:
+        st, raw = req(host, port, "GET", "/items//42?v=1")
+        b = body_of(raw)
+        check("double-slash path still normalizes with a query attached", st == 200 and b == b"42",
+              "status=%s body=%r" % (st, b))
+
+        st, raw = req(host, port, "GET", "/items/1/../42?v=1")
+        b = body_of(raw)
+        check("dot-segment path still resolves with a query attached", st == 200 and b == b"42",
+              "status=%s body=%r" % (st, b))
+
+    # Buffer growth/relocation: header_reserve_hint is 512 bytes, recv_buffer_incr is 8192, so a
+    # query value comfortably past 512 but under max_header_size (8192) forces at least one grow
+    # cycle. This is what actually exercises the parser fix's memmove reassembly, not just the
+    # split-then-normalize logic on a small request that never needed to grow
+    with term.progress("query", "buffer growth") as pr:
+        big_value = "x" * 4000
+        st, j = _query_json(host, port, "/query/echo?pad=" + ("p" * 1000) + "&v=" + big_value)
+        check("large query value survives buffer growth", st == 200 and j and j.get("present") is True
+              and j.get("len") == 4000 and j.get("value") == big_value,
+              "st=%s len=%s" % (st, j and j.get("len")))
+
+        # Same growth scenario, checked through the full raw path this time (not just the parsed
+        # value), via the existing /echo-full route's X-Echo-Path header
+        traversal_value = "/a/../b" * 200  # ~1400 bytes, still traversal-shaped, still must survive
+        st, raw = req(host, port, "POST", "/echo-full?v=" + traversal_value,
+                      headers={"X-Marker": "grow"}, body=b"body", rtimeout=5.0)
+        _, hdrs, _ = parse_hdrs(raw)
+        echoed_path = b"".join(hdrs.get(b"x-echo-path", [b""])).decode(errors="replace")
+        check("full path+query survives growth via X-Echo-Path",
+              st == 200 and echoed_path == "/echo-full?v=" + traversal_value,
+              "status=%s echoed_path=%r" % (st, echoed_path[:120]))
+
+    # Many pairs: correctness and basic responsiveness, not a hard DoS bound like forms' equivalent
+    # check (there's no per-request pair-count cap here), just confirms a large-but-legal query
+    # string still parses correctly and promptly
+    with term.progress("query", "many-pairs") as pr:
+        pairs = "&".join("k%d=v%d" % (i, i) for i in range(100))
+        t0 = time.time()
+        st, j = _query_json(host, port, "/query/echo?" + pairs + "&v=findme", rtimeout=5.0)
+        dt = time.time() - t0
+        check("100 pairs parsed correctly and promptly",
+              st == 200 and j and j.get("present") is True and j.get("value") == "findme"
+              and j.get("count") == 101 and dt < 3.0,
+              "st=%s j=%r elapsed=%.2fs" % (st, j, dt))
+
+    if not common.health(host, port, 4.0):
+        findings.append(("SERVER_DEAD", "server unreachable after query phase"))
+
+    nf = len(findings)
+    term.log("query", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
+
+    ctx.phase("query").record(findings, security=("QUERY_TRAVERSAL_MANGLED",), vectors=checks)
+
 # Phase 5: METRICS
 #
 # The per-route metrics table: identity plumbing (path + method attached at read
@@ -1811,6 +1950,7 @@ class BaseAudit(common.Suite):
         "protocol": phase_protocol,
         "features": phase_features,
         "forms":    phase_forms,
+        "query":    phase_query,
         "metrics":  phase_metrics,
         "soak":     phase_soak,
         "chaos":    phase_chaos,
