@@ -1316,6 +1316,39 @@ WFX_POST("/smtp/send", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     co_return;
 })
 
+// Same personas/headers as /smtp/send, but drives the whole exchange through
+// SmtpEndpoint::SendMail instead of MailFrom/RcptTo/DataStart/DataBody by hand. SendMail is
+// itself a coroutine 'co_await'ed from here rather than the top-level handler doing every step,
+// so this is what actually proves nested Task<T> composition works end to end, not just compiles
+//
+//   { "ep": <EndpointStatus int>, "code": <SMTP reply code, 0 if none arrived>, "success": <bool> }
+WFX_POST("/smtp/send-mail", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    std::string_view personaName = "good";
+    req.GetHeader("X-Persona", personaName);
+
+    std::string_view fromAddr = "sender@wfx.test", fromName{}, toAddr = "recipient@wfx.test",
+                     toName{}, subject = "audit", replyTo{};
+    req.GetHeader("X-From", fromAddr);
+    req.GetHeader("X-FromName", fromName);
+    req.GetHeader("X-To", toAddr);
+    req.GetHeader("X-ToName", toName);
+    req.GetHeader("X-Subject", subject);
+    req.GetHeader("X-ReplyTo", replyTo);
+    std::string_view body = req.Body();
+
+    const WFX::SmtpEndpoint* ep = SmtpEndpointOf(personaName);
+
+    WFX::SmtpSendOutcome outcome;
+    co_await ep->SendMail(fromAddr, fromName, toAddr, toName, subject, body, outcome, replyTo);
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("ep", EpJ(outcome.status));
+    j.Write("code", outcome.response ? outcome.response->code : 0);
+    j.Write("success", outcome.Success());
+    co_return;
+})
+
 // Serialize-side injection probe for the SMTP client, mirrors HTTP's /inject: the injection
 // screen (Smtp::Detail::HasInjectionBytes) only rejects CR/LF/NUL bytes that an HTTP *header*
 // could never carry in the first place, so the hostile payload travels as the POST body and

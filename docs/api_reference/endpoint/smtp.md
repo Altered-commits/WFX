@@ -79,20 +79,94 @@ details.
 Unlike `HttpEndpoint`, one call doesn't stand alone: a mail transaction is
 several commands (`MAIL FROM`, `RCPT TO`, `DATA`) that must run on the same
 connection, so `SmtpEndpoint` hands you a [pinned connection](overview.md#pinning-a-connection)
-(`SmtpTransaction`) instead of a single request/response pair. Each step is
-awaited explicitly, there is no one call that does the whole transaction for
-you, see [Writing protocol-agnostic code](overview.md#writing-protocol-agnostic-code)
-for why: this codebase's coroutine machinery is a closed set of specializations
-with nowhere for a "await several sub-operations, hand back one result" helper
-to live outside your own route handler.
+(`SmtpTransaction`) instead of a single request/response pair.
+
+You have two ways to drive that exchange:
+
+- **[`SendMail`](#sendmail)**: one call that runs the whole thing for you.
+  Right for almost every case: a contact form, a signup confirmation, any
+  place you just want to know whether the email went out.
+- **[`SmtpTransaction`](#smtptransaction)**, step by step: for when you need
+  to react differently depending on which command failed (for example,
+  showing "that recipient doesn't exist" instead of a generic error), or when
+  you want to send to several recipients on one connection by calling
+  `RcptTo` more than once before `DataStart`.
+
+---
+
+## `SendMail`
+
+The one-call version. It opens a transaction, runs `MAIL FROM`, `RCPT TO`,
+`DATA`, and the message body through it, and stops at the first thing that
+goes wrong.
+
+```cpp
+WFX_POST("/contact", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    WFX::SmtpSendOutcome outcome;
+
+    co_await Relay.SendMail(
+        "noreply@example.com",  // fromAddr:  envelope + From: header
+        "Example",               // fromName:  display name on From:
+        "contact@example.com",   // toAddr:    envelope + To: header
+        "Contact Form",          // toName:    display name on To:
+        "New enquiry",           // subject
+        "message body",          // body
+        outcome
+    );
+
+    if(!outcome.Success()) {
+        res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed");
+        co_return;
+    }
+
+    res.SendText("sent");
+    co_return;
+});
+```
+
+**`SmtpSendOutcome`**:
+
+```cpp
+struct SmtpSendOutcome {
+    Shared::EndpointStatus status; // EpOk once DATA actually goes through
+    EndpointOutput<SmtpResponse> response; // the last reply that came back, if any
+
+    bool Success() const noexcept; // status == EpOk && response && response->Success()
+};
+```
+
+- **`status`** tells you whether a real SMTP conversation even happened. It's
+  `WFX::EpOk` once the message is fully sent. Anything else means the
+  problem was below the SMTP layer entirely: the connection pool was full
+  (`WFX::EpPoolExhausted`), the relay refused the TCP/TLS connection, or a
+  command timed out. A real reply from the server was never received in any
+  of those cases.
+- **`response`** stays empty (`bool(outcome.response) == false`) exactly when
+  that happens. Once a real SMTP reply exists, `response` holds it: `code`
+  and `text`, the same shape `SmtpTransaction`'s own methods return, see
+  [`SmtpResponse`](#smtpresponse) below.
+- **`Success()`** is the one thing most callers need: true only if the whole
+  four-step exchange completed and the server accepted it.
+
+If you need to know exactly which step failed (bad sender vs. bad recipient
+vs. the message itself getting rejected), `SendMail` won't tell you that on
+its own. Drop down to [`SmtpTransaction`](#smtptransaction) and run the
+steps yourself, checking each response as it comes back.
 
 ---
 
 ## `SmtpTransaction`
 
+SMTP isn't one request/response, it's a small conversation, and the server
+keeps track of that conversation's state (who the mail is from, who it's
+going to, whether it's currently in the middle of receiving a message body)
+tied to the one TCP connection it's happening on. That's the whole reason
+`SmtpTransaction` exists: it's a handle to one pinned connection, and every
+method on it sends the next command in that same conversation.
+
 ```cpp
 auto tx = Relay.Begin();
-if(!tx.IsValid()) { /* pool exhausted */ }
+if(!tx.IsValid()) { /* pool exhausted, every pooled connection is busy */ }
 
 tx.MailFrom(addr);
 tx.RcptTo(addr);
@@ -104,16 +178,99 @@ tx.Quit();
 
 Every method returns the same `{status, out}` pair described in
 [Sending a request](overview.md#sending-a-request), where `out` is a
-`WFX::EndpointOutput<SmtpResponse>`. `Begin()` pins one connection for the
-whole exchange exactly as [`Reserve()`](overview.md#pinning-a-connection)
-does, always check `IsValid()` before use, the pool can be exhausted.
+`WFX::EndpointOutput<SmtpResponse>`. Check `status` first (it covers
+transport-level failures like a timeout, where `out` never gets filled in at
+all), then check the response itself, see [`SmtpResponse`](#smtpresponse)
+below for what `Success()` and `Continue()` mean.
 
-`DataBody` builds the `From`/`To`/`Reply-To`/`Subject` headers and a
-dot-stuffed body (RFC 5321 4.5.2: a body line starting with `.` is escaped to
-`..` so it can't be mistaken for the `DATA` terminator) internally, along with
-a `Date`, `Message-ID`, and `MIME-Version`/`Content-Type` header. Every
-caller-supplied field is CR/LF/NUL-screened before it reaches the wire, see
-[Injection defenses](#injection-defenses) below.
+### `Begin()` and `IsValid()`
+
+`Begin()` reserves one connection from the pool for you, exactly like
+[`Reserve()`](overview.md#pinning-a-connection) on the raw primitive. You get
+it back wrapped in an `SmtpTransaction`. Every command you send through that
+`tx` runs on that same connection, which is what lets the server follow along
+with one mail transaction instead of seeing unrelated commands from different
+connections.
+
+Always check `IsValid()` before calling anything else on `tx`. It comes back
+false when every connection in the pool is already busy (bounded by
+`connLimit`, see [Tuning & limits](#tuning-limits) below), there simply
+wasn't a free connection to hand you.
+
+### `MailFrom(addr)`
+
+Sends `MAIL FROM:<addr>`, the first command of any transaction. This is the
+*envelope* sender, the address the receiving server uses for bounces and
+delivery decisions. It's a separate thing from the human-readable `From:`
+header you'll set later in `DataBody`, they're usually the same address but
+don't have to be. A success reply is `250`.
+
+### `RcptTo(addr)`
+
+Sends `RCPT TO:<addr>`, the envelope recipient. Real SMTP lets you call this
+more than once before `DataStart` to send the same message to several
+recipients on one connection, `SmtpTransaction` doesn't stop you from doing
+that either. A success reply is `250`; a common rejection is `550` (no such
+user, or the relay won't deliver to that address).
+
+### `DataStart()`
+
+Sends `DATA`, announcing that the message content is about to follow. The
+server's reply here is not a normal `2xx`, it's `354` ("start mail input, end
+with a line containing just a dot"), which is exactly why `SmtpResponse` has
+a separate `Continue()` check instead of reusing `Success()` for this one
+step.
+
+### `DataBody(fromAddr, fromName, toAddr, toName, subject, body, replyTo = {})`
+
+Sends the actual message: headers, then a blank line, then the body, then the
+terminator. It builds all of this for you from the arguments:
+
+- **`fromAddr` / `fromName`** become the `From:` header, e.g.
+  `From: Example <noreply@example.com>`. `fromName` can be empty, in which
+  case `From:` is just the bare address.
+- **`toAddr` / `toName`** become `To:` the same way.
+- **`subject`** becomes the `Subject:` header, unmodified.
+- **`body`** is the message text. It gets dot-stuffed automatically (RFC 5321
+  4.5.2: a body line starting with `.` is escaped to `..`, so a line in your
+  message that happens to start with a period can never be mistaken for the
+  terminator that ends the `DATA` block).
+- **`replyTo`** is optional. If you pass one, a `Reply-To:` header is added.
+
+`Date`, `Message-ID`, and `MIME-Version`/`Content-Type` headers are added on
+top of that automatically, you don't provide them. Every one of the
+caller-supplied fields above is screened for CR/LF/NUL before any of this
+reaches the wire, see [Injection defenses](#injection-defenses) below. A
+success reply is `250`.
+
+### `Reset()`
+
+Sends `RSET`, which clears whatever `MAIL FROM`/`RCPT TO`/`DATA` state has
+built up so far, without closing the connection. Use it when you want to
+start a second, unrelated transaction on the same already-authenticated
+connection instead of paying for a new connection and a new handshake, for
+example after a recipient gets rejected and you want to try a different one
+from scratch.
+
+### `Quit()`
+
+Sends `QUIT`, telling the server you are completely finished with this
+connection. The server typically closes its end after replying `221`.
+
+!!! warning "Quit() is not cleanup, it ends the connection"
+    You do not need to call `Quit()` when you're done with a `tx`. Letting it
+    go out of scope already returns the connection to the pool for reuse
+    (`ReservedSlot`'s destructor does this, see
+    [Pinning a connection](overview.md#pinning-a-connection)), and that
+    happens purely on WFX's side, no bytes get sent to the server for it.
+    `Quit()` is the opposite: it actively tells the *server* to close the TCP
+    connection. Only call it if you deliberately want this specific
+    connection gone instead of sitting in the pool for the next `Begin()` to
+    reuse.
+
+---
+
+## Coalescing
 
 `SmtpEndpoint` does not wire up [coalescing](overview.md#coalescing):
 `coalesceKey`/`cloneOutput` are left null in its `EndpointDesc`. `MAIL FROM`

@@ -9,10 +9,12 @@
 // Outbound SMTP client (submission), built on wfx/endpoint/base.hpp's raw Endpoint<>.
 //
 // Provides:
-//   WFX::SmtpEndpoint       : the client. One instance per upstream relay.
+//   WFX::SmtpEndpoint       : the client. One instance per upstream relay. Also where SendMail
+//                             (the one-call wrapper below) lives, as a member function.
 //   WFX::SmtpTransaction    : one MAIL FROM / RCPT TO / DATA exchange, pinned to one connection
 //   WFX::SmtpEndpointConfig : connection pool + credentials + protocol hardening knobs
 //   WFX::SmtpResponse       : status code / text from one transaction command
+//   WFX::SmtpSendOutcome    : result of SmtpEndpoint::SendMail
 //
 // STARTTLS on port 587 only (RFC 3207) (implicit TLS (465) is out
 // of scope). Speaks 7-bit ASCII command/response lines (RFC 5321)
@@ -91,17 +93,21 @@
 //       co_return;
 //   });
 //
-// Each step is awaited explicitly rather than hidden behind one
-// call: the underlying coroutine machinery (WFX::Async::Promise<T>)
-// is a closed set of three specializations (void, MiddlewareAction,
-// ConnectResult) used by route handlers, middleware and onConnect
-// respectively. It deliberately isn't a generic future/promise
-// framework, so a helper that awaits several sub-operations and
-// hands back one aggregate value has nowhere to live except the
-// caller's own WFX::Coro. This mirrors Reserve()'s own documented
-// use case (SQL transactions, LISTEN/NOTIFY): a multi-command
-// exchange that must stay on one connection is the caller's
-// sequence to drive.
+// Every step above is written out and awaited by hand, which is what you want
+// when you need to react differently depending on which command failed, or
+// send to more than one recipient on the same connection with repeated
+// RcptTo calls before DataStart. For the common case of "just send this one
+// email", SmtpEndpoint::SendMail runs the whole exchange for you:
+//
+//   WFX::SmtpSendOutcome outcome;
+//   co_await Relay.SendMail("noreply@rearc.example", "ReArc", "contact@rearc.example",
+//                            "ReArc Contact", enquirySubject, enquiryBody, outcome);
+//   if(!outcome.Success()) { res.Status(WFX::HttpStatus::BAD_GATEWAY).SendText("mail failed");
+//   co_return; }
+//
+// This works because WFX::Coro (Async::Task<void>) can now be co_awaited from
+// another coroutine, so SendMail can be a coroutine in its own right that a
+// route handler just awaits like any single step. See include/async/task.hpp.
 //
 // -----------------------------------------------------------------------
 
@@ -677,13 +683,18 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
             co_return EpFatal;
     }
 
+    // Sent twice further down (once now, once again post-TLS since the pre-TLS capability list
+    // is never trusted), built once here since heloName never changes between the two sends
+    WFX::String ehloLine;
+    ehloLine.reserve(5 + opts->heloName.size() + 2); // "EHLO " + heloName + "\r\n"
+    ehloLine.append("EHLO ");
+    ehloLine.append(opts->heloName.data(), opts->heloName.size());
+    ehloLine.append("\r\n");
+
     // 2. EHLO (pre-TLS), only consulted for STARTTLS capability. Its AUTH line, if any, is
     // deliberately never trusted: see the re-EHLO after the TLS upgrade below
-    {
-        WFX::String line = WFX::String("EHLO ") + WFX::String(opts->heloName) + "\r\n";
-        if((co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size()))) != EpSlotOk)
-            co_return EpFatal;
-    }
+    if((co_await h.Send(ehloLine.data(), static_cast<std::uint32_t>(ehloLine.size()))) != EpSlotOk)
+        co_return EpFatal;
 
     {
         WFX_SMTP_READ_RESPONSE(ehlo1)
@@ -717,14 +728,12 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
     // (e.g. an injection attempt's extra bytes) is stale now, not real leftover data to trim
     pending = 0;
 
-    // 4. Re-EHLO over the encrypted channel. The pre-TLS capability list above is never reused
-    // past this point. A MITM that stripped STARTTLS/AUTH from it already failed at step 3, and
-    // one that let STARTTLS through but lied about AUTH mechanisms gets caught here instead
-    {
-        WFX::String line = WFX::String("EHLO ") + WFX::String(opts->heloName) + "\r\n";
-        if((co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size()))) != EpSlotOk)
-            co_return EpFatal;
-    }
+    // 4. Re-EHLO over the encrypted channel, reusing the exact same line built above. The pre-TLS
+    // capability list is never reused past this point: a MITM that stripped STARTTLS/AUTH from it
+    // already failed at step 3, and one that let STARTTLS through but lied about AUTH mechanisms
+    // gets caught here instead
+    if((co_await h.Send(ehloLine.data(), static_cast<std::uint32_t>(ehloLine.size()))) != EpSlotOk)
+        co_return EpFatal;
 
     // 5. AUTH: PLAIN preferred (single round trip), LOGIN as fallback for relays that don't offer
     // PLAIN. Picked from what the server just advertised POST-TLS, never assumed
@@ -747,7 +756,12 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
         blob.append(opts->password.data(), opts->password.size());
 
         WFX::String encoded = Base64Encode(std::string_view(blob.data(), blob.size()));
-        WFX::String line = WFX::String("AUTH PLAIN ") + encoded + "\r\n";
+
+        WFX::String line;
+        line.reserve(11 + encoded.size() + 2); // "AUTH PLAIN " + encoded + "\r\n"
+        line.append("AUTH PLAIN ");
+        line.append(encoded);
+        line.append("\r\n");
 
         if((co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size()))) != EpSlotOk)
             co_return EpFatal;
@@ -856,6 +870,21 @@ private:
     ReservedSlot<SmtpCmd, SmtpResponse> slot_;
 };
 
+// Result of SmtpEndpoint::SendMail below.
+//   status   EpOk once DATA actually goes through, otherwise whatever stopped it, including
+//            failures that happen before any SMTP response exists at all (pool exhausted,
+//            connect failure, timeout)
+//   response whichever step's response came back last, empty if 'status' never got that far
+struct SmtpSendOutcome {
+    Shared::EndpointStatus status = EpInternalError;
+    EndpointOutput<SmtpResponse> response;
+
+    bool Success() const noexcept
+    {
+        return status == EpOk && response && response->Success();
+    }
+};
+
 // -----------------------------------------------------------------------
 // The client. One instance per upstream relay, declared at namespace scope before Run():
 //
@@ -893,6 +922,47 @@ public:
     SmtpTransaction Begin() const noexcept
     {
         return SmtpTransaction{ep_.Reserve()};
+    }
+
+    // One-call convenience wrapper around a full MAIL FROM -> RCPT TO -> DATA exchange, instead
+    // of writing the sequence out by hand like SmtpTransaction's own doc comment shows.
+    //
+    //   WFX::SmtpSendOutcome outcome;
+    //   co_await Relay.SendMail("noreply@example.com", "Example", "contact@example.com",
+    //                            "Contact Form", "New enquiry", "message body", outcome);
+    //   if(!outcome.Success()) { /* outcome.status says why, outcome.response the last reply */ }
+    WFX::Coro SendMail(std::string_view fromAddr, std::string_view fromName, std::string_view toAddr,
+                       std::string_view toName, std::string_view subject, std::string_view body,
+                       SmtpSendOutcome& out, std::string_view replyTo = {}) const
+    {
+        auto tx = Begin();
+        if(!tx.IsValid()) {
+            out.status = EpPoolExhausted;
+            co_return;
+        }
+
+        // Moves whatever came back into 'out' and reports whether step actually succeeded,
+        // so the four steps below don't repeat this every time
+        auto record = [&out](Shared::EndpointStatus s, EndpointOutput<SmtpResponse>& r, bool responseOk) {
+            out.status = s;
+            out.response = std::move(r);
+            return s == EpOk && responseOk;
+        };
+
+        auto [s1, r1] = co_await tx.MailFrom(fromAddr);
+        if(!record(s1, r1, r1 && r1->Success()))
+            co_return;
+
+        auto [s2, r2] = co_await tx.RcptTo(toAddr);
+        if(!record(s2, r2, r2 && r2->Success()))
+            co_return;
+
+        auto [s3, r3] = co_await tx.DataStart();
+        if(!record(s3, r3, r3 && r3->Continue()))
+            co_return;
+
+        auto [s4, r4] = co_await tx.DataBody(fromAddr, fromName, toAddr, toName, subject, body, replyTo);
+        record(s4, r4, r4 && r4->Success());
     }
 
 private:

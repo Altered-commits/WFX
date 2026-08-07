@@ -22,6 +22,11 @@ struct BasePromise {
     AsyncCompleteFn onDone = nullptr;
     void* onDoneUd = nullptr;
 
+    // Only gets set when another coroutine 'co_await's this one, by Task<T>::await_suspend.
+    // Stays null for the usual case of the engine driving this coroutine directly through
+    // Resume()/SetCompletion(), and final_suspend below just falls through to that old path
+    std::coroutine_handle<> continuation = nullptr;
+
 public:
     void* operator new(std::size_t size)
     {
@@ -74,8 +79,14 @@ public:
             }
 
             // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
-            void await_suspend(std::coroutine_handle<> h) noexcept
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) noexcept
             {
+                // Somebody 'co_await'ed us instead of the engine driving us directly. Jump
+                // straight back into them and leave 'h' alone: Task<void>::await_resume is the
+                // one that destroys it, once they've actually resumed and read whatever they need
+                if(p->continuation)
+                    return p->continuation;
+
                 const AsyncResult result{nullptr, 0, Shared::MiddlewareAction::CONTINUE, p->status};
 
                 auto cb = p->onDone;
@@ -85,6 +96,8 @@ public:
 
                 if(cb)
                     cb(ud, result);
+
+                return std::noop_coroutine();
             }
 
             // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
@@ -131,8 +144,13 @@ public:
             }
 
             // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
-            void await_suspend(std::coroutine_handle<> h) noexcept
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) noexcept
             {
+                // See Promise<void>::final_suspend's Completion::await_suspend for what this
+                // branch is for
+                if(p->continuation)
+                    return p->continuation;
+
                 const AsyncResult result{nullptr, 0, p->value, p->status};
 
                 auto cb = p->onDone;
@@ -142,6 +160,8 @@ public:
 
                 if(cb)
                     cb(ud, result);
+
+                return std::noop_coroutine();
             }
 
             // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
@@ -188,8 +208,13 @@ public:
             }
 
             // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
-            void await_suspend(std::coroutine_handle<> h) noexcept
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) noexcept
             {
+                // See Promise<void>::final_suspend's Completion::await_suspend for what this
+                // branch is for
+                if(p->continuation)
+                    return p->continuation;
+
                 AsyncResult result{nullptr, 0, {}, p->status};
                 result.connectResult = p->value;
 
@@ -200,6 +225,8 @@ public:
 
                 if(cb)
                     cb(ud, result);
+
+                return std::noop_coroutine();
             }
 
             // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling

@@ -5,10 +5,14 @@
 #define WFX_INC_CXX_ASYNC_TASK_HPP
 
 #include "promise.hpp"
+#include <type_traits>
 
 namespace WFX::Async {
 
-// Task is fire and forget. 'final_suspend' destroys the coroutine frame
+// Task is fire and forget when the engine drives it directly ('final_suspend' destroys the
+// coroutine frame and fires 'onDone'). It can also be 'co_await'ed from another coroutine, see
+// await_ready/await_suspend/await_resume below. When that happens 'onDone' never gets touched,
+// the frame instead gets destroyed by await_resume once the awaiting coroutine reads its result
 template <typename T> struct [[nodiscard]] Task {
     using promise_type = Promise<T>;
     using HandleType = std::coroutine_handle<promise_type>;
@@ -40,6 +44,34 @@ public:
         if(handle) {
             handle.promise().onDone = cb;
             handle.promise().onDoneUd = ud;
+        }
+    }
+
+public:
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    bool await_ready() const noexcept
+    {
+        return false;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiter) noexcept
+    {
+        // 'handle' was created suspended (initial_suspend = suspend_always), so this is what
+        // actually starts it running, via symmetric transfer instead of a manual Resume() call
+        handle.promise().continuation = awaiter;
+        return handle;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
+    T await_resume() noexcept
+    {
+        if constexpr(std::is_void_v<T>)
+            handle.destroy();
+        else {
+            T value = handle.promise().value;
+            handle.destroy();
+            return value;
         }
     }
 };
