@@ -318,6 +318,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     auto& osConfig = config.osSpecificConfig;
     auto& buildConfig = config.buildConfig;
     auto& loggingConfig = config.loggingConfig;
+    auto& metricsConfig = config.metricsConfig;
 
     // Used in daemon registry
     auto& projectName = config.projectConfig.projectName;
@@ -331,7 +332,8 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     if(!GetRandomPool().GenerateSSLKey())
         logger.Fatal("[WFX-Master]: Failed to generate SSL key");
 
-    if(!MetricTracer::Create(static_cast<int>(osConfig.workerProcesses)))
+    if(!MetricTracer::Create(static_cast<int>(osConfig.workerProcesses), metricsConfig.maxRoutes,
+                             metricsConfig.maxEndpoints, metricsConfig.latency))
         logger.Fatal("[WFX-Master]: Failed to initialize metric tracer region");
 
     // -------------------- TEMPLATE / USER CODE COMPILATION PHASE --------------------
@@ -456,10 +458,10 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     logger.Info("[WFX-Master]: Signal received (INT / TERM), waiting for workers to shutdown...");
 
     // -------------------- SHUTDOWN PHASE --------------------
-    // Wait on every worker CONCURRENTLY, inside one shared 'workerShutdownTimeout' window,-
-    // -instead of one worker's full timeout at a time: N workers waited on serially could take-
-    // -N times as long as configured, long enough for an external 'wfx control stop' to give up-
-    // -and kill this process first, orphaning whichever workers hadn't been reached yet
+    // Wait on every worker CONCURRENTLY, inside one shared 'workerShutdownTimeout' window,
+    // instead of one worker's full timeout at a time: N workers waited on serially could take
+    // N times as long as configured, long enough for an external 'wfx control stop' to give up
+    // and kill this process first, orphaning whichever workers hadn't been reached yet.
     std::vector<pid_t> pending;
     for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(osConfig.workerProcesses); i++) {
         const pid_t pid = globalState.workerPids[i];
@@ -484,8 +486,8 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    // Anything still here ignored SIGTERM, or was spawned too late to receive it. Either way,-
-    // -force it and block until it's actually reaped, no worker is left running past this point
+    // Anything still here ignored SIGTERM, or was spawned too late to receive it. Either way,
+    // force it and block until it's actually reaped, no worker is left running past this point.
     for(const pid_t pid : pending) {
         logger.Warn("[WFX-Master]: Worker (pid=", pid, ") did not exit in time, sending SIGKILL");
         kill(pid, SIGKILL);

@@ -228,10 +228,10 @@ StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
         return StopResult::FAILED;
     }
 
-    // The master waits up to 'workerShutdownTimeout' (once, for every worker together, see-
-    // -the shutdown loop in 'RunServerImpl') before it force-kills stragglers itself. Wait at-
-    // -least that long here too, plus a small buffer for its own exit bookkeeping, so we never-
-    // -SIGKILL the master while it's still busy cleaning up its own children.
+    // The master waits up to 'workerShutdownTimeout' (once, for every worker together, see
+    // the shutdown loop in 'RunServerImpl') before it force-kills stragglers itself. Wait at
+    // least that long here too, plus a small buffer for its own exit bookkeeping, so we never
+    // SIGKILL the master while it's still busy cleaning up its own children.
     const int timeoutSeconds = info.workerShutdownTimeout + extraGraceSeconds;
 
     // Poll for clean exit every 100ms

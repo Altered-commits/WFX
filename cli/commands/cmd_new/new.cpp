@@ -194,17 +194,24 @@ header_timeout               = 15      # Max time limit for entire header to arr
 body_timeout                 = 20      # Max time limit for entire body to arrive (in seconds)
 idle_timeout                 = 40      # Max time limit for a connection to stay idle (in seconds)
 max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
-max_connections_per_ip       = 20      # Per-IP connection cap
-max_request_burst_per_ip     = 10      # Initial request tokens per IP
-max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
 
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
+[IP]
+max_connections_per_ip       = 20      # Per-IP connection cap
+max_request_burst_per_ip     = 10      # Initial request tokens per IP
+max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
+max_tracked_identities       = 24576   # Cap on distinct resolved identities tracked at once, oldest evicted first
+real_ip_header               = ""      # Header to trust for the real client IP, e.g. "CF-Connecting-IP" [Empty disables real-IP resolution]
+real_ip_recursive            = false   # X-Forwarded-For-style chains only: walk past trusted hops to find the real client
+trusted_proxies              = []      # CIDR blocks allowed to set real_ip_header, e.g. ["173.245.48.0/20"]
+
 [SSL]
 cert_path                   = "..."           # Path to the server certificate (PEM format)
 key_path                    = "..."           # Path to the private key corresponding to the certificate
-ca_cert_path                = ""              # Path to the CA certificate for client verification (PEM format) [Keep empty if not used]
+outbound_ca_path            = ""              # Extra CA to trust for outbound TLS (PEM format) [Keep empty if not used]
+client_ca_path              = ""              # CA for verifying inbound client certs (PEM format) [Empty disables mTLS]
 tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
                                            # ^^^ Colon-separated TLSv1.3 ciphers in preference order
 tls12_ciphers               = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
@@ -246,6 +253,11 @@ enable_file       = false      # Write to log files
 max_file_size     = 16777216   # Max log file size before rotation (in bytes) [if enable_file = true]
 max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
 
+[Metrics]
+max_routes    = 256    # Max routes tracked in the per-route metrics table
+max_endpoints = 256    # Max endpoints tracked in the per-endpoint metrics table
+latency       = false  # Record per-route / per-endpoint latency histograms (costs two clock reads per request)
+
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)
 template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
@@ -271,7 +283,7 @@ extern "C" {
 
         if(api) {
             WFX::Core::SetMasterApi(api);
-            WFX::Core::__ExecuteAndEraseDeferred();
+            WFX::Core::ExecuteAndEraseDeferred();
 
             registered = true;
         }

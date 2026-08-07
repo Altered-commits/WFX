@@ -43,19 +43,40 @@ struct NetworkConfig {
     std::uint16_t idleTimeout = 60;
 
     std::uint32_t maxConnections = 2000;
-    std::uint32_t maxConnectionsPerIp = 20;
-    std::uint32_t maxRequestBurstSize = 10;
-    std::uint32_t maxTokensPerSecond = 5;
 };
 
 struct ENVConfig {
     std::string envPath;
 };
 
+struct IPConfig {
+    std::uint32_t maxConnectionsPerIp = 20;
+    std::uint32_t maxRequestBurstSize = 10;
+    std::uint32_t maxTokensPerSecond = 5;
+
+    // Cap on distinct resolved identities RequestRateLimiter tracks at once. Its entries persist
+    // across connection close (unlike ConnectionLimiter's), so this bounds memory instead. The
+    // least-recently-touched identity is evicted once the cap is reached.
+    std::uint32_t maxTrackedIdentities = 24 * 1024;
+
+    // X-Forwarded-For-style comma-separated chains only: walk right-to-left past trusted hops
+    // to find the real client instead of taking the header's value as-is.
+    bool realIpRecursive = false;
+
+    // Header to trust for the real client IP (e.g. "CF-Connecting-IP"). Empty disables real-IP
+    // resolution entirely: every limiter always uses the raw peer IP.
+    std::string realIpHeader;
+
+    // CIDR blocks allowed to set 'realIpHeader'. Empty means nothing matches, so the header is
+    // never honored even if 'realIpHeader' is set (fails safe by construction).
+    std::vector<std::string> trustedProxies;
+};
+
 struct SSLConfig {
     std::string certPath;
     std::string keyPath;
-    std::string caCertPath;
+    std::string outboundCaPath; // CA WFX trusts when it dials out as a client (outbound TLS verification)
+    std::string clientCaPath;   // CA WFX uses to verify inbound client certs (mTLS). Non-empty requires a client cert
 
     std::string tls13Ciphers = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
 
@@ -95,6 +116,15 @@ struct LoggingConfig {
     std::uint32_t maxFileSize = 16 * 1024 * 1024;
 };
 
+struct MetricsConfig {
+    std::uint16_t maxRoutes = 256;
+    std::uint16_t maxEndpoints = 256;
+
+    // Latency histograms cost two clock reads per request and far more memory than the counters
+    // Keep it false in normal case (unless debugging)
+    bool latency = false;
+};
+
 struct MiscConfig {
     std::uint16_t fileCacheSize = 20;
     std::uint16_t cacheChunkSize = 2 * 1024;
@@ -117,10 +147,12 @@ public: // Main storage space for configurations
     BuildConfig buildConfig;
     NetworkConfig networkConfig;
     ENVConfig envConfig;
+    IPConfig ipConfig;
     SSLConfig sslConfig;
     OSSpecificConfig osSpecificConfig;
     LoggingConfig loggingConfig;
     MiscConfig miscConfig;
+    MetricsConfig metricsConfig;
 };
 
 // Free function declaration (defined in 'config.cpp')

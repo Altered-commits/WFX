@@ -130,8 +130,8 @@ bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uin
     if(minSize > maxSize)
         return false;
 
-    // growSize == 0 means jump straight to maxSize; minSize lets the caller skip straight to a-
-    // -known target instead of looping. 64-bit to avoid wrapping bufferSize + growSize past uint32
+    // growSize == 0 means jump straight to maxSize; minSize lets the caller skip straight to a
+    // known target instead of looping. 64-bit to avoid wrapping bufferSize + growSize past uint32.
     std::uint64_t newSize = growSize ? static_cast<std::uint64_t>(meta->bufferSize) + growSize : maxSize;
     if(minSize > newSize)
         newSize = minSize;
@@ -168,10 +168,10 @@ bool RWBuffer::GenericAppendData(char*& buffer, std::uint32_t metaSize, const ch
         if(required > maxSize)
             return false;
 
-        // Grow to fit in a SINGLE realloc, rounding the target up to a whole number of growSize-
-        // -steps above the current size so back-to-back appends amortize (growSize == 0 grows to-
-        // -exactly what's needed), then clamp to the ceiling. required <= maxSize checked above-
-        // -guarantees the clamp still leaves room for this append
+        // Grow to fit in a SINGLE realloc, rounding the target up to a whole number of growSize
+        // steps above the current size so back-to-back appends amortize (growSize == 0 grows to
+        // exactly what's needed), then clamp to the ceiling. required <= maxSize checked above
+        // guarantees the clamp still leaves room for this append.
         std::uint64_t newSize{0};
 
         if(growSize == 0)
@@ -256,6 +256,22 @@ void RWBuffer::AdvanceWriteLength(std::uint32_t n) noexcept
 
     auto* meta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
     meta->writtenLength = std::min(meta->writtenLength + n, meta->dataLength);
+}
+
+void RWBuffer::CompactWriteBuffer() noexcept
+{
+    // Discards the flushed prefix [0, writtenLength), slides the unsent tail [writtenLength,
+    // dataLength) down to offset 0, and rebases both watermarks so only live bytes remain.
+    auto* meta = GetWriteMeta();
+    if(!meta || meta->writtenLength == 0)
+        return;
+
+    const std::uint32_t remaining = meta->dataLength - meta->writtenLength;
+    if(remaining > 0)
+        std::memmove(GetWriteData(), GetWriteData() + meta->writtenLength, remaining);
+
+    meta->dataLength = remaining;
+    meta->writtenLength = 0;
 }
 
 ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept

@@ -2,32 +2,32 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Altered-commits
 #
-# Scriptable *hostile* mock upstream for the WFX HttpEndpoint audit.
+# Scriptable *hostile* mock upstream for the WFX HttpEndpoint audit
 #
 # This is NOT a conformant HTTP server. It is a raw-socket byte oracle whose whole
 # purpose is to attack the WFX client-side HTTP/1.1 parser/serializer in
 # include/wfx/endpoint/http.hpp. It speaks exact, hand-built wire bytes so the
-# harness can drive every branch and every boundary of the client.
+# audit can drive every branch and every boundary of the client
 #
 # The 150+ attack vectors live in the HARNESS (endpoint_audit.py), not here; this
 # file is deliberately thin. It gets hostile bytes onto the wire two ways:
 #
-#   1. STAGING (/ctl/stage + /raw/<id>): the harness POSTs an arbitrary raw
+#   1. STAGING (/ctl/stage + /raw/<id>): the audit POSTs an arbitrary raw
 #      response blob (id in X-Id, keep-alive in X-Keep); WFX then GETs /raw/<id>
 #      and the mock replays those exact bytes. This is how the status-line, header,
 #      chunk, EOF, and limit fuzz corpora reach the client: one primitive, endless
-#      vectors, byte-for-byte controlled by the harness.
+#      vectors, byte-for-byte controlled by the audit
 #
 #   2. Fixed routes (/ok, /chunked/<k>, /evil/*, /coalesce, /reflect, ...) for the
 #      cases that need stable behaviour or server-side bookkeeping (keep-alive
-#      request counter, coalesce backend-hit counter, request reflection).
+#      request counter, coalesce backend-hit counter, request reflection)
 #
 # Threat model: the upstream is fully adversarial. The client must never crash,
 # never hang past its timeout, never mis-frame one response into the next, and
-# never let a hostile upstream poison a pooled keep-alive connection.
+# never let a hostile upstream poison a pooled keep-alive connection
 #
 # Stdlib only. One thread per connection. Pinned by default to 127.0.0.1:8091,
-# which the WFX app (app/src/main.cpp, UPSTREAM macro) baked in at compile time.
+# which the WFX app (app/src/main.cpp, UPSTREAM macro) baked in at compile time
 
 import argparse
 import socket
@@ -76,7 +76,7 @@ def _raw(blob, keep_alive=True):
 # multiple sends with tiny stalls so the client's incremental parser has to
 # reassemble lines/bodies across recv() boundaries. This exercises the lineAcc
 # line-join path, the body-resume-across-EpParseIncomplete path, and the
-# accumulating maxHeaderBytes cap, none of which a single write() reaches.
+# accumulating maxHeaderBytes cap, none of which a single write() reaches
 #   mode "whole" : one send (default)
 #   mode "drip"  : arg-byte pieces, each followed by a short sleep
 #   mode "split" : one split at byte offset `arg` (0 => midpoint), sleep between
@@ -94,12 +94,11 @@ def _raw_frag(blob, keep_alive, mode="whole", arg=0):
         return [("send", blob[:off]), ("sleep", 0.02), ("send", blob[off:])], keep_alive
     return [("send", blob)], keep_alive
 
-
 def handle(method, path, headers, body, conn):
     """Return (plan, keep_alive). conn is per-connection mutable state."""
     global _coalesce_hits
 
-    # Staging: replay harness-supplied raw bytes verbatim
+    # Staging: replay audit-supplied raw bytes verbatim
     if path.startswith("/raw/"):
         with _lock:
             entry = _staged.get(path[5:])
@@ -111,7 +110,7 @@ def handle(method, path, headers, body, conn):
     # Desync / smuggling crown jewels (before the HEAD default)
     # Well-formed-looking responses that hide extra body bytes the client must
     # treat as "no body". If the client reads or leaves those bytes on a pooled
-    # connection, the NEXT request on it gets a corrupted / smuggled response.
+    # connection, the NEXT request on it gets a corrupted / smuggled response
     if path == "/evil/204body":
         return _raw(b"HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\nhello", keep_alive=True)
     if path == "/evil/304body":
@@ -127,11 +126,11 @@ def handle(method, path, headers, body, conn):
 
     # HEAD default: every server answers HEAD bodyless. Proves the client
     # completes HEAD on the blank line and keeps the conn reusable even though
-    # Content-Length is non-zero.
+    # Content-Length is non-zero
     if method == "HEAD":
         return _raw(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", keep_alive=True)
 
-    # Control plane (harness hits these directly)
+    # Control plane (the audit hits these directly)
     if path == "/ctl/ping":
         return _cl("pong")
     if path == "/ctl/coalesce/reset":
@@ -150,12 +149,21 @@ def handle(method, path, headers, body, conn):
     if path == "/ctl/protoconns":
         with _lock:
             return _cl(str(_proto_connections))
+    if path == "/ctl/cancels/reset":
+        _sp_cancel_reset()
+        return _cl("ok")
+    if path == "/ctl/cancels/count":
+        with _lock:
+            return _cl(str(_sp_cancels_count))
+    if path == "/ctl/cancels/lastid":
+        with _lock:
+            return _cl(str(_sp_last_cancel_id))
 
     # Accepted-connections minus served-requests, computed atomically under one lock
     # in a SINGLE request (this request itself counts as +1 conn and +1 req, netting
     # zero). Counts connections that were opened but never sent a request, i.e. idle
     # prewarmed connections. Reading conns and requests as two separate control calls
-    # would skew the diff by 1 (the second call bumps requests once more).
+    # would skew the diff by 1 (the second call bumps requests once more)
     if path == "/ctl/idleconns":
         with _lock:
             return _cl(str(_total_connections - _total_requests))
@@ -220,8 +228,8 @@ def handle(method, path, headers, body, conn):
     # Serialize() byte oracle: hand back the EXACT request head (request line
     # + header block, minus the trailing blank line) the client emitted, with
     # every CR/LF turned into a '|' (and one trailing '|') so it round-trips
-    # cleanly through JSON. Lets the harness assert header order, dedup, CL
-    # correctness, and the absence of any smuggled line break.
+    # cleanly through JSON. Lets the audit assert header order, dedup, CL
+    # correctness, and the absence of any smuggled line break
     if path == "/reflectraw":
         h = conn.get("head", b"")
         h = h.replace(b"\r\n", b"|").replace(b"\r", b"|").replace(b"\n", b"|")
@@ -246,7 +254,7 @@ def handle(method, path, headers, body, conn):
 
     # Timeouts / connection faults
     # Stall well past the fast endpoint's 5s request budget (+ up to a 5s timer-tick
-    # of slack) so the client's request-timeout, not this response, wins.
+    # of slack) so the client's request-timeout, not this response, wins
     if path == "/slow-headers":
         return [("send", b"HTTP/1.1 200 OK\r\n"), ("sleep", 20.0)], False
     if path == "/slow-body":
@@ -298,7 +306,7 @@ def serve_conn(sock):
     # default) is always the one to close first; otherwise the mock closing an idle
     # pooled connection first would strand a slot the client still thinks is alive,
     # causing intermittent None on reuse. A peer close still returns EOF instantly,
-    # so this only affects genuinely-idle keep-alive sockets.
+    # so this only affects genuinely-idle keep-alive sockets
     sock.settimeout(65.0)
     conn = {"n": 0}
     buf = b""
@@ -331,8 +339,10 @@ def serve_conn(sock):
                 elif action[0] == "sleep":
                     time.sleep(action[1])
                 elif action[0] == "shutwr":
-                    try: sock.shutdown(socket.SHUT_WR)
-                    except OSError: pass
+                    try:
+                        sock.shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
                 elif action[0] == "reset":
                     _hard_reset(sock)
                     return
@@ -342,8 +352,10 @@ def serve_conn(sock):
     except OSError:
         return
     finally:
-        try: sock.close()
-        except OSError: pass
+        try:
+            sock.close()
+        except OSError:
+            pass
 
 def _hard_reset(sock):
     try:
@@ -355,7 +367,7 @@ def _hard_reset(sock):
 # Second listener: tiny hand-rolled protocol for onConnect / onDisconnect /
 # multiplexing coverage, spoken by tests/endpoint_audit/app/src/proto.cpp's
 # raw WFX::Endpoint<> instances (HttpEndpoint can't exercise any of this,
-# HTTP/1.1 has no handshake and no concurrent-requests-per-connection).
+# HTTP/1.1 has no handshake and no concurrent-requests-per-connection)
 #
 # Wire format, newline-delimited ASCII, one connection = one handshake then any
 # number of requests:
@@ -446,8 +458,10 @@ def _serve_proto_conn(sock):
     except OSError:
         return
     finally:
-        try: sock.close()
-        except OSError: pass
+        try:
+            sock.close()
+        except OSError:
+            pass
 
 def _float(s, default):
     try:
@@ -468,12 +482,230 @@ def _serve_proto(host, port):
             break
         threading.Thread(target=_serve_proto_conn, args=(conn,), daemon=True).start()
 
+# SP listener: the non-multiplexed protocol that exercises slot pinning,
+# streaming (both CHUNK_READY families), onPush, and the cert-free half of the
+# TLS-upgrade surface. See app/src/main.cpp for the wire format
+#
+# Every connection gets a unique connId echoed in "OK <id>", which is what lets
+# the audit prove which physical connection served which request, and so
+# whether pinning actually pinned
+_sp_conn_seq = 0
+_sp_mode = {"push_flood": 0, "push_garbage": 0, "push_partial": 0,
+            "stall_mid_stream": 0, "push_during_request": 0, "overrun": 0}
+
+def _sp_set(name, value):
+    with _lock:
+        _sp_mode[name] = value
+
+# onAbort cancel tracking: a side connection sends "CANCEL <connId>\n" with no
+# STARTTLS/AUTH first (mirrors a real Postgres CancelRequest, which needs none
+# either). connId is the primary connection's own AUTH-time id, so the audit
+# can prove a cancel references the SAME physical connection being aborted
+_sp_cancels_count = 0
+_sp_last_cancel_id = 0
+
+def _sp_cancel_reset():
+    global _sp_cancels_count, _sp_last_cancel_id
+    with _lock:
+        _sp_cancels_count = 0
+        _sp_last_cancel_id = 0
+
+def _serve_sp_conn(sock):
+    global _sp_conn_seq, _sp_cancels_count, _sp_last_cancel_id
+    with _lock:
+        _sp_conn_seq += 1
+        conn_id = _sp_conn_seq
+
+    sock.settimeout(65.0)
+    buf = b""
+    authed = False
+    upgraded_probe = False
+    page_left = 0
+    page_size = 0
+
+    def send(data):
+        try:
+            sock.sendall(data if isinstance(data, bytes) else data.encode("latin-1"))
+        except OSError:
+            pass
+
+    def payload(n):
+        return ("x" * max(1, n))
+
+    try:
+        while True:
+            nl = buf.find(b"\n")
+            while nl == -1:
+                try:
+                    d = sock.recv(65536)
+                except OSError:
+                    return
+                if not d:
+                    return
+                buf += d
+                nl = buf.find(b"\n")
+
+            line = buf[:nl].decode("latin-1", "replace").rstrip("\r")
+            buf = buf[nl + 1:]
+
+            # No auth needed, same as a real Postgres CancelRequest: it rides on its
+            # own brand-new connection and is the only thing that connection ever sends
+            if line.startswith("CANCEL "):
+                with _lock:
+                    _sp_cancels_count += 1
+                    _sp_last_cancel_id = _int(line[7:], 0)
+                return
+
+            if line.startswith("STARTTLS"):
+                bits = line.split(" ", 1)
+                who = bits[1] if len(bits) > 1 else ""
+
+                if who == "tlsgarbage":
+                    # Agree to upgrade, then send garbage instead of a
+                    # ServerHello: the handshake must fail and tear the slot
+                    # down cleanly rather than hang
+                    send("S\n")
+                    send(b"\x16\x03\x01\x00\x10not-a-tls-handshake\xff" * 8)
+                    return
+
+                # Refuse. The "downgrade" endpoint requires TLS, so its
+                # onConnect must fail closed instead of continuing in plaintext
+                # (the CVE-2015-3152 / CVE-2025-49146 failure mode)
+                send("N\n")
+                continue
+
+            if not authed:
+                parts = line.split(" ", 1)
+                token = parts[1] if len(parts) > 1 else ""
+                if token == "abortmidconnect":
+                    # Slow AUTH reply: gives the audit a window to abandon the CLIENT
+                    # connection while onConnect is still awaiting this very reply,
+                    # proving onAbort must not fire while inOnConnectPhase is set
+                    # (it would steal onConnect's asyncData and strand its coroutine)
+                    time.sleep(1.0)
+                    send("OK %d\n" % conn_id)
+                    authed = True
+                elif token in ("good", "tlsgarbage", "abort", "abortnoaux"):
+                    send("OK %d\n" % conn_id)
+                    authed = True
+                elif token == "downgrade":
+                    # Only reachable if the client wrongly continued after "N"
+                    send("OK %d\n" % conn_id)
+                    authed = True
+                else:
+                    send("ERR\n")
+                continue
+
+            if line.startswith("GET "):
+                key = line[4:]
+
+                # A push emitted BEFORE the reply arrives while the request is
+                # still in flight, so parse() must consume it, never onPush
+                if key == "pushinflight":
+                    send("PUSH midflight\n")
+                    send("VAL %d:%s\n" % (conn_id, key))
+                    continue
+
+                # Slow backend: the audit abandons the CLIENT connection well before
+                # this fires, giving onAbort a window to run while the primary slot
+                # is genuinely mid-request (EVENT_ENDPOINT_RECV). The reply below
+                # still arrives on schedule, exercising "let it finish naturally"
+                if key.startswith("slow:"):
+                    time.sleep(_float(key.split(":", 1)[1], 1.0))
+
+                # Everything below lands on an idle slot (the reply above ended
+                # the request), which is the only state onPush ever sees
+                send("VAL %d:%s\n" % (conn_id, key))
+
+                if key.startswith("push:"):
+                    for i in range(_int(key.split(":", 1)[1], 1)):
+                        send("PUSH n%d\n" % i)
+                elif key.startswith("pushflood:"):
+                    n = _int(key.split(":", 1)[1], 1000)
+                    blob = "".join("PUSH %s\n" % ("f" * 64) for _ in range(n))
+                    send(blob)
+                elif key == "pushgarbage":
+                    # onPush returns false -> engine must close the slot
+                    send("NOTAPUSH whatever\n")
+                elif key == "pushpartial":
+                    # No trailing newline: onPush reports consumed=0 forever
+                    # The engine must park, not spin and not wedge the slot
+                    send("PUSH incomplete-no-newline")
+                continue
+
+            if line.startswith("STREAM "):
+                bits = line.split(" ")
+                n = _int(bits[1] if len(bits) > 1 else "0", 0)
+                sz = _int(bits[2] if len(bits) > 2 else "8", 8)
+
+                # Optional stall: chunk 'stall_after' onward is delayed stall_ms milliseconds.
+                # Absent (0) is a no-op, so every pre-existing STREAM call is unaffected.
+                # Lets the audit abandon the client AFTER isStreaming is already set-
+                # -(the first chunk got through), proving onAbort's scope cut holds:
+                # a client bailing mid-stream still force-closes, never fires onAbort
+                stall_after = _int(bits[3], 0) if len(bits) > 3 else 0
+                stall_secs = (_int(bits[4], 0) if len(bits) > 4 else 0) / 1000.0
+
+                for i in range(n):
+                    if _sp_mode.get("stall_mid_stream") and i == max(1, n // 2):
+                        # Go silent mid-stream: the client's request timeout must
+                        # fire instead of hanging forever
+                        time.sleep(30.0)
+                        return
+                    if stall_after and i == stall_after:
+                        time.sleep(stall_secs)
+                    send("CHUNK %s\n" % payload(sz))
+                send("END\n")
+                continue
+
+            if line.startswith("PAGE "):
+                bits = line.split(" ")
+                page_left = _int(bits[1] if len(bits) > 1 else "0", 0)
+                page_size = _int(bits[2] if len(bits) > 2 else "8", 8)
+                if page_left <= 0:
+                    send("END\n")
+                else:
+                    send("CHUNK %s\n" % payload(page_size))
+                    page_left -= 1
+                continue
+
+            # Cursor continuation. Nothing is sent until the client asks, which
+            # is what makes this the CHUNK_READY_FETCH path
+            if line == "MORE":
+                if page_left <= 0:
+                    send("END\n")
+                else:
+                    send("CHUNK %s\n" % payload(page_size))
+                    page_left -= 1
+                continue
+    except OSError:
+        return
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+def _serve_sp(host, port):
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind((host, port))
+    srv.listen(256)
+    print("mock sp-upstream on %s:%d" % (host, port), flush=True)
+    while True:
+        try:
+            conn, _ = srv.accept()
+        except OSError:
+            break
+        threading.Thread(target=_serve_sp_conn, args=(conn,), daemon=True).start()
+
 # Main
 def main():
     ap = argparse.ArgumentParser(description="WFX endpoint-audit hostile mock upstream")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8091)
     ap.add_argument("--proto-port", type=int, default=8092)
+    ap.add_argument("--sp-port", type=int, default=8093)
     args = ap.parse_args()
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -483,6 +715,7 @@ def main():
     print("mock upstream on %s:%d" % (args.host, args.port), flush=True)
 
     threading.Thread(target=_serve_proto, args=(args.host, args.proto_port), daemon=True).start()
+    threading.Thread(target=_serve_sp, args=(args.host, args.sp_port), daemon=True).start()
 
     try:
         while True:

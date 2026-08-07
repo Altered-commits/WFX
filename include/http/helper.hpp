@@ -18,12 +18,12 @@ template <typename Lambda> Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
 {
     // Async route: Lambda returns WFX::Coro (Task<void>)
     if constexpr(std::is_invocable_r_v<Async::Task<void>, Lambda, Request, Response>) {
-        static auto fn = cb;
+        static auto GlobalFn = cb;
 
         Shared::RouteCallback rc;
         rc.kind = Shared::CallbackKind::ASYNC;
         rc.async = [](Request req, Response res, Shared::AsyncCompleteFn onDone, void* onDoneUd) {
-            auto task = fn(req, res);
+            auto task = GlobalFn(req, res);
             task.SetCompletion(onDone, onDoneUd);
             task.Resume();
             // Task will go out of scope, and that is fine
@@ -38,11 +38,11 @@ template <typename Lambda> Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
 
     // Sync route: Lambda returns void
     else if constexpr(std::is_invocable_r_v<void, Lambda, Request, Response>) {
-        static auto fn = cb;
+        static auto GlobalFn = cb;
 
         Shared::RouteCallback rc;
         rc.kind = Shared::CallbackKind::SYNC;
-        rc.sync = [](Request req, Response res) { fn(req, res); };
+        rc.sync = [](Request req, Response res) { GlobalFn(req, res); };
 
         return rc;
     }
@@ -58,12 +58,12 @@ template <typename Lambda> Shared::MwCallback MakeMwCallback(Lambda&& cb)
 {
     // Async middleware: returns WFX::MwCoro (Task<MiddlewareAction>)
     if constexpr(std::is_invocable_r_v<Async::Task<Shared::MiddlewareAction>, Lambda, Request, Response>) {
-        static auto fn = cb;
+        static auto GlobalFn = cb;
 
         Shared::MwCallback mc;
         mc.kind = Shared::CallbackKind::ASYNC;
         mc.async = [](Request req, Response res, Shared::AsyncCompleteFn onDone, void* onDoneUd) {
-            auto task = fn(req, res);
+            auto task = GlobalFn(req, res);
             task.SetCompletion(onDone, onDoneUd);
             task.Resume();
         };
@@ -73,11 +73,11 @@ template <typename Lambda> Shared::MwCallback MakeMwCallback(Lambda&& cb)
 
     // Sync middleware: returns WFX::MiddlewareAction
     else if constexpr(std::is_invocable_r_v<Shared::MiddlewareAction, Lambda, Request, Response>) {
-        static auto fn = cb;
+        static auto GlobalFn = cb;
 
         Shared::MwCallback mc;
         mc.kind = Shared::CallbackKind::SYNC;
-        mc.sync = [](Request req, Response res) -> Shared::MiddlewareAction { return fn(req, res); };
+        mc.sync = [](Request req, Response res) -> Shared::MiddlewareAction { return GlobalFn(req, res); };
 
         return mc;
     }

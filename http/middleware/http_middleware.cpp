@@ -103,8 +103,8 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(ClientCtx* ctx, Request req, Resp
 
     // Check if we already executed this beforehand, we just need to continue from where we left off
     if(mIndex > 0) {
-        // But before we jump to executing middleware, we need to consider previous async middlewares-
-        // -return value
+        // But before we jump to executing middleware, we need to consider the previous async
+        // middleware's return value.
         auto lastAction = *trackAsync.GetMAction();
         switch(lastAction) {
             case MiddlewareAction::CONTINUE:
@@ -125,9 +125,9 @@ MiddlewareResult HttpMiddleware::ExecuteHelper(ClientCtx* ctx, Request req, Resp
         // Execute
         auto [action, isAsync] = ExecuteFunction(ctx, req, res, mw);
 
-        // Async function, so we need to store the next valid middleware index because this async function-
-        // -will run in scheduler seperate from this middleware chain, after it completes we need to invoke-
-        // -the next valid scheduler
+        // Async function, so we need to store the next valid middleware index because this async
+        // function will run in a scheduler separate from this middleware chain. After it completes
+        // we need to invoke the next valid scheduler.
         if(isAsync) {
             trackAsync.SetMIndex(static_cast<std::uint16_t>(i + 1));
             return {false, true};

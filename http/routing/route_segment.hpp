@@ -13,6 +13,8 @@ namespace WFX::Http {
 
 using PathSegments = std::vector<Shared::SegmentVariant>;
 
+static constexpr std::uint16_t METRICS_IDX_UNASSIGNED = 0xFFFF;
+
 enum class ParamType : std::uint8_t { UINT, INT, STRING, UUID, UNKNOWN };
 
 struct RouteSegment;
@@ -20,6 +22,8 @@ struct RouteSegment;
 struct TrieNode {
     std::vector<RouteSegment> children;
     Shared::RouteCallback callback;
+    // Index into the per-worker route metrics array, assigned dense from 0 by RegisterRoute
+    std::uint16_t metricsIdx = METRICS_IDX_UNASSIGNED;
 };
 
 struct RouteSegment {

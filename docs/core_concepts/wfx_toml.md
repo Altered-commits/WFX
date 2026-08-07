@@ -69,11 +69,8 @@ max_body_size                = 8192    # 32-bit Unsigned Integer (In bytes)
 max_header_count             = 64      # 16-bit Unsigned Integer
 header_timeout               = 15      # 16-bit Unsigned Integer (In seconds)
 body_timeout                 = 20      # 16-bit Unsigned Integer (In seconds)
-idle_timeout                 = 40      # 16-bit Unsigned Integer (In seconds)
+idle_timeout                 = 60      # 16-bit Unsigned Integer (In seconds)
 max_connections              = 2000    # 32-bit Unsigned Integer
-max_connections_per_ip       = 20      # 32-bit Unsigned Integer
-max_request_burst_per_ip     = 10      # 32-bit Unsigned Integer
-max_requests_per_ip_per_sec  = 5       # 32-bit Unsigned Integer
 ```
 
 ### Buffers
@@ -103,18 +100,6 @@ max_requests_per_ip_per_sec  = 5       # 32-bit Unsigned Integer
   Internally, WFX rounds this value **up to the nearest multiple of 64** for efficiency.  
   This is a hard cap; once reached, new connections are rejected by that worker.
 
-- `max_connections_per_ip`  
-  Maximum number of simultaneous connections allowed from a single IP address per worker process.  
-  This prevents one client from consuming all available connections.
-
-- `max_request_burst_per_ip`  
-  The number of requests an IP address is allowed to send immediately without being throttled.  
-  Think of this as a bucket of tokens given to each IP when it first connects.
-
-- `max_requests_per_ip_per_sec`  
-  How fast the token bucket for each IP is refilled, measured in **tokens per second**.  
-  Once an IP runs out of tokens, further requests are delayed or rejected until tokens are refilled.
-
 ---
 
 ## `[ENV]`
@@ -132,6 +117,67 @@ env_path = "..." # String (Path to .env file)
 
 ---
 
+## `[IP]`
+
+Per-IP connection/request limiting and real-client-IP resolution. All values are **optional**;
+defaults are applied if omitted.
+
+```toml
+[IP]
+max_connections_per_ip       = 20      # 32-bit Unsigned Integer
+max_request_burst_per_ip     = 10      # 32-bit Unsigned Integer
+max_requests_per_ip_per_sec  = 5       # 32-bit Unsigned Integer
+max_tracked_identities       = 24576   # 32-bit Unsigned Integer
+real_ip_header               = ""      # String (Header name, or "" to always use the raw peer IP)
+real_ip_recursive            = false   # Boolean (true or false)
+trusted_proxies              = []      # Array of Strings (CIDR blocks)
+```
+
+### Limiting
+
+- `max_connections_per_ip`  
+  Maximum number of simultaneous connections allowed from a single IP address per worker process.  
+  This prevents one client from consuming all available connections.
+
+- `max_request_burst_per_ip`  
+  The number of requests an IP address is allowed to send immediately without being throttled.  
+  Think of this as a bucket of tokens given to each IP when it first connects.
+
+- `max_requests_per_ip_per_sec`  
+  How fast the token bucket for each IP is refilled, measured in **tokens per second**.  
+  Once an IP runs out of tokens, further requests are delayed or rejected until tokens are refilled.
+
+- `max_tracked_identities`  
+  Maximum number of distinct resolved identities whose rate-limit bucket is kept in memory at
+  once, per worker process. Unlike the connection cap, a rate-limit bucket has to survive its
+  owning connection closing (see `max_requests_per_ip_per_sec`), so this is what bounds its
+  memory instead: once the cap is reached, the least-recently-seen identity is evicted to make
+  room for a new one, never one still tied to an open connection.  
+  **Always rounded up to a multiple of 64 internally, so the real minimum is 64** regardless of
+  the configured value.
+
+### Real IP
+
+- `real_ip_header`  
+  Name of a request header to trust for the real client IP, e.g. `"CF-Connecting-IP"` behind
+  Cloudflare, or `"X-Forwarded-For"` behind a generic reverse proxy. Left empty (the default),
+  every limiter always uses the raw peer IP, no header is ever consulted.
+
+- `real_ip_recursive`  
+  Only relevant for header values that can hold a comma-separated chain, such as
+  `X-Forwarded-For`. When `true`, WFX walks the chain right-to-left, skipping entries that are
+  themselves trusted proxies, until it finds the first one that isn't. When `false` (the
+  default), the header's value is used as-is.
+
+- `trusted_proxies`  
+  List of CIDR blocks (e.g. `"173.245.48.0/20"`) allowed to set `real_ip_header`. A request whose
+  peer IP isn't inside one of these blocks has its header ignored and falls back to the raw peer
+  IP, even if `real_ip_header` is configured, this is what stops a client from spoofing its own
+  IP by just setting the header itself. An empty list (the default) means nothing matches, so
+  `real_ip_header` is effectively never honored until at least one block is added.
+
+---
+
 ## `[SSL]`
 
 TLS configuration. This section is **only used when WFX is running in HTTPS mode**.
@@ -141,7 +187,8 @@ When HTTPS is enabled, certificate paths are **mandatory**; all other settings a
 [SSL]
 cert_path                   = "..."           # String (Path to server certificate)
 key_path                    = "..."           # String (Path to private key)
-ca_cert_path                = ""              # String (Path to an extra trusted CA, or "" to use the system store)
+outbound_ca_path            = ""              # String (Path to an extra trusted CA, or "" to use the system store)
+client_ca_path              = ""              # String (Path to a CA for verifying inbound client certs, or "" to disable mTLS)
 tls13_ciphers               = "..."           # String
 tls12_ciphers               = "..."           # String
 curves                      = "X25519:P-256"  # String
@@ -150,7 +197,7 @@ enable_client_session_cache = true            # Boolean (true or false)
 enable_ktls                 = false           # Boolean (true or false)
 server_session_cache_size   = 4096            # 64-bit Unsigned Integer (In bytes)
 client_session_cache_size   = 1024            # 64-bit Unsigned Integer (In bytes)
-min_proto_version           = 3               # 8-bit Unsigned Integer (1 - 3 only)
+min_proto_version           = 2               # 8-bit Unsigned Integer (1 - 3 only)
 security_level              = 2               # Integer (0 - 5 only)
 ```
 
@@ -160,8 +207,13 @@ security_level              = 2               # Integer (0 - 5 only)
   PEM-encoded server certificate, presented to inbound HTTPS clients.
 - `key_path`*  
   Private key matching `cert_path`.
-- `ca_cert_path`*  
+- `outbound_ca_path`  
   Path to an extra CA certificate that WFX should trust when it connects out to other servers, on top of what your operating system already trusts. Use this if a server you are connecting to presents a certificate signed by an internal or self signed CA, for example a certificate used for local testing, since your OS would not already trust it. Leave it empty to rely only on your system trust store, which is the right choice for most public servers. This setting only affects connections WFX makes outward, it does not change how WFX verifies clients connecting to it.
+
+### Client Certificates (mTLS)
+
+- `client_ca_path`  
+  Path to a CA certificate WFX uses to verify certificates presented by connecting clients. Leaving this empty disables mutual TLS entirely, clients connect exactly as they do today, no certificate requested. Setting it to a non-empty path does two things at once: it starts requiring every inbound client to present a certificate, and rejects the handshake if that certificate wasn't signed by this CA. There is no separate on/off setting, presence of `client_ca_path` is what turns mTLS on. This is unrelated to `outbound_ca_path`, which only affects connections WFX itself makes outward as a client; this setting only affects how WFX verifies clients connecting to it.
 
 ### Cipher Suites
 
@@ -204,15 +256,8 @@ security_level              = 2               # Integer (0 - 5 only)
   **Example**: `2` means TLS 1.2 or higher only; older clients using TLS 1.0 or 1.1 will be rejected for security reasons.
 
 - `security_level`  
-  OpenSSL security strictness (0–5). Higher values enforce stronger algorithms, longer keys, and stricter certificate checks.  
+  OpenSSL security strictness (0-5). Higher values enforce stronger algorithms, longer keys, and stricter certificate checks.  
   **Example**: `2` is a reasonable default, while `5` is extremely strict and may block older clients.
-
----
-
-## `[Windows]`
-
-!!! note
-    This section will be updated once official Windows support is released.
 
 ---
 
@@ -222,7 +267,7 @@ Socket and worker configuration for **Linux systems only**. All settings in this
 
 ```toml
 [Linux]
-worker_processes        = 2     # 32-bit Unsigned Integer
+worker_processes        = 4     # 32-bit Unsigned Integer
 worker_shutdown_timeout = 5     # 16-bit Unsigned Integer (In seconds)
 backlog                 = 1024  # 32-bit Unsigned Integer
 ```
@@ -236,11 +281,6 @@ backlog                 = 1024  # 32-bit Unsigned Integer
 
 - `backlog`  
   Sets the maximum number of incoming connections the OS can queue while workers are busy. If this limit is too low, new connections may be rejected during traffic spikes even if the server is healthy.
-
-## `[Linux.IoUring]`
-
-!!! note
-    This section will be updated once official IoUring support is released.
 
 ## `[Linux.Epoll]`
 
@@ -278,6 +318,33 @@ max_rotations     = 2         # 16-bit Unsigned Integer
 - `enable_file`: Write log output to per-worker log files under `logs/default_logs/`.
 - `max_file_size`: Max size of a single log file before it rotates. Only applies when `enable_file = true`.
 - `max_rotations`: Number of rotated log files to keep. Files are named `.1` through `.N`, oldest are discarded. Only applies when `enable_file = true`.
+
+---
+
+## `[Metrics]`
+
+Controls the per-route and per-endpoint metrics tables and optional latency histograms. This section is **optional**.
+
+```toml
+[Metrics]
+max_routes    = 256    # 16-bit Unsigned Integer
+max_endpoints = 256    # 16-bit Unsigned Integer
+latency       = false  # Boolean
+```
+
+- `max_routes`: Number of route slots reserved in the per-route metrics table. Routes are indexed densely from `0`, so this caps how many distinct routes can be tracked. Registering more routes than this leaves the overflow untracked.
+- `max_endpoints`: Number of endpoint slots reserved in the per-endpoint metrics table, indexed the same way as routes.
+- `latency`: Record per-route and per-endpoint latency histograms. When `true`, each request costs two extra clock reads and each tracked route/endpoint gets its own histogram in the shared metrics map. Leave it `false` in normal operation and enable it only when profiling. When `false`, `WFX::GetRouteLatencyAt` / `WFX::GetEndpointLatencyAt` return zeroed histograms and `WFX::MetricsLatencyEnabled()` returns `false`.
+
+!!! note "Allocation is lazy"
+    `max_routes` and `max_endpoints` reserve **virtual** address space in the shared metrics map, not physical memory. The map is anonymous, so a page only faults into physical memory the first time a slot on it is actually written. A slot is written when its route/endpoint first serves a request, so setting these higher than you need costs address space but almost no real memory. Size them to your worst case and forget about them; the counter tables themselves are tiny (roughly 48 KB per worker at the defaults).
+
+!!! warning "When to enable `latency`"
+    Latency histograms are the one part of the metrics map that is genuinely expensive. Each histogram is ~1.5 KB, and turning `latency` on maps one per route **and** one per endpoint, per worker. At the defaults that is ~772 KB of reserved space per worker (still lazily faulted, so real cost tracks the slots you actually touch), on top of two clock reads on every request.
+
+    Keep `latency = false` for steady-state production, where the counter tables (request counts, status classes, byte totals, endpoint failures) already answer "what is happening." Turn it on when you specifically need the shape of the latency distribution: chasing a p99 regression, validating a change under load, or capacity planning. Turn it back off when you are done. It is a profiling switch, not an always-on gauge.
+
+See [Telemetry](../api_reference/telemetry.md) for the read-side API that consumes these tables.
 
 ---
 

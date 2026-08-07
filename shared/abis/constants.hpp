@@ -22,8 +22,8 @@ constexpr StringView SV_HTTP10{"HTTP/1.0", 8};
 constexpr StringView SV_HTTP11{"HTTP/1.1", 8};
 constexpr StringView SV_HTTP20{"HTTP/2.0", 8};
 
-// GET/POST are the inbound router's supported methods; PUT..TRACE are additive and only-
-// -meaningful to the outbound WFX::HttpEndpoint (Shared::HttpMethodToStringView below)
+// GET/POST are the inbound router's supported methods; PUT..TRACE are additive and only
+// meaningful to the outbound WFX::HttpEndpoint (Shared::HttpMethodToStringView below).
 enum class HttpMethod : std::uint8_t { GET = 0, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, CONNECT, TRACE, UNKNOWN };
 
 // HTTP Status Codes (common subset)

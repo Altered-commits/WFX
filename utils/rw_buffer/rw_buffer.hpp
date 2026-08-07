@@ -70,6 +70,7 @@ public: // Write buffer management
     bool GrowWriteBuffer(std::uint32_t growSize, std::uint32_t maxSize);
     bool AppendWriteData(const char* data, std::uint32_t size, std::uint32_t incSize, std::uint32_t maxSize);
     void AdvanceWriteLength(std::uint32_t n) noexcept;
+    void CompactWriteBuffer() noexcept;
     ValidRegion GetWritableWriteRegion() const noexcept;
 
 private: // Internal functions

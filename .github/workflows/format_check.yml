@@ -1,7 +1,7 @@
 name: WFX Format Check
 
-# Reusable: invoked by entry.yml AFTER the CI filter, so this file owns ONLY-
-# -the formatting logic
+# Reusable: invoked by entry.yml AFTER the CI filter, so this file owns ONLY
+# the formatting logic
 on:
   workflow_call:
 
@@ -19,4 +19,4 @@ jobs:
           sudo apt-get install -y clang-format
 
       - name: Check formatting
-        run: bash scripts/format.sh --dry-run
+        run: bash scripts/format.sh

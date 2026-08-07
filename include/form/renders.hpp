@@ -33,27 +33,27 @@ static inline void RenderInputAttributes(std::string& preRenderedForm, const Int
 {
     preRenderedForm += "type=\"number\" ";
 
-    if(n.min)
+    if(n.min != INT_UNBOUNDED_MIN)
         preRenderedForm += "min=\"" + std::to_string(n.min) + "\" ";
-    if(n.max)
+    if(n.max != INT_UNBOUNDED_MAX)
         preRenderedForm += "max=\"" + std::to_string(n.max) + "\" ";
 }
 
 static inline void RenderInputAttributes(std::string& preRenderedForm, const UInt& n)
 {
     preRenderedForm += "type=\"number\" ";
-    if(n.min)
+    if(n.min != UINT_UNBOUNDED_MIN)
         preRenderedForm += "min=\"" + std::to_string(n.min) + "\" ";
-    if(n.max)
+    if(n.max != UINT_UNBOUNDED_MAX)
         preRenderedForm += "max=\"" + std::to_string(n.max) + "\" ";
 }
 
 static inline void RenderInputAttributes(std::string& preRenderedForm, const Float& f)
 {
     preRenderedForm += "type=\"number\" ";
-    if(f.min)
+    if(f.min != FLOAT_UNBOUNDED_MIN)
         preRenderedForm += "min=\"" + std::to_string(f.min) + "\" ";
-    if(f.max)
+    if(f.max != FLOAT_UNBOUNDED_MAX)
         preRenderedForm += "max=\"" + std::to_string(f.max) + "\" ";
 }
 

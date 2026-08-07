@@ -105,20 +105,20 @@ public: // vvv uint32 aliases into u64a and u64b vvv
     template <typename T> T* BufAs() noexcept
     {
         T* p;
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion) - intentional type pun, see comment above
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see above.
         std::memcpy(&p, &u64b, 8);
         return p;
     }
     template <typename T> const T* BufAs() const noexcept
     {
         const T* p;
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion) - intentional type pun, see comment above
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see above.
         std::memcpy(&p, &u64b, 8);
         return p;
     }
     template <typename T> void BufSet(T* p) noexcept
     {
-        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion) - intentional type pun, see comment above
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see above.
         std::memcpy(&u64b, &p, 8);
     }
 };
@@ -423,7 +423,7 @@ public:
         const auto& n = N();
         if(n.tag == JsonTag::STR_VIEW) {
             const char* ptr;
-            // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion) - intentional type pun
+            // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun.
             std::memcpy(&ptr, &n.u64a, 8);
             return {ptr, n.U32c()};
         }
@@ -599,7 +599,7 @@ public:
         if(kvIdx == JSON_NIL)
             return Dead();
 
-        // Re fetch node after potential reallocs from AllocStr / AllocKV
+        // Re-fetch node after potential reallocs from AllocStr / AllocKV
         auto& n2 = NMut();
         JsonKV& kv = s_->kvs[kvIdx];
         kv.keyOff = keyOff;
@@ -780,7 +780,7 @@ public:
         n.tag = JsonTag::STR_VIEW;
         n.u64b = 0;
 
-        std::memcpy(&n.u64a, &v, 8); // NOLINT(bugprone-multi-level-implicit-pointer-conversion) - intentional type pun
+        std::memcpy(&n.u64a, &v, 8); // NOLINT(bugprone-multi-level-implicit-pointer-conversion): intentional type pun.
         n.U32c() = static_cast<std::uint32_t>(std::strlen(v));
         return *this;
     }
@@ -1104,12 +1104,12 @@ private:
         return JsonRef{s_, valIdx};
     }
 
-    // Same as GetOrCreate, but for a key whose bytes are ALREADY resident in the store at keyOff-
-    // -(klen bytes), e.g. an escaped key the parser just decoded in place. Crucially it does NOT-
-    // -call AllocStr: handing GetOrCreate a pointer INTO strs would dangle the moment AllocStr-
-    // -reallocs strs to copy that key and then memcpy's from the freed original. Offsets survive-
-    // -reallocs, so inserting by keyOff is safe (and avoids storing the key a second time). On a-
-    // -dedup hit the already-stored key bytes are simply left in the store (a rare-key waste only)
+    // Same as GetOrCreate, but for a key whose bytes are ALREADY resident in the store at keyOff
+    // (klen bytes), e.g. an escaped key the parser just decoded in place. Crucially it does NOT
+    // call AllocStr: handing GetOrCreate a pointer INTO strs would dangle the moment AllocStr
+    // reallocs strs to copy that key and then memcpy's from the freed original. Offsets survive
+    // reallocs, so inserting by keyOff is safe, and it avoids storing the key a second time. On a
+    // dedup hit, the already-stored key bytes are simply left in the store (a rare-key waste only).
     JsonRef GetOrCreateStored(std::uint32_t keyOff, std::uint32_t klen) noexcept
     {
         if(!Valid())
@@ -1129,8 +1129,8 @@ private:
         if(existing != JSON_NIL)
             return JsonRef{s_, s_->kvs[existing].valIdx};
 
-        // New key: bytes already live in strs at keyOff, so no AllocStr/copy is needed. The-
-        // -allocs below only ever move nodes/kvs/the object index buffer, never invalidate keyOff
+        // New key: bytes already live in strs at keyOff, so no AllocStr/copy is needed. The
+        // allocs below only ever move nodes/kvs/the object index buffer, never invalidate keyOff.
         const std::uint32_t valIdx = s_->AllocNode();
         if(valIdx == JSON_NIL)
             return Dead();
@@ -1517,7 +1517,7 @@ private:
 
             case JsonTag::STR_VIEW: {
                 const char* ptr;
-                // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion) - intentional type pun
+                // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun.
                 std::memcpy(&ptr, &n.u64a, 8);
                 Raw(res, "\"", 1);
                 Escaped(res, ptr, n.U32c());

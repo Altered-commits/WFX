@@ -73,8 +73,8 @@ private:
 };
 
 // localtime_r/localtime_s costs 300-700ns (glibc mutex, tz lookup)
-// Called once per second; sub-second tracked via steady_clock delta,-
-// -which is a vDSO read + integer math (~10ns, no syscall)
+// Called once per second; sub-second tracked via steady_clock delta,
+// which is a vDSO read + integer math (~10ns, no syscall).
 class TimestampCache {
 public:
     // Writes [HH:MM:SS.mmm] into out. Returns updated pointer.

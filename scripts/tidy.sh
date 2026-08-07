@@ -11,21 +11,21 @@ set -euo pipefail
 #   ./scripts/tidy.sh --files a.cpp b.hpp  -> lint only the given files
 #   ./scripts/tidy.sh --ci                 -> CI mode, see below
 #
-# Always uses THIS checkout's own './build' - never '~/.wfx/src' (that's a symlink into
-# a checkout for './scripts/install.sh --local-debug'/'--local-release', or a separate real clone for a plain
-# end-user install; either way its own compile_commands.json can point somewhere other
-# than here). clang-tidy is invoked with '-p build' and looks up each file's flags
-# itself, so '--fix' always writes straight to this working tree.
+# Always uses THIS checkout's own './build', never '~/.wfx/src' (that's a symlink into a-
+# -checkout for './scripts/install.sh --local-debug'/'--local-release', or a separate real-
+# -clone for a plain end-user install; either way its own compile_commands.json can point-
+# -somewhere other than here). clang-tidy is invoked with '-p build' and looks up each-
+# -file's flags itself, so '--fix' always writes straight to this working tree.
 #
-# Locally: if './build' doesn't exist yet, this configures it (fast, no full build -
-#   compile_commands.json is emitted at CMake configure time). Files that need real
-#   OpenSSL headers (anything using recent APIs) won't fully resolve until something
-#   actually builds it, e.g. './scripts/install.sh --local-debug' - that's the same './build',
-#   so once it's been run once, tidy sees the real thing from then on.
+# Locally: if './build' doesn't exist yet, this configures it (fast, no full build,-
+# -compile_commands.json is emitted at CMake configure time). Files that need real-
+# -OpenSSL headers (anything using recent APIs) won't fully resolve until something-
+# -actually builds it (e.g. running './scripts/install.sh --local-debug', the same-
+# -'./build'), so once it's been run once, tidy sees the real thing from then on.
 #
-# --ci: same './build', but produced by compile_check.yml's clang leg in the SAME
-#   checkout this runs in (a full build, so OpenSSL is always real there). CI restores
-#   that job's cache before calling this with --ci, so nothing gets rebuilt here either
+# --ci: same './build', but produced by compile_check.yml's clang leg in the SAME-
+# -checkout this runs in (a full build, so OpenSSL is always real there). CI restores-
+# -that job's cache before calling this with --ci, so nothing gets rebuilt here either
 # ---------------------------------------------------------------
 
 # ---------------------------------------------------------------
@@ -34,14 +34,14 @@ set -euo pipefail
 CLANG_TIDY="${CLANG_TIDY:-clang-tidy}"
 BUILD_DIR="build"
 
-# scripts/tidy_cache.py: skips re-running clang-tidy on a file whose preprocessed-
+# scripts/py/tidy_cache.py: skips re-running clang-tidy on a file whose preprocessed-
 # -content + resolved config + args are unchanged, replaying the exact prior-
 # -stdout/exit code instead. Zero effect on which checks run or what they find,-
 # -only on whether an unchanged file gets re-analyzed.
 # Disabled for --fix: a cache hit skips invoking real clang-tidy entirely, which-
 # -would skip the in-place edit too, so --fix must always run for real.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TIDY_CACHE_PY="$SCRIPT_DIR/tidy_cache.py"
+TIDY_CACHE_PY="$SCRIPT_DIR/py/tidy_cache.py"
 CTCACHE_ENABLE="${CTCACHE_ENABLE:-1}"
 
 SOURCE_EXTENSIONS=(
@@ -291,8 +291,17 @@ run_one() {
         output=$("$CLANG_TIDY" "${TIDY_ARGS[@]}" "$file" 2>&1) || status=$?
     fi
 
+    # Clang's diagnostics engine prints its own "N warnings generated." tally per-
+    # -translation unit it processes internally, unrelated to clang-tidy's own findings-
+    # -and not suppressed by --quiet, strip it so only real findings show
+    #
+    # Here-strings, not 'printf | grep': with pipefail, grep -q's early exit on a match-
+    # -can SIGPIPE a still-writing printf on large output, and pipefail then reports-
+    # -that non-zero death as the pipeline's status instead of grep's real match
+    output=$(grep -vE '^[0-9]+ warnings? generated\.$' <<< "$output" || true)
+
     printf '%s' "$output" > "$RESULT_DIR/$idx.out"
-    if [ "$status" -ne 0 ] || printf '%s' "$output" | grep -qE '(warning|error): '; then
+    if [ "$status" -ne 0 ] || grep -qE '(warning|error): ' <<< "$output"; then
         : > "$RESULT_DIR/$idx.fail"
     fi
 }

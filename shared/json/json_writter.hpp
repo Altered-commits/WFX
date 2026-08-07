@@ -110,6 +110,12 @@ public: // Main Functions
         WKey(key);
         WStr(v);
     }
+    void Write(std::string_view key, const Shared::StringView& v)
+    {
+        Comma();
+        WKey(key);
+        WStr({v.Data(), v.Size()});
+    }
     void Write(std::string_view key, const char* v)
     {
         Comma();
@@ -187,6 +193,11 @@ public: // Main Functions
         Comma();
         WStr(v);
     }
+    void Push(const Shared::StringView& v)
+    {
+        Comma();
+        WStr({v.Data(), v.Size()});
+    }
     void Push(std::int64_t v)
     {
         Comma();
@@ -244,7 +255,7 @@ private: // Helper Functions
 
     void Comma()
     {
-        std::uint64_t bit = 1ull << depth_;
+        const std::uint64_t bit = 1ull << depth_;
         if(commas_ & bit)
             Raw(",", 1);
 
@@ -342,18 +353,18 @@ private: // Helper Functions
                     el = 2;
                     break;
                 default: {
-                    // RFC 8259 requires every U+0000-U+001F escaped, not just the 7-
-                    // -above. A raw control byte (e.g. NUL) left as-is produces invalid-
-                    // -JSON that strict parsers reject outright
+                    // RFC 8259 requires every U+0000-U+001F escaped, not just the 7 above. A raw
+                    // control byte (e.g. NUL) left as-is produces invalid JSON that strict parsers
+                    // reject outright.
                     auto uc = static_cast<unsigned char>(*p);
                     if(uc < 0x20) {
-                        static constexpr char hex[] = "0123456789abcdef";
+                        static constexpr char HEX[] = "0123456789abcdef";
                         uBuf[0] = '\\';
                         uBuf[1] = 'u';
                         uBuf[2] = '0';
                         uBuf[3] = '0';
-                        uBuf[4] = hex[(uc >> 4) & 0xF];
-                        uBuf[5] = hex[uc & 0xF];
+                        uBuf[4] = HEX[(uc >> 4) & 0xF];
+                        uBuf[5] = HEX[uc & 0xF];
                         esc = uBuf;
                         el = 6;
                     }
@@ -377,10 +388,10 @@ private: // Helper Functions
     }
 
 private: // Storage
-    // 64-bit masks + a hard depth cap keep every '1ull << depth_' shift in range: the bit index-
-    // -never exceeds 63, so no undefined shift and no truncated bracket/comma tracking. Nesting-
-    // -past MAX_DEPTH is counted in over_ (no physical bracket written) and unwound 1:1 by Close,-
-    // -so depth_ stays balanced and can never underflow even in that (practically unreachable) case
+    // 64-bit masks and a hard depth cap keep every '1ull << depth_' shift in range: the bit index
+    // never exceeds 63, so no undefined shift and no truncated bracket/comma tracking. Nesting
+    // past MAX_DEPTH is counted in over_ (no physical bracket written) and unwound 1:1 by Close,
+    // so depth_ stays balanced and can never underflow even in that practically unreachable case.
     static constexpr std::uint32_t MAX_DEPTH = 63;
 
     Http::Response& res_;

@@ -27,6 +27,9 @@ WFX::Free(ptr)          // raw free
 WFX::New<T>(args...)    // allocate + construct, like `new T(args...)`
 WFX::Delete(ptr)        // destroy + free, like `delete ptr`
 
+WFX::NewArray<T>(count)     // allocate + value-construct N, like `new T[count]{}`
+WFX::DeleteArray(ptr, n)    // destroy N + free, like `delete[] ptr`
+
 WFX::Allocator<T>       // std::allocator-compatible, stateless
 WFX::Vector<T>          // std::vector<T, WFX::Allocator<T>>
 WFX::String             // std::basic_string<char, ..., WFX::Allocator<char>>
@@ -90,6 +93,26 @@ WFX::Delete(p);
 This is exactly the pattern the engine itself uses for per-connection and
 per-request state in [Endpoint](endpoint/overview.md#endpointdesc) callbacks
 like `createSlotState`/`destroySlotState` and `createOutput`/`destroyOutput`.
+
+---
+
+## Allocating arrays
+
+`WFX::NewArray<T>(count)` allocates and value-constructs `count` elements, like
+`new T[count]{}`. `WFX::DeleteArray(ptr, count)` destroys all `count` elements
+and frees the block, mirroring `delete[]`:
+
+```cpp
+auto* items = WFX::NewArray<SlotState>(16);
+// ... use items[0..15] ...
+WFX::DeleteArray(items, 16);
+```
+
+- `NewArray` returns `nullptr` if the underlying allocation fails.
+- You must pass the same count to `DeleteArray` that you passed to `NewArray`,
+  the count is not tracked for you.
+- Same allocator-matching rule as `New`/`Delete`: never mix `NewArray`/`DeleteArray`
+  with `new[]`/`delete[]`.
 
 ---
 

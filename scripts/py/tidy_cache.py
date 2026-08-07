@@ -140,8 +140,11 @@ def write_cache(path, exit_code, output_bytes):
         raise
 
 def run_real_clang_tidy(argv):
-    proc = subprocess.run(argv, capture_output=True)
-    output = proc.stdout + proc.stderr
+    # stderr is merged into the same pipe as stdout (not captured separately then-
+    # -concatenated after the fact), so output stays in the order clang-tidy actually-
+    # -wrote it, matching what '2>&1' gives the non-cached path
+    proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output = proc.stdout
     sys.stdout.buffer.write(output)
     return proc.returncode, output
 

@@ -6,21 +6,24 @@ WFX tracks server metrics across all worker processes using a shared memory regi
 
 ## Memory layout
 
-Before the fork, the master calls `MetricTracer::Create(workerCount)`. This allocates a contiguous shared memory region (`mmap(MAP_SHARED | MAP_ANONYMOUS)` on POSIX, `CreateFileMapping` on Windows) sized exactly to hold `workerCount` slots:
+Before the fork, the master calls `MetricTracer::Create(workerCount, maxRoutes, maxEndpoints, latency)`. This allocates a contiguous shared memory region (`mmap(MAP_SHARED | MAP_ANONYMOUS)` on POSIX, `CreateFileMapping` on Windows) with one block per worker:
 
 ```
-[ WorkerMetrics slot 0 ][ WorkerMetrics slot 1 ][ WorkerMetrics slot 2 ] ...
+[ WorkerMetrics ][ RouteMetrics x maxRoutes ][ EndpointMetrics x maxEndpoints ]
+[ LatencyMetrics x maxRoutes ][ LatencyMetrics x maxEndpoints ]   <- only when latency is on
 ```
 
-Each `WorkerMetrics` slot is `alignas(64)` and its size is always a multiple of 64 bytes. This ensures each worker's slot occupies its own set of cache lines with no overlap into adjacent slots, preventing false sharing between workers.
+`maxRoutes`/`maxEndpoints` come from `[Metrics]` in `wfx.toml` (see [WFX Settings](../core_concepts/wfx_toml.md#metrics)) and are a fixed ceiling decided at `Create()` time, before fork - not the actual number of routes/endpoints registered. Route/endpoint registration hard-fails past the cap, so an index handed to `CurrentRoute`/`CurrentEndpoint` is always in range. Unused slots never fault in a physical page, so sizing the cap generously costs address space, not real memory.
 
-After the fork, each worker calls `MetricTracer::InitWorker(index)` which stores its slot index in a process-local static. From that point on, `MetricTracer::Current()` returns a direct pointer to that worker's slot.
+Each worker's block is `alignas(64)` and its total size (`WorkerMetrics` plus whichever of the arrays above are present) is always rounded up to a multiple of 64 bytes. This ensures each worker's block occupies its own set of cache lines with no overlap into an adjacent worker's block, preventing false sharing between workers.
+
+After the fork, each worker calls `MetricTracer::InitWorker(index)` which stores its slot index in a process-local static. From that point on, `MetricTracer::Current()` returns a direct pointer to that worker's `WorkerMetrics`, and `MetricTracer::CurrentRoute(idx)`/`CurrentEndpoint(idx)` return pointers into that same worker's route/endpoint arrays.
 
 ---
 
 ## Struct layout
 
-`WorkerMetrics` embeds all metric structs directly. The current categories are:
+`WorkerMetrics` embeds the per-worker (not per-route/per-endpoint) metric structs directly. The current categories are:
 
 ```
 WorkerMetrics
@@ -29,7 +32,9 @@ WorkerMetrics
     SelfMetrics    self       (48 bytes)
 ```
 
-All nested metric structs are defined in `shared/abis/types.hpp` because they cross the ABI boundary. User code queries them directly through `UTILS_API_EXT1`. `WorkerMetrics` itself does not cross the boundary. It lives purely on the engine side inside the mapped region.
+`RouteMetrics` (56 bytes: request count plus one counter per status class, `1xx`-`5xx`, plus `bytesOut`) and `EndpointMetrics` (adds `completed`, `connectFailures`, `tlsFailures`, `requestTimeouts`, `poolExhausted`, `otherErrors` on top of the same shape) live in their own arrays right after `WorkerMetrics` in the same block, sized to `maxRoutes`/`maxEndpoints` - see [Memory layout](#memory-layout) above. `LatencyMetrics` (a running `sumUs` plus a 192-bucket histogram, one bucket per fine-grained power-of-two-ish duration range) exists per route and per endpoint too, but only when `[Metrics] latency = true`.
+
+All of these structs are defined in `shared/abis/types.hpp` because they cross the ABI boundary. User code queries them directly through `UtilsAPIExt1`. `WorkerMetrics` itself does not cross the boundary. It lives purely on the engine side inside the mapped region.
 
 `SelfMetrics` is written exclusively by the master process, not workers. It holds per-slot process state: resident memory, virtual memory, restart and crash counts, backoff state, PID, and timestamps. Workers read it at scrape time but never write to it.
 
@@ -71,13 +76,25 @@ metrics_->network.accepts++;
 metrics_->network.bytesRead += n;
 ```
 
+Route and endpoint counters go through their own accessors instead, since they're arrays rather than a single struct on the worker:
+
+```cpp
+if(auto* r = MetricTracer::CurrentRoute(routeIdx))
+    r->requests++;
+
+if(auto* e = MetricTracer::CurrentEndpoint(endpointIdx))
+    e->requests++;
+```
+
+When `[Metrics] latency = true`, `RecordRouteLatencyUs(routeIdx, us)`/`RecordEndpointLatencyUs(endpointIdx, us)` record one sample into the matching histogram; both are no-ops (not even a branch you need to add yourself) when latency is off, since the underlying slot accessor returns null in that case.
+
 ---
 
 ## Reading metrics
 
-Any worker can read the entire mapped region at any time. `MetricTracer` provides an `Aggregate...()` function for each metric category that loops over all slots and sums the relevant fields. Each category also has a per-worker variant that returns only the current worker's slot.
+Any worker can read the entire mapped region at any time. `MetricTracer` provides an `Aggregate...()` function for each category (`AggregateLog`, `AggregateNetwork`, `AggregateSelf`, `AggregateRoute(idx)`, `AggregateEndpoint(idx)`, `AggregateRouteLatency(idx)`, `AggregateEndpointLatency(idx)`) that loops over all workers' slots and sums the relevant fields for that one route/endpoint index (or, for the three worker-level categories, across the whole worker). Each category also has a per-worker variant that returns only the current worker's slot without summing.
 
-The aggregate and per-worker functions for each category are exposed to user code through `UTILS_API_EXT1`, and wrapped as inline functions in `include/wfx/telemetry.hpp`. See that file for the current list of available functions.
+The aggregate and per-worker functions for each category are exposed to user code through `UtilsAPIExt1`, and wrapped as inline functions in `include/wfx/telemetry.hpp`. See that file for the current list of available functions.
 
 Not every field makes sense to aggregate. For `SelfMetrics`, only `rssBytes`, `vmBytes`, `restarts`, and `crashes` are summed across slots. Fields like `pid`, `startedAt`, `nextRetryAt`, and `backoffAttempts` are per-slot only and are not included in the aggregate result.
 
@@ -88,7 +105,7 @@ Aggregation is not atomic. A worker reading slot N while another worker is mid-i
 ## Lifecycle
 
 ```
-Master: MetricTracer::Create(N)     // shared memory region
+Master: MetricTracer::Create(N, maxRoutes, maxEndpoints, latency)  // shared memory region
         fork()
 Worker: MetricTracer::InitWorker(i) // slot index stored process-locally
         ... runs event loop ...
@@ -116,7 +133,7 @@ If the process crashes before `Destroy()` is called, the OS reclaims the shared 
 1. Define a new struct in `shared/abis/types.hpp` following the same pattern as the existing ones.
 2. Add it as a new embedded member in `WorkerMetrics`.
 3. Add a new `Aggregate...()` function in `utils/diagnostics/metric_tracer.hpp` and implement it in `metric_tracer.cpp`.
-4. Add new function pointer types and entries to `UTILS_API_EXT1` in `shared/apis/utils_api.hpp`.
+4. Add new function pointer types and entries to `UtilsAPIExt1` in `shared/apis/utils_api.hpp`.
 5. Wire the lambdas in `shared/apis/utils_api.cpp`.
 6. Add the user-facing inline functions in `include/wfx/telemetry.hpp`.
 
@@ -134,7 +151,7 @@ If the process crashes before `Destroy()` is called, the OS reclaims the shared 
     Implementations of `Create`, `InitWorker`, `Destroy`, and all `Aggregate...()` functions.
 
 - `shared/apis/utils_api.hpp`  
-    `UTILS_API_EXT1` function pointer declarations for metrics and logging.
+    `UtilsAPIExt1` function pointer declarations for metrics and logging.
 
 - `shared/apis/utils_api.cpp`  
     Lambda implementations that wire `MetricTracer` to the API function pointers.

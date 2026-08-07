@@ -33,9 +33,9 @@ BufferPool::~BufferPool()
     for(void* segment : shard_.memorySegments)
         AlignedFree(segment);
 
-    // Need to do this because now every singleton in this system initializes itself-
-    // -asap as its all global statics. Meaning it would exist in master process as well
-    // And it will print garbage metrics unecessarily
+    // Need to do this because now every singleton in this system initializes itself
+    // asap as its all global statics. Meaning it would exist in master process as well.
+    // And it will print garbage metrics unecessarily.
     if(IsInitialized())
         logger_.Info("[BufferPool]: Shutdown successfully. Metrics: ", "allocs=", stats_.totalAllocations, ", ",
                      "frees=", stats_.totalFrees, ", ", "reallocs=", stats_.totalReallocs, ", ",

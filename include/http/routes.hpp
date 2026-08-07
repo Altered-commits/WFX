@@ -19,7 +19,7 @@
     struct WFX_ROUTE_CLASS(method, uniq) {                                                                             \
         WFX_ROUTE_CLASS(method, uniq)()                                                                                \
         {                                                                                                              \
-            WFX::Core::__WFXDeferred.emplace_back([] {                                                                 \
+            WFX::Core::GlobalWFXDeferred.emplace_back([] {                                                             \
                 WFX::Core::HttpApiExt1()->registerRoute(WFX::Shared::HttpMethod::method,                               \
                                                         WFX::Shared::StringView::FromCString(path),                    \
                                                         WFX::Http::MakeRouteCallback(__VA_ARGS__));                    \
@@ -34,7 +34,7 @@
         WFX_ROUTE_CLASS(method, uniq)()                                                                                \
         {                                                                                                              \
             auto mwArr = mw;                                                                                           \
-            WFX::Core::__WFXDeferred.emplace_back([mwArr]() mutable {                                                  \
+            WFX::Core::GlobalWFXDeferred.emplace_back([mwArr]() mutable {                                              \
                 WFX::Core::HttpApiExt1()->registerRouteEx(WFX::Shared::HttpMethod::method,                             \
                                                           WFX::Shared::StringView::FromCString(path), mwArr.Data(),    \
                                                           mwArr.Count(), WFX::Http::MakeRouteCallback(__VA_ARGS__));   \
@@ -65,7 +65,8 @@
     struct WFX_CONCAT(WFXGroupStart_, id) {                                                                            \
         WFX_CONCAT(WFXGroupStart_, id)()                                                                               \
         {                                                                                                              \
-            WFX::Shared::__WFXDeferredSimple.emplace_back([] { WFX::Core::HttpApiExt1()->pushRoutePrefix(path); });    \
+            WFX::Core::GlobalWFXDeferred.emplace_back(                                                                 \
+                [] { WFX::Core::HttpApiExt1()->pushRoutePrefix(WFX::Shared::StringView::FromCString(path)); });        \
         }                                                                                                              \
     } WFX_CONCAT(WFXGroupStartInst_, id);                                                                              \
     }
@@ -75,7 +76,7 @@
     struct WFX_CONCAT(WFXGroupEnd_, id) {                                                                              \
         WFX_CONCAT(WFXGroupEnd_, id)()                                                                                 \
         {                                                                                                              \
-            WFX::Shared::__WFXDeferredSimple.emplace_back([] { WFX::Core::HttpApiExt1()->popRoutePrefix(); });         \
+            WFX::Core::GlobalWFXDeferred.emplace_back([] { WFX::Core::HttpApiExt1()->popRoutePrefix(); });             \
         }                                                                                                              \
     } WFX_CONCAT(WFXGroupEndInst_, id);                                                                                \
     }

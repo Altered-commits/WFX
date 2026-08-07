@@ -19,17 +19,24 @@ header_timeout               = 15      # Max time limit for entire header to arr
 body_timeout                 = 20      # Max time limit for entire body to arrive (in seconds)
 idle_timeout                 = 40      # Max time limit for a connection to stay idle (in seconds)
 max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
-max_connections_per_ip       = 20      # Per-IP connection cap
-max_request_burst_per_ip     = 10      # Initial request tokens per IP
-max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
 
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
+# Cranked wide open, same as the other three audits: every phase drives dozens of HTTPS
+# calls from the single test-runner IP (127.0.0.1), left at production-tight defaults this
+# self-throttles partway through the run and every later phase reads as a cascade of failures
+# indistinguishable from a real bug (is_ok()/is_err() can't tell "rate-limited" from "call failed")
+[IP]
+max_connections_per_ip       = 512     # Single-IP (127.0.0.1) harness traffic must not be throttled
+max_request_burst_per_ip     = 512     # Initial request tokens per IP
+max_requests_per_ip_per_sec  = 512     # Refill rate (tokens per second per IP)
+
 [SSL]
 cert_path                   = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/good.pem"   # mkcert leaf cert (patched to absolute by the harness)
 key_path                    = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/good-key.pem"    # mkcert leaf key  (patched to absolute by the harness)
-ca_cert_path                = "/home/atomic/.local/share/mkcert/rootCA.pem"              # Empty -> client verifies against the system trust store, where `mkcert -install` placed the root CA that signed the mock's cert
+outbound_ca_path            = "/home/atomic/.local/share/mkcert/rootCA.pem"              # Empty -> client verifies against the system trust store, where `mkcert -install` placed the root CA that signed the mock's cert
+client_ca_path               = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/client-ca-bundle.pem"             # Inbound mTLS ON for this whole suite (patched by the harness) - every audit call presents a client cert, see tls_send() in tls_audit.py
 
 tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
                                            # ^^^ Colon-separated TLSv1.3 ciphers in preference order

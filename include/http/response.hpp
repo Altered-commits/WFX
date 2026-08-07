@@ -7,6 +7,7 @@
 #include "core/core.hpp"
 #include "shared/json/json_object_fwd.hpp"
 #include "shared/apis/http_api.hpp"
+#include "shared/utils/memory.hpp"
 #include <string_view>
 #include <charconv>
 
@@ -157,11 +158,9 @@ public: // Sugar syntax
     {
         using FnType = std::decay_t<Fn>;
 
-        void* raw = Core::MemoryApiExt1()->alloc(sizeof(FnType));
-        if(!raw)
+        FnType* f = Shared::New<FnType>(std::forward<Fn>(fn));
+        if(!f)
             return;
-
-        FnType* f = new (raw) FnType(std::forward<Fn>(fn));
 
         Shared::StreamGenerator gen{f,
 
@@ -171,11 +170,7 @@ public: // Sugar syntax
                                     },
 
                                     // Destroy
-                                    [](void* ctx) {
-                                        auto* f = static_cast<FnType*>(ctx);
-                                        f->~FnType();
-                                        Core::MemoryApiExt1()->free(f);
-                                    }};
+                                    [](void* ctx) { Shared::Delete(static_cast<FnType*>(ctx)); }};
 
         Core::HttpApiExt1()->writeStream(backend_, gen, chunked);
     }

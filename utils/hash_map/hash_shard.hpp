@@ -33,8 +33,8 @@ public:
     HashShard() = default;
     ~HashShard();
 
-    // Owns a raw, manually-lifetime-managed 'entries_' buffer. A shallow (compiler-generated) copy-
-    // -would double-free it, so copying is disabled outright rather than left as a footgun
+    // Owns a raw, manually-lifetime-managed 'entries_' buffer. A shallow (compiler-generated) copy
+    // would double-free it, so copying is disabled outright rather than left as a footgun.
     HashShard(const HashShard&) = delete;
     HashShard& operator=(const HashShard&) = delete;
 
@@ -67,8 +67,8 @@ private: // Helper Functions
     [[nodiscard]] bool Resize(std::size_t newCapacity = 0);
     void BackwardShiftErase(std::size_t pos);
 
-    // Every slot is a live, placement-constructed object, even unoccupied ones - must be-
-    // -individually destroyed before the backing buffer is freed, or container V leaks
+    // Every slot is a live, placement-constructed object, even unoccupied ones - must be
+    // individually destroyed before the backing buffer is freed, or container V leaks.
     static void DestroySlots(Entry* slots, std::size_t count) noexcept;
 
     // Overflow-safe 'count * sizeof(Entry)'

@@ -1,8 +1,8 @@
 name: WFX Tidy Check
 
-# Reusable: invoked by entry.yml AFTER the compile check, so this file owns-
-# -ONLY the clang-tidy logic. Reuses compile_check.yml's clang build cache-
-# -so nothing gets rebuilt from scratch
+# Reusable: invoked by entry.yml AFTER the compile check, so this file owns
+# ONLY the clang-tidy logic. Reuses compile_check.yml's clang build cache
+# so nothing gets rebuilt from scratch
 on:
   workflow_call:
 
@@ -21,8 +21,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake build-essential clang clang-tidy ninja-build
 
-      # See compile_check.yml: checkout resets mtimes, which defeats Ninja's-
-      # -cache-hit detection on the restored build/ dir below.
+      # See compile_check.yml: checkout resets mtimes, which defeats Ninja's
+      # cache-hit detection on the restored build/ dir below.
       - name: Restore file mtimes from git history
         run: |
           git ls-files -z | while IFS= read -r -d '' f; do
@@ -47,9 +47,9 @@ jobs:
             -DWFX_ENABLE_ASAN=ON
           cmake --build build
 
-      # scripts/tidy_cache.py skips re-analyzing files unchanged since a prior-
-      # -run (see the script's docstring for how it keys results). This is what-
-      # -actually persists across CI runs, so restore/save it same as build/
+      # scripts/py/tidy_cache.py skips re-analyzing files unchanged since a prior
+      # run (see the script's docstring for how it keys results). This is what
+      # actually persists across CI runs, so restore/save it same as build/
       - name: Restore clang-tidy result cache
         uses: actions/cache@v6
         with:

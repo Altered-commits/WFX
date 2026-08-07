@@ -10,7 +10,7 @@ namespace WFX::Http {
 using namespace WFX::Utils;  // For 'Logger', 'StringUtils'
 using namespace WFX::Shared; // For every single abi type
 
-const TrieNode* RouteTrie::Insert(std::string_view fullRoute, RouteCallback handler)
+TrieNode* RouteTrie::Insert(std::string_view fullRoute, RouteCallback handler)
 {
     TrieNode* node = InsertRoute(fullRoute);
     node->callback = handler;

@@ -16,7 +16,7 @@ namespace CryptoImpl = WFX::Utils::Crypto;
 const CryptoApiExt1* GetCryptoApiExt1()
 {
     // clang-format off
-    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
     static const CryptoApiExt1 GlobalCryptoAPIExt1 = {
         CryptoImpl::Hash,
         CryptoImpl::HashCreate,
@@ -39,6 +39,17 @@ const CryptoApiExt1* GetCryptoApiExt1()
 
         CryptoImpl::RandomBytes,
         CryptoImpl::ConstantTimeEquals,
+
+        CryptoImpl::AsymKeyLoad,
+        CryptoImpl::AsymKeyGenerate,
+        CryptoImpl::AsymKeyFromRsaPublic,
+        CryptoImpl::AsymKeyFromEcPublic,
+        CryptoImpl::AsymKeyPemLen,
+        CryptoImpl::AsymKeyExport,
+        CryptoImpl::AsymKeyFree,
+        CryptoImpl::AsymSigLen,
+        CryptoImpl::AsymSign,
+        CryptoImpl::AsymVerify,
     };
     // clang-format on
 

@@ -55,10 +55,12 @@ using WFX::Form::Field;
 //   WFX::Form::Malformed      : body structure is broken / wrong field order
 //   WFX::Form::CleanFailed    : a field failed validation or sanitization
 // -----------------------------------------------------------------------
+// NOLINTBEGIN(readability-identifier-naming)
 inline constexpr auto Ok = FormError::NONE;
 inline constexpr auto BadContentType = FormError::UNSUPPORTED_CONTENT_TYPE;
 inline constexpr auto Malformed = FormError::MALFORMED;
 inline constexpr auto CleanFailed = FormError::CLEAN_FAILED;
+// NOLINTEND(readability-identifier-naming)
 
 // -----------------------------------------------------------------------
 // Schema builder

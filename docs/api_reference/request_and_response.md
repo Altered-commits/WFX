@@ -55,13 +55,13 @@ Below are the primary members exposed by the `Request` structure.
     ```
 
 - **`Path Segments`**  
-    Contains the parsed components of the request path. Each segment represents either a literal path component or a typed route parameter extracted from the URL (for example integers or UUIDs).
+    Route paths can declare typed placeholders with `<name:type>` (the `name` is just for readability - it has no effect at runtime, only `type` is used). Four types are supported: `uint`, `int`, `uuid`, and `string`. A bare `*` as the last segment matches the rest of the path as a `string`.
 
-    This allows route handlers to access route parameters in a type-safe manner without performing manual string parsing or conversions.
+    This lets route handlers read route parameters in a type-safe way without manual string parsing.
 
     **Example route**:  
     ```cpp
-    WFX_GET("/users/<int>/posts/<uint>", [](WFX::Request req, WFX::Respons res) {
+    WFX_GET("/users/<id:uint>/posts/<postId:int>", [](WFX::Request req, WFX::Response res) {
         /* ... */
     });
     ```
@@ -72,12 +72,12 @@ Below are the primary members exposed by the `Request` structure.
     **Conceptual internal representation**:
     ```cpp
     [
-        int64_t{42},
-        uint64_t{100}
+        uint64_t{42},
+        int64_t{100}
     ]
     ```
 
-    **Accessed via an index-based API**:
+    **Accessed via an index-based API** (segments are matched by position, not by the name written in the route - there is no name-based lookup):
     ```cpp
     // Returns number of parsed segments
     std::uint64_t segCount = req.SegmentCount();
@@ -85,15 +85,18 @@ Below are the primary members exposed by the `Request` structure.
     // Returns the typed segment at the given index
     auto segment = req.GetSegment(0); // Access 42
 
-    // However, 'segment' itself is a variant type. To access the value:
-    segment.AsInt();
-
-    // or directly:
-    req.GetSegment(0).AsInt();
+    // 'segment' is a variant type - pick the accessor matching the route's declared type
+    segment.AsU64();   // uint
+    segment.AsI64();   // int
+    segment.AsString(); // string / *
+    segment.AsUUID();   // uuid
     ```
 
+    !!! warning
+        Calling the wrong accessor for the segment's actual type (e.g. `AsU64()` on a `string` segment) is undefined behavior - match the accessor to the type declared in the route path. Calling `GetSegment()` with an out-of-range index is fatal.
+
     !!! note
-        The purpose and usage of `pathSegments` will become much clearer in the Routing section.
+        If a segment's value fails to parse as its declared type (e.g. a non-numeric value against `<id:uint>`), the route simply does not match and the request falls through to a normal 404 - it is never a runtime error.
     
 - **`Context Store`**  
     Allows storing request-scoped values for the lifetime of the active request lifecycle.

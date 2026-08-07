@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Altered-commits
 #
-# WFX test harness.
+# WFX base audit
 #
 # Phases:
 #   security   path traversal, CRLF/response-splitting, info leakage,
@@ -15,292 +15,147 @@
 #   chaos      worker kills, SIGSTOP/SIGCONT, kill under mixed load
 #
 # Usage:
-#   python3 harness.py                   # all phases
-#   python3 harness.py --phase security
-#   python3 harness.py --list-phases
+#   python3 base_audit.py                   # all phases
+#   python3 base_audit.py --phase security
+#   python3 base_audit.py --list-phases
 #
 # Exit codes:
 #   0   all phases passed
 #   1   crash / hang / correctness failure / server death
 #   2   security finding (traversal, response splitting, info leak)
 
-import argparse
-import collections
 import concurrent.futures
 import json
 import os
 import random
 import signal
 import socket
-import subprocess
 import sys
 import threading
 import time
 
+# Suites are run directly, so tests/ has to be on the path before common is importable
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-import _audit_common as common
 
-# Terminal: colors, GitHub Actions workflow commands, and --ci state are
-# shared with the other audits, see _audit_common.py. _dot/_progress_*/_sec
-# below are specific to this harness's dot-progress + chaos-phase output.
-_green, _red, _yellow, _cyan, _bold = common.green, common.red, common.yellow, common.cyan, common.bold
-_mag = lambda t: common.color("35", t)
-_gh_group, _gh_endgroup, _gh_error, _gh_warning = common.gh_group, common.gh_endgroup, common.gh_error, common.gh_warning
-_hdr = common.hdr
+import common
+from common import net, term
 
-def _log(tag, msg="", c=None):
-    ts = time.strftime("%H:%M:%S")
-    print("[%s] %s  %s" % (ts, (c or _cyan)("%-10s" % tag), msg), flush=True)
+_green, _red, _yellow, _cyan = term.green, term.red, term.yellow, term.cyan
 
-def _dot(ch=".", col="32"):
-    if common.CI: return
-    sys.stdout.write(common.color(col, ch)); sys.stdout.flush()
+# Transport
+#
+# common.net is the transport; these adapt it to the (status, raw) pair this suite reads on
+# nearly every line, and build the request bytes its vectors need
+# A failed exchange is ("CONN_ERR", b""): refused and reset used to be distinguished, but every
+# call site treats them the same ("not ready yet")
+_status    = net.status
+body_of    = net.body
+parse_hdrs = net.headers
 
-def _progress_hdr(text):
-    """Inline progress prefix. TTY: no newline. CI: full log line."""
-    if common.CI:
-        print(text.rstrip(), flush=True)
-    else:
-        sys.stdout.write(text); sys.stdout.flush()
+def raw_send(host, port, payload, rtimeout=3.0, rmax=1 << 20, ctimeout=4.0):
+    raw = net.send(host, port, payload, rtimeout=rtimeout, ctimeout=ctimeout, rmax=rmax)
+    return ("CONN_ERR", b"") if raw is None else (net.status(raw), raw)
 
-def _progress_end(suffix=""):
-    """End a dot-progress line. TTY: newline. CI: print suffix if any."""
-    if common.CI:
-        if suffix: print("  " + suffix, flush=True)
-    else:
-        print((" " + suffix) if suffix else "", flush=True)
-
-def _sec(name, verdict, w=78):
-    print("\n  %s  [%s]" % (_bold("── " + name), verdict))
-    print("─" * w)
-
-# Raw HTTP: stdlib socket only, no external deps
-def raw_send(host, port, payload, rtimeout=3.0, rmax=1<<20, ctimeout=4.0):
-    """Send raw bytes, read until close/timeout. Never raises. Returns (status, raw)."""
-    try:
-        s = socket.create_connection((host, port), timeout=ctimeout)
-    except OSError:
-        return "CONN_ERR", b""
-    try:
-        s.sendall(payload)
-        s.settimeout(rtimeout)
-        buf, total = [], 0
-        while total < rmax:
-            try:
-                d = s.recv(65536)
-            except (socket.timeout, OSError):
-                break
-            if not d: break
-            buf.append(d); total += len(d)
-        raw = b"".join(buf)
-        return _status(raw), raw
-    except OSError:
-        return "IO_ERR", b""
-    finally:
-        try: s.close()
-        except OSError: pass
-
-def raw_send_dripped(host, port, payload, chunk_size=1, delay=0.0, rtimeout=5.0, rmax=1<<20, ctimeout=4.0):
-    """Like raw_send, but writes the payload in small chunks (optionally with a short
-    delay between each) instead of one sendall() call. Forces the request to actually
-    arrive over several separate recv() calls server-side, exercising the ET-epoll
-    multi-read / incremental read-buffer growth path instead of landing in a single read.
-    Never raises. Returns (status, raw)."""
-    try:
-        s = socket.create_connection((host, port), timeout=ctimeout)
-    except OSError:
-        return "CONN_ERR", b""
-    try:
-        for i in range(0, len(payload), chunk_size):
-            s.sendall(payload[i:i + chunk_size])
-            if delay: time.sleep(delay)
-        s.settimeout(rtimeout)
-        buf, total = [], 0
-        while total < rmax:
-            try:
-                d = s.recv(65536)
-            except (socket.timeout, OSError):
-                break
-            if not d: break
-            buf.append(d); total += len(d)
-        raw = b"".join(buf)
-        return _status(raw), raw
-    except OSError:
-        return "IO_ERR", b""
-    finally:
-        try: s.close()
-        except OSError: pass
-
-def _status(raw):
-    if not raw.startswith(b"HTTP/"): return None
-    try:    return int(raw.split(b" ", 2)[1])
-    except: return None
+# Writes the request in small pieces, so it lands over several server-side reads instead of one:-
+# -exercises the ET-epoll multi-read and incremental buffer growth paths
+def raw_send_dripped(host, port, payload, chunk_size=1, delay=0.0, rtimeout=5.0, rmax=1 << 20,
+                     ctimeout=4.0):
+    raw = net.send_dripped(host, port, payload, chunk_size=chunk_size, delay=delay,
+                           rtimeout=rtimeout, ctimeout=ctimeout, rmax=rmax)
+    return ("CONN_ERR", b"") if raw is None else (net.status(raw), raw)
 
 def _build(method, path, headers=None, body=b"", close=True):
     lines = ["%s %s HTTP/1.1" % (method, path), "Host: x"]
-    if close:    lines.append("Connection: close")
+    if close:
+        lines.append("Connection: close")
     if headers:
-        for k, v in headers.items(): lines.append("%s: %s" % (k, v))
-    if body:     lines.append("Content-Length: %d" % len(body))
+        for k, v in headers.items():
+            lines.append("%s: %s" % (k, v))
+    if body:
+        lines.append("Content-Length: %d" % len(body))
+
     return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + body
 
 def _build_at_header_size(total, method="GET", path="/health"):
-    """Build a raw request whose header block (request-line through the blank line,
-    inclusive - matches SafeFindHeaderEnd's accounting in http_parser.cpp) is exactly
-    `total` bytes, via a single padding header. Lets a boundary test target
-    max_header_size precisely instead of guessing padding by hand."""
+    """Build a request whose header block is exactly `total` bytes, via one padding header.
+
+    The block runs from the request line through the blank line inclusive, matching
+    SafeFindHeaderEnd's accounting in http_parser.cpp, so a boundary test can target
+    max_header_size precisely instead of guessing padding by hand.
+    """
     head = "%s %s HTTP/1.1\r\nHost: x\r\nConnection: close\r\n" % (method, path)
     tail = "\r\n"
     pad_prefix, pad_suffix = "X-Pad: ", "\r\n"
-    fixed = len(head) + len(tail) + len(pad_prefix) + len(pad_suffix)
-    pad_len = total - fixed
+
+    pad_len = total - (len(head) + len(tail) + len(pad_prefix) + len(pad_suffix))
     if pad_len < 0:
-        raise ValueError("target header size %d too small (min %d)" % (total, fixed))
+        raise ValueError("target header size %d too small" % total)
+
     return (head + pad_prefix + ("A" * pad_len) + pad_suffix + tail).encode("latin-1")
 
 def req(host, port, method, path, headers=None, body=b"", **kw):
     return raw_send(host, port, _build(method, path, headers, body), **kw)
 
-def body_of(raw):
-    i = raw.find(b"\r\n\r\n")
-    return raw[i+4:] if i >= 0 else b""
-
-def parse_hdrs(raw):
-    i = raw.find(b"\r\n\r\n")
-    if i < 0: return None, {}, raw
-    head = raw[:i]; body = raw[i+4:]
-    lines = head.split(b"\r\n")
-    hdrs = {}
-    for line in lines[1:]:
-        if b":" not in line: continue
-        k, _, v = line.partition(b":")
-        hdrs.setdefault(k.strip().lower(), []).append(v.strip())
-    return lines[0] if lines else None, hdrs, body
-
-def health(host, port, timeout=2.0):
-    st, _ = req(host, port, "GET", "/health", rtimeout=timeout, ctimeout=timeout)
-    return st == 200
-
-def wait_up(host, port, timeout=20.0):
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        if health(host, port, timeout=1.0): return time.time() - t0
-        time.sleep(0.3)
-    return None
-
-# /proc
+# Process inspection
 _HAS_PROC = os.path.isdir("/proc")
 
 def children(ppid):
-    if not _HAS_PROC: return []
+    if not _HAS_PROC:
+        return []
     out = []
     try:
         for e in os.listdir("/proc"):
-            if not e.isdigit(): continue
+            if not e.isdigit():
+                continue
             try:
                 with open("/proc/%s/status" % e) as f:
                     for line in f:
                         if line.startswith("PPid:"):
-                            if int(line.split()[1]) == ppid: out.append(int(e))
+                            if int(line.split()[1]) == ppid:
+                                out.append(int(e))
                             break
-            except (OSError, ValueError): pass
-    except OSError: pass
+            except (OSError, ValueError):
+                pass
+    except OSError:
+        pass
     return out
 
 def rss_mb(pids):
-    if not _HAS_PROC: return 0.0
+    if not _HAS_PROC:
+        return 0.0
     total = 0
     for p in pids:
         try:
             with open("/proc/%d/status" % p) as f:
                 for line in f:
-                    if line.startswith("VmRSS:"): total += int(line.split()[1]); break
-        except (OSError, ValueError): pass
+                    if line.startswith("VmRSS:"):
+                        total += int(line.split()[1])
+                        break
+        except (OSError, ValueError):
+            pass
     return total / 1024.0
 
 def fd_count(pids):
-    if not _HAS_PROC: return 0
+    if not _HAS_PROC:
+        return 0
     total = 0
     for p in pids:
-        try: total += len(os.listdir("/proc/%d/fd" % p))
-        except OSError: pass
+        try:
+            total += len(os.listdir("/proc/%d/fd" % p))
+        except OSError:
+            pass
     return total
 
 def proc_alive(pid):
-    try: os.kill(pid, 0); return True
-    except OSError: return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 # Server context
-class Server:
-    def __init__(self, cfg):
-        self.cfg  = cfg
-        self._pid = None
-        self._up  = False
-
-    def start(self):
-        cmd = [self.cfg.wfx, "run", self.cfg.app_dir,
-               "--port", str(self.cfg.port), "--detach"]
-        _log("server", "starting: %s" % " ".join(cmd))
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            raise RuntimeError("wfx run failed (rc=%d): %s %s"
-                               % (r.returncode, r.stdout.strip(), r.stderr.strip()))
-        self._up = True
-        _log("server", _green("detached OK"))
-
-    def wait_ready(self):
-        _log("server", "waiting for /health …")
-        t = wait_up(self.cfg.host, self.cfg.port, self.cfg.ready_timeout)
-        if t is None:
-            raise RuntimeError("server at %s:%d never responded within %ds"
-                               % (self.cfg.host, self.cfg.port, self.cfg.ready_timeout))
-        _log("server", _green("up in %.1fs" % t))
-
-    def pid(self):
-        if self._pid: return self._pid
-        if not self.cfg.pid_file: return None
-        try:
-            txt = open(os.path.expanduser(self.cfg.pid_file)).read().strip()
-            try:
-                d = json.loads(txt)
-                self._pid = int(d.get("pid") or d.get("Pid") or 0) or None
-            except Exception:
-                for line in txt.splitlines():
-                    if "=" in line:
-                        k, _, v = line.partition("=")
-                        if k.strip() == "pid":
-                            try: self._pid = int(v.strip()) or None
-                            except ValueError: pass
-                if not self._pid:
-                    try: self._pid = int(txt) or None
-                    except ValueError: pass
-        except (OSError, ValueError): pass
-        return self._pid
-
-    def is_alive(self):
-        return health(self.cfg.host, self.cfg.port, timeout=2.0)
-
-    def stop(self):
-        if not self._up: return
-        _log("server", "stopping …")
-        subprocess.run([self.cfg.wfx, "control", "stop", "app"],
-                       capture_output=True, text=True)
-        mpid = self.pid()
-        if mpid:
-            deadline = time.time() + 10.0
-            while time.time() < deadline:
-                if not proc_alive(mpid):
-                    _log("server", _green("stopped (PID %d exited)" % mpid))
-                    return
-                time.sleep(0.25)
-            _log("server", _yellow("PID %d still alive, sending SIGKILL" % mpid))
-            try: os.kill(mpid, signal.SIGKILL)
-            except OSError: pass
-        else:
-            _log("server", _green("stopped"))
-
 # Payload corpora
-# Leak markers: any of these in a response = information leakage finding.
+# Leak markers: any of these in a response = information leakage finding
 # Pairs: (must_contain_a, must_contain_b_or_None)
 LEAK_MARKERS = [
     (b"root:x:",           None),
@@ -333,9 +188,9 @@ LEAK_MARKERS = [
 
 def has_leak(raw):
     for a, b in LEAK_MARKERS:
-        if a in raw and (b is None or b in raw): return True, a
+        if a in raw and (b is None or b in raw):
+            return True, a
     return False, None
-
 
 def _build_traversal_url():
     targets = [
@@ -417,11 +272,13 @@ def _build_traversal_url():
         "/public/C:\\Windows\\system32\\drivers\\etc\\hosts",
         "/public/%43%3a%5cwindows%5csystem32%5cdrivers%5cetc%5chosts",
     ]
-    seen = set(); out = []
+    seen = set()
+    out = []
     for v in vecs:
-        if v not in seen: seen.add(v); out.append(v)
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
     return out
-
 
 def _build_traversal_hdr():
     targets = [
@@ -459,18 +316,20 @@ def _build_traversal_hdr():
         "public/../../../etc/passwd",
         "../" * 64 + "etc/passwd",
     ]
-    seen = set(); out = []
+    seen = set()
+    out = []
     for v in vecs:
-        if v not in seen: seen.add(v); out.append(v)
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
     return out
-
 
 TRAVERSAL_URL = _build_traversal_url()
 TRAVERSAL_HDR = _build_traversal_hdr()
 
 # CRLF corpus: check is STRICT, only flags if the marker appears as a parsed
 # HEADER NAME (split on \r\n, partitioned at first :). Substrings inside
-# values never count. Zero false positives.
+# values never count. Zero false positives
 CRLF_VALUES = [
     # Real CRLF injection: the only ones that actually split in HTTP/1.1
     b"safe\r\nX-Injected: pwned",
@@ -499,10 +358,10 @@ CRLF_VALUES = [
     b"A" * 32768,
 ]
 
-# Max body size from wfx.toml = 65536.
-# Test at-limit, one-over, and integer-overflow variants.
+# Max body size from wfx.toml = 65536
+# Test at-limit, one-over, and integer-overflow variants
 _BODY_LIMIT = 65536
-# Max header block size from wfx.toml (max_header_size) = 8192.
+# Max header block size from wfx.toml (max_header_size) = 8192
 _HEADER_LIMIT = 8192
 BODYBOMB_PAYLOADS = [
     # Exactly at limit: should be accepted (200)
@@ -722,7 +581,7 @@ VIOLATE_ROUTES = ["/violate/204body", "/violate/conn", "/violate/recommit"]
 LIGHT_PATHS    = ["/health", "/text", "/api/v1/status", "/chain"]
 
 # Route correctness specification
-# Every route in main.cpp is listed here with exact expected behavior.
+# Every route in main.cpp is listed here with exact expected behavior
 ROUTE_CHECKS = [
     # (method, path, headers, body, expected_status, must_contain_in_body, must_have_header)
     # Basic routes
@@ -824,66 +683,20 @@ def _probe(host, port, payload, retries=3, delay=0.3):
     st, raw = "CONN_ERR", b""
     for i in range(retries):
         st, raw = raw_send(host, port, payload, rtimeout=3.0)
-        if isinstance(st, int): return st, raw
-        if i < retries - 1: time.sleep(delay)
+        if isinstance(st, int):
+            return st, raw
+        if i < retries - 1:
+            time.sleep(delay)
     return st, raw
 
 def _fetch_metrics(host, port):
     st, raw = req(host, port, "GET", "/metrics", rtimeout=3.0)
     if st == 200:
-        try: return json.loads(body_of(raw))
-        except Exception: pass
+        try:
+            return json.loads(body_of(raw))
+        except Exception:
+            pass
     return {}
-
-class _Heartbeat:
-    """Logs a 'still running' line every `interval` seconds. CI only."""
-    def __init__(self, interval=30):
-        self._stop  = threading.Event()
-        self._phase = "?"
-        self._t0    = time.time()
-        self._lock  = threading.Lock()
-        self._t     = threading.Thread(target=self._run, daemon=True, name="heartbeat")
-        self._t.start()
-
-    def set_phase(self, name):
-        with self._lock:
-            self._phase = name
-            self._t0    = time.time()
-
-    def _run(self):
-        while not self._stop.wait(30):
-            with self._lock:
-                phase   = self._phase
-                elapsed = time.time() - self._t0
-            _log("harness", "still running: phase=%s  elapsed=%.0fs" % (phase, elapsed))
-
-    def stop(self):
-        self._stop.set()
-        self._t.join(timeout=5.0)
-
-
-def _run_phase_timed(name, fn, cfg, srv, timeout):
-    """Run phase fn in a thread; if it exceeds timeout mark TIMEOUT and return."""
-    result = [None]
-    def _worker(): result[0] = fn(cfg, srv)
-    t = threading.Thread(target=_worker, daemon=True, name="phase-%s" % name)
-    t.start()
-    t.join(timeout=timeout)
-    if t.is_alive():
-        msg = "phase %s exceeded %ds limit" % (name, timeout)
-        _gh_error(msg)
-        _log("harness", _red("TIMEOUT: " + msg))
-        return {"name": name, "rc": 1,
-                "findings": [("TIMEOUT", msg)], "stats": {}}
-    return result[0]
-
-
-def _wait_recovery(host, port, timeout=15.0):
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        if health(host, port, timeout=1.0): return time.time() - t0
-        time.sleep(0.3)
-    return None
 
 def _verify_all_routes(host, port):
     """
@@ -902,20 +715,24 @@ def _verify_all_routes(host, port):
         for attempt in range(3):
             st, raw = req(host, port, method, path, headers=hdrs, body=body,
                           rtimeout=5.0, ctimeout=3.0)
-            if isinstance(st, int): break
-            if attempt < 2: time.sleep(0.3)
+            if isinstance(st, int):
+                break
+            if attempt < 2:
+                time.sleep(0.3)
         b = body_of(raw)
         ok = (st == expect_st)
-        if ok and needle is not None: ok = needle in b
+        if ok and needle is not None:
+            ok = needle in b
         if ok and hdr_check is not None:
             _, hdrs_r, _ = parse_hdrs(raw)
             hname, hval = hdr_check
             vals = hdrs_r.get(hname.lower().encode(), [])
             ok = bool(vals) and hval in vals[0]
-        detail = None if ok else "%s %s → %s (expected %s%s)" % (
+        detail = None if ok else "%s %s -> %s (expected %s%s)" % (
             method, path, st, expect_st,
             (", body missing %r" % needle) if needle and st == expect_st else "")
-        with lock: results.append((ok, detail))
+        with lock:
+            results.append((ok, detail))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(ROUTE_CHECKS)) as ex:
         futs = [ex.submit(_check, *c) for c in ROUTE_CHECKS]
@@ -928,32 +745,32 @@ def _verify_all_routes(host, port):
 def _do_kill(mpid, stats, label):
     ws = children(mpid)
     if not ws:
-        _log("chaos", _yellow("  [%s] no workers to kill" % label))
+        term.log("chaos", _yellow("  [%s] no workers to kill" % label))
         return None, False
     v = random.choice(ws)
     try:
         os.kill(v, signal.SIGKILL)
         stats["kills"] = stats.get("kills", 0) + 1
-        _log("chaos", "  [%s] SIGKILL PID %d (%d workers)" % (label, v, len(ws)))
+        term.log("chaos", "  [%s] SIGKILL PID %d (%d workers)" % (label, v, len(ws)))
         return v, True
     except OSError as e:
-        _log("chaos", _yellow("  [%s] kill failed: %s" % (label, e)))
+        term.log("chaos", _yellow("  [%s] kill failed: %s" % (label, e)))
         return v, False
 
 def _chaos_recover_and_verify(host, port, findings, label, timeout=15.0):
-    rec = _wait_recovery(host, port, timeout)
+    rec = common.await_health(host, port, timeout)
     if rec is None:
-        _log("chaos", _red("  [%s] server did NOT recover within %.0fs" % (label, timeout)))
+        term.log("chaos", _red("  [%s] server did NOT recover within %.0fs" % (label, timeout)))
         findings.append(("NO_RECOVERY", "[%s] unreachable after kill" % label))
         return False
-    _log("chaos", _green("  [%s] /health back in %.1fs" % (label, rec)))
+    term.log("chaos", _green("  [%s] /health back in %.1fs" % (label, rec)))
     p, f, details = _verify_all_routes(host, port)
     if f > 0:
-        _log("chaos", _red("  [%s] %d/%d routes WRONG: %s" % (label, f, p+f, details[:2])))
+        term.log("chaos", _red("  [%s] %d/%d routes WRONG: %s" % (label, f, p+f, details[:2])))
         findings.append(("CORRECTNESS", "[%s] %d routes wrong after recovery: %s"
                          % (label, f, details[:3])))
     else:
-        _log("chaos", _green("  [%s] %d/%d routes correct" % (label, p, p+f)))
+        term.log("chaos", _green("  [%s] %d/%d routes correct" % (label, p, p+f)))
     return True
 
 def _light_flood(host, port, n=8):
@@ -962,11 +779,13 @@ def _light_flood(host, port, n=8):
         while not stop.is_set():
             req(host, port, "GET", random.choice(LIGHT_PATHS), rtimeout=1.0, ctimeout=1.0)
     ts = [threading.Thread(target=_w, daemon=True) for _ in range(n)]
-    for t in ts: t.start()
+    for t in ts:
+        t.start()
     return stop, ts
 
 # Phase 1: SECURITY
-def phase_security(cfg, srv):
+def phase_security(ctx):
+    cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
     findings = []
     stats = {"trav_url": 0, "trav_hdr": 0, "crlf": 0,
@@ -978,86 +797,79 @@ def phase_security(cfg, srv):
         while not stop_bg.is_set():
             req(host, port, "GET", random.choice(LIGHT_PATHS), rtimeout=2.0)
     bg = [threading.Thread(target=_bg, daemon=True) for _ in range(16)]
-    for t in bg: t.start()
+    for t in bg:
+        t.start()
 
-    _log("security", "started  (%d trav-url  %d trav-hdr  %d CRLF  %d violate)"
+    term.log("security", "started  (%d trav-url  %d trav-hdr  %d CRLF  %d violate)"
          % (len(TRAVERSAL_URL), len(TRAVERSAL_HDR), len(CRLF_VALUES), len(VIOLATE_ROUTES)))
 
     try:
-        # ── /download without X-File must return 400 ─────────────────────────
+        # /download without X-File must return 400
         st, _ = _probe(host, port, _build("GET", "/download"))
         if isinstance(st, int) and st != 400:
             findings.append(("MISSING_HEADER_NOT_400",
                               "/download without X-File returned %s, expected 400" % st))
 
-        # ── URL path traversal ────────────────────────────────────────────────
-        _progress_hdr(_cyan("[%s] security   " % time.strftime("%H:%M:%S")) +
-                      "trav-url  [%3d] " % len(TRAVERSAL_URL))
-        for vec in TRAVERSAL_URL:
-            payload = ("GET %s HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
-                       % vec).encode("latin-1", "replace")
-            _, raw = _probe(host, port, payload)
-            stats["trav_url"] += 1
-            leaked, marker = has_leak(raw)
-            if leaked:
-                _dot("!", "31")
-                findings.append(("PATH_TRAVERSAL_URL",
-                                  "vec=%r  marker=%r" % (vec, marker)))
-            else:
-                _dot(".")
-        _progress_end()
+        # URL path traversal
+        with term.progress("security", "trav-url", len(TRAVERSAL_URL)) as pr:
+            for vec in TRAVERSAL_URL:
+                payload = ("GET %s HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+                           % vec).encode("latin-1", "replace")
+                _, raw = _probe(host, port, payload)
+                stats["trav_url"] += 1
+                leaked, marker = has_leak(raw)
+                if leaked:
+                    pr.bad()
+                    findings.append(("PATH_TRAVERSAL_URL",
+                                      "vec=%r  marker=%r" % (vec, marker)))
+                else:
+                    pr.ok()
 
-        # ── X-File header traversal ───────────────────────────────────────────
-        _progress_hdr(_cyan("[%s] security   " % time.strftime("%H:%M:%S")) +
-                      "trav-hdr  [%3d] " % len(TRAVERSAL_HDR))
-        for vec in TRAVERSAL_HDR:
-            _, raw = _probe(host, port, _build("GET", "/download", headers={"X-File": vec}))
-            stats["trav_hdr"] += 1
-            leaked, marker = has_leak(raw)
-            if leaked:
-                _dot("!", "31")
-                findings.append(("PATH_TRAVERSAL_HDR",
-                                  "vec=%r  marker=%r" % (vec, marker)))
-            else:
-                _dot(".")
-        _progress_end()
+        # X-File header traversal
+        with term.progress("security", "trav-hdr", len(TRAVERSAL_HDR)) as pr:
+            for vec in TRAVERSAL_HDR:
+                _, raw = _probe(host, port, _build("GET", "/download", headers={"X-File": vec}))
+                stats["trav_hdr"] += 1
+                leaked, marker = has_leak(raw)
+                if leaked:
+                    pr.bad()
+                    findings.append(("PATH_TRAVERSAL_HDR",
+                                      "vec=%r  marker=%r" % (vec, marker)))
+                else:
+                    pr.ok()
 
-        # ── CRLF / response splitting ─────────────────────────────────────────
-        _progress_hdr(_cyan("[%s] security   " % time.strftime("%H:%M:%S")) +
-                      "crlf      [%3d] " % len(CRLF_VALUES))
-        for val in CRLF_VALUES:
-            payload = (b"GET /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\nX-Echo: "
-                       + val + b"\r\n\r\n")
-            _, raw = _probe(host, port, payload)
-            stats["crlf"] += 1
-            _, hdrs, _ = parse_hdrs(raw)
-            if b"x-injected" in hdrs:
-                _dot("!", "31")
-                findings.append(("RESPONSE_SPLIT",
-                                  "X-Echo %r caused X-Injected as parsed header name" % val))
-            else:
-                _dot(".")
-        _progress_end()
+        # CRLF / response splitting
+        with term.progress("security", "crlf", len(CRLF_VALUES)) as pr:
+            for val in CRLF_VALUES:
+                payload = (b"GET /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\nX-Echo: "
+                           + val + b"\r\n\r\n")
+                _, raw = _probe(host, port, payload)
+                stats["crlf"] += 1
+                _, hdrs, _ = parse_hdrs(raw)
+                if b"x-injected" in hdrs:
+                    pr.bad()
+                    findings.append(("RESPONSE_SPLIT",
+                                      "X-Echo %r caused X-Injected as parsed header name" % val))
+                else:
+                    pr.ok()
 
-        # ── Content-Type duplication (real \r\n injection) ────────────────────
-        _progress_hdr(_cyan("[%s] security   " % time.strftime("%H:%M:%S")) +
-                      "crlf-ct   [  2] ")
-        for val in (b"ok\r\nContent-Type: text/html",
-                    b"ok\r\nSet-Cookie: session=evil; Path=/"):
-            payload = (b"GET /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\nX-Echo: "
-                       + val + b"\r\n\r\n")
-            _, raw = _probe(host, port, payload)
-            _, hdrs, _ = parse_hdrs(raw)
-            if len(hdrs.get(b"content-type", [])) > 1:
-                _dot("!", "31")
-                findings.append(("RESPONSE_SPLIT",
-                                  "Content-Type duplicated by %r" % val))
-            else:
-                _dot(".")
-        _progress_end()
+        # Content-Type duplication (real \r\n injection)
+        with term.progress("security", "crlf-ct", 2) as pr:
+            for val in (b"ok\r\nContent-Type: text/html",
+                        b"ok\r\nSet-Cookie: session=evil; Path=/"):
+                payload = (b"GET /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\nX-Echo: "
+                           + val + b"\r\n\r\n")
+                _, raw = _probe(host, port, payload)
+                _, hdrs, _ = parse_hdrs(raw)
+                if len(hdrs.get(b"content-type", [])) > 1:
+                    pr.bad()
+                    findings.append(("RESPONSE_SPLIT",
+                                      "Content-Type duplicated by %r" % val))
+                else:
+                    pr.ok()
 
-        # ── Double-CRLF fake HTTP response ────────────────────────────────────
-        _log("security", "double-CRLF body injection …")
+        # Double-CRLF fake HTTP response
+        term.log("security", "double-CRLF body injection ...")
         dbl = b"safe\r\n\r\nHTTP/1.1 200 Injected\r\nX-Injected: pwned\r\n\r\nbody"
         payload = (b"GET /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\nX-Echo: "
                    + dbl + b"\r\n\r\n")
@@ -1066,11 +878,11 @@ def phase_security(cfg, srv):
         if sep >= 0 and raw[sep+4:].startswith(b"HTTP/1.1 200 Injected"):
             findings.append(("RESPONSE_SPLIT",
                               "double CRLF created parseable second HTTP response"))
-            _log("security", _red("  !! double-CRLF body injection confirmed"))
+            term.log("security", _red("  !! double-CRLF body injection confirmed"))
 
-        # ── Information leakage on all routes ────────────────────────────────
+        # Information leakage on all routes
         # Any route returning sensitive content = critical
-        _log("security", "info leakage check across all routes …")
+        term.log("security", "info leakage check across all routes ...")
         leakable_paths = [
             "/health", "/text", "/metrics", "/json/im", "/json/rm",
             "/api/v1/status", "/chain", "/mw/injected", "/mw/blocked",
@@ -1084,84 +896,84 @@ def phase_security(cfg, srv):
                 stats["leak"] += 1
                 findings.append(("INFO_LEAK",
                                   "route=%s  marker=%r" % (path, marker)))
-                _log("security", _red("  !! LEAK on %s: %r" % (path, marker)))
+                term.log("security", _red("  !! LEAK on %s: %r" % (path, marker)))
 
-        # ── Contract violations: must return 500, never crash ─────────────────
-        _log("security", "contract violations (%d routes × 10 hits) …" % len(VIOLATE_ROUTES))
+        # Contract violations: must return 500, never crash
+        term.log("security", "contract violations (%d routes x 10 hits) ..." % len(VIOLATE_ROUTES))
         for route in VIOLATE_ROUTES:
-            _progress_hdr(_cyan("[%s] security   " % time.strftime("%H:%M:%S")) +
-                          "%-32s " % route)
-            for _ in range(10):
-                st, _ = _probe(host, port, _build("GET", route))
-                if st == 500:
-                    stats["violate_ok"] += 1; _dot(".")
-                else:
-                    stats["violate_bad"] += 1; _dot("!", "31")
-                    findings.append(("VIOLATE_BAD_STATUS",
-                                      "%s returned %s, expected 500" % (route, st)))
-            _progress_end()
+            with term.progress("security", route) as pr:
+                for _ in range(10):
+                    st, _ = _probe(host, port, _build("GET", route))
+                    if st == 500:
+                        stats["violate_ok"] += 1
+                        pr.ok()
+                    else:
+                        stats["violate_bad"] += 1
+                        pr.bad()
+                        findings.append(("VIOLATE_BAD_STATUS",
+                                          "%s returned %s, expected 500" % (route, st)))
 
-        # ── Server still alive ────────────────────────────────────────────────
-        if not health(host, port, timeout=4.0):
+        # Server still alive
+        if not common.health(host, port, 4.0):
             findings.append(("SERVER_DEAD", "unreachable after security phase"))
 
     finally:
         stop_bg.set()
 
     nf = len(findings)
-    _log("security", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
+    term.log("security", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
 
-    rc = 2 if any(f[0] in ("PATH_TRAVERSAL_URL", "PATH_TRAVERSAL_HDR",
-                            "RESPONSE_SPLIT", "INFO_LEAK") for f in findings) \
-           else (1 if findings else 0)
-    return {"name": "security", "rc": rc, "findings": findings, "stats": stats}
+    ctx.phase("security").record(findings, security=("PATH_TRAVERSAL_URL", "PATH_TRAVERSAL_HDR",
+                                                     "RESPONSE_SPLIT", "INFO_LEAK"),
+                                 vectors=stats["trav_url"] + stats["trav_hdr"] + stats["crlf"]
+                                         + stats["leak"] + stats["violate_ok"] + stats["violate_bad"])
 
 # Phase 2: PROTOCOL
-# Server must survive every single vector. No assertion on status codes: # 400/500/501 are all fine. Crash = fail.
-def phase_protocol(cfg, srv):
+# Server must survive every single vector. No assertion on status codes: # 400/500/501 are all fine. Crash = fail
+def phase_protocol(ctx):
+    cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
     findings = []
     sent = 0
 
     corpora = [
-        (HEADER_ABUSE,    "header-abuse"),
-        (MALFORMED,       "malformed   "),
-        (METHOD_FORMS,    "methods     "),
-        (SMUGGLING,       "smuggling   "),
-        (BODYBOMB_PAYLOADS,"bodybomb    "),
+        (HEADER_ABUSE,      "header-abuse"),
+        (MALFORMED,         "malformed"),
+        (METHOD_FORMS,      "methods"),
+        (SMUGGLING,         "smuggling"),
+        (BODYBOMB_PAYLOADS, "bodybomb"),
     ]
 
-    _log("protocol", "started  (%d corpora, %d total vectors, zero concurrent load)"
+    term.log("protocol", "started  (%d corpora, %d total vectors, zero concurrent load)"
          % (len(corpora), sum(len(c) for c, _ in corpora)))
 
     for corpus, label in corpora:
-        _progress_hdr(_cyan("[%s] protocol   " % time.strftime("%H:%M:%S")) +
-                      "%s [%3d] " % (label, len(corpus)))
-        for vec in corpus:
-            sent += 1
-            raw_send(host, port, vec, rtimeout=2.0)
-            _dot(".")
+        with term.progress("protocol", label, len(corpus)) as pr:
+            for vec in corpus:
+                sent += 1
+                raw_send(host, port, vec, rtimeout=2.0)
+                pr.ok()
 
-        alive_now = health(host, port, timeout=5.0)
-        _progress_end(_green("alive") if alive_now else _red("DEAD"))
+            alive_now = common.health(host, port, 5.0)
+            pr.finish(_green("alive") if alive_now else _red("DEAD"))
 
         if not alive_now:
-            findings.append(("SERVER_DEAD_AFTER_%s" % label.strip().upper(),
-                              "server unreachable after %s" % label.strip()))
+            findings.append(("SERVER_DEAD_AFTER_%s" % label.upper(),
+                              "server unreachable after %s" % label))
         else:
             time.sleep(0.5)
 
-    _log("protocol", "%d vectors: %s" % (sent,
+    term.log("protocol", "%d vectors: %s" % (sent,
          _green("survived all") if not findings
          else _red("%d corpus killed server" % len(findings))))
 
-    return {"name": "protocol", "rc": 1 if findings else 0,
-            "findings": findings, "stats": {"sent": sent}}
+    ctx.phase("protocol").record(findings, vectors=sent)
 
 # Phase 3: FEATURES
-# Every route verified for correct status, body content, and headers.
-# Additional invariant checks beyond simple status.
-def phase_features(cfg, srv):
+# Every route verified for correct status, body content, and headers
+# Additional invariant checks beyond simple status
+def phase_features(ctx):
+    cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
     findings = []
 
@@ -1171,133 +983,132 @@ def phase_features(cfg, srv):
         while not stop_bg.is_set():
             req(host, port, "GET", random.choice(LIGHT_PATHS), rtimeout=2.0)
     bg = [threading.Thread(target=_bg, daemon=True) for _ in range(8)]
-    for t in bg: t.start()
+    for t in bg:
+        t.start()
 
-    _log("features", "started  (8 background threads, %d route checks)" % len(ROUTE_CHECKS))
+    term.log("features", "started  (8 background threads, %d route checks)" % len(ROUTE_CHECKS))
 
     try:
-        # ── All routes concurrently ───────────────────────────────────────────
+        # All routes concurrently
         p, f, details = _verify_all_routes(host, port)
         for d in details:
             findings.append(("ROUTE_FAIL", d))
-        _log("features", "%d/%d routes correct%s" % (p, p+f,
+        term.log("features", "%d/%d routes correct%s" % (p, p+f,
              (": " + _red("%d failed" % f)) if f else ""))
 
-        # ── Additional invariants ─────────────────────────────────────────────
+        # Additional invariants
 
         # mw/injected: middleware must inject X-Route-MW: hit
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "mw:header          ")
-        for _ in range(5):
-            st, raw = req(host, port, "GET", "/mw/injected", rtimeout=3.0)
-            _, hdrs, _ = parse_hdrs(raw)
-            vals = hdrs.get(b"x-route-mw", [])
-            if st != 200 or not vals or vals[0] != b"hit":
-                _dot("!", "31")
-                findings.append(("ROUTE_FAIL",
-                                  "/mw/injected: X-Route-MW wrong (status=%s vals=%r)" % (st, vals)))
-            else:
-                _dot(".")
-        _progress_end()
+        with term.progress("features", "mw:header") as pr:
+            for _ in range(5):
+                st, raw = req(host, port, "GET", "/mw/injected", rtimeout=3.0)
+                _, hdrs, _ = parse_hdrs(raw)
+                vals = hdrs.get(b"x-route-mw", [])
+                if st != 200 or not vals or vals[0] != b"hit":
+                    pr.bad()
+                    findings.append(("ROUTE_FAIL",
+                                      "/mw/injected: X-Route-MW wrong (status=%s vals=%r)" % (st, vals)))
+                else:
+                    pr.ok()
 
         # mw/skipnext: skipped MW header must NOT appear
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "mw:skipnext        ")
-        for _ in range(5):
-            st, raw = req(host, port, "GET", "/mw/skipnext", rtimeout=3.0)
-            _, hdrs, _ = parse_hdrs(raw)
-            if b"x-should-not-appear" in hdrs:
-                _dot("!", "31")
-                findings.append(("ROUTE_FAIL", "/mw/skipnext: skipped middleware header appeared"))
-            else:
-                _dot(".")
-        _progress_end()
+        with term.progress("features", "mw:skipnext") as pr:
+            for _ in range(5):
+                st, raw = req(host, port, "GET", "/mw/skipnext", rtimeout=3.0)
+                _, hdrs, _ = parse_hdrs(raw)
+                if b"x-should-not-appear" in hdrs:
+                    pr.bad()
+                    findings.append(("ROUTE_FAIL", "/mw/skipnext: skipped middleware header appeared"))
+                else:
+                    pr.ok()
 
         # template/cond: branch isolation: wrong branches must not appear
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "tmpl:cond-isolation")
-        for n, expected, forbidden in [
-            (2, b"high",   [b"medium", b"low"]),
-            (1, b"medium", [b"high",   b"low"]),
-            (0, b"low",    [b"high",   b"medium"]),
-        ]:
-            st, raw = req(host, port, "GET", "/template/cond/%d" % n, rtimeout=3.0)
-            b = body_of(raw)
-            if st != 200 or expected not in b:
-                _dot("!", "31")
-                findings.append(("ROUTE_FAIL",
-                                  "/template/cond/%d: %r missing" % (n, expected)))
-            elif any(x in b for x in forbidden):
-                _dot("!", "31")
-                findings.append(("ROUTE_FAIL",
-                                  "/template/cond/%d: forbidden %r present" % (
-                                      n, [x for x in forbidden if x in b])))
-            else:
-                _dot(".")
-        _progress_end()
+        with term.progress("features", "tmpl:cond-isolation") as pr:
+            for n, expected, forbidden in [
+                (2, b"high",   [b"medium", b"low"]),
+                (1, b"medium", [b"high",   b"low"]),
+                (0, b"low",    [b"high",   b"medium"]),
+            ]:
+                st, raw = req(host, port, "GET", "/template/cond/%d" % n, rtimeout=3.0)
+                b = body_of(raw)
+                if st != 200 or expected not in b:
+                    pr.bad()
+                    findings.append(("ROUTE_FAIL",
+                                      "/template/cond/%d: %r missing" % (n, expected)))
+                elif any(x in b for x in forbidden):
+                    pr.bad()
+                    findings.append(("ROUTE_FAIL",
+                                      "/template/cond/%d: forbidden %r present" % (
+                                          n, [x for x in forbidden if x in b])))
+                else:
+                    pr.ok()
 
         # template/inherit: base title must NOT appear (child overrode it)
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "tmpl:inherit       ")
-        st, raw = req(host, port, "GET", "/template/inherit", rtimeout=3.0)
-        b = body_of(raw)
-        if b"Base Title" in b:
-            _dot("!", "31")
-            findings.append(("ROUTE_FAIL",
-                              "/template/inherit: base title leaked: child override failed"))
-        else:
-            _dot(".")
-        _progress_end()
+        with term.progress("features", "tmpl:inherit") as pr:
+            st, raw = req(host, port, "GET", "/template/inherit", rtimeout=3.0)
+            b = body_of(raw)
+            if b"Base Title" in b:
+                pr.bad()
+                findings.append(("ROUTE_FAIL",
+                                  "/template/inherit: base title leaked: child override failed"))
+            else:
+                pr.ok()
 
         # Templates must respond Content-Type: text/html
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "tmpl:content-type  ")
-        for path in ["/template/static", "/template/dynamic", "/template/loop",
-                     "/template/include", "/template/inherit"]:
-            st, raw = req(host, port, "GET", path, rtimeout=3.0)
-            _, hdrs, _ = parse_hdrs(raw)
-            ct = b"".join(hdrs.get(b"content-type", [b""]))
-            if st != 200 or b"text/html" not in ct:
-                _dot("!", "31")
-                findings.append(("ROUTE_FAIL",
-                                  "%s: Content-Type=%r (expected text/html)" % (path, ct)))
-            else:
-                _dot(".")
-        _progress_end()
+        with term.progress("features", "tmpl:content-type") as pr:
+            for path in ["/template/static", "/template/dynamic", "/template/loop",
+                         "/template/include", "/template/inherit"]:
+                st, raw = req(host, port, "GET", path, rtimeout=3.0)
+                _, hdrs, _ = parse_hdrs(raw)
+                ct = b"".join(hdrs.get(b"content-type", [b""]))
+                if st != 200 or b"text/html" not in ct:
+                    pr.bad()
+                    findings.append(("ROUTE_FAIL",
+                                      "%s: Content-Type=%r (expected text/html)" % (path, ct)))
+                else:
+                    pr.ok()
 
         # /chain: all three headers must be present with exact values
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "chain:all-headers  ")
-        for _ in range(3):
-            st, raw = req(host, port, "GET", "/chain", rtimeout=3.0)
-            _, hdrs, _ = parse_hdrs(raw)
-            ok = (st == 200
-                  and hdrs.get(b"x-chain-a", [b""])[0] == b"alpha"
-                  and hdrs.get(b"x-chain-b", [b""])[0] == b"beta"
-                  and hdrs.get(b"x-chain-c", [b""])[0] == b"gamma")
-            if not ok:
-                _dot("!", "31")
-                findings.append(("ROUTE_FAIL",
-                                  "/chain: headers wrong (status=%s a=%r b=%r c=%r)" % (
-                                      st,
-                                      hdrs.get(b"x-chain-a"),
-                                      hdrs.get(b"x-chain-b"),
-                                      hdrs.get(b"x-chain-c"))))
-            else:
-                _dot(".")
-        _progress_end()
+        with term.progress("features", "chain:all-headers") as pr:
+            for _ in range(3):
+                st, raw = req(host, port, "GET", "/chain", rtimeout=3.0)
+                _, hdrs, _ = parse_hdrs(raw)
+                ok = (st == 200
+                      and hdrs.get(b"x-chain-a", [b""])[0] == b"alpha"
+                      and hdrs.get(b"x-chain-b", [b""])[0] == b"beta"
+                      and hdrs.get(b"x-chain-c", [b""])[0] == b"gamma")
+                if not ok:
+                    pr.bad()
+                    findings.append(("ROUTE_FAIL",
+                                      "/chain: headers wrong (status=%s a=%r b=%r c=%r)" % (
+                                          st,
+                                          hdrs.get(b"x-chain-a"),
+                                          hdrs.get(b"x-chain-b"),
+                                          hdrs.get(b"x-chain-c"))))
+                else:
+                    pr.ok()
 
         # /async/sleep: 20 concurrent requests: tests timer pool
-        _log("features", "async/sleep × 20 concurrent …")
+        term.log("features", "async/sleep x 20 concurrent ...")
         ok20 = fail20 = 0
         lock20 = threading.Lock()
         def _async_req():
             nonlocal ok20, fail20
             st, raw = req(host, port, "GET", "/async/sleep", rtimeout=5.0)
             with lock20:
-                if st == 200 and b"slept" in body_of(raw): ok20 += 1
-                else:                                        fail20 += 1
+                if st == 200 and b"slept" in body_of(raw):
+                    ok20 += 1
+                else:
+                    fail20 += 1
         ts = [threading.Thread(target=_async_req) for _ in range(20)]
-        for t in ts: t.start()
-        for t in ts: t.join(timeout=10.0)
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(timeout=10.0)
         if fail20 == 0:
-            _log("features", _green("  async/sleep: 20/20 passed"))
+            term.log("features", _green("  async/sleep: 20/20 passed"))
         else:
-            _log("features", _red("  async/sleep: %d/20 failed" % fail20))
+            term.log("features", _red("  async/sleep: %d/20 failed" % fail20))
             findings.append(("ROUTE_FAIL", "async/sleep concurrent: %d/20 failed" % fail20))
 
         # /echo-full under forced buffer relocation: request.Path()/GetHeader()/Body() are
@@ -1305,90 +1116,105 @@ def phase_features(cfg, srv):
         # the initial recv buffer (recv_buffer_incr=8192) forces RWBuffer to relocate
         # mid-parse (see PrepareForBody in http/parser/http_parser.cpp). This regression-
         # tests that every one of those views still points at the right bytes afterward,
-        # not just the body - a previous bug here caused false 404s and corrupted routing.
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "realloc:integrity  ")
-        marker = "REALLOC-MARK-%d" % random.randint(100000, 999999)
-        big_body = b"R" * 50000  # > recv_buffer_incr (8192), < max_body_size (65536)
-        payload = _build("POST", "/echo-full", {"X-Marker": marker}, big_body)
-        st = raw = None
-        for attempt in range(3):
-            st, raw = raw_send_dripped(host, port, payload, chunk_size=333, delay=0.002, rtimeout=8.0)
-            if isinstance(st, int): break
-            if attempt < 2: time.sleep(0.3)
-        _, hdrs, b = parse_hdrs(raw)
-        ok = (st == 200
-              and hdrs.get(b"x-echo-method", [b""])[0] == b"POST"
-              and hdrs.get(b"x-echo-path", [b""])[0] == b"/echo-full"
-              and hdrs.get(b"x-echo-marker", [b""])[0] == marker.encode()
-              and b == big_body)
-        if not ok:
-            _dot("!", "31")
-            findings.append(("REALLOC_INTEGRITY",
-                              "echo-full mismatch after relocation: status=%s method=%r path=%r "
-                              "marker=%r (expected %r) body_ok=%s body_len=%d (expected %d)"
-                              % (st, hdrs.get(b"x-echo-method"), hdrs.get(b"x-echo-path"),
-                                 hdrs.get(b"x-echo-marker"), marker, b == big_body,
-                                 len(b), len(big_body))))
-        else:
-            _dot(".")
-        _progress_end()
+        # not just the body - a previous bug here caused false 404s and corrupted routing
+        with term.progress("features", "realloc:integrity") as pr:
+            marker = "REALLOC-MARK-%d" % random.randint(100000, 999999)
+            big_body = b"R" * 50000  # > recv_buffer_incr (8192), < max_body_size (65536)
+            payload = _build("POST", "/echo-full", {"X-Marker": marker}, big_body)
+            st = raw = None
+            for attempt in range(3):
+                st, raw = raw_send_dripped(host, port, payload, chunk_size=333, delay=0.002, rtimeout=8.0)
+                if isinstance(st, int):
+                    break
+                if attempt < 2:
+                    time.sleep(0.3)
+            _, hdrs, b = parse_hdrs(raw)
+            ok = (st == 200
+                  and hdrs.get(b"x-echo-method", [b""])[0] == b"POST"
+                  and hdrs.get(b"x-echo-path", [b""])[0] == b"/echo-full"
+                  and hdrs.get(b"x-echo-marker", [b""])[0] == marker.encode()
+                  and b == big_body)
+            if not ok:
+                pr.bad()
+                findings.append(("REALLOC_INTEGRITY",
+                                  "echo-full mismatch after relocation: status=%s method=%r path=%r "
+                                  "marker=%r (expected %r) body_ok=%s body_len=%d (expected %d)"
+                                  % (st, hdrs.get(b"x-echo-method"), hdrs.get(b"x-echo-path"),
+                                     hdrs.get(b"x-echo-marker"), marker, b == big_body,
+                                     len(b), len(big_body))))
+            else:
+                pr.ok()
 
         # Boundary correctness: body/header limits from wfx.toml must be enforced exactly
         # at the byte, not off-by-one in either direction (previously only checked for
-        # "server survives", never for the actual status code - see phase_protocol).
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "limits:boundary    ")
-        boundary_checks = [
-            ("body at limit",     _build("POST", "/echo-body", None, b"B" * _BODY_LIMIT), 200),
-            ("body one over",     _build("POST", "/echo-body", None, b"B" * (_BODY_LIMIT + 1)), 400),
-            ("header at limit",   _build_at_header_size(_HEADER_LIMIT), 200),
-            ("header one over",   _build_at_header_size(_HEADER_LIMIT + 1), 400),
-        ]
-        for label, vec, expect_st in boundary_checks:
-            st, raw = _probe(host, port, vec)
-            if st != expect_st:
-                _dot("!", "31")
-                findings.append(("LIMIT_BOUNDARY", "%s: status=%s (expected %s)" % (label, st, expect_st)))
-            else:
-                _dot(".")
-        _progress_end()
+        # "server survives", never for the actual status code - see phase_protocol)
+        with term.progress("features", "limits:boundary") as pr:
+            boundary_checks = [
+                ("body at limit",     _build("POST", "/echo-body", None, b"B" * _BODY_LIMIT), 200),
+                ("body one over",     _build("POST", "/echo-body", None, b"B" * (_BODY_LIMIT + 1)), 400),
+                ("header at limit",   _build_at_header_size(_HEADER_LIMIT), 200),
+                ("header one over",   _build_at_header_size(_HEADER_LIMIT + 1), 400),
+            ]
+            for label, vec, expect_st in boundary_checks:
+                st, raw = _probe(host, port, vec)
+                if st != expect_st:
+                    pr.bad()
+                    findings.append(("LIMIT_BOUNDARY", "%s: status=%s (expected %s)" % (label, st, expect_st)))
+                else:
+                    pr.ok()
 
         # Slow-drip inbound: send a small request one byte at a time, forcing the server
         # to observe it across many separate recv() calls instead of one - exercises the
         # ET-epoll multi-read path independently of buffer relocation (the body here stays
         # well under recv_buffer_incr, so this isolates drip-read correctness from the
-        # relocation check above).
-        _progress_hdr(_cyan("[%s] features   " % time.strftime("%H:%M:%S")) + "drip:byte-at-a-time")
-        drip_marker = "DRIP-MARK-%d" % random.randint(100000, 999999)
-        drip_body = b"d" * 500
-        drip_payload = _build("POST", "/echo-full", {"X-Marker": drip_marker}, drip_body)
-        st = raw = None
-        for attempt in range(3):
-            st, raw = raw_send_dripped(host, port, drip_payload, chunk_size=1, rtimeout=10.0)
-            if isinstance(st, int): break
-            if attempt < 2: time.sleep(0.3)
-        _, hdrs, b = parse_hdrs(raw)
-        ok = (st == 200
-              and hdrs.get(b"x-echo-marker", [b""])[0] == drip_marker.encode()
-              and b == drip_body)
-        if not ok:
-            _dot("!", "31")
-            findings.append(("DRIP_INTEGRITY",
-                              "echo-full mismatch under byte-at-a-time send: status=%s marker=%r "
-                              "(expected %r) body_ok=%s" % (st, hdrs.get(b"x-echo-marker"), drip_marker, b == drip_body)))
-        else:
-            _dot(".")
-        _progress_end()
+        # relocation check above)
+        with term.progress("features", "drip:byte-at-a-time") as pr:
+            drip_marker = "DRIP-MARK-%d" % random.randint(100000, 999999)
+            drip_body = b"d" * 500
+            drip_payload = _build("POST", "/echo-full", {"X-Marker": drip_marker}, drip_body)
+            st = raw = None
+            for attempt in range(3):
+                st, raw = raw_send_dripped(host, port, drip_payload, chunk_size=1, rtimeout=10.0)
+                if isinstance(st, int):
+                    break
+                if attempt < 2:
+                    time.sleep(0.3)
+            _, hdrs, b = parse_hdrs(raw)
+            ok = (st == 200
+                  and hdrs.get(b"x-echo-marker", [b""])[0] == drip_marker.encode()
+                  and b == drip_body)
+            if not ok:
+                pr.bad()
+                findings.append(("DRIP_INTEGRITY",
+                                  "echo-full mismatch under byte-at-a-time send: status=%s marker=%r "
+                                  "(expected %r) body_ok=%s" % (st, hdrs.get(b"x-echo-marker"), drip_marker, b == drip_body)))
+            else:
+                pr.ok()
 
-        if not health(host, port, timeout=4.0):
+        # /stream: chunked streaming response via res.Stream() (512 chunks x 256 'S'
+        # bytes). This whole response-streaming path had no coverage: no ROUTE_CHECK
+        # ever requested it. Drive it and verify the full 131072-byte body reassembles
+        with term.progress("features", "stream:chunked") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/stream"), rtimeout=8.0, rmax=1 << 20)
+            sbody = net.dechunk(body_of(raw)) if raw else b""
+            expected = b"S" * (512 * 256)
+            if st != 200 or sbody != expected:
+                pr.bad()
+                findings.append(("STREAM_FAIL",
+                                  "/stream: status=%s len=%d (expected 200, %d bytes of 'S')"
+                                  % (st, len(sbody), len(expected))))
+            else:
+                pr.ok()
+
+        if not common.health(host, port, 4.0):
             findings.append(("SERVER_DEAD", "server unreachable after features phase"))
 
     finally:
         stop_bg.set()
 
     nf = len(findings)
-    _log("features", _green("all clear") if nf == 0 else _red("%d failure(s)" % nf))
-    return {"name": "features", "rc": 1 if findings else 0,
-            "findings": findings, "stats": {}}
+    term.log("features", _green("all clear") if nf == 0 else _red("%d failure(s)" % nf))
+    ctx.phase("features").record(findings, vectors=len(ROUTE_CHECKS))
 
 # Phase 4: FORMS
 def _form(host, port, path, content_type, body, rtimeout=3.0):
@@ -1402,295 +1228,404 @@ def _form_json(host, port, path, content_type, body, rtimeout=3.0):
     except Exception:
         return st, None
 
-def phase_forms(cfg, srv):
+def phase_forms(ctx):
+    cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
     findings = []
+    checks = 0
     CT = "application/x-www-form-urlencoded"
 
     def check(name, cond, detail="", tag="FORM_FAIL"):
+        nonlocal checks
+        checks += 1
+
         if cond:
-            _dot(".")
+            pr.ok()
         else:
-            _dot("!", "31")
+            pr.bad()
             findings.append((tag, "%s: %s" % (name, detail)))
 
     VALID_BODY = b"username=alice&email=alice%40example.com&age=30&bio=hi"
 
-    _log("forms", "started")
-    _progress_hdr(_cyan("[%s] forms      " % time.strftime("%H:%M:%S")) + "functional         ")
+    term.log("forms", "started")
+    with term.progress("forms", "functional") as pr:
 
-    # ── Happy path ────────────────────────────────────────────────────────────
-    st, j = _form_json(host, port, "/form", CT, VALID_BODY)
-    check("valid submission", st == 200 and j and j.get("username") == "alice"
-          and j.get("email") == "alice@example.com" and j.get("age") == 30
-          and j.get("bio_present") is True and j.get("bio_len") == 2,
-          "status=%s body=%r" % (st, j))
+        # Happy path
+        st, j = _form_json(host, port, "/form", CT, VALID_BODY)
+        check("valid submission", st == 200 and j and j.get("username") == "alice"
+              and j.get("email") == "alice@example.com" and j.get("age") == 30
+              and j.get("bio_present") is True and j.get("bio_len") == 2,
+              "status=%s body=%r" % (st, j))
 
-    # ── Content-Type matching ────────────────────────────────────────────────
-    for name, ct, want in [
-        ("wrong type json", "application/json", 415),
-        ("wrong type multipart", "multipart/form-data; boundary=x", 415),
-        ("missing content-type", None, 415),
-        ("uppercase type", CT.upper(), 200),
-        ("type with charset param", CT + "; charset=utf-8", 200),
-        ("type trailing space", CT + " ", 200),
-        ("prefix-junk suffix", CT + "x", 415),
-    ]:
-        st, _ = _form(host, port, "/form", ct, VALID_BODY)
-        check("content-type: %s" % name, st == want, "got %s want %s" % (st, want))
+        # Content-Type matching
+        for name, ct, want in [
+            ("wrong type json", "application/json", 415),
+            ("wrong type multipart", "multipart/form-data; boundary=x", 415),
+            ("missing content-type", None, 415),
+            ("uppercase type", CT.upper(), 200),
+            ("type with charset param", CT + "; charset=utf-8", 200),
+            ("type trailing space", CT + " ", 200),
+            ("prefix-junk suffix", CT + "x", 415),
+        ]:
+            st, _ = _form(host, port, "/form", ct, VALID_BODY)
+            check("content-type: %s" % name, st == want, "got %s want %s" % (st, want))
 
-    # ── Structural parsing (field order / count / equals) ───────────────────
-    for name, body in [
-        ("missing field", b"username=alice&email=alice%40example.com&age=30"),
-        ("extra field", b"username=alice&email=alice%40example.com&age=30&bio=hi&extra=1"),
-        ("wrong order", b"email=alice%40example.com&username=alice&age=30&bio=hi"),
-        ("no equals sign", b"username&email=alice%40example.com&age=30&bio=hi"),
-        ("trailing ampersand", VALID_BODY + b"&"),
-        ("empty body", b""),
-        ("duplicate key wrong slot", b"username=alice&username=bob&age=30&bio=hi"),
-    ]:
-        st, _ = _form(host, port, "/form", CT, body)
-        check("structure: %s" % name, st == 400, "got %s, want 400" % st)
+        # Structural parsing (field order / count / equals)
+        for name, body in [
+            ("missing field", b"username=alice&email=alice%40example.com&age=30"),
+            ("extra field", b"username=alice&email=alice%40example.com&age=30&bio=hi&extra=1"),
+            ("wrong order", b"email=alice%40example.com&username=alice&age=30&bio=hi"),
+            ("no equals sign", b"username&email=alice%40example.com&age=30&bio=hi"),
+            ("trailing ampersand", VALID_BODY + b"&"),
+            ("empty body", b""),
+            ("duplicate key wrong slot", b"username=alice&username=bob&age=30&bio=hi"),
+        ]:
+            st, _ = _form(host, port, "/form", CT, body)
+            check("structure: %s" % name, st == 400, "got %s, want 400" % st)
 
-    # ── Required-but-empty vs optional-missing ───────────────────────────────
-    st, _ = _form(host, port, "/form", CT, b"username=&email=alice%40example.com&age=30&bio=hi")
-    check("required empty -> 422", st == 422, "got %s" % st)
+        # Required-but-empty vs optional-missing
+        st, _ = _form(host, port, "/form", CT, b"username=&email=alice%40example.com&age=30&bio=hi")
+        check("required empty -> 422", st == 422, "got %s" % st)
 
-    # ── Validator boundaries ──────────────────────────────────────────────────
-    def with_username(u):
-        return ("username=%s&email=alice%%40example.com&age=30&bio=hi" % u).encode()
+        # Validator boundaries
+        def with_username(u):
+            return ("username=%s&email=alice%%40example.com&age=30&bio=hi" % u).encode()
 
-    for name, u, want in [
-        ("username len 3 (min)", "abc", 200),
-        ("username len 2 (under min)", "ab", 422),
-        ("username len 32 (max)", "a" * 32, 200),
-        ("username len 33 (over max)", "a" * 33, 422),
-    ]:
-        st, _ = _form(host, port, "/form", CT, with_username(u))
-        check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
+        for name, u, want in [
+            ("username len 3 (min)", "abc", 200),
+            ("username len 2 (under min)", "ab", 422),
+            ("username len 32 (max)", "a" * 32, 200),
+            ("username len 33 (over max)", "a" * 33, 422),
+        ]:
+            st, _ = _form(host, port, "/form", CT, with_username(u))
+            check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
 
-    def with_age(a):
-        return ("username=alice&email=alice%%40example.com&age=%s&bio=hi" % a).encode()
+        def with_age(a):
+            return ("username=alice&email=alice%%40example.com&age=%s&bio=hi" % a).encode()
 
-    for name, a, want in [
-        ("age 0 (min)", "0", 200), ("age 120 (max)", "120", 200),
-        ("age 121 (over)", "121", 422), ("age negative", "-1", 422),
-        ("age non-numeric", "abc", 422), ("age overflow u64", "99999999999999999999", 422),
-    ]:
-        st, _ = _form(host, port, "/form", CT, with_age(a))
-        check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
+        for name, a, want in [
+            ("age 0 (min)", "0", 200), ("age 120 (max)", "120", 200),
+            ("age 121 (over)", "121", 422), ("age negative", "-1", 422),
+            ("age non-numeric", "abc", 422), ("age overflow u64", "99999999999999999999", 422),
+        ]:
+            st, _ = _form(host, port, "/form", CT, with_age(a))
+            check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
 
-    def with_email(e):
-        return ("username=alice&email=%s&age=30&bio=hi" % e).encode()
+        def with_email(e):
+            return ("username=alice&email=%s&age=30&bio=hi" % e).encode()
 
-    for name, e, want in [
-        ("email valid", "a%40b.co", 200), ("email no at", "nope", 422),
-        ("email trailing at", "a%40", 422), ("email leading at", "%40b.com", 422),
-        ("email double dot local", "a..b%40x.com", 422),
-        ("email double dot domain", "a%40b..com", 422),
-        ("email no dot domain", "a%40b", 422),
-    ]:
-        st, _ = _form(host, port, "/form", CT, with_email(e))
-        check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
+        for name, e, want in [
+            ("email valid", "a%40b.co", 200), ("email no at", "nope", 422),
+            ("email trailing at", "a%40", 422), ("email leading at", "%40b.com", 422),
+            ("email double dot local", "a..b%40x.com", 422),
+            ("email double dot domain", "a%40b..com", 422),
+            ("email no dot domain", "a%40b", 422),
+        ]:
+            st, _ = _form(host, port, "/form", CT, with_email(e))
+            check("boundary: %s" % name, st == want, "got %s want %s" % (st, want))
 
-    _progress_end()
+    # Percent-decoding fuzz (via /form/raw, single isolated field)
+    with term.progress("forms", "percent-decoding") as pr:
 
-    # ── Percent-decoding fuzz (via /form/raw, single isolated field) ─────────
-    _progress_hdr(_cyan("[%s] forms      " % time.strftime("%H:%M:%S")) + "percent-decoding   ")
+        def raw_decode(v):
+            return _form_json(host, port, "/form/raw", CT, b"v=" + v)
 
-    def raw_decode(v):
-        return _form_json(host, port, "/form/raw", CT, b"v=" + v)
+        st, j = raw_decode(b"%00")
+        check("decode NUL byte", st == 200 and j and j.get("len") == 1, "st=%s j=%r" % (st, j))
 
-    st, j = raw_decode(b"%00")
-    check("decode NUL byte", st == 200 and j and j.get("len") == 1, "st=%s j=%r" % (st, j))
+        st, j = raw_decode(b"%25")
+        check("decode %25 -> literal percent", st == 200 and j and j.get("len") == 1
+              and j.get("value") == "%", "st=%s j=%r" % (st, j))
 
-    st, j = raw_decode(b"%25")
-    check("decode %25 -> literal percent", st == 200 and j and j.get("len") == 1
-          and j.get("value") == "%", "st=%s j=%r" % (st, j))
+        st, j = raw_decode(b"%2500")
+        check("no double-decode (%2500)", st == 200 and j and j.get("len") == 3
+              and j.get("value") == "%00", "st=%s j=%r (would be len=1 if double-decoded)" % (st, j),
+              tag="FORM_DECODE_BYPASS")
 
-    st, j = raw_decode(b"%2500")
-    check("no double-decode (%2500)", st == 200 and j and j.get("len") == 3
-          and j.get("value") == "%00", "st=%s j=%r (would be len=1 if double-decoded)" % (st, j),
-          tag="FORM_DECODE_BYPASS")
+        st, j = raw_decode(b"%")
+        check("lone trailing percent -> literal", st == 200 and j and j.get("value") == "%", "st=%s j=%r" % (st, j))
 
-    st, j = raw_decode(b"%")
-    check("lone trailing percent -> literal", st == 200 and j and j.get("value") == "%", "st=%s j=%r" % (st, j))
+        st, j = raw_decode(b"%4")
+        check("one hex digit then end -> literal", st == 200 and j and j.get("value") == "%4", "st=%s j=%r" % (st, j))
 
-    st, j = raw_decode(b"%4")
-    check("one hex digit then end -> literal", st == 200 and j and j.get("value") == "%4", "st=%s j=%r" % (st, j))
+        st, j = raw_decode(b"%2")
+        check("%2 at exact end -> literal", st == 200 and j and j.get("value") == "%2", "st=%s j=%r" % (st, j))
 
-    st, j = raw_decode(b"%2")
-    check("%2 at exact end -> literal", st == 200 and j and j.get("value") == "%2", "st=%s j=%r" % (st, j))
+        for bad in (b"%ZZ", b"%2G", b"%G2", b"%-1", b"%0G", b"%G0"):
+            st, _ = raw_decode(bad)
+            check("invalid hex escape rejected: %r" % bad, st == 400, "got %s" % st, tag="FORM_DECODE_BYPASS")
 
-    for bad in (b"%ZZ", b"%2G", b"%G2", b"%-1", b"%0G", b"%G0"):
-        st, _ = raw_decode(bad)
-        check("invalid hex escape rejected: %r" % bad, st == 400, "got %s" % st, tag="FORM_DECODE_BYPASS")
+        st, j = raw_decode(b"a+b")
+        check("+ decodes to space", st == 200 and j and j.get("value") == "a b", "st=%s j=%r" % (st, j))
 
-    st, j = raw_decode(b"a+b")
-    check("+ decodes to space", st == 200 and j and j.get("value") == "a b", "st=%s j=%r" % (st, j))
+        st, j = raw_decode(b"a%2Bb")
+        check("encoded plus stays literal", st == 200 and j and j.get("value") == "a+b", "st=%s j=%r" % (st, j))
 
-    st, j = raw_decode(b"a%2Bb")
-    check("encoded plus stays literal", st == 200 and j and j.get("value") == "a+b", "st=%s j=%r" % (st, j))
+        st, j = raw_decode(b"a" * 8192)
+        check("value at max (8192)", st == 200 and j and j.get("len") == 8192, "st=%s len=%s" % (st, j and j.get("len")))
 
-    st, j = raw_decode(b"a" * 8192)
-    check("value at max (8192)", st == 200 and j and j.get("len") == 8192, "st=%s len=%s" % (st, j and j.get("len")))
+        st, j = raw_decode(b"a" * 8193)
+        check("value over max (8193)", st == 422, "got %s" % st)
 
-    st, j = raw_decode(b"a" * 8193)
-    check("value over max (8193)", st == 422, "got %s" % st)
+        # Raw (pre-decode) body is 3x larger than the decoded result: validator must
+        # bound the DECODED length, not the raw wire length
+        st, j = raw_decode(b"%61" * 8192)
+        check("validated post-decode, not pre-decode", st == 200 and j and j.get("len") == 8192,
+              "st=%s len=%s" % (st, j and j.get("len")))
 
-    # Raw (pre-decode) body is 3x larger than the decoded result: validator must
-    # bound the DECODED length, not the raw wire length
-    st, j = raw_decode(b"%61" * 8192)
-    check("validated post-decode, not pre-decode", st == 200 and j and j.get("len") == 8192,
-          "st=%s len=%s" % (st, j and j.get("len")))
+    # Decoded-value-into-header injection (response splitting)
+    with term.progress("forms", "header-injection") as pr:
 
-    _progress_end()
+        for name, u in [
+            ("crlf + header", "AAA%0d%0aX-Injected%3a%20evil"),
+            ("bare cr", "AAA%0dX-Injected%3a%20evil"),
+            ("bare lf", "AAA%0aX-Injected%3a%20evil"),
+            ("double crlf + line", "AAA%0d%0a%0d%0aGET%20%2fevil%20HTTP%2f1.1"),
+        ]:
+            st, raw = _form(host, port, "/form", CT, with_username(u))
+            _, hdrs, _ = parse_hdrs(raw)
+            leaked = b"x-injected" in hdrs
+            check("no header split: %s" % name, not leaked, "raw=%r" % raw[:200],
+                  tag="FORM_HEADER_INJECT")
 
-    # ── Decoded-value-into-header injection (response splitting) ────────────
-    _progress_hdr(_cyan("[%s] forms      " % time.strftime("%H:%M:%S")) + "header-injection   ")
+    # Structural DoS / hang resistance
+    with term.progress("forms", "dos-resistance") as pr:
 
-    for name, u in [
-        ("crlf + header", "AAA%0d%0aX-Injected%3a%20evil"),
-        ("bare cr", "AAA%0dX-Injected%3a%20evil"),
-        ("bare lf", "AAA%0aX-Injected%3a%20evil"),
-        ("double crlf + line", "AAA%0d%0a%0d%0aGET%20%2fevil%20HTTP%2f1.1"),
-    ]:
-        st, raw = _form(host, port, "/form", CT, with_username(u))
-        _, hdrs, _ = parse_hdrs(raw)
-        leaked = b"x-injected" in hdrs
-        check("no header split: %s" % name, not leaked, "raw=%r" % raw[:200],
-              tag="FORM_HEADER_INJECT")
+        t0 = time.time()
+        many = b"&".join(b"k%d=v" % i for i in range(200))
+        st, _ = _form(host, port, "/form", CT, many, rtimeout=5.0)
+        dt = time.time() - t0
+        check("200 pairs rejected promptly", st == 400 and dt < 3.0, "status=%s elapsed=%.2fs" % (st, dt))
 
-    _progress_end()
+        t0 = time.time()
+        st, _ = _form(host, port, "/form", CT, b"&" * 500, rtimeout=5.0)
+        dt = time.time() - t0
+        check("500 empty segments rejected promptly", st == 400 and dt < 3.0, "status=%s elapsed=%.2fs" % (st, dt))
 
-    # ── Structural DoS / hang resistance ─────────────────────────────────────
-    _progress_hdr(_cyan("[%s] forms      " % time.strftime("%H:%M:%S")) + "dos-resistance     ")
-
-    t0 = time.time()
-    many = b"&".join(b"k%d=v" % i for i in range(200))
-    st, _ = _form(host, port, "/form", CT, many, rtimeout=5.0)
-    dt = time.time() - t0
-    check("200 pairs rejected promptly", st == 400 and dt < 3.0, "status=%s elapsed=%.2fs" % (st, dt))
-
-    t0 = time.time()
-    st, _ = _form(host, port, "/form", CT, b"&" * 500, rtimeout=5.0)
-    dt = time.time() - t0
-    check("500 empty segments rejected promptly", st == 400 and dt < 3.0, "status=%s elapsed=%.2fs" % (st, dt))
-
-    _progress_end()
-
-    if not health(host, port, timeout=4.0):
+    if not common.health(host, port, 4.0):
         findings.append(("SERVER_DEAD", "server unreachable after forms phase"))
 
     nf = len(findings)
-    _log("forms", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
+    term.log("forms", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
 
-    rc = 2 if any(f[0] in ("FORM_HEADER_INJECT", "FORM_DECODE_BYPASS") for f in findings) \
-           else (1 if findings else 0)
-    return {"name": "forms", "rc": rc, "findings": findings, "stats": {}}
+    ctx.phase("forms").record(findings, security=("FORM_HEADER_INJECT", "FORM_DECODE_BYPASS"),
+                              vectors=checks)
 
-# Phase 5: CHAOS
-def phase_chaos(cfg, srv):
+# Phase 5: METRICS
+#
+# The per-route metrics table: identity plumbing (path + method attached at read
+# time), counters that match driven traffic, status-class bucketing, and - since
+# the audit toml sets [Metrics] latency = true - the route latency histogram.
+#
+# Every assertion is delta-based (snapshot, drive a known count, snapshot again),
+# so earlier phases' traffic and the two-worker aggregation don't matter: only the
+# change caused by this phase's own requests is checked. Runs before chaos, whose
+# worker kills reset a slot's counters mid-flight and would break a delta.
+def _find_route(metrics, pred):
+    for r in metrics.get("routes", []):
+        if pred(r):
+            return r
+    return None
+
+def _route_exact(method, path):
+    return lambda r: r.get("method") == method and r.get("path") == path
+
+def _route_prefix(method, prefix):
+    return lambda r: r.get("method") == method and (r.get("path") or "").startswith(prefix)
+
+# Every RouteMetrics field: requests, status1xx..5xx, bytesOut, plus the latency
+# histogram. status1xx is unreachable over HTTP (no response's FINAL status is 1xx),
+# so it is asserted to stay zero rather than driven
+def phase_metrics(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    p = ctx.phase("metrics")
+
+    before = _fetch_metrics(host, port)
+    p.check("metrics: latency histograms enabled", before.get("latency_enabled") is True,
+            "expected [Metrics] latency = true in wfx.toml, got %r" % before.get("latency_enabled"))
+
+    # Identity plumbing: two known routes each show up with their own path and method.
+    # /status/<code:uint> is the status-class workhorse, /health a second static route
+    sb = _find_route(before, _route_prefix("GET", "/status"))
+    hb = _find_route(before, _route_exact("GET", "/health"))
+    p.check("metrics: dynamic route identity (path + method) attached", sb is not None,
+            "no GET /status* route in routes[]: %r" % [r.get("path") for r in before.get("routes", [])])
+    p.check("metrics: static route identity (path + method) attached", hb is not None,
+            "GET /health absent")
+    if sb is None or hb is None:
+        return
+
+    # Drive every status class through the one /status route, and /health separately
+    counts = {200: 20, 301: 7, 404: 11, 500: 5}
+    for code, n in counts.items():
+        for _ in range(n):
+            req(host, port, "GET", "/status/%d" % code, rtimeout=3.0)
+    n_health = 13
+    for _ in range(n_health):
+        req(host, port, "GET", "/health", rtimeout=3.0)
+
+    after = _fetch_metrics(host, port)
+    sa = _find_route(after, _route_prefix("GET", "/status"))
+    ha = _find_route(after, _route_exact("GET", "/health"))
+    if sa is None or ha is None:
+        p.failed("metrics: routes vanished after drive", "status=%r health=%r" % (sa, ha))
+        return
+
+    n_status_total = sum(counts.values())
+    checks = [
+        ("requests count matches total driven", sa["requests"] - sb["requests"], n_status_total),
+        ("2xx status class matches",            sa["status_2xx"] - sb["status_2xx"], counts[200]),
+        ("3xx status class matches",            sa["status_3xx"] - sb["status_3xx"], counts[301]),
+        ("4xx status class matches",            sa["status_4xx"] - sb["status_4xx"], counts[404]),
+        ("5xx status class matches",            sa["status_5xx"] - sb["status_5xx"], counts[500]),
+    ]
+    for label, got, want in checks:
+        p.check("metrics: " + label, got == want, "expected +%d, got +%d" % (want, got))
+
+    p.check("metrics: 1xx bucket stays zero (no final-1xx over HTTP)",
+            sa["status_1xx"] - sb["status_1xx"] == 0)
+    p.check("metrics: bytes_out increased (one byte body x N)",
+            sa["bytes_out"] - sb["bytes_out"] >= n_status_total)
+
+    # Route isolation: /health traffic lands only on /health, never on /status
+    p.check("metrics: per-route isolation (health counted on its own slot)",
+            ha["requests"] - hb["requests"] == n_health,
+            "expected +%d on /health, got +%d" % (n_health, ha["requests"] - hb["requests"]))
+    p.check("metrics: /health traffic never bleeds into /status requests",
+            (sa["requests"] - sb["requests"]) == n_status_total)
+
+    # Latency: one sample per served request on each route's own histogram
+    ls_b, ls_a = sb.get("latency") or {}, sa.get("latency") or {}
+    lh_b, lh_a = hb.get("latency") or {}, ha.get("latency") or {}
+    p.check("metrics: /status latency count tracks its requests",
+            ls_a.get("count", 0) - ls_b.get("count", 0) == n_status_total,
+            "expected +%d, got +%d" % (n_status_total, ls_a.get("count", 0) - ls_b.get("count", 0)))
+    p.check("metrics: /health latency count tracks its requests",
+            lh_a.get("count", 0) - lh_b.get("count", 0) == n_health,
+            "expected +%d, got +%d" % (n_health, lh_a.get("count", 0) - lh_b.get("count", 0)))
+    p.check("metrics: latency percentiles ordered and populated",
+            ls_a.get("count", 0) == 0 or
+            (ls_a.get("p50_us", 0) > 0 and ls_a.get("p99_us", 0) >= ls_a.get("p50_us", 0)
+             and ls_a.get("max_us", 0) >= ls_a.get("p99_us", 0)),
+            "p50=%r p99=%r max=%r" % (ls_a.get("p50_us"), ls_a.get("p99_us"), ls_a.get("max_us")))
+    p.check("metrics: latency mean within [p50-ish, max]",
+            ls_a.get("count", 0) == 0 or (0 < ls_a.get("mean_us", 0) <= ls_a.get("max_us", 1)),
+            "mean=%r max=%r" % (ls_a.get("mean_us"), ls_a.get("max_us")))
+
+    if not ctx.server.alive():
+        p.failed("SERVER_DEAD", "unreachable after metrics phase")
+
+# Phase 6: CHAOS
+def phase_chaos(ctx):
+    cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
     findings = []
     stats    = {}
 
     mpid = srv.pid()
     if not mpid:
-        _log("chaos", _yellow("no master PID: skipped"))
-        return {"name": "chaos", "rc": 0, "findings": [],
-                "stats": {}, "notes": ["master PID unavailable"]}
+        term.log("chaos", _yellow("no master PID: skipped"))
+        return
 
-    _log("chaos", "started  (master PID=%d)" % mpid)
+    term.log("chaos", "started  (master PID=%d)" % mpid)
 
-    # 1. Single worker kills × 3
-    _log("chaos", _bold("1/6: single worker kill × 3"))
+    # 1. Single worker kills x 3
+    term.log("chaos", term.bold("1/6: single worker kill x 3"))
     for i in range(3):
         stop, ts = _light_flood(host, port, 8)
         _do_kill(mpid, stats, "kill-%d" % (i+1))
         ok = _chaos_recover_and_verify(host, port, findings, "kill-%d" % (i+1))
         stop.set()
-        for t in ts: t.join(timeout=3.0)
-        if not ok: break
+        for t in ts:
+            t.join(timeout=3.0)
+        if not ok:
+            break
         time.sleep(0.5)
 
     # 2. Kills under sustained load (30s, 1 kill/5s)
-    _log("chaos", _bold("2/6: kills under sustained load (30s)"))
+    term.log("chaos", term.bold("2/6: kills under sustained load (30s)"))
     stop, ts = _light_flood(host, port, 16)
-    t0 = time.time(); kn = 0
+    t0 = time.time()
+    kn = 0
     while time.time() - t0 < 30.0:
         time.sleep(5.0)
         _, ok = _do_kill(mpid, stats, "load-%d" % (kn+1))
-        if ok: kn += 1
+        if ok:
+            kn += 1
     stop.set()
-    for t in ts: t.join(timeout=5.0)
+    for t in ts:
+        t.join(timeout=5.0)
     _chaos_recover_and_verify(host, port, findings, "load-kills")
-    _log("chaos", "  %d kills under load" % kn)
+    term.log("chaos", "  %d kills under load" % kn)
 
-    # 3. Rapid-fire kills (1 kill/2s × 5)
-    _log("chaos", _bold("3/6: rapid-fire kills (1/2s × 5)"))
+    # 3. Rapid-fire kills (1 kill/2s x 5)
+    term.log("chaos", term.bold("3/6: rapid-fire kills (1/2s x 5)"))
     stop, ts = _light_flood(host, port, 12)
     rk = 0
     for i in range(5):
         time.sleep(2.0)
         _, ok = _do_kill(mpid, stats, "rapid-%d" % (i+1))
-        if ok: rk += 1
+        if ok:
+            rk += 1
     stop.set()
-    for t in ts: t.join(timeout=3.0)
+    for t in ts:
+        t.join(timeout=3.0)
     _chaos_recover_and_verify(host, port, findings, "rapid-fire", timeout=20.0)
-    _log("chaos", "  %d rapid kills" % rk)
+    term.log("chaos", "  %d rapid kills" % rk)
 
     # 4. Kill both workers simultaneously
-    _log("chaos", _bold("4/6: simultaneous dual-worker kill"))
+    term.log("chaos", term.bold("4/6: simultaneous dual-worker kill"))
     ws = children(mpid)
     if len(ws) >= 2:
         for w in ws[:2]:
             try:
                 os.kill(w, signal.SIGKILL)
                 stats["kills"] = stats.get("kills", 0) + 1
-                _log("chaos", "  dual-kill PID %d" % w)
+                term.log("chaos", "  dual-kill PID %d" % w)
             except OSError as e:
-                _log("chaos", _yellow("  dual-kill failed: %s" % e))
+                term.log("chaos", _yellow("  dual-kill failed: %s" % e))
         _chaos_recover_and_verify(host, port, findings, "dual-kill", timeout=20.0)
     else:
-        _log("chaos", _yellow("  only %d worker: skipping dual kill" % len(ws)))
+        term.log("chaos", _yellow("  only %d worker: skipping dual kill" % len(ws)))
 
-    # 5. SIGSTOP → hammer 3s → SIGCONT
-    _log("chaos", _bold("5/6: SIGSTOP worker for 3s then SIGCONT"))
+    # 5. SIGSTOP -> hammer 3s -> SIGCONT
+    term.log("chaos", term.bold("5/6: SIGSTOP worker for 3s then SIGCONT"))
     ws = children(mpid)
     if ws:
         v = random.choice(ws)
         try:
             os.kill(v, signal.SIGSTOP)
             stats["stops"] = stats.get("stops", 0) + 1
-            _log("chaos", "  SIGSTOP PID %d" % v)
+            term.log("chaos", "  SIGSTOP PID %d" % v)
             stop, ts = _light_flood(host, port, 8)
             time.sleep(3.0)
             stop.set()
-            for t in ts: t.join(timeout=4.0)
+            for t in ts:
+                t.join(timeout=4.0)
             os.kill(v, signal.SIGCONT)
-            _log("chaos", "  SIGCONT PID %d" % v)
+            term.log("chaos", "  SIGCONT PID %d" % v)
             p, f, details = _verify_all_routes(host, port)
             if f > 0:
                 findings.append(("SIGSTOP_FAIL",
                                   "%d routes wrong after SIGCONT: %s" % (f, details[:2])))
-                _log("chaos", _red("  %d routes wrong after SIGCONT" % f))
+                term.log("chaos", _red("  %d routes wrong after SIGCONT" % f))
             else:
-                _log("chaos", _green("  all routes OK after SIGCONT"))
+                term.log("chaos", _green("  all routes OK after SIGCONT"))
         except OSError as e:
-            _log("chaos", _yellow("  SIGSTOP/SIGCONT failed: %s" % e))
+            term.log("chaos", _yellow("  SIGSTOP/SIGCONT failed: %s" % e))
     else:
-        _log("chaos", _yellow("  no workers for SIGSTOP"))
+        term.log("chaos", _yellow("  no workers for SIGSTOP"))
 
-    # 6. Kill under mixed load: idle connections + concurrent large responses.
+    # 6. Kill under mixed load: idle connections + concurrent large responses
     #
-    # 75 half-open connections sit in read-wait on the server (no harness threads,
-    # just held FDs). 12 threads each pull a 1MiB /big response in a loop.
+    # 75 half-open connections sit in read-wait on the server (no audit threads,
+    # just held FDs). 12 threads each pull a 1MiB /big response in a loop
     # 12 is enough to saturate the server's send path; more would just thrash
-    # Python's scheduler on a 2-core CI runner without adding real server stress.
+    # Python's scheduler on a 2-core CI runner without adding real server stress
     # After 2s of active load a worker is killed. This exercises epoll cleanup of
-    # in-progress sends AND idle-fd teardown in a single scenario.
-    _log("chaos", _bold("6/6: kill under mixed load (75 idle conns + 12 /big threads)"))
+    # in-progress sends AND idle-fd teardown in a single scenario
+    term.log("chaos", term.bold("6/6: kill under mixed load (75 idle conns + 12 /big threads)"))
 
     held = []
     for _ in range(75):
@@ -1702,7 +1637,7 @@ def phase_chaos(cfg, srv):
         except OSError:
             break
     stats["conn_held"] = len(held)
-    _log("chaos", "  holding %d idle connections" % len(held))
+    term.log("chaos", "  holding %d idle connections" % len(held))
 
     big_ok = big_fail = 0
     big_lock = threading.Lock()
@@ -1712,223 +1647,201 @@ def phase_chaos(cfg, srv):
         while not stop_big.is_set():
             st, _ = req(host, port, "GET", "/big", rtimeout=8.0, ctimeout=2.0)
             with big_lock:
-                if st == 200: big_ok += 1
-                else:         big_fail += 1
+                if st == 200:
+                    big_ok += 1
+                else:
+                    big_fail += 1
     bts = [threading.Thread(target=_big_req, daemon=True) for _ in range(12)]
-    for t in bts: t.start()
+    for t in bts:
+        t.start()
     time.sleep(2.0)
 
     _do_kill(mpid, stats, "mixed-load")
 
     stop_big.set()
-    for t in bts: t.join(timeout=10.0)
+    for t in bts:
+        t.join(timeout=10.0)
     for s in held:
-        try: s.close()
-        except OSError: pass
+        try:
+            s.close()
+        except OSError:
+            pass
     held.clear()
 
-    _log("chaos", "  /big: ok=%d fail=%d  idle-conns=%d" % (big_ok, big_fail, stats["conn_held"]))
+    term.log("chaos", "  /big: ok=%d fail=%d  idle-conns=%d" % (big_ok, big_fail, stats["conn_held"]))
     _chaos_recover_and_verify(host, port, findings, "mixed-load")
 
     time.sleep(1.0)
-    if not health(host, port, timeout=5.0):
+    if not common.health(host, port, 5.0):
         findings.append(("FINAL_DEAD", "server unreachable at end of chaos phase"))
 
     fm = _fetch_metrics(host, port)
     nf = len(findings)
     msg = "all scenarios survived" if nf == 0 else "%d issue(s)" % nf
-    _log("chaos", "%s  (kills=%d  crashes=%s  restarts=%s)"
+    term.log("chaos", "%s  (kills=%d  crashes=%s  restarts=%s)"
          % ((_green(msg) if nf == 0 else _red(msg)),
             stats.get("kills", 0),
             fm.get("process", {}).get("crashes", "?"),
             fm.get("process", {}).get("restarts", "?")))
 
-    return {"name": "chaos", "rc": 1 if findings else 0,
-            "findings": findings, "stats": stats, "final_metrics": fm}
+    ctx.phase("chaos").record(findings, vectors=stats.get("kills", 0) + stats.get("stops", 0))
 
-# Report
-def print_report(results):
-    print()
-    _hdr("WFX TORTURE REPORT")
-    overall = 0
+# Phase 7: KEEP-ALIVE SOAK
+#
+# Every other phase opens a fresh Connection: close socket per request, so WFX's
+# INBOUND keep-alive path - many sequential requests parsed off ONE persistent
+# connection, each reusing the same per-connection read/write buffers and parser
+# state - is barely exercised anywhere. This drives a long run of back-to-back
+# requests on a single socket and asserts every response is byte-exact, which is
+# what catches read/write buffer offsets that never reset, parser state that
+# carries across requests, and cross-request body/header bleed on reuse
+def _read_http_response(sock, buf):
+    """Read exactly one CL-framed HTTP response off `sock`. Returns (status, body, leftover)."""
+    while b"\r\n\r\n" not in buf:
+        try:
+            d = sock.recv(65536)
+        except OSError:
+            return None, b"", buf
+        if not d:
+            return None, b"", buf
+        buf += d
 
-    for r in results:
-        name = r["name"].upper()
-        rc   = r["rc"]
-        overall = max(overall, rc)
-        verdict = (_green("PASS") if rc == 0 else
-                   _red("SECURITY FAILURE") if rc == 2 else _red("FAIL"))
-        _sec(name, verdict)
-
-        if name == "SECURITY":
-            s = r["stats"]
-            print("  traversal URL   : %d vectors" % s["trav_url"])
-            print("  traversal X-File: %d vectors" % s["trav_hdr"])
-            print("  CRLF injection  : %d vectors" % s["crlf"])
-            print("  violate OK/BAD  : %d / %d" % (s["violate_ok"], s["violate_bad"]))
-            print("  info leak checks: %d routes" % s["leak"])
-            print()
-            print("  CRLF: STRICT, only \\r\\n header-name splitting counts.")
-
-        elif name == "PROTOCOL":
-            print("  vectors sent: %d" % r["stats"]["sent"])
-            print("  Corpora: header-abuse, malformed, methods, smuggling, bodybomb.")
-            print("  Goal: server survives every vector. Any crash = FAIL.")
-
-        elif name == "FEATURES":
-            print("  Route checks: %d" % len(ROUTE_CHECKS))
-            print("  Covers: segments (uint/int/string/uuid), groups,")
-            print("  middleware (continue/break/skipnext), context, async,")
-            print("  ImJson, RmJson, parse-json, chain-headers, metrics,")
-            print("  templates (static/dynamic/cond/loop/include/inherit).")
-
-        elif name == "CHAOS":
-            s = r["stats"]
-            print("  kills     : %d" % s.get("kills", 0))
-            print("  stops     : %d" % s.get("stops", 0))
-            print("  idle conns: %d (mixed-load scenario)" % s.get("conn_held", 0))
-            fm = r.get("final_metrics", {})
-            if fm:
-                proc = fm.get("process", {})
-                print("  crashes   : %s  restarts: %s"
-                      % (proc.get("crashes"), proc.get("restarts")))
-            print("  Route correctness verified after every recovery scenario.")
-
-        for note in r.get("notes", []):
-            print("  NOTE  %s" % note)
-
-        if r.get("findings"):
-            print("  %s" % _red("FINDINGS:"))
-            seen = set()
-            for label, detail in r["findings"]:
-                key = (label, detail[:120])
-                if key in seen: continue
-                seen.add(key)
-                print("    %s  %s" % (_red("[%s]" % label), detail))
-                _gh_error("[%s] %s: %s" % (r["name"], label, detail[:200]))
-
-    print()
-    print("=" * 78)
-    if overall == 0:   print(_bold(_green("  VERDICT: PASS, survived clean")))
-    elif overall == 2: print(_bold(_red("  VERDICT: SECURITY FAILURE")))
-    else:              print(_bold(_red("  VERDICT: FAIL")))
-    print("=" * 78)
-    print()
-    return overall
-
-# Main
-PHASES = ["security", "protocol", "features", "forms", "chaos"]
-
-PHASE_FNS = {
-    "security": phase_security,
-    "protocol": phase_protocol,
-    "features": phase_features,
-    "forms":    phase_forms,
-    "chaos":    phase_chaos,
-}
-
-
-def main():
-    ap = argparse.ArgumentParser(
-        description="WFX test harness.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""\
-phases:
-  security   path traversal (URL + X-File), CRLF/response-splitting,
-             info leakage on all routes, contract violations
-  protocol   malformed/abuse request vectors: server must survive, not crash
-             corpora: header-abuse, malformed, methods, smuggling, bodybomb
-  features   every route verified: exact status, body, headers, invariants
-             branch isolation, header injection absence, Content-Type checks
-             buffer-relocation integrity, exact body/header size limits,
-             byte-at-a-time drip sends
-  chaos      6 scenarios: worker kills x3, kills under sustained load,
-             rapid-fire kills, dual-kill, SIGSTOP/SIGCONT,
-             kill under mixed load (75 idle conns + 12 large-response threads)
-             route correctness verified after every recovery
-
-examples:
-  python3 harness.py
-  python3 harness.py --phase security
-  python3 harness.py --list-phases
-""")
-
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8080)
-    ap.add_argument("--wfx", default="wfx", metavar="BIN")
-    ap.add_argument("--app-dir", default="app", metavar="DIR")
-    ap.add_argument("--phase", default="all", choices=["all"] + PHASES)
-    ap.add_argument("--pid-file", default="~/.wfx/daemons/app.pid", metavar="PATH")
-    ap.add_argument("--ready-timeout", type=int, default=20, metavar="S")
-    ap.add_argument("--list-phases", action="store_true", help="list available phases and exit")
-    ap.add_argument("--ci", action="store_true",
-                    help="CI-friendly output: suppress inline dot progress, "
-                         "emit GitHub Actions workflow commands (::group::, ::error::)")
-    ap.add_argument("--phase-timeout", type=int, default=0, metavar="S",
-                    help="max seconds per phase before marking TIMEOUT and continuing "
-                         "(0 = unlimited; auto-set to 300 when --ci)")
-
-    cfg = ap.parse_args()
-
-    if cfg.ci:
-        common.enable_ci_mode()
-        if cfg.phase_timeout == 0:
-            cfg.phase_timeout = 300  # 5 min per phase in CI
-
-    if cfg.list_phases:
-        for p in PHASES: print(p)
-        return 0
-
-    srv = Server(cfg)
+    head, _, rest = buf.partition(b"\r\n\r\n")
+    lines = head.split(b"\r\n")
     try:
-        srv.start()
-        srv.wait_ready()
-    except RuntimeError as e:
-        print(_red("[FATAL]") + "  " + str(e), file=sys.stderr)
-        return 1
+        status = int(lines[0].split(b" ")[1])
+    except (IndexError, ValueError):
+        return None, b"", rest
 
-    mpid = srv.pid()
-    if mpid: _log("harness", "master PID=%d  (%s)" % (mpid, cfg.pid_file))
-    else:    _log("harness", _yellow("warning: no master PID: chaos phase limited"))
+    clen = 0
+    for line in lines[1:]:
+        if line.lower().startswith(b"content-length:"):
+            try:
+                clen = int(line.split(b":", 1)[1].strip())
+            except ValueError:
+                clen = 0
+            break
 
-    results = []; overall = 0
-    phases_to_run = PHASES if cfg.phase == "all" else [cfg.phase]
-    hb = _Heartbeat() if common.CI else None
+    while len(rest) < clen:
+        try:
+            d = sock.recv(65536)
+        except OSError:
+            break
+        if not d:
+            break
+        rest += d
+
+    return status, rest[:clen], rest[clen:]
+
+def phase_soak(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    findings = []
+
+    # CL-framed routes with mixed body sizes so the read buffer sees varying request
+    # shapes and the write buffer varying response lengths across reuse
+    rotation = [
+        ("/health",        200, b"ok"),
+        ("/text",          200, b"ok"),
+        ("/items/42",      200, b"42"),
+        ("/greet/soak",    200, b"hello soak"),
+        ("/api/v1/status", 200, b"ok"),
+    ]
+    n = 2000
+    term.log("soak", "started  (%d sequential requests on ONE keep-alive connection)" % n)
 
     try:
-        for name in phases_to_run:
-            print()
-            if hb: hb.set_phase(name)
-            _gh_group("phase: " + name)
-            if cfg.phase_timeout > 0:
-                r = _run_phase_timed(name, PHASE_FNS[name], cfg, srv, cfg.phase_timeout)
-            else:
-                r = PHASE_FNS[name](cfg, srv)
-            _gh_endgroup()
-            results.append(r)
-            overall = max(overall, r["rc"])
-            if r["rc"] == 2:
-                _gh_error("security finding in phase %s: stopping" % name)
-                _log("harness", _red("security finding: stopping"))
-                break
-            dead = [f for f in r.get("findings", [])
-                    if "DEAD" in f[0] or "NO_RECOVERY" in f[0]]
-            if dead and name != phases_to_run[-1]:
-                _gh_warning("server appears dead after phase %s" % name)
-                _log("harness", _yellow("server appears dead: skipping remaining phases"))
-                break
+        sock = socket.create_connection((host, port), timeout=5.0)
+        sock.settimeout(5.0)
+    except OSError as e:
+        ctx.phase("soak").record([("SOAK_CONNECT", "could not open keep-alive socket: %s" % e)])
+        return
 
-    except KeyboardInterrupt:
-        _log("harness", _yellow("interrupted"))
+    buf = b""
+    completed = 0
+    with term.progress("soak", "keep-alive", n) as pr:
+        try:
+            for i in range(n):
+                path, exp_st, exp_body = rotation[i % len(rotation)]
+                reqb = ("GET %s HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n" % path).encode("latin-1")
+                try:
+                    sock.sendall(reqb)
+                except OSError as e:
+                    findings.append(("SOAK_SEND", "send failed at request #%d: %s" % (i, e)))
+                    pr.bad()
+                    break
 
-    finally:
-        if hb: hb.stop()
-        print()
-        srv.stop()
+                st, rbody, buf = _read_http_response(sock, buf)
+                if st != exp_st or rbody != exp_body:
+                    findings.append(("SOAK_MISFRAME",
+                                      "request #%d %s -> status=%r body=%r (expected %d / %r)"
+                                      % (i, path, st, rbody[:64], exp_st, exp_body)))
+                    pr.bad()
+                    break
 
-    overall = max(overall, print_report(results))
-    return overall
+                completed += 1
+                pr.ok()
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
+    term.log("soak", "%d/%d requests correct on one connection" % (completed, n))
+    if completed < n and not findings:
+        findings.append(("SOAK_INCOMPLETE", "only %d/%d completed on the reused connection" % (completed, n)))
+
+    if not common.health(host, port, 4.0):
+        findings.append(("SERVER_DEAD", "server unreachable after soak phase"))
+
+    ctx.phase("soak").record(findings, vectors=completed)
+
+# Torture suite: hostile load and deliberate worker kills, so the interesting output is what went
+# wrong rather than a pass count. Phases collect findings and flush them with Phase.record()
+#
+# Two behaviours it needs beyond the default lifecycle:
+#   - stop on a security finding, since later phases would be measuring an already-compromised
+#     server and their results would be noise
+#   - a per-phase timeout, because a phase that wedges under load would otherwise stall the run
+class BaseAudit(common.Suite):
+    name = "base_audit"
+    description = "WFX server torture audit: security, protocol, features, forms, chaos"
+    phases = {
+        "security": phase_security,
+        "protocol": phase_protocol,
+        "features": phase_features,
+        "forms":    phase_forms,
+        "metrics":  phase_metrics,
+        "soak":     phase_soak,
+        "chaos":    phase_chaos,
+    }
+
+    stop_on_security = True
+    confirm_exit = True   # the chaos phase kills workers, so confirm the master really exited
+    heartbeat = 30        # some phases run silent for minutes and CI kills a quiet job
+
+    def add_arguments(self, parser):
+        parser.add_argument("--pid-file", default=None, metavar="PATH",
+                            help="daemon pid file, needed by the chaos phase to signal workers "
+                                 "(default: ~/.wfx/daemons/<app>.pid)")
+        parser.add_argument("--phase-timeout", type=int, default=0, metavar="S",
+                            help="max seconds per phase before marking TIMEOUT and continuing "
+                                 "(0 = unlimited, 300 under --ci)")
+        parser.set_defaults(ready_timeout=20, wfx_logs=common.logs.CRASH)
+
+    def configure(self, cfg):
+        cfg.pid_file = cfg.args.pid_file
+
+        # A phase wedged under load costs the whole CI job otherwise
+        self.phase_timeout = cfg.args.phase_timeout or (300 if term.is_ci() else 0)
+
+    def before_phases(self, ctx):
+        # Read once the daemon is up: the pid file does not exist before that
+        master = ctx.server.pid()
+        if master:
+            term.log("runner", "master PID=%d" % master)
+        else:
+            term.log("runner", _yellow("no master PID: chaos phase limited"))
 
 if __name__ == "__main__":
-    sys.exit(main())
+    common.run(BaseAudit)

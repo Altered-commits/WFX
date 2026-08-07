@@ -15,7 +15,7 @@
     struct WFX_CONSTRUCTOR_CLASS(uniq) {                                                                               \
         WFX_CONSTRUCTOR_CLASS(uniq)()                                                                                  \
         {                                                                                                              \
-            WFX::Core::__WFXDeferred.emplace_back(__VA_ARGS__);                                                        \
+            WFX::Core::GlobalWFXDeferred.emplace_back(__VA_ARGS__);                                                    \
         }                                                                                                              \
     } WFX_CONSTRUCTOR_INSTANCE(uniq);                                                                                  \
     }

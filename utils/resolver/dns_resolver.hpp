@@ -12,8 +12,8 @@
 namespace WFX::Utils {
 
 // Single source of truth for a resolved address across the engine and DNS resolver
-// 'ttlSeconds' is only meaningful immediately after resolution (used to schedule the-
-// -next refresh); the engine ignores it for everything past registration
+// 'ttlSeconds' is only meaningful immediately after resolution (used to schedule the
+// next refresh); the engine ignores it for everything past registration.
 struct ResolvedAddr {
     sockaddr_storage addr;
     socklen_t addrLen;

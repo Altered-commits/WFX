@@ -21,15 +21,20 @@ using namespace WFX::Core;  // For 'Config'
 static constexpr unsigned char DEFAULT_PROTOS[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
 
 // vvv Constructors and Destructors vvv
-HttpOpenSSL::HttpOpenSSL()
+HttpOpenSSL::HttpOpenSSL(bool initServer)
 {
-    auto& logger = GetLogger();
-    auto& sslConfig = GetConfig().sslConfig;
-
     GlobalOpenSSLInit();
 
-    InitServerContext();
-    InitClientContext();
+    if(initServer)
+        InitServerContext();
+}
+
+bool HttpOpenSSL::EnsureClientContext()
+{
+    if(!clientCtx_)
+        InitClientContext();
+
+    return clientCtx_ != nullptr;
 }
 
 HttpOpenSSL::~HttpOpenSSL()
@@ -76,8 +81,8 @@ void HttpOpenSSL::InitServerContext()
     if(SSL_CTX_set_min_proto_version(serverCtx_, protoVersion) != 1)
         LogOpenSSLError("Failed to set minimum TLS protocol version for server ctx");
 
-    // Server cert and key. ONLY on serverCtx_, loading this on clientCtx_ would-
-    // -pollute the verify store and break outbound client certificate verification
+    // Server cert and key. ONLY on serverCtx_, loading this on clientCtx_ would pollute the verify
+    // store and break outbound client certificate verification.
     if(SSL_CTX_use_certificate_chain_file(serverCtx_, sslConfig.certPath.c_str()) <= 0)
         LogOpenSSLError("Failed to load certificate chain file");
 
@@ -86,6 +91,22 @@ void HttpOpenSSL::InitServerContext()
 
     if(!SSL_CTX_check_private_key(serverCtx_))
         LogOpenSSLError("Private key does not match certificate");
+
+    // Inbound mTLS, active only when client_ca_path is configured: verifies inbound client certs
+    // against that CA and requires one be presented.
+    if(!sslConfig.clientCaPath.empty()) {
+        if(SSL_CTX_load_verify_locations(serverCtx_, sslConfig.clientCaPath.c_str(), nullptr) != 1)
+            LogOpenSSLError("Failed to load client CA certificate for server ctx");
+
+        // Sent to the client in the handshake's CertificateRequest so it can pick a matching cert
+        // when it holds more than one.
+        if(STACK_OF(X509_NAME)* clientCaNames = SSL_load_client_CA_file(sslConfig.clientCaPath.c_str()))
+            SSL_CTX_set_client_CA_list(serverCtx_, clientCaNames);
+        else
+            LogOpenSSLError("Failed to build client CA name list for server ctx");
+
+        SSL_CTX_set_verify(serverCtx_, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
+    }
 
     // Server-side session cache: server automatically stores and looks up sessions
     // SSL_SESS_CACHE_SERVER is the correct mode for inbound connections
@@ -102,9 +123,9 @@ void HttpOpenSSL::InitServerContext()
     if(SSL_CTX_set_tlsext_ticket_keys(serverCtx_, ticketKey.data(), ticketKey.size()) != 1)
         LogOpenSSLError("Failed to set session ticket keys");
 
-    // Required for session resumption (any TLS version): lets OpenSSL tell apart sessions-
-    // -established under a different security context. Value is arbitrary, just needs to-
-    // -be stable (see SSL_CTX_set_session_id_context(3))
+    // Required for session resumption (any TLS version): lets OpenSSL tell apart sessions
+    // established under a different security context. Value is arbitrary, just needs to be stable
+    // (see SSL_CTX_set_session_id_context(3)).
     static constexpr unsigned char SESSION_ID_CTX[] = "wfx-server";
     SSL_CTX_set_session_id_context(serverCtx_, SESSION_ID_CTX, sizeof(SESSION_ID_CTX) - 1);
 
@@ -178,13 +199,13 @@ void HttpOpenSSL::InitClientContext()
         logger.Fatal("[HttpOpenSSL]: Failed to create client SSL_CTX");
 
     // Always load system CAs so public internet endpoints verify correctly
-    // If user also specifies ca_cert_path (for internal/self-signed CAs like mkcert),-
-    // -it is added on top
+    // If user also specifies outbound_ca_path (for internal/self-signed CAs like mkcert), it is
+    // added on top.
     if(SSL_CTX_set_default_verify_paths(clientCtx_) != 1)
         LogOpenSSLError("Failed to load default system CA certificates for client ctx");
 
-    if(!sslConfig.caCertPath.empty()) {
-        if(SSL_CTX_load_verify_locations(clientCtx_, sslConfig.caCertPath.c_str(), nullptr) != 1)
+    if(!sslConfig.outboundCaPath.empty()) {
+        if(SSL_CTX_load_verify_locations(clientCtx_, sslConfig.outboundCaPath.c_str(), nullptr) != 1)
             LogOpenSSLError("Failed to load configured CA certificate for client ctx");
     }
 
@@ -210,9 +231,9 @@ void HttpOpenSSL::InitClientContext()
     if(SSL_CTX_set_min_proto_version(clientCtx_, protoVersion) != 1)
         LogOpenSSLError("Failed to set minimum TLS protocol version for client ctx");
 
-    // Client-side session cache. Unlike the server, SSL_SESS_CACHE_CLIENT alone doesn't-
-    // -reuse anything, we drive resumption ourselves via NewClientSessionCallback +
-    // WrapClient's sessionSlot (see http_ssl.hpp), one session per endpoint
+    // Client-side session cache. Unlike the server, SSL_SESS_CACHE_CLIENT alone doesn't reuse
+    // anything, we drive resumption ourselves via NewClientSessionCallback + WrapClient's
+    // sessionSlot (see http_ssl.hpp), one session per endpoint.
     if(sslConfig.enableClientSessionCache) {
         SSL_CTX_set_session_cache_mode(clientCtx_, SSL_SESS_CACHE_CLIENT);
         SSL_CTX_sess_set_cache_size(clientCtx_, sslConfig.clientSessionCacheSize);
@@ -223,8 +244,8 @@ void HttpOpenSSL::InitClientContext()
         SSL_CTX_set_session_cache_mode(clientCtx_, SSL_SESS_CACHE_OFF);
 
     // Client advertises these to the server as supported suites
-    // Server's SSL_OP_CIPHER_SERVER_PREFERENCE will override order on the server side-
-    // -but we still want to advertise only strong suites
+    // Server's SSL_OP_CIPHER_SERVER_PREFERENCE will override order on the server side, but we
+    // still want to advertise only strong suites.
     if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(clientCtx_, sslConfig.tls13Ciphers.c_str()) != 1)
         LogOpenSSLError("Failed to set TLSv1.3 ciphersuites for client ctx");
 
@@ -240,9 +261,9 @@ void HttpOpenSSL::InitClientContext()
 
     // SSL_OP_NO_COMPRESSION: applies to both sides, client enforcing prevents
     // CRIME attack on outbound connections regardless of what server advertises
-    // SSL_OP_CIPHER_SERVER_PREFERENCE: NOT set, meaningless on client side,-
-    // -only the server uses this to override the negotiated cipher order
-    // SSL_OP_ENABLE_KTLS: NOT set, KTLS is for SSL_sendfile which is server-side only
+    // SSL_OP_CIPHER_SERVER_PREFERENCE: NOT set, meaningless on client side, only the server uses
+    // this to override the negotiated cipher order.
+    // SSL_OP_ENABLE_KTLS: NOT set, KTLS is for SSL_sendfile which is server-side only.
     SSL_CTX_set_options(clientCtx_, SSL_OP_NO_COMPRESSION);
 
     logger.Info("[HttpOpenSSL]: Client SSL context initialized successfully");
@@ -267,8 +288,8 @@ void* HttpOpenSSL::Wrap(SSLSocket sock)
     return ssl;
 }
 
-// Process-wide slot for tagging an SSL* with the void** sessionSlot it should report a-
-// -new session back into. Registered once (C++11 magic-static init is thread-safe)
+// Process-wide slot for tagging an SSL* with the void** sessionSlot it should report a new
+// session back into. Registered once (C++11 magic-static init is thread-safe).
 static int SessionSlotExIndex()
 {
     static const int IDX = SSL_get_ex_new_index(0, nullptr, nullptr, nullptr, nullptr);
@@ -329,8 +350,8 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view
         return nullptr;
     }
 
-    // Session resumption: offer back whatever this endpoint's slot holds, and tag the-
-    // -SSL* with the slot so NewClientSessionCallback can fill it in later
+    // Session resumption: offer back whatever this endpoint's slot holds, and tag the SSL* with
+    // the slot so NewClientSessionCallback can fill it in later.
     if(clientSessionCacheEnabled_ && sessionSlot) {
         if(*sessionSlot)
             SSL_set_session(ssl, static_cast<SSL_SESSION*>(*sessionSlot));
@@ -346,8 +367,8 @@ int HttpOpenSSL::NewClientSessionCallback(SSL* ssl, SSL_SESSION* sess)
 {
     auto* slot = static_cast<void**>(SSL_get_ex_data(ssl, SessionSlotExIndex()));
 
-    // No slot tagged (resumption disabled for this connection); refuse ownership so-
-    // -OpenSSL frees it
+    // No slot tagged (resumption disabled for this connection); refuse ownership so OpenSSL
+    // frees it.
     if(!slot)
         return 0;
 

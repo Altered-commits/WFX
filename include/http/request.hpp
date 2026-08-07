@@ -6,6 +6,7 @@
 
 #include "core/core.hpp"
 #include "shared/apis/http_api.hpp"
+#include "shared/utils/memory.hpp"
 #include <string_view>
 #include <cstring>
 
@@ -82,17 +83,12 @@ public:
             any.destructor = nullptr;
         }
         else {
-            void* mem = Core::MemoryApiExt1()->alloc(sizeof(U));
-            if(!mem)
+            U* obj = Shared::New<U>(std::forward<T>(value));
+            if(!obj)
                 return false;
 
-            U* obj = new (mem) U(std::forward<T>(value));
             any.data = obj;
-
-            any.destructor = [](void* p) {
-                static_cast<U*>(p)->~U();
-                Core::MemoryApiExt1()->free(p);
-            };
+            any.destructor = [](void* p) { Shared::Delete(static_cast<U*>(p)); };
         }
 
         Core::HttpApiExt1()->setContext(backend_, k, any);

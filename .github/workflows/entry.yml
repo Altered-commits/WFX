@@ -1,14 +1,14 @@
 name: WFX CI
 
-# Top-level orchestrator: the ONLY workflow triggered on push / PR. Each check-
-# -lives in its own file:
+# Top-level orchestrator: the ONLY workflow triggered on push / PR. Each check
+# lives in its own file:
 #
 #   filter_check.yml -> format_check.yml -> compile_check.yml -> [audit_check.yml, tidy_check.yml]
 #
-# The filter runs once; format runs only if the filter says so; compile runs only-
-# -after format succeeds; audit and tidy both run only after compile succeeds (in-
-# -parallel with each other). A final collector reports one stable status for-
-# -branch protection (green when the filter skips CI, red if any stage fails)
+# The filter runs once; format runs only if the filter says so; compile runs only
+# after format succeeds; audit and tidy both run only after compile succeeds (in
+# parallel with each other). A final collector reports one stable status for
+# branch protection (green when the filter skips CI, red if any stage fails)
 
 on:
   push:
@@ -45,8 +45,8 @@ jobs:
     if: needs.filter.outputs.should_run == '1'
     uses: ./.github/workflows/tidy_check.yml
 
-  # Collector: single required status. Success when the filter skipped CI or every-
-  # -stage passed; failure if any stage failed or was cancelled.
+  # Collector: single required status. Success when the filter skipped CI or every
+  # stage passed; failure if any stage failed or was cancelled.
   ci-success:
     name: WFX CI Success
     runs-on: ubuntu-latest

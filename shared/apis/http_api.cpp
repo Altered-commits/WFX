@@ -15,8 +15,8 @@ namespace WFX::Shared {
 
 using namespace WFX::Http; // For 'Router', 'Middleware', ...
 
-// 'GlobalHttpDataExt1.data' Can be set via the http api, the reason why this is safe to set even-
-// -with multiple connections is our entire flow of data is single threaded and will remain that way
+// 'GlobalHttpDataExt1.data' can be set via the http api. It's safe to set even with multiple
+// connections because our entire flow of data is single threaded and will remain that way.
 static HttpAPIDataExt1 GlobalHttpDataExt1;
 static EndpointAPIDataExt1 GlobalEndpointDataExt1;
 
@@ -38,7 +38,7 @@ static HttpResponse* ToRes(void* backend)
 const HttpAPIExt1* GetHttpAPIExt1()
 {
     // clang-format off
-    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
     static const HttpAPIExt1 GlobalHttpAPIExt1 = {
         // vvv Routing vvv
         [](HttpMethod method, StringView path, RouteCallback cb) {  // RegisterRoute
@@ -217,26 +217,52 @@ void InitHttpAPIExt1(Router* extRouter, HttpMiddleware* extMiddleware)
 const EndpointAPIExt1* GetEndpointAPIExt1()
 {
     // clang-format off
-    // NOLINTNEXTLINE(readability-identifier-naming) - singleton table, treated as Global variable
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
     static const EndpointAPIExt1 GlobalEndpointAPIExt1 = {
         [](const char* host, EndpointDesc desc, EndpointConfig config) -> std::uint16_t {
             return GlobalEndpointDataExt1.connHandler->AllocateEndpoint(host, desc, config);
         },
-        [](void* clientCtx, std::uint16_t endpointIdx, const void* req, AsyncData asyncData) -> EndpointStatus {
+        [](void* clientCtx, std::uint16_t endpointIdx, const void* req, AsyncData asyncData, std::uint64_t pinnedSlot) -> EndpointStatus {
             auto* ctx = static_cast<ClientCtx*>(clientCtx);
-            return GlobalEndpointDataExt1.connHandler->SendPayload(ctx, endpointIdx, req, asyncData);
+            return GlobalEndpointDataExt1.connHandler->SendPayload(ctx, endpointIdx, req, asyncData, pinnedSlot);
         },
         [](void* endpointCtx, const void* data, std::uint32_t size, AsyncData asyncData) -> void {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
             GlobalEndpointDataExt1.connHandler->SlotSend(ctx, data, size, asyncData);
         },
+        [](void* endpointCtx, std::uint32_t consumed, AsyncData asyncData) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, consumed, asyncData);
+        },
         [](void* endpointCtx, AsyncData asyncData) -> void {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
-            GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, asyncData);
+            GlobalEndpointDataExt1.connHandler->SlotUpgradeTls(ctx, asyncData);
         },
         [](void* endpointCtx) -> StringView {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
             return GlobalEndpointDataExt1.connHandler->NegotiatedProtocol(ctx);
+        },
+        [](std::uint16_t endpointIdx) -> std::uint64_t {
+            return GlobalEndpointDataExt1.connHandler->ReserveSlot(endpointIdx);
+        },
+        [](std::uint64_t pinnedSlot) -> void {
+            GlobalEndpointDataExt1.connHandler->ReleaseSlot(pinnedSlot);
+        },
+        [](void* clientCtx, const void* req, AsyncData asyncData) -> EndpointStatus {
+            auto* ctx = static_cast<ClientCtx*>(clientCtx);
+            return GlobalEndpointDataExt1.connHandler->StreamNext(ctx, req, asyncData);
+        },
+        [](void* clientCtx) -> const void* {
+            auto* ctx = static_cast<ClientCtx*>(clientCtx);
+            return GlobalEndpointDataExt1.connHandler->StreamChunk(ctx);
+        },
+        [](void* ownerCtx, AsyncData asyncData) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(ownerCtx);
+            GlobalEndpointDataExt1.connHandler->OpenSideConnection(ctx, asyncData);
+        },
+        [](void* endpointCtx) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            GlobalEndpointDataExt1.connHandler->CloseSideConnection(ctx);
         }
     };
     // clang-format on

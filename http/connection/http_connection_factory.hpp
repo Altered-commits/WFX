@@ -4,8 +4,8 @@
 #ifndef WFX_HTTP_CONNECTION_FACTORY_HPP
 #define WFX_HTTP_CONNECTION_FACTORY_HPP
 
-// This is simply a helper thingy which will abstract the 'selecting'-
-// -of OS specific functionality for connection handling
+// This is simply a helper thingy which will abstract the 'selecting' of OS-specific functionality
+// for connection handling.
 #include "http_connection.hpp"
 #include "shared/utils/detection_macro.hpp"
 #include <memory>
