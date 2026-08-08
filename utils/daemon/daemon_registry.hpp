@@ -8,11 +8,7 @@
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
 #include <sys/types.h>
-#else
-using pid_t = int;
-#endif
 
 namespace WFX::Utils {
 

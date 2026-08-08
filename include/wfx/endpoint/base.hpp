@@ -9,11 +9,13 @@
 // Raw building block for outbound protocol endpoints.
 //
 // Provides:
-//   WFX::Endpoint<TReq, TRes [, OnConnect]> : the endpoint template
+//   WFX::Endpoint<TReq, TRes [, OnConnect [, OnAbort]]> : the endpoint template
 //   WFX::EndpointOutput<T>                  : RAII response wrapper
 //   WFX::SlotHandle                         : handle passed into onConnect
+//   WFX::AbortSlotHandle                    : handle passed into onAbort (OpenSideConnection only)
 //   WFX::SlotReceiveResult                  : result of co_await handle.Receive()
 //   WFX::EpCoro                             : return type for onConnect functions
+//   WFX::EpAbortCoro                        : return type for onAbort functions
 //   WFX::EndpointDesc                       : describe the protocol (serialize / parse / ...)
 //   WFX::EndpointConfig                     : connection pool settings
 //   WFX::EndpointTLS                        : TLS mode type alias
@@ -55,17 +57,30 @@
 //
 //   In parse():
 //     WFX::EpParseIncomplete     need more bytes; call again when more data arrives
+//     WFX::EpParseChunk          one chunk ready; more bytes arrive unprompted
+//     WFX::EpParseChunkFetch     one chunk ready; engine re-serializes for the next batch
 //     WFX::EpParseDone           complete message received; slot returns to pool
 //     WFX::EpParseClose          complete message received; close the slot after delivery
 //     WFX::EpParseError          unrecoverable parse error; slot is closed
 //
-//   In onConnect, from co_await handle.Send():
-//     WFX::EpSlotSendOk          bytes flushed to socket
-//     WFX::EpSlotSendError       fatal write failure; co_return EpFatal
+//   In onConnect, from co_await handle.Send(), (co_await handle.Receive()).status
+//   and co_await handle.UpgradeToTLS(). Anything but EpSlotOk is fatal for the
+//   slot, co_return EpFatal:
+//     WFX::EpSlotOk              operation succeeded
+//     WFX::EpSlotBufferError     slot buffer couldn't be allocated or grown
+//     WFX::EpSlotEpollError      re-arming the slot with epoll failed
+//     WFX::EpSlotIoError         socket read/write failed
+//     WFX::EpSlotTlsError        TLS wrap or handshake failed
+//     WFX::EpSlotInvalidState    invalid for this slot now (upgrading an already-secure one)
 //
-//   In onConnect, from (co_await handle.Receive()).status:
-//     WFX::EpSlotRecvOk          data available in .buf / .len
-//     WFX::EpSlotRecvError       fatal read failure; co_return EpFatal
+//   onAbort fires when a single-slot request's client disconnects before the backend replied,
+//   instead of force-closing the slot (multiplexed/mid-Stream() requests still force-close)
+//   The slot is left alone, its real response still arrives and completes normally.
+//   AbortSlotHandle only has OpenSideConnection()/NegotiatedProtocol(), since the slot is
+//   still mid-request:
+//     co_await handle.OpenSideConnection() -> {EpSlotOk/error, SlotHandle side}
+//       side.Send(...) / side.Receive() / side.UpgradeToTLS() same as any SlotHandle
+//       side.Close()   closes it early; connectTimeoutSeconds is the safety net either way
 //
 // -----------------------------------------------------------------------
 // Minimal example (stateless JSON API client)
@@ -124,11 +139,11 @@
 //   WFX::EpCoro Authenticate(WFX::SlotHandle h, void* /*state*/)
 //   {
 //       static const char kAuth[] = "*2\r\n$4\r\nAUTH\r\n$8\r\npassword\r\n";
-//       if(co_await h.Send(kAuth, sizeof(kAuth) - 1) == WFX::EpSlotSendError)
+//       if(co_await h.Send(kAuth, sizeof(kAuth) - 1) != WFX::EpSlotOk)
 //           co_return WFX::EpFatal;
 //
 //       auto recv = co_await h.Receive();
-//       if(recv.status == WFX::EpSlotRecvError)
+//       if(recv.status != WFX::EpSlotOk)
 //           co_return WFX::EpFatal;
 //
 //       co_return (recv.len >= 3 && recv.buf[0] == '+') ? WFX::EpReady : WFX::EpFatal;
@@ -141,10 +156,33 @@
 //   };
 //
 // -----------------------------------------------------------------------
+// With onAbort (Postgres-style cancel over a fresh connection)
+// -----------------------------------------------------------------------
+//
+//   WFX::EpAbortCoro CancelQuery(WFX::AbortSlotHandle h, void* state)
+//   {
+//       auto* pg = static_cast<PgSlotState*>(state);
+//       auto [status, side] = co_await h.OpenSideConnection();
+//       if (status == WFX::EpSlotOk) {
+//           char msg[16];
+//           EncodeCancelRequest(msg, pg->backendPid, pg->secretKey);
+//           co_await side.Send(msg, sizeof(msg));
+//           side.Close();
+//       }
+//       co_return;
+//   }
+//
+//   inline const auto Postgres = WFX::Endpoint<PgReq, PgRes, &Connect, &CancelQuery>{
+//       "postgres.internal:5432",
+//       WFX::EndpointDesc{ .serialize = ..., .parse = ... },
+//       WFX::EndpointConfig{ .connLimit = 8, .auxConnLimit = 4, .requestTimeoutSeconds = 30 }
+//   };
+//
+// -----------------------------------------------------------------------
 // parse() isEof note:
 //   isEof is true on the final call after the peer closed the connection.
-//   At that point you MUST NOT return EpParseIncomplete (return EpParseClose-
-//   -or EpParseError). Used for HTTP/1.0-style close-delimited bodies.
+//   At that point you MUST NOT return EpParseIncomplete (return EpParseClose
+//   or EpParseError). Used for HTTP/1.0-style close-delimited bodies.
 // -----------------------------------------------------------------------
 
 #include "async/endpoint.hpp"
@@ -155,16 +193,20 @@ namespace WFX {
 // -----------------------------------------------------------------------
 // Core endpoint template
 //
-// Declare at namespace scope, before Run(). Each declaration occupies one-
-// -slot in the connection pool described by EndpointConfig.
+// Declare at namespace scope, before Run(). Each declaration occupies one
+// slot in the connection pool described by EndpointConfig.
 //
 //   inline const auto MyEp = WFX::Endpoint<MyReq, MyRes>{ host, desc, cfg };
 //
 // With an onConnect coroutine (TLS auth, Redis AUTH, SMTP EHLO, etc.):
 //   inline const auto MyEp = WFX::Endpoint<MyReq, MyRes, &MyOnConnect>{ ... };
+//
+// With onAbort too (graceful cancel on client disconnect, needs .auxConnLimit set):
+//   inline const auto MyEp = WFX::Endpoint<MyReq, MyRes, &MyOnConnect, &MyOnAbort>{ ... };
 // -----------------------------------------------------------------------
-template <typename TReq, typename TRes, Async::UserOnConnectFn OnConnect = nullptr>
-using Endpoint = Async::Resolve<TReq, TRes, OnConnect>;
+template <typename TReq, typename TRes, Async::UserOnConnectFn OnConnect = nullptr,
+          Async::UserOnAbortFn OnAbort = nullptr>
+using Endpoint = Async::Resolve<TReq, TRes, OnConnect, OnAbort>;
 
 // -----------------------------------------------------------------------
 // RAII owner for the response returned by co_await ep.SendPayload()
@@ -175,14 +217,38 @@ using Endpoint = Async::Resolve<TReq, TRes, OnConnect>;
 template <typename T> using EndpointOutput = Async::EndpointOutput<T>;
 
 // -----------------------------------------------------------------------
-// Passed into onConnect coroutines. Use handle.Send() and handle.Receive()-
-// -to perform the handshake before the slot enters the pool.
+// RAII owner of a connection pinned via ep.Reserve(), for protocols where
+// consecutive requests must share one connection (SQL transactions,
+// LISTEN/NOTIFY). Releases on destruction; check IsValid() first, since
+// Reserve() returns an empty one when the pool is exhausted.
+// -----------------------------------------------------------------------
+template <typename TReq, typename TRes> using ReservedSlot = Async::ReservedSlot<TReq, TRes>;
+
+// -----------------------------------------------------------------------
+// Chunked consumption of a large response via ep.Stream(req). Hold the
+// handle across the whole loop; each chunk's .data borrows engine memory
+// and is only valid until the next Next(), which is what keeps peak
+// memory at one chunk rather than the entire response.
+// -----------------------------------------------------------------------
+template <typename TReq, typename TRes> using StreamHandle = Async::StreamHandle<TReq, TRes>;
+template <typename TRes> using StreamChunk = Async::StreamChunk<TRes>;
+
+// -----------------------------------------------------------------------
+// Passed into onConnect coroutines. Use handle.Send() and handle.Receive()
+// to perform the handshake before the slot enters the pool.
 // -----------------------------------------------------------------------
 using SlotHandle = Async::SlotHandle;
 
 // -----------------------------------------------------------------------
+// Passed into onAbort coroutines. Only OpenSideConnection()/
+// NegotiatedProtocol(), the slot is still mid-request, so
+// Send/Receive/UpgradeToTLS aren't exposed here.
+// -----------------------------------------------------------------------
+using AbortSlotHandle = Async::AbortSlotHandle;
+
+// -----------------------------------------------------------------------
 // Returned by co_await handle.Receive()
-//   .status   EpSlotRecvOk or EpSlotRecvError
+//   .status   EpSlotOk, or one of the EpSlot*Error codes above
 //   .buf      pointer to received bytes (valid until the next Receive call)
 //   .len      number of bytes in .buf
 // -----------------------------------------------------------------------
@@ -199,23 +265,37 @@ using SlotReceiveResult = Async::SlotReceiveResult;
 using EpCoro = Async::Task<Shared::ConnectResult>;
 
 // -----------------------------------------------------------------------
-// Protocol descriptor. Fill the fields your protocol needs, leave the-
-// -rest null. serialize and parse are always required.
+// Return type for onAbort functions. No verdict to return, unlike EpCoro:
+// the original slot's fate is decided by its own receive/parse/timeout
+// cycle.
+//
+//   WFX::EpAbortCoro CancelQuery(WFX::AbortSlotHandle h, void* state) {
+//       // ... co_await h.OpenSideConnection(), send the cancel, side.Close() ...
+//       co_return;
+//   }
+// -----------------------------------------------------------------------
+using EpAbortCoro = Async::Task<void>;
+
+// -----------------------------------------------------------------------
+// Protocol descriptor. Fill the fields your protocol needs, leave the
+// rest null. serialize and parse are always required.
 //
 // Required:
 //   .serialize(slotState, &req, buf, bufLen, &written)
-//       Write the wire encoding of req into buf. Return EpSerOk on success,-
-//       -EpSerBufferTooSmall if buf is too small (engine retries once with a-
-//       -larger buffer), EpSerError on unrecoverable failure.
+//       Write the wire encoding of req into buf. Return EpSerOk on
+//       success, EpSerBufferTooSmall if buf is too small (engine retries
+//       once with a larger buffer), EpSerError on unrecoverable failure.
 //
 //   .parse(slotState, parseState, buf, len, &consumed, outObj, isEof)
-//       Read arriving bytes and fill outObj. Set *consumed to the number-
-//       -of bytes you read. Return EpParseDone or EpParseClose on a complete-
-//       -message, EpParseIncomplete if you need more bytes, EpParseError on-
-//       -failure. When isEof is true you must not return EpParseIncomplete.
+//       Read arriving bytes and fill outObj. Set *consumed to the number
+//       of bytes you read. Return EpParseDone or EpParseClose on a
+//       complete message, EpParseIncomplete if you need more bytes,
+//       EpParseError on failure. When isEof is true you must not return
+//       EpParseIncomplete.
 //
 // Nullable (omit or set to nullptr if not needed):
 //   .onConnect                         -> set by Endpoint<> from the OnConnect template arg
+//   .onAbort                           -> set by Endpoint<> from the OnAbort template arg
 //   .onDisconnect(slotState, reason)
 //   .createSlotState(userCtx)          -> void*  per-connection context
 //   .destroySlotState(slotState)
@@ -234,6 +314,7 @@ using EndpointDesc = Shared::EndpointDesc;
 // Connection pool settings
 //
 //   .connLimit              max simultaneous connections in the pool
+//   .auxConnLimit           max simultaneous OpenSideConnection()s; 0 = disabled (default)
 //   .dnsRefreshSeconds      0 = respect DNS TTL, N = hard override
 //   .connectTimeoutSeconds  TCP + TLS + onConnect must finish in this window
 //   .requestTimeoutSeconds  serialize + send + parse must finish in this window
@@ -249,6 +330,7 @@ using EndpointConfig = Shared::EndpointConfig;
 // -----------------------------------------------------------------------
 // TLS mode (set in EndpointConfig::tlsConfig)
 // -----------------------------------------------------------------------
+// NOLINTBEGIN(readability-identifier-naming)
 inline constexpr auto EpTlsAuto = Shared::EndpointTLSConfig::AUTO;
 inline constexpr auto EpTlsRequire = Shared::EndpointTLSConfig::FORCE_REQUIRE;
 inline constexpr auto EpTlsInsecure = Shared::EndpointTLSConfig::FORCE_INSECURE;
@@ -298,21 +380,24 @@ inline constexpr auto EpSerError = Shared::SerializeResult::ERROR;
 // In parse() (return value)
 // -----------------------------------------------------------------------
 inline constexpr auto EpParseIncomplete = Shared::ParseResult::INCOMPLETE;
+inline constexpr auto EpParseChunk = Shared::ParseResult::CHUNK_READY;
+inline constexpr auto EpParseChunkFetch = Shared::ParseResult::CHUNK_READY_FETCH;
 inline constexpr auto EpParseDone = Shared::ParseResult::COMPLETE_KEEP_ALIVE;
 inline constexpr auto EpParseClose = Shared::ParseResult::COMPLETE_CLOSE;
 inline constexpr auto EpParseError = Shared::ParseResult::ERROR;
 
 // -----------------------------------------------------------------------
-// In onConnect (from co_await handle.Send())
+// In onConnect, shared by co_await handle.Send(), .Receive().status and
+// .UpgradeToTLS(). Anything other than EpSlotOk is fatal for the slot:
+// co_return EpFatal
 // -----------------------------------------------------------------------
-inline constexpr auto EpSlotSendOk = Shared::SlotSendResult::OK;
-inline constexpr auto EpSlotSendError = Shared::SlotSendResult::ERROR;
-
-// -----------------------------------------------------------------------
-// In onConnect (from (co_await handle.Receive()).status)
-// -----------------------------------------------------------------------
-inline constexpr auto EpSlotRecvOk = Shared::SlotReceiveStatus::OK;
-inline constexpr auto EpSlotRecvError = Shared::SlotReceiveStatus::ERROR;
+inline constexpr auto EpSlotOk = Shared::SlotStatus::OK;
+inline constexpr auto EpSlotBufferError = Shared::SlotStatus::BUFFER_ERROR;
+inline constexpr auto EpSlotEpollError = Shared::SlotStatus::EPOLL_ERROR;
+inline constexpr auto EpSlotIoError = Shared::SlotStatus::IO_ERROR;
+inline constexpr auto EpSlotTlsError = Shared::SlotStatus::TLS_ERROR;
+inline constexpr auto EpSlotInvalidState = Shared::SlotStatus::INVALID_STATE;
+// NOLINTEND(readability-identifier-naming)
 
 } // namespace WFX
 

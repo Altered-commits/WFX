@@ -19,13 +19,9 @@ void HandleBuildDirectory();
 void HandleUserCxxCompilation(CxxCompilationOption = CxxCompilationOption::ALL);
 
 // vvv OS Specific Stuff vvv
-#ifdef _WIN32
-// Windows: future work
-#else
 void HandleMasterSignal(int);
 void HandleWorkerSignal(int);
 void PinWorkerToCPU(int);
-#endif
 
 } // namespace WFX::CLI
 

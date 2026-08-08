@@ -3,12 +3,9 @@
 
 # Build files
 build/
-BuildMinGW/
-BuildGCC/
-BuildGCCDebug/
-BuildMSVC/
-Debug/
-Release/
+
+# Engine binary
+./wfx
 
 # Internal
 ignore/

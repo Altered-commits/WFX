@@ -3,7 +3,7 @@ set -e
 
 # ---------------------------------------------------------------
 # WFX Uninstaller
-# Supports: Linux, macOS
+# Supports: Linux only
 # ---------------------------------------------------------------
 
 WFX_HOME="$HOME/.wfx"
@@ -21,9 +21,8 @@ error()   { printf "\033[1;31m[WFX]\033[0m %s\n" "$*" >&2; exit 1; }
 # Detect OS
 # ---------------------------------------------------------------
 case "$(uname -s)" in
-    Linux*)  OS="linux"  ;;
-    Darwin*) OS="macos"  ;;
-    *)       error "Unsupported OS: $(uname -s)" ;;
+    Linux*) ;;
+    *)      error "Unsupported OS: $(uname -s) (WFX currently supports Linux only)" ;;
 esac
 
 # ---------------------------------------------------------------
@@ -48,25 +47,15 @@ remove_from_path() {
     local file="$1"
     if [ -f "$file" ] && grep -qF '.wfx/bin' "$file"; then
         # Remove the WFX block (comment + export line)
-        if [ "$OS" = "macos" ]; then
-            sed -i '' '/# WFX/d' "$file"
-            sed -i '' '/\.wfx\/bin/d' "$file"
-        else
-            sed -i '/# WFX/d' "$file"
-            sed -i '/\.wfx\/bin/d' "$file"
-        fi
+        sed -i '/# WFX/d' "$file"
+        sed -i '/\.wfx\/bin/d' "$file"
         info "Removed WFX from PATH in $file"
     fi
 }
 
 info "Removing WFX from PATH..."
-if [ "$OS" = "macos" ]; then
-    remove_from_path "$HOME/.zshrc"
-    remove_from_path "$HOME/.bash_profile"
-else
-    remove_from_path "$HOME/.bashrc"
-    remove_from_path "$HOME/.profile"
-fi
+remove_from_path "$HOME/.bashrc"
+remove_from_path "$HOME/.profile"
 
 # ---------------------------------------------------------------
 # Remove ~/.wfx

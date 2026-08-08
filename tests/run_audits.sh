@@ -2,33 +2,45 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Altered-commits
 #
-# Single entry point for running the WFX audits (base, endpoint, tls),
+# Single entry point for running the WFX audits (base, endpoint, tls, crypto, ip),
 # locally or in CI.
 #
 # This script does NOT build wfx. It assumes a wfx binary already exists,
 # either on PATH or at the repo root (where a normal CMake build leaves it).
-# Build it yourself first, with ./scripts/install.sh --local or a plain
+# Build it yourself first, with ./scripts/install.sh --local-debug or a plain
 # cmake/ninja build, the same way you would before running any audit by hand.
 #
 # Usage:
-#   tests/run_audits.sh                  run all three audits, one after another
-#   tests/run_audits.sh --audit base     run one audit only: base, endpoint, or tls
+#   tests/run_audits.sh                  run all five audits, one after another
+#   tests/run_audits.sh --audit base     run one audit only: base, endpoint, tls, crypto, ip
 #   tests/run_audits.sh --ci             forward --ci to every audit that runs
-#   tests/run_audits.sh --audit tls -- --phase verify --wfx-logs all
+#   tests/run_audits.sh --audit endpoint --phase streaming
+#                                        run a single phase, needs --audit since phase
+#                                        names differ per audit
+#   tests/run_audits.sh --audit endpoint --list-phases
+#                                        list that audit's phases and exit
+#   tests/run_audits.sh --audit tls -- --wfx-logs all
 #                                        anything after -- is passed through as-is
 #
-# Locally, run it with no --audit and it goes through all three in sequence,
+# Locally, run it with no --audit and it goes through all five in sequence,
 # which is what you want on a dev machine. In GitHub Actions, --audit is set
-# to one name per matrix job, so the three run as separate parallel jobs
+# to one name per matrix job, so the five run as separate parallel jobs
 # instead, see .github/workflows/audit_check.yml.
 
 set -euo pipefail
+
+# Ctrl+C ends the whole run
+# Without this the loop below reads the interrupt as "this audit failed" and starts the next one,
+# so stopping a full run takes one Ctrl+C per remaining audit
+trap 'echo; echo "Interrupted."; exit 130' INT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 audit=""
 ci=0
+phase=""
+list_phases=0
 extra_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -39,6 +51,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --ci)
             ci=1
+            shift
+            ;;
+        --phase)
+            phase="$2"
+            shift 2
+            ;;
+        --list-phases)
+            list_phases=1
             shift
             ;;
         --)
@@ -53,15 +73,31 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Phase names differ per audit, so both only make sense against a single one
+if [[ -z "$audit" ]]; then
+    if [[ -n "$phase" ]]; then
+        echo "--phase needs --audit, phase names differ per audit" >&2
+        exit 1
+    fi
+    if [[ $list_phases -eq 1 ]]; then
+        echo "--list-phases needs --audit, phase names differ per audit" >&2
+        exit 1
+    fi
+fi
+
 declare -A AUDIT_DIRS=(
     [base]="base_audit"
     [endpoint]="endpoint_audit"
     [tls]="tls_audit"
+    [crypto]="crypto_audit"
+    [ip]="ip_audit"
 )
 declare -A AUDIT_SCRIPTS=(
     [base]="base_audit.py"
     [endpoint]="endpoint_audit.py"
     [tls]="tls_audit.py"
+    [crypto]="crypto_audit.py"
+    [ip]="ip_audit.py"
 )
 
 # Every audit's --wfx defaults to "wfx" on PATH. The binary itself lands at
@@ -77,13 +113,21 @@ run_one() {
     local name="$1"
     local dir="${AUDIT_DIRS[$name]:-}"
     if [[ -z "$dir" ]]; then
-        echo "Unknown audit: $name (expected one of: base, endpoint, tls)" >&2
+        echo "Unknown audit: $name (expected one of: base, endpoint, tls, crypto, ip)" >&2
         return 1
     fi
 
     local args=(--wfx "$wfx_bin")
     [[ $ci -eq 1 ]] && args+=(--ci)
+    [[ -n "$phase" ]] && args+=(--phase "$phase")
+    [[ $list_phases -eq 1 ]] && args+=(--list-phases)
     args+=("${extra_args[@]}")
+
+    # CI always starts from a clean checkout, so its template cache is never stale
+    # Locally it's gitignored and persists across runs, which can hide a template
+    # engine bug that a real recompile would've caught. Delete just the cache
+    # file so every run (local or CI) recompiles templates from current source
+    rm -f "$REPO_ROOT/tests/$dir/app/intermediate/template.wfxmeta"
 
     echo "==> running $name audit"
     (cd "$REPO_ROOT/tests/$dir" && python3 "${AUDIT_SCRIPTS[$name]}" "${args[@]}")
@@ -95,8 +139,19 @@ if [[ -n "$audit" ]]; then
 fi
 
 failed=()
-for name in base endpoint tls; do
-    if ! run_one "$name"; then
+for name in base endpoint tls crypto ip; do
+    rc=0
+    run_one "$name" || rc=$?
+
+    # 130 is SIGINT, which the trap above normally catches first: this covers the case where only
+    # the audit process got signalled, so an interrupt still stops the sequence
+    if [[ $rc -eq 130 ]]; then
+        echo
+        echo "Interrupted during $name audit."
+        exit 130
+    fi
+
+    if [[ $rc -ne 0 ]]; then
         failed+=("$name")
     fi
 done

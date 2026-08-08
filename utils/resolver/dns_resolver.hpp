@@ -7,18 +7,13 @@
 #include <cstdint>
 #include <vector>
 
-#if defined(_WIN32)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
 #include <sys/socket.h>
-#endif
 
 namespace WFX::Utils {
 
 // Single source of truth for a resolved address across the engine and DNS resolver
-// 'ttlSeconds' is only meaningful immediately after resolution (used to schedule the-
-// -next refresh); the engine ignores it for everything past registration
+// 'ttlSeconds' is only meaningful immediately after resolution (used to schedule the
+// next refresh); the engine ignores it for everything past registration.
 struct ResolvedAddr {
     sockaddr_storage addr;
     socklen_t addrLen;

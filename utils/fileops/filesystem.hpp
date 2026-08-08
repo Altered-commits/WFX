@@ -11,10 +11,6 @@
 #include <vector>
 #include <cstdint>
 
-// Dawg 'Windows' is hurting my brain, why name it same as mine smh
-#undef DeleteFile
-#undef CreateDirectory
-
 namespace WFX::Utils {
 
 class BaseFile;

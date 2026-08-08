@@ -2,20 +2,13 @@
 // Copyright (c) 2025-2026 Altered-commits
 
 #include "rw_buffer.hpp"
-#include "utils/diagnostics/logger.hpp"
+#include "shared/utils/memory.hpp"
 
 #include <cstring>
 
 namespace WFX::Utils {
 
-// vvv Constructor and Destructor vvv
-RWBuffer::RWBuffer()
-{
-    auto& pool = GetBufferPool();
-    if(!pool.IsInitialized())
-        GetLogger().Fatal("[RWBuffer]: 'BufferPool' must be initialized for 'RWBuffer' to work");
-}
-
+// vvv Destructor vvv
 RWBuffer::~RWBuffer()
 {
     ResetBuffer();
@@ -28,10 +21,8 @@ bool RWBuffer::InitReadBuffer(std::uint32_t size)
     if(readBuffer_)
         return true;
 
-    auto& pool = GetBufferPool();
-
-    std::size_t allocSize = sizeof(ReadMetadata) + size;
-    readBuffer_ = static_cast<char*>(pool.Alloc(allocSize));
+    const std::size_t allocSize = sizeof(ReadMetadata) + size;
+    readBuffer_ = static_cast<char*>(Shared::Alloc(allocSize));
     if(!readBuffer_)
         return false;
 
@@ -48,10 +39,8 @@ bool RWBuffer::InitWriteBuffer(std::uint32_t size)
     if(writeBuffer_)
         return true;
 
-    auto& pool = GetBufferPool();
-
-    std::size_t allocSize = sizeof(WriteMetadata) + size;
-    writeBuffer_ = static_cast<char*>(pool.Alloc(allocSize));
+    const std::size_t allocSize = sizeof(WriteMetadata) + size;
+    writeBuffer_ = static_cast<char*>(Shared::Alloc(allocSize));
     if(!writeBuffer_)
         return false;
 
@@ -65,11 +54,9 @@ bool RWBuffer::InitWriteBuffer(std::uint32_t size)
 
 void RWBuffer::ResetBuffer()
 {
-    auto& pool = GetBufferPool();
-
-    pool.Free(readBuffer_);
+    Shared::Free(readBuffer_);
     readBuffer_ = nullptr;
-    pool.Free(writeBuffer_);
+    Shared::Free(writeBuffer_);
     writeBuffer_ = nullptr;
 }
 
@@ -127,7 +114,8 @@ bool RWBuffer::IsWriteInitialized() const noexcept
 }
 
 // vvv Generic Buffer Management vvv
-bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uint32_t growSize, std::uint32_t maxSize)
+bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uint32_t growSize, std::uint32_t maxSize,
+                                 std::uint32_t minSize)
 {
     if(!buffer)
         return false;
@@ -138,19 +126,21 @@ bool RWBuffer::GenericGrowBuffer(char*& buffer, std::uint32_t metaSize, std::uin
     if(meta->bufferSize >= maxSize)
         return false;
 
-    // Advance one growSize step. growSize == 0 is treated as "jump straight to the ceiling" so a-
-    // -caller looping on this (serialize retry, region-full read) can never spin without making-
-    // -progress. Computed in 64-bit so bufferSize + growSize can't wrap a uint32 and hand back a-
-    // -newSize smaller than the current buffer, which would silently shrink and truncate the data
+    // minSize unreachable under the ceiling
+    if(minSize > maxSize)
+        return false;
+
+    // growSize == 0 means jump straight to maxSize; minSize lets the caller skip straight to a
+    // known target instead of looping. 64-bit to avoid wrapping bufferSize + growSize past uint32.
     std::uint64_t newSize = growSize ? static_cast<std::uint64_t>(meta->bufferSize) + growSize : maxSize;
+    if(minSize > newSize)
+        newSize = minSize;
     if(newSize > maxSize)
         newSize = maxSize;
 
-    auto& pool = GetBufferPool();
+    const std::uint32_t allocSize = static_cast<std::uint32_t>(metaSize + newSize);
 
-    std::uint32_t allocSize = static_cast<std::uint32_t>(metaSize + newSize);
-
-    char* newBuf = static_cast<char*>(pool.Realloc(buffer, allocSize));
+    char* newBuf = static_cast<char*>(Shared::Realloc(buffer, allocSize));
     if(!newBuf)
         return false;
 
@@ -171,34 +161,33 @@ bool RWBuffer::GenericAppendData(char*& buffer, std::uint32_t metaSize, const ch
     auto* meta = reinterpret_cast<RWBaseMetadata*>(buffer);
 
     // Total capacity this append needs. 64-bit so dataLength + size can't wrap a uint32
-    std::uint64_t required = static_cast<std::uint64_t>(meta->dataLength) + size;
+    const std::uint64_t required = static_cast<std::uint64_t>(meta->dataLength) + size;
 
     if(required > meta->bufferSize) {
         // Won't fit even fully grown, refuse rather than truncate
         if(required > maxSize)
             return false;
 
-        // Grow to fit in a SINGLE realloc, rounding the target up to a whole number of growSize-
-        // -steps above the current size so back-to-back appends amortize (growSize == 0 grows to-
-        // -exactly what's needed), then clamp to the ceiling. required <= maxSize checked above-
-        // -guarantees the clamp still leaves room for this append
+        // Grow to fit in a SINGLE realloc, rounding the target up to a whole number of growSize
+        // steps above the current size so back-to-back appends amortize (growSize == 0 grows to
+        // exactly what's needed), then clamp to the ceiling. required <= maxSize checked above
+        // guarantees the clamp still leaves room for this append.
         std::uint64_t newSize{0};
 
         if(growSize == 0)
             newSize = required;
         else {
-            std::uint64_t deficit = required - meta->bufferSize;
-            std::uint64_t steps = (deficit + growSize - 1) / growSize;
+            const std::uint64_t deficit = required - meta->bufferSize;
+            const std::uint64_t steps = (deficit + growSize - 1) / growSize;
             newSize = static_cast<std::uint64_t>(meta->bufferSize) + steps * growSize;
         }
 
         if(newSize > maxSize)
             newSize = maxSize;
 
-        auto& pool = GetBufferPool();
-        std::uint32_t allocSize = static_cast<std::uint32_t>(metaSize + newSize);
+        const std::uint32_t allocSize = static_cast<std::uint32_t>(metaSize + newSize);
 
-        char* newBuf = static_cast<char*>(pool.Realloc(buffer, allocSize));
+        char* newBuf = static_cast<char*>(Shared::Realloc(buffer, allocSize));
         if(!newBuf)
             return false;
 
@@ -215,12 +204,12 @@ bool RWBuffer::GenericAppendData(char*& buffer, std::uint32_t metaSize, const ch
 }
 
 // vvv Read Buffer Management vvv
-bool RWBuffer::GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize)
+bool RWBuffer::GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize, std::uint32_t minSize)
 {
     if(!readBuffer_)
         return false;
 
-    return GenericGrowBuffer(readBuffer_, sizeof(ReadMetadata), growSize, maxSize);
+    return GenericGrowBuffer(readBuffer_, sizeof(ReadMetadata), growSize, maxSize, minSize);
 }
 
 bool RWBuffer::AppendReadData(const char* data, std::uint32_t size, std::uint32_t incSize, std::uint32_t maxSize)
@@ -267,6 +256,22 @@ void RWBuffer::AdvanceWriteLength(std::uint32_t n) noexcept
 
     auto* meta = reinterpret_cast<WriteMetadata*>(writeBuffer_);
     meta->writtenLength = std::min(meta->writtenLength + n, meta->dataLength);
+}
+
+void RWBuffer::CompactWriteBuffer() noexcept
+{
+    // Discards the flushed prefix [0, writtenLength), slides the unsent tail [writtenLength,
+    // dataLength) down to offset 0, and rebases both watermarks so only live bytes remain.
+    auto* meta = GetWriteMeta();
+    if(!meta || meta->writtenLength == 0)
+        return;
+
+    const std::uint32_t remaining = meta->dataLength - meta->writtenLength;
+    if(remaining > 0)
+        std::memmove(GetWriteData(), GetWriteData() + meta->writtenLength, remaining);
+
+    meta->dataLength = remaining;
+    meta->writtenLength = 0;
 }
 
 ValidRegion RWBuffer::GetWritableWriteRegion() const noexcept

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <bit>
 #include "utils/diagnostics/logger.hpp"
+#include "shared/utils/memory.hpp"
 
 namespace WFX::Utils {
 
@@ -26,21 +27,23 @@ public: // vvv Constructor and Destructor vvv
         slots_ = std::uint32_t(rounded);
         words_ = slots_ >> 6;
 
-        pool_ = new T[slots_]{};
-        bitmap_ = new std::uint64_t[words_]{0};
+        pool_ = Shared::NewArray<T>(slots_);
+        bitmap_ = Shared::NewArray<std::uint64_t>(words_);
 
-        if(!pool_ || !bitmap_)
+        // numSlots == 0 is a deliberate empty pool (AllocSlot then always returns nullptr), not a
+        // failure: Alloc(0) itself returns nullptr, so only fail loud when slots were actually requested.
+        if(slots_ > 0 && (!pool_ || !bitmap_))
             GetLogger().Fatal("[BitmapPool]: Failed to create pools (Allocation returned nullptr)");
     }
 
     ~BitmapPool()
     {
         if(pool_) {
-            delete[] pool_;
+            Shared::DeleteArray(pool_, slots_);
             pool_ = nullptr;
         }
         if(bitmap_) {
-            delete[] bitmap_;
+            Shared::DeleteArray(bitmap_, words_);
             bitmap_ = nullptr;
         }
     }
@@ -68,8 +71,8 @@ public: // vvv Constructor and Destructor vvv
     BitmapPool& operator=(BitmapPool&& other) noexcept
     {
         if(this != &other) {
-            delete[] pool_;
-            delete[] bitmap_;
+            Shared::DeleteArray(pool_, slots_);
+            Shared::DeleteArray(bitmap_, words_);
 
             pool_ = other.pool_;
             bitmap_ = other.bitmap_;
@@ -93,9 +96,9 @@ public: // vvv Main Functions vvv
 
         // Primary scan: from last index to end
         for(; w < words_; ++w) {
-            std::uint64_t inv = ~bitmap_[w];
+            const std::uint64_t inv = ~bitmap_[w];
             if(inv) {
-                int bit = std::countr_zero(inv);
+                const int bit = std::countr_zero(inv);
                 bitmap_[w] |= 1ULL << bit;
                 lastUsedIndex_ = w;
                 return &pool_[(w << 6) + bit];
@@ -105,9 +108,9 @@ public: // vvv Main Functions vvv
         // Wrap around scan: from start to old index
         w = 0;
         for(; w < lastUsedIndex_; ++w) {
-            std::uint64_t inv = ~bitmap_[w];
+            const std::uint64_t inv = ~bitmap_[w];
             if(inv) {
-                int bit = std::countr_zero(inv);
+                const int bit = std::countr_zero(inv);
                 bitmap_[w] |= 1ULL << bit;
                 lastUsedIndex_ = w;
                 return &pool_[(w << 6) + bit];
@@ -119,15 +122,15 @@ public: // vvv Main Functions vvv
 
     void FreeSlot(std::uint32_t idx)
     {
-        std::uint32_t w = idx >> 6;
-        std::uint32_t bit = idx & 63;
+        const std::uint32_t w = idx >> 6;
+        const std::uint32_t bit = idx & 63;
         bitmap_[w] &= ~(1ULL << bit);
     }
 
     bool IsAllocated(std::uint32_t idx) const
     {
-        std::uint32_t w = idx >> 6;
-        std::uint32_t bit = idx & 63;
+        const std::uint32_t w = idx >> 6;
+        const std::uint32_t bit = idx & 63;
         return (bitmap_[w] & (1ULL << bit)) != 0;
     }
 

@@ -4,6 +4,7 @@
 #ifndef WFX_SHARED_ABI_TYPES_HPP
 #define WFX_SHARED_ABI_TYPES_HPP
 
+#include "constants.hpp"
 #include "uuid.hpp"
 
 // Fwd declare user side request and response
@@ -38,6 +39,18 @@ enum class AsyncStatus : std::uint8_t {
     INTERNAL_FAILURE
 };
 
+// Shared result for every slot-level operation available inside an onConnect coroutine
+// (Send, Receive, UpgradeToTLS). One enum rather than one per operation: the failure modes
+// are the same underlying set, and each operation can only produce a subset anyway.
+enum class SlotStatus : std::uint8_t {
+    OK,           // Operation completed
+    BUFFER_ERROR, // Slot's read/write buffer couldn't be allocated or grown
+    EPOLL_ERROR,  // Re-arming the slot with epoll failed
+    IO_ERROR,     // Socket read/write failed
+    TLS_ERROR,    // TLS wrap or handshake failed
+    INVALID_STATE // Not valid for this slot right now (e.g. upgrading an already-secure one)
+};
+
 struct AsyncResult {
     void* data;
     std::uint32_t dataLen;
@@ -45,6 +58,7 @@ struct AsyncResult {
         MiddlewareAction action;       // CONTINUE for non-middleware
         ConnectResult connectResult;   // Set by Promise<ConnectResult> on final_suspend
         EndpointStatus endpointStatus; // Set by ReleaseEndpoint and HandleEndpointReceive on client failure
+        SlotStatus slotStatus;         // Set by SlotSend/SlotReceive/SlotUpgradeTls on failure
         std::uint8_t unused;           // Filler when none of the above apply (e.g. endpoint success)
     };
     AsyncStatus status;
@@ -57,8 +71,8 @@ using AsyncDestroyFn = void (*)(void* userData);
 
 struct AsyncData {
     void* userData;                // |
-    AsyncCompleteFn AsyncComplete; // | -> For cleaner storage on engine side i suppose
-    AsyncDestroyFn AsyncDestroy;   // |
+    AsyncCompleteFn asyncComplete; // | -> For cleaner storage on engine side i suppose
+    AsyncDestroyFn asyncDestroy;   // |
 };
 static_assert(sizeof(AsyncData) == 24, "'AsyncData' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<AsyncData>, "'AsyncData' must be standard layout");
@@ -120,8 +134,8 @@ static_assert(std::is_standard_layout_v<StreamBuffer>, "'StreamBuffer' must be s
 
 struct StreamGenerator {
     void* ctx;
-    StreamResult (*Next)(void* ctx, StreamBuffer buffer);
-    void (*Destroy)(void* ctx);
+    StreamResult (*next)(void* ctx, StreamBuffer buffer);
+    void (*destroy)(void* ctx);
 };
 static_assert(sizeof(StreamGenerator) == 24, "'StreamGenerator' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<StreamGenerator>, "'StreamGenerator' must be standard layout");
@@ -129,8 +143,9 @@ static_assert(std::is_standard_layout_v<StreamGenerator>, "'StreamGenerator' mus
 // vvv Endpoint vvv
 enum class EndpointStatus : std::uint8_t {
     // Success
-    SUCCESS = 0, // Endpoint processing finished
-    PENDING,     // Endpoint processing in progress
+    SUCCESS = 0,     // Endpoint processing finished
+    PENDING,         // Endpoint processing in progress
+    CHUNK_AVAILABLE, // Stream Next() satisfied from buffered bytes, chunk ready without suspending
 
     // Buffer errors
     BUFFER_ERROR,        // Initialization failed, etc
@@ -171,87 +186,98 @@ enum class DisconnectReason : std::uint8_t {
     ERROR              // I/O or protocol error, or any other close not covered above
 };
 
-enum class SlotSendResult : std::uint8_t {
-    OK,   // Written and flushed immediately
-    ERROR // Fatal write failure
-};
-
-enum class SlotReceiveStatus : std::uint8_t {
-    OK,   // Data arrived, buffer pointer and length are valid
-    ERROR // Fatal read failure
-};
-
 enum class SerializeResult : std::uint8_t {
     OK,               // Serialized successfully
     BUFFER_TOO_SMALL, // Output buffer insufficient, engine may retry with larger buffer
     ERROR             // Unrecoverable serialization failure
 };
 
+// CHUNK_* deliver one piece of a response and keep the request in flight. outObj is borrowed
+// until the next Next(), so the protocol must reset it on the following parse call, not append:
+// reusing one object is what bounds memory to a single chunk regardless of total size.
 enum class ParseResult : std::uint8_t {
     INCOMPLETE,          // Need more bytes, call again when data arrives
+    CHUNK_READY,         // Chunk ready; more bytes arrive unprompted (MySQL rows, HTTP chunked, etc)
+    CHUNK_READY_FETCH,   // Chunk ready; engine re-serializes to ask for the next batch (Postgres, Cassandra, etc)
     COMPLETE_KEEP_ALIVE, // Full message received, slot returns to pool
     COMPLETE_CLOSE,      // Full message received, slot must close after delivery
     ERROR                // Unrecoverable parse failure
 };
 
-// Reserved slot-close hook, currently unused (nullptr) by the engine
-// Present for ABI symmetry with the rest of EndpointSlotHandle
+// Closes a side connection opened via the endpoint API's openSideConnection. nullptr on a
+// primary handle (onConnect's/onAbort's own slot); only a side-connection handle gets a real one.
 using EndpointSlotCloseFn = void (*)(void* endpointCtx);
+
 // Returns the ALPN protocol negotiated on this slot's TLS connection
 // Empty if not TLS or the handshake hasn't completed yet
 using EndpointNegotiatedProtocolFn = StringView (*)(void* endpointCtx);
 
-// Send/Receive go through the endpoint API (SlotSend/SlotReceive) directly,-
-// -SlotHandle::Send/Receive call those rather than a per-slot function pointer here
+// Send/Receive go through the endpoint API (SlotSend/SlotReceive) directly; SlotHandle::Send/Receive
+// call those rather than a per-slot function pointer here.
 struct EndpointSlotHandle {
     void* impl;
-    EndpointSlotCloseFn Close;
-    EndpointNegotiatedProtocolFn NegotiatedProtocol;
+    EndpointSlotCloseFn close;
+    EndpointNegotiatedProtocolFn negotiatedProtocol;
 };
 static_assert(sizeof(EndpointSlotHandle) == 24, "'EndpointSlotHandle' must be exactly 24 bytes.");
 static_assert(std::is_standard_layout_v<EndpointSlotHandle>, "'EndpointSlotHandle' must be standard layout");
 
-// Writes req's wire encoding into buf; streamKey is only used when hasCapacity is set-
-// -(the key this request should be tracked under, e.g. an HTTP/2 stream id), else left at 0
+// Wire codec, the two every protocol implements. serialize's streamKey is only set when
+// hasCapacity is (e.g. an HTTP/2 stream id), else left 0; parse's completedKey mirrors it.
+// isEof forbids parse from returning INCOMPLETE, no more bytes are coming
 using EndpointSerializeFn = SerializeResult (*)(void* slotState, const void* req, char* buf, std::uint32_t bufLen,
                                                 std::uint32_t* written, std::uint64_t* streamKey);
-// Reads arriving bytes for one slot; isEof forbids returning INCOMPLETE (no more bytes coming)
-// completedKey is 0 unless hasCapacity is set, in which case non-zero means that stream is done
 using EndpointParseFn = ParseResult (*)(void* slotState, void* parseState, const char* buf, std::uint32_t len,
                                         std::uint32_t* consumed, void* outObj, bool isEof, std::uint64_t* completedKey);
-// Runs once per connection before it enters the pool (auth handshakes, etc.)
-// Must eventually call onDone with a ConnectResult via onDoneUd
+
+// Connection lifecycle. onConnect runs before the slot enters the pool (auth handshakes) and
+// must eventually call onDone with a ConnectResult; onDisconnect runs on teardown, before
+// slotState is destroyed.
 using EndpointOnConnectFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone,
                                      void* onDoneUd);
-// Fires when a slot is torn down, before slotState is destroyed
-// reason distinguishes drain / idle-timeout / error
 using EndpointOnDisconnectFn = void (*)(void* slotState, DisconnectReason reason);
-// Allocates per-slot or per-request state (ctx is userCtx for slots, slotState for requests)
-// Paired with the matching EndpointDestroyStateFn
+
+// Fires when a single-slot request's client disconnects, instead of force-closing the slot. The
+// slot itself is left alone (still mid-request, real response completes normally). handle is
+// read-only + OpenSideConnection only (see AbortSlotHandle); Send/Receive on it directly is illegal
+// here. Never fires for multiplexed slots or a request already mid-Stream().
+using EndpointOnAbortFn = void (*)(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd);
+
+// State allocation for slot state, parse state and output. create's ctx is userCtx for slot
+// state, slotState for per-request state. reset clears parse state between keep-alive requests;
+// without it the engine destroys and recreates instead.
 using EndpointCreateStateFn = void* (*)(void* ctx);
-// Frees state allocated by the matching EndpointCreateStateFn
-// Called on request completion or slot teardown
 using EndpointDestroyStateFn = void (*)(void* state);
-// Clears parse state for reuse between keep-alive requests on the same slot
-// Only called when non-null; otherwise the engine destroys and recreates it
 using EndpointResetStateFn = void (*)(void* parseState);
-// Computes a dedup key for req; identical keys share one in-flight backend request
-// Return 0 to opt this request out of coalescing
+
+// Coalescing, where identical in-flight requests share one backend round trip. coalesceKey
+// returns 0 to opt a request out; cloneOutput gives each waiter its own owned copy and is
+// REQUIRED whenever coalesceKey is set.
 using EndpointCoalesceKeyFn = std::uint64_t (*)(const void* req);
-// Returns a freshly allocated deep clone of srcOutput, or null on allocation failure
-// Required when coalesceKey is set (each coalesced waiter receives its own owned clone)
 using EndpointCloneOutputFn = void* (*)(void* slotState, const void* srcOutput);
-// Null = slot is exclusively single-request (today's behavior)
-// Non-null = engine may hand this busy slot another request when this returns true
+
+// Multiplexing, several concurrent requests over one connection. Non-null hasCapacity enables
+// it, and the engine hands a busy slot more work whenever it returns true. takeStreamOutput
+// claims a stream's output (null if unfinished) and is REQUIRED alongside it.
 using EndpointHasCapacityFn = bool (*)(void* slotState);
-// Claims a multiplexed stream's finished output (completed or being abandoned early)
-// Returns null if unfinished; protocol must free any partial internal state for that key
 using EndpointTakeStreamOutputFn = void* (*)(void* slotState, std::uint64_t key);
+
+// Server-initiated data with nothing awaiting it (Postgres NOTIFY, Redis pub/sub), so a plain
+// callback rather than a coroutine resume. Set *consumed to a complete message's length
+// (0 = need more bytes); return false if undecodable, which closes the slot.
+using EndpointOnPushFn = bool (*)(void* slotState, const char* buf, std::uint32_t len, std::uint32_t* consumed);
+
+// Reports the protocol's own response status so the engine can bucket upstream results per
+// endpoint. Only protocols that have such a concept implement it; everything else leaves it null
+// and the status counters stay zero.
+// Returning 0 means "no status for this response" and is not counted
+using EndpointStatusCodeFn = std::uint16_t (*)(const void* outObj);
 
 struct EndpointDesc {
     EndpointSerializeFn serialize;
     EndpointParseFn parse;
     EndpointOnConnectFn onConnect;               // nullable, skipped for simple protocols (Redis, etc)
+    EndpointOnAbortFn onAbort;                   // nullable, single-slot requests only
     EndpointOnDisconnectFn onDisconnect;         // nullable
     EndpointCreateStateFn createSlotState;       // nullable
     EndpointDestroyStateFn destroySlotState;     // nullable
@@ -264,13 +290,16 @@ struct EndpointDesc {
     EndpointCloneOutputFn cloneOutput;           // nullable, REQUIRED when coalesceKey is set
     EndpointHasCapacityFn hasCapacity;           // nullable, non-null enables multiplexed slot sharing
     EndpointTakeStreamOutputFn takeStreamOutput; // nullable, REQUIRED when hasCapacity is set
+    EndpointOnPushFn onPush;                     // nullable, null closes the slot on unsolicited bytes
+    EndpointStatusCodeFn statusCode;             // nullable, feeds the per-endpoint status counters
     void* userCtx;                               // injected into createSlotState
 };
-static_assert(sizeof(EndpointDesc) == 128, "'EndpointDesc' must be exactly 128 bytes.");
+static_assert(sizeof(EndpointDesc) == 152, "'EndpointDesc' must be exactly 152 bytes.");
 static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be standard layout");
 
 struct EndpointConfig {
-    std::uint32_t connLimit;             // Max simultaneous connections in the slot pool
+    std::uint32_t connLimit;             // Max simultaneous connections (next 64 aligned) in the slot pool
+    std::uint32_t auxConnLimit;          // Max simultaneous side connections (next 64 aligned); 0 = disabled
     std::uint32_t dnsRefreshSeconds;     // 0 = respect actual DNS TTL, N = override with N seconds
     std::uint16_t connectTimeoutSeconds; // TCP+TLS+onConnect must complete within this window
     std::uint16_t requestTimeoutSeconds; // Send+receive cycle must complete within this window
@@ -283,7 +312,7 @@ struct EndpointConfig {
     std::uint32_t maxConcurrentStreams;  // Cap on requests sharing one slot; 0/1 = exclusive slot
     StringView alpnProtocols;            // Wire-encoded ALPN list; empty = offer http/1.1 only
 };
-static_assert(sizeof(EndpointConfig) == 48, "'EndpointConfig' must be exactly 48 bytes.");
+static_assert(sizeof(EndpointConfig) == 56, "'EndpointConfig' must be exactly 56 bytes.");
 static_assert(std::is_standard_layout_v<EndpointConfig>, "'EndpointConfig' must be standard layout");
 
 // vvv Server Metrics vvv
@@ -299,6 +328,68 @@ struct LogMetrics {
 static_assert(sizeof(LogMetrics) == 48, "'LogMetrics' must be exactly 48 bytes");
 static_assert(std::is_standard_layout_v<LogMetrics>, "'LogMetrics' must be standard layout");
 
+// vvv Per-route and per-endpoint metrics vvv
+// Counters only, kept deliberately small: these are always mapped, so every field here is paid
+// for in production. Anything only interesting while chasing a specific bug belongs in a log
+// line, not a permanent counter.
+// Slots are indexed densely from 0, so the mmap only faults in the pages actually used, and the
+// route name is not stored here: it is registration data, identical in every worker, and is
+// attached when the metrics are read.
+struct RouteMetrics {
+    std::uint64_t requests = 0;
+    std::uint64_t status1xx = 0;
+    std::uint64_t status2xx = 0;
+    std::uint64_t status3xx = 0;
+    std::uint64_t status4xx = 0;
+    std::uint64_t status5xx = 0;
+    std::uint64_t bytesOut = 0;
+};
+static_assert(sizeof(RouteMetrics) == 56, "'RouteMetrics' must be exactly 56 bytes");
+static_assert(std::is_standard_layout_v<RouteMetrics>, "'RouteMetrics' must be standard layout");
+
+// Errors are split only where the split changes what you would do about it: unreachable host, bad
+// TLS, slow upstream and a pool too small are four different fixes. Everything else shares one
+// bucket, since narrowing it further is a debugging job rather than a monitoring one.
+// The status counters are filled from EndpointDesc::statusCode, so they stay zero for protocols
+// that have no such concept.
+struct EndpointMetrics {
+    std::uint64_t requests = 0;
+    std::uint64_t completed = 0;
+    std::uint64_t status1xx = 0;
+    std::uint64_t status2xx = 0;
+    std::uint64_t status3xx = 0;
+    std::uint64_t status4xx = 0;
+    std::uint64_t status5xx = 0;
+    std::uint64_t connectFailures = 0;
+    std::uint64_t tlsFailures = 0;
+    std::uint64_t requestTimeouts = 0;
+    std::uint64_t poolExhausted = 0;
+    std::uint64_t otherErrors = 0;
+    std::uint64_t reconnects = 0;
+    std::uint64_t coalesceHits = 0;
+    std::uint64_t bytesOut = 0;
+    std::uint64_t bytesIn = 0;
+    std::uint64_t slotsInUse = 0; // Gauge, current leases against connLimit
+};
+static_assert(sizeof(EndpointMetrics) == 136, "'EndpointMetrics' must be exactly 136 bytes");
+static_assert(std::is_standard_layout_v<EndpointMetrics>, "'EndpointMetrics' must be standard layout");
+
+// Latency lives in its own array, mapped only when [Metrics] latency is on
+// Production wants to know what happened, a perf run wants to know how long it took, and the
+// second question costs two clock reads per request and far more memory than the counters.
+//
+// 24 power-of-two ranges of 8 linear sub-buckets cover 1us to ~16s. A value reported at its
+// bucket midpoint is within 6.25% of the truth, which is tight enough to tell a p99 regression
+// from noise. Recording is a shift and an increment, percentiles are rebuilt at scrape time.
+inline constexpr std::uint32_t LATENCY_BUCKET_COUNT = 192;
+
+struct LatencyMetrics {
+    std::uint64_t sumUs = 0;
+    std::uint64_t buckets[LATENCY_BUCKET_COUNT] = {};
+};
+static_assert(sizeof(LatencyMetrics) == 1544, "'LatencyMetrics' must be exactly 1544 bytes");
+static_assert(std::is_standard_layout_v<LatencyMetrics>, "'LatencyMetrics' must be standard layout");
+
 // Updated per request-response cycle
 struct NetworkMetrics {
     std::uint64_t accepts = 0;
@@ -311,14 +402,8 @@ struct NetworkMetrics {
     std::uint64_t fileBytesWritten = 0;
     std::uint64_t activeClientConns = 0;
     std::uint64_t activeEndpointConns = 0;
-    std::uint64_t requests = 0;
-    std::uint64_t response1xx = 0;
-    std::uint64_t response2xx = 0;
-    std::uint64_t response3xx = 0;
-    std::uint64_t response4xx = 0;
-    std::uint64_t response5xx = 0;
 };
-static_assert(sizeof(NetworkMetrics) == 128, "'NetworkMetrics' must be exactly 128 bytes");
+static_assert(sizeof(NetworkMetrics) == 80, "'NetworkMetrics' must be exactly 80 bytes");
 static_assert(std::is_standard_layout_v<NetworkMetrics>, "'NetworkMetrics' must be standard layout");
 
 // Written by master process, reflects live state of each worker slot
@@ -334,6 +419,24 @@ struct SelfMetrics {
 };
 static_assert(sizeof(SelfMetrics) == 48, "'SelfMetrics' must be exactly 48 bytes");
 static_assert(std::is_standard_layout_v<SelfMetrics>, "'SelfMetrics' must be standard layout");
+
+// Counters plus the identity they belong to, assembled at read time: the counters come from the
+// mmap, the identity from registration data. path and host are views into engine-owned strings
+// that live for the whole process, so they stay valid for the scraping handler's lifetime.
+struct RouteMetricsView {
+    StringView path;
+    HttpMethod method = HttpMethod::GET;
+    RouteMetrics metrics;
+};
+static_assert(sizeof(RouteMetricsView) == 80, "'RouteMetricsView' must be exactly 80 bytes");
+static_assert(std::is_standard_layout_v<RouteMetricsView>, "'RouteMetricsView' must be standard layout");
+
+struct EndpointMetricsView {
+    StringView host;
+    EndpointMetrics metrics;
+};
+static_assert(sizeof(EndpointMetricsView) == 152, "'EndpointMetricsView' must be exactly 152 bytes");
+static_assert(std::is_standard_layout_v<EndpointMetricsView>, "'EndpointMetricsView' must be standard layout");
 
 // One slot per worker in shared mmap
 // Embeds user-facing metric structs directly (add fields there, not here)

@@ -39,33 +39,33 @@ struct JsonParser {
 public: // vvv Primitives vvv
     bool Ok() const noexcept
     {
-        return err == nullptr;
+        return err_ == nullptr;
     }
     bool End() const noexcept
     {
-        return pos >= len;
+        return pos_ >= len_;
     }
     char Peek() const noexcept
     {
-        return pos < len ? src[pos] : '\0';
+        return pos_ < len_ ? src_[pos_] : '\0';
     }
 
     void Fail(const char* msg) noexcept
     {
-        if(!err) {
-            err = msg;
-            errOff = pos;
+        if(!err_) {
+            err_ = msg;
+            errOff_ = pos_;
         }
     }
 
     void SkipWS() noexcept
     {
-        while(pos < len) {
-            char c = src[pos];
+        while(pos_ < len_) {
+            const char c = src_[pos_];
             if(c != ' ' && c != '\t' && c != '\n' && c != '\r')
                 break;
 
-            ++pos;
+            ++pos_;
         }
     }
 
@@ -78,18 +78,18 @@ public: // vvv Primitives vvv
             return false;
         }
 
-        ++pos;
+        ++pos_;
         return true;
     }
 
     // Consume consecutive ASCII digits, returns false if none present
     bool SkipDigits() noexcept
     {
-        if(pos >= len || src[pos] < '0' || src[pos] > '9')
+        if(pos_ >= len_ || src_[pos_] < '0' || src_[pos_] > '9')
             return false;
 
-        while(pos < len && src[pos] >= '0' && src[pos] <= '9')
-            ++pos;
+        while(pos_ < len_ && src_[pos_] >= '0' && src_[pos_] <= '9')
+            ++pos_;
 
         return true;
     }
@@ -98,7 +98,7 @@ public: // vvv Unicode vvv
     // Decode 4 hex digits at src[pos], advance pos by 4, return codepoint or -1
     std::int32_t DecodeHex4() noexcept
     {
-        if(pos + 4 > len) {
+        if(pos_ + 4 > len_) {
             Fail("truncated \\u escape");
             return -1;
         }
@@ -106,7 +106,7 @@ public: // vvv Unicode vvv
         std::uint32_t cp = 0;
 
         for(int i = 0; i < 4; ++i) {
-            char c = src[pos++];
+            const char c = src_[pos_++];
             std::uint32_t d;
 
             if(c >= '0' && c <= '9')
@@ -160,20 +160,20 @@ public: // vvv String scanning vvv
     // Returns false on control character or unterminated string
     bool ScanString(std::size_t& end, bool& hasEscape) noexcept
     {
-        for(std::size_t i = pos; i < len; ++i) {
-            unsigned char c = static_cast<unsigned char>(src[i]);
+        for(std::size_t i = pos_; i < len_; ++i) {
+            const unsigned char c = static_cast<unsigned char>(src_[i]);
 
             if(c < 0x20) {
                 Fail("control character in string");
                 return false;
             }
 
-            if(src[i] == '\\') {
+            if(src_[i] == '\\') {
                 hasEscape = true;
                 end = i;
                 return true;
             }
-            if(src[i] == '"') {
+            if(src_[i] == '"') {
                 hasEscape = false;
                 end = i;
                 return true;
@@ -188,12 +188,12 @@ public: // vvv String scanning vvv
     // Returns false on error
     bool DecodeEscape(char* out, std::uint32_t& outLen) noexcept
     {
-        if(pos >= len) {
+        if(pos_ >= len_) {
             Fail("truncated escape");
             return false;
         }
 
-        char esc = src[pos++];
+        const char esc = src_[pos_++];
 
         switch(esc) {
             case '"':
@@ -221,20 +221,20 @@ public: // vvv String scanning vvv
                 out[outLen++] = '\t';
                 return true;
             case 'u': {
-                std::int32_t cp = DecodeHex4();
+                const std::int32_t cp = DecodeHex4();
                 if(cp < 0)
                     return false;
 
                 if(cp >= 0xD800 && cp <= 0xDBFF) {
                     // High surrogate, must be followed by low surrogate \uXXXX
-                    if(pos + 1 >= len || src[pos] != '\\' || src[pos + 1] != 'u') {
+                    if(pos_ + 1 >= len_ || src_[pos_] != '\\' || src_[pos_ + 1] != 'u') {
                         Fail("missing low surrogate");
                         return false;
                     }
 
-                    pos += 2;
+                    pos_ += 2;
 
-                    std::int32_t low = DecodeHex4();
+                    const std::int32_t low = DecodeHex4();
                     if(low < 0)
                         return false;
 
@@ -243,8 +243,8 @@ public: // vvv String scanning vvv
                         return false;
                     }
 
-                    std::uint32_t full = 0x10000u + ((static_cast<std::uint32_t>(cp) - 0xD800u) << 10) +
-                                         (static_cast<std::uint32_t>(low) - 0xDC00u);
+                    const std::uint32_t full = 0x10000u + ((static_cast<std::uint32_t>(cp) - 0xD800u) << 10) +
+                                               (static_cast<std::uint32_t>(low) - 0xDC00u);
 
                     outLen += EncodeUTF8(full, out + outLen);
                 }
@@ -269,8 +269,8 @@ public: // vvv String parsing vvv
     // Returns false on error
     bool ParseStringEscaped(JsonStore* s, JsonNode& n) noexcept
     {
-        std::uint32_t capacity = static_cast<std::uint32_t>(len - pos) + 4;
-        std::uint32_t strOff = s->AllocStr(nullptr, capacity);
+        const std::uint32_t capacity = static_cast<std::uint32_t>(len_ - pos_) + 4;
+        const std::uint32_t strOff = s->AllocStr(nullptr, capacity);
 
         if(strOff == JSON_NIL) {
             Fail("out of memory");
@@ -280,11 +280,11 @@ public: // vvv String parsing vvv
         char* out = s->strs + strOff;
         std::uint32_t outLen = 0;
 
-        while(pos < len) {
-            char c = src[pos];
+        while(pos_ < len_) {
+            const char c = src_[pos_];
 
             if(c == '"') {
-                ++pos;
+                ++pos_;
                 break;
             }
 
@@ -295,11 +295,11 @@ public: // vvv String parsing vvv
 
             if(c != '\\') {
                 out[outLen++] = c;
-                ++pos;
+                ++pos_;
                 continue;
             }
 
-            ++pos; // consume backslash
+            ++pos_; // consume backslash
 
             if(!DecodeEscape(out, outLen))
                 return false;
@@ -309,8 +309,8 @@ public: // vvv String parsing vvv
         s->strLen = strOff + outLen + 1; // patch strLen, capacity may be larger
 
         n.tag = JsonTag::STR_OWN;
-        n.u32a() = strOff;
-        n.u32c() = outLen;
+        n.U32a() = strOff;
+        n.U32c() = outLen;
         return true;
     }
 
@@ -324,7 +324,7 @@ public: // vvv String parsing vvv
         if(!Expect('"'))
             return false;
 
-        std::size_t end = pos;
+        std::size_t end = pos_;
         bool hasEscape = false;
 
         if(!ScanString(end, hasEscape))
@@ -333,18 +333,20 @@ public: // vvv String parsing vvv
             return ParseStringEscaped(s, n);
 
         // Fast path: no escape sequences in this string
-        std::uint32_t slen = static_cast<std::uint32_t>(end - pos);
+        const std::uint32_t slen = static_cast<std::uint32_t>(end - pos_);
 
-        if(isView) {
-            // Zero-copy: pack pointer into u64a, store length in u32c
+        if(isView_) {
+            // Zero-copy: pack pointer into u64a, store length in U32c
             // Must memcpy from a const char* local, &src[pos] is the char's address
             n.tag = JsonTag::STR_VIEW;
-            const char* ptr = src + pos;
+            const char* ptr = src_ + pos_;
+
+            // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion): intentional type pun, see above.
             std::memcpy(&n.u64a, &ptr, 8);
-            n.u32c() = slen;
+            n.U32c() = slen;
         }
         else {
-            std::uint32_t off = s->AllocStr(src + pos, slen);
+            const std::uint32_t off = s->AllocStr(src_ + pos_, slen);
 
             if(off == JSON_NIL) {
                 Fail("out of memory");
@@ -352,11 +354,11 @@ public: // vvv String parsing vvv
             }
 
             n.tag = JsonTag::STR_OWN;
-            n.u32a() = off;
-            n.u32c() = slen;
+            n.U32a() = off;
+            n.U32c() = slen;
         }
 
-        pos = end + 1; // skip closing "
+        pos_ = end + 1; // skip closing "
         return true;
     }
 
@@ -371,9 +373,9 @@ public: // vvv Number parsing vvv
             return false;
         }
 
-        if(pos < len && src[pos] == '.') {
+        if(pos_ < len_ && src_[pos_] == '.') {
             isFloat = true;
-            ++pos;
+            ++pos_;
 
             if(!SkipDigits()) {
                 Fail("invalid number");
@@ -381,12 +383,12 @@ public: // vvv Number parsing vvv
             }
         }
 
-        if(pos < len && (src[pos] == 'e' || src[pos] == 'E')) {
+        if(pos_ < len_ && (src_[pos_] == 'e' || src_[pos_] == 'E')) {
             isFloat = true;
-            ++pos;
+            ++pos_;
 
-            if(pos < len && (src[pos] == '+' || src[pos] == '-'))
-                ++pos;
+            if(pos_ < len_ && (src_[pos_] == '+' || src_[pos_] == '-'))
+                ++pos_;
 
             if(!SkipDigits()) {
                 Fail("invalid number");
@@ -399,17 +401,17 @@ public: // vvv Number parsing vvv
 
     bool ParseNumber(JsonNode& n) noexcept
     {
-        std::size_t start = pos;
-        bool isNeg = Peek() == '-';
+        const std::size_t start = pos_;
+        const bool isNeg = Peek() == '-';
         bool isFloat = false;
 
         if(isNeg)
-            ++pos;
+            ++pos_;
         if(!ScanNumber(isFloat))
             return false;
 
-        const char* begin = src + start;
-        const char* end = src + pos;
+        const char* begin = src_ + start;
+        const char* end = src_ + pos_;
 
         if(isFloat) {
             double v;
@@ -458,7 +460,7 @@ public: // vvv Value vvv
             return false;
         }
 
-        char c = Peek();
+        const char c = Peek();
         JsonNode& n = r.NMut();
 
         if(c == '"')
@@ -469,36 +471,36 @@ public: // vvv Value vvv
             return ParseArray(r);
 
         if(c == 't') {
-            if(pos + 4 > len || std::memcmp(src + pos, "true", 4) != 0) {
+            if(pos_ + 4 > len_ || std::memcmp(src_ + pos_, "true", 4) != 0) {
                 Fail("invalid literal");
                 return false;
             }
 
-            pos += 4;
+            pos_ += 4;
             n.tag = JsonTag::BOOL;
             n.u64a = 1;
             return true;
         }
 
         if(c == 'f') {
-            if(pos + 5 > len || std::memcmp(src + pos, "false", 5) != 0) {
+            if(pos_ + 5 > len_ || std::memcmp(src_ + pos_, "false", 5) != 0) {
                 Fail("invalid literal");
                 return false;
             }
 
-            pos += 5;
+            pos_ += 5;
             n.tag = JsonTag::BOOL;
             n.u64a = 0;
             return true;
         }
 
         if(c == 'n') {
-            if(pos + 4 > len || std::memcmp(src + pos, "null", 4) != 0) {
+            if(pos_ + 4 > len_ || std::memcmp(src_ + pos_, "null", 4) != 0) {
                 Fail("invalid literal");
                 return false;
             }
 
-            pos += 4;
+            pos_ += 4;
             n.tag = JsonTag::EMPTY;
             return true;
         }
@@ -515,8 +517,8 @@ public: // vvv Object and Array vvv
     // Keys must always be owned, src may not outlive the JsonObject
     bool ParseObject(JsonRef r) noexcept
     {
-        ++pos; // skip '{'
-        if(++depth > maxDepth) {
+        ++pos_; // skip '{'
+        if(++depth_ > maxDepth_) {
             Fail("max depth exceeded");
             return false;
         }
@@ -527,8 +529,8 @@ public: // vvv Object and Array vvv
 
         SkipWS();
         if(Peek() == '}') {
-            ++pos;
-            --depth;
+            ++pos_;
+            --depth_;
             return true;
         }
 
@@ -540,8 +542,8 @@ public: // vvv Object and Array vvv
                 return false;
             }
 
-            std::size_t keyStart = ++pos; // skip opening "
-            std::size_t end = pos;
+            const std::size_t keyStart = ++pos_; // skip opening "
+            std::size_t end = pos_;
             bool hasEscape = false;
 
             if(!ScanString(end, hasEscape))
@@ -551,14 +553,14 @@ public: // vvv Object and Array vvv
 
             if(!hasEscape) {
                 // Fast path: key has no escape sequences, copy directly from src
-                std::uint32_t klen = static_cast<std::uint32_t>(end - keyStart);
-                pos = end + 1; // skip closing "
-                valRef = r.GetOrCreate(src + keyStart, klen);
+                const std::uint32_t klen = static_cast<std::uint32_t>(end - keyStart);
+                pos_ = end + 1; // skip closing "
+                valRef = r.GetOrCreate(src_ + keyStart, klen);
             }
             else {
-                // Escaped key: rewind and parse the full string to get decoded bytes,-
-                // -then insert. Always owned, escaped content differs from src bytes
-                pos = keyStart - 1; // rewind to opening quote
+                // Escaped key: rewind and parse the full string to get decoded bytes, then insert.
+                // Always owned, escaped content differs from src bytes.
+                pos_ = keyStart - 1; // rewind to opening quote
 
                 JsonNode tmp;
                 tmp.tag = JsonTag::EMPTY;
@@ -566,20 +568,20 @@ public: // vvv Object and Array vvv
                 tmp.u64b = 0;
 
                 // Force copy for the key parse regardless of isView
-                bool savedView = isView;
-                isView = false;
+                const bool savedView = isView_;
+                isView_ = false;
 
-                bool ok = ParseString(r.s_, tmp);
-                isView = savedView;
+                const bool ok = ParseString(r.s_, tmp);
+                isView_ = savedView;
 
                 if(!ok)
                     return false;
 
-                // The decoded key already lives in the store (ParseStringEscaped wrote it there)
-                // Insert it by offset, NOT by pointer: GetOrCreate would feed that strs-interior-
-                // -pointer to AllocStr, which reallocs strs and then memcpy's from the freed-
-                // -original (use-after-free), on top of storing the key a second time
-                valRef = r.GetOrCreateStored(tmp.u32a(), tmp.u32c());
+                // The decoded key already lives in the store (ParseStringEscaped wrote it there).
+                // Insert it by offset, NOT by pointer: GetOrCreate would feed that strs-interior
+                // pointer to AllocStr, which reallocs strs and then memcpy's from the freed
+                // original (use-after-free), on top of storing the key a second time.
+                valRef = r.GetOrCreateStored(tmp.U32a(), tmp.U32c());
             }
 
             if(!valRef.Valid()) {
@@ -595,10 +597,10 @@ public: // vvv Object and Array vvv
                 return false;
 
             SkipWS();
-            char next = Peek();
+            const char next = Peek();
 
             if(next == '}') {
-                ++pos;
+                ++pos_;
                 break;
             }
 
@@ -607,18 +609,18 @@ public: // vvv Object and Array vvv
                 return false;
             }
 
-            ++pos;
+            ++pos_;
         }
 
-        --depth;
+        --depth_;
         return Ok();
     }
 
     // For each element, PushBack() gives a value JsonRef, then parse recursively into it
     bool ParseArray(JsonRef r) noexcept
     {
-        ++pos; // skip '['
-        if(++depth > maxDepth) {
+        ++pos_; // skip '['
+        if(++depth_ > maxDepth_) {
             Fail("max depth exceeded");
             return false;
         }
@@ -629,8 +631,8 @@ public: // vvv Object and Array vvv
 
         SkipWS();
         if(Peek() == ']') {
-            ++pos;
-            --depth;
+            ++pos_;
+            --depth_;
             return true;
         }
 
@@ -647,10 +649,10 @@ public: // vvv Object and Array vvv
                 return false;
 
             SkipWS();
-            char next = Peek();
+            const char next = Peek();
 
             if(next == ']') {
-                ++pos;
+                ++pos_;
                 break;
             }
 
@@ -659,10 +661,10 @@ public: // vvv Object and Array vvv
                 return false;
             }
 
-            ++pos;
+            ++pos_;
         }
 
-        --depth;
+        --depth_;
         return Ok();
     }
 
@@ -687,31 +689,31 @@ public: // vvv Entry point vvv
         }
 
         JsonParser p;
-        p.src = body.data();
-        p.len = body.size();
-        p.pos = 0;
-        p.depth = 0;
-        p.maxDepth = maxDepth;
-        p.isView = isView;
-        p.err = nullptr;
-        p.errOff = 0;
+        p.src_ = body.data();
+        p.len_ = body.size();
+        p.pos_ = 0;
+        p.depth_ = 0;
+        p.maxDepth_ = maxDepth;
+        p.isView_ = isView;
+        p.err_ = nullptr;
+        p.errOff_ = 0;
 
         p.SkipWS();
 
         if(p.Peek() != '{' && p.Peek() != '[') {
             result.error = "root must be object or array";
-            result.offset = p.pos;
+            result.offset = p.pos_;
             return result;
         }
 
         // Root node is node 0, always allocated by JsonObject::Init()
-        JsonRef root{result.object.s_, 0};
+        const JsonRef root{result.object.s_, 0};
 
-        bool ok = p.Peek() == '{' ? p.ParseObject(root) : p.ParseArray(root);
+        const bool ok = p.Peek() == '{' ? p.ParseObject(root) : p.ParseArray(root);
 
         if(!ok || !p.Ok()) {
-            result.error = p.err ? p.err : "parse error";
-            result.offset = p.errOff;
+            result.error = p.err_ ? p.err_ : "parse error";
+            result.offset = p.errOff_;
             return result;
         }
 
@@ -719,7 +721,7 @@ public: // vvv Entry point vvv
 
         if(!p.End()) {
             result.error = "trailing content after root";
-            result.offset = p.pos;
+            result.offset = p.pos_;
             return result;
         }
 
@@ -727,14 +729,14 @@ public: // vvv Entry point vvv
     }
 
 private: // vvv State vvv
-    const char* src;
-    std::size_t len;
-    std::size_t pos;
-    std::uint32_t depth;
-    std::uint32_t maxDepth;
-    const char* err = nullptr;
-    std::size_t errOff = 0;
-    bool isView;
+    const char* src_;
+    std::size_t len_;
+    std::size_t pos_;
+    std::uint32_t depth_;
+    std::uint32_t maxDepth_;
+    const char* err_ = nullptr;
+    std::size_t errOff_ = 0;
+    bool isView_;
 };
 
 } // namespace WFX::Shared

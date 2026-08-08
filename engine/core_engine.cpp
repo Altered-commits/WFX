@@ -15,10 +15,14 @@
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
+#include "shared/utils/detection_macro.hpp"
+#include "shared/utils/memory.hpp"
 
-#if defined(__linux__)
+#ifdef WFX_PLATFORM_POSIX
 #include <dlfcn.h>
 #endif
+
+#include <chrono>
 
 namespace WFX::Core {
 
@@ -34,6 +38,14 @@ enum ConnectionHeader : std::uint8_t {
     ERROR = 1 << 3,
 };
 
+// Monotonic microseconds for route latency. Stamp and read both go through here, so the base
+// cancels out and only the delta matters.
+static std::uint64_t NowUs()
+{
+    auto tse = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::microseconds>(tse).count();
+}
+
 // vvv Main Functions vvv
 CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
 {
@@ -42,13 +54,14 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
         logger_.Fatal("[CoreEngine]: Failed to create connection backend");
 
     // Initialize API backend before anything else
-    Shared::InitHttpAPIExt1(&router_, &middleware_);
-    Shared::InitEndpointAPIExt1(connHandler_.get());
-    Shared::InitAsyncAPIExt1(connHandler_.get());
+    InitHttpAPIExt1(&router_, &middleware_);
+    InitEndpointAPIExt1(connHandler_.get());
+    InitAsyncAPIExt1(connHandler_.get());
+    InitUtilsAPIExt1(&router_, connHandler_.get());
 
-    // We set it on our end because each compiled binary has its own copy of '__WFXApi'
+    // We set it on our end because each compiled binary has its own copy of 'GlobalWFXApi'
     // If we want it to work on our end, we gotta set it here as well
-    SetMasterApi(Shared::GetMasterAPI());
+    SetMasterApi(GetMasterAPI());
 
     // Load user's DLL file which we compiled / is cached
     HandleUserDLLInjection(dllPath);
@@ -60,7 +73,8 @@ CoreEngine::CoreEngine(const char* dllPath, bool useHttps)
 void CoreEngine::Listen(const std::string& host, std::uint16_t port)
 {
     connHandler_->Initialize(host, port);
-    connHandler_->SetEngineCallback([this](ClientCtx* ctx) { this->HandleRequest(ctx); });
+    connHandler_->SetEngineCallbacks([this](ClientCtx* ctx) { this->HandleRequest(ctx); },
+                                     [this](ClientCtx* ctx) { this->HandleClose(ctx); });
     connHandler_->Run();
 }
 
@@ -79,12 +93,12 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
 
     // Allocate response once per connection, reused across requests via Reset()
     if(!ctx->responseInfo)
-        ctx->responseInfo = new HttpResponse{};
+        ctx->responseInfo = New<HttpResponse>();
 
     auto& res = *ctx->responseInfo;
 
     // Main shit
-    HttpParseState state = HttpParser::Parse(ctx);
+    const HttpParseState state = HttpParser::Parse(ctx);
 
     switch(state) {
         case HttpParseState::PARSE_INCOMPLETE_HEADERS:
@@ -108,30 +122,34 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             return;
 
         case HttpParseState::PARSE_SUCCESS: {
-            metrics_->network.requests++;
-
-            // After parsing, ctx->trackBytes becomes the compact state register used by-
-            // -'HandleSuccess' for async resumption IF needed that is
+            // After parsing, ctx->trackBytes becomes the compact state register used by
+            // 'HandleSuccess' for async resumption IF needed that is.
             // For now reset ctx->trackBytes so ctx->trackAsync becomes zeroed out 'HandleSuccess'
             ctx->trackBytes = 0;
 
+            // Stamp request-dispatch time for route latency, read back in RecordRouteMetrics. Gated
+            // so the clock read is only paid when latency is on.
+            if(Utils::MetricTracer::LatencyEnabled())
+                ctx->routeStartUs = NowUs();
+
             auto& reqInfo = *ctx->requestInfo;
+
             auto connHeader = reqInfo.headers.GetHeader("Connection");
             auto connMask = HandleConnectionHeader(connHeader);
 
             // RFC violation, close connection
             if(connMask & ConnectionHeader::ERROR) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-                connHandler_->Write(ctx, HttpError::badRequest);
+                connHandler_->Write(ctx, HttpError::BAD_REQUEST);
                 return;
             }
 
             // In this case:
             // HTTP/1.0: Defaults to close
             // HTTP/1.1: Defaults to keep-alive
-            bool shouldClose = (connMask == ConnectionHeader::NONE)
-                                   ? (reqInfo.version == HttpVersion::HTTP_1_0)
-                                   : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
+            const bool shouldClose = (connMask == ConnectionHeader::NONE)
+                                         ? (reqInfo.version == HttpVersion::HTTP_1_0)
+                                         : static_cast<bool>(connMask & ConnectionHeader::CLOSE);
 
             ctx->SetConnectionState(shouldClose ? ConnectionState::CONNECTION_CLOSE
                                                 : ConnectionState::CONNECTION_ALIVE);
@@ -140,7 +158,7 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             // Write buffer allocated once, reused across requests on same connection
             if(!ctx->rwBuffer.IsWriteInitialized() && !ctx->rwBuffer.InitWriteBuffer(networkConfig.maxSendBufferSize)) {
                 ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-                connHandler_->Write(ctx, HttpError::internalError);
+                connHandler_->Write(ctx, HttpError::INTERNAL_ERROR);
                 return;
             }
 
@@ -149,10 +167,31 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             res.SetVersion(reqInfo.version);
             res.SetShouldClose(shouldClose);
 
+            // Connection limit is a capacity refusal (503); request limit is an actual rate
+            // limit (429). Neither is a protocol error, so both go through the normal response
+            // path and honor shouldClose above, instead of force-closing a connection the client
+            // asked to keep alive.
+            switch(AllowRequest(ctx)) {
+                case RateLimitResult::CONNECTION_LIMIT:
+                    HandleError(ctx, HttpStatus::SERVICE_UNAVAILABLE, "503: Connection limit exceeded");
+                    goto __HandleResponse;
+                case RateLimitResult::REQUEST_LIMIT:
+                    HandleError(ctx, HttpStatus::TOO_MANY_REQUESTS, "429: Rate limit exceeded");
+                    goto __HandleResponse;
+                default:
+                    break;
+            }
+
+            // Matched-origin requests get their CORS headers persisted here so they still survive
+            // a later 404 or handler error. Preflight requests are fully answered here too, before
+            // routing ever sees them.
+            if(HandleCors(ctx))
+                goto __HandleResponse;
+
             // Public file shortcut
             if(reqInfo.path.starts_with("/public/")) {
-                std::string_view relativePath = reqInfo.path.substr(7);
-                std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
+                const std::string_view relativePath = reqInfo.path.substr(7);
+                const std::string fullRoute = config_.projectConfig.publicDir + std::string(relativePath);
 
                 res.SendFile(fullRoute, true);
                 goto __HandleResponse;
@@ -161,6 +200,9 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             {
                 auto node = router_.MatchRoute(reqInfo.method, reqInfo.path, reqInfo.pathSegments);
                 if(!node) {
+                    if(HandleGenericOptions(ctx))
+                        goto __HandleResponse;
+
                     HandleError(ctx, HttpStatus::NOT_FOUND, "404: Route not found :(");
                     goto __HandleResponse;
                 }
@@ -178,13 +220,13 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
 
         case HttpParseState::PARSE_ERROR:
             ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-            connHandler_->Write(ctx, HttpError::badRequest);
+            connHandler_->Write(ctx, HttpError::BAD_REQUEST);
             return;
 
         case HttpParseState::PARSE_STREAMING_BODY:
         default:
             ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
-            connHandler_->Write(ctx, HttpError::notImplemented);
+            connHandler_->Write(ctx, HttpError::NOT_IMPLEMENTED);
             return;
     }
 }
@@ -199,13 +241,9 @@ void CoreEngine::HandleResponse(ClientCtx* ctx)
     if(!res.IsCommitted())
         res.Commit();
 
-    // Metrics
-    auto code = static_cast<std::uint16_t>(res.GetStatus());
-    metrics_->network.response1xx += (code >= 100 && code < 200);
-    metrics_->network.response2xx += (code >= 200 && code < 300);
-    metrics_->network.response3xx += (code >= 300 && code < 400);
-    metrics_->network.response4xx += (code >= 400 && code < 500);
-    metrics_->network.response5xx += (code >= 500 && code < 600);
+    // Every completed request converges here (sync, async, 404, public file), so per-route
+    // counters are recorded once at this single point.
+    RecordRouteMetrics(ctx);
 
     if(res.IsFile()) {
         connHandler_->WriteFile(ctx, res.TakeFilePath());
@@ -225,15 +263,15 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
 {
     WFX_TRACE();
 
-    auto* httpApi = Shared::GetHttpAPIExt1();
+    auto* httpApi = GetHttpAPIExt1();
     auto& req = *ctx->requestInfo;
     auto& res = *ctx->responseInfo;
     auto* node = static_cast<const TrieNode*>(req.routeNode_);
 
-    Response userRes{&res};
-    Request userReq{&req};
+    const Response userRes{&res};
+    const Request userReq{&req};
 
-    ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
+    const ExecutionLevel eLevel = ctx->trackAsync.GetELevel();
 
     if(eLevel == ExecutionLevel::RESPONSE)
         goto __HandleResponse;
@@ -257,8 +295,8 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
             return;
         }
 
-        // Update 'eLevel' to be 'RESPONSE' level so the next time this shits called, we-
-        // -directly jump to '__HandleResponse'
+        // Update 'eLevel' to be 'RESPONSE' level so the next time this shits called, we
+        // directly jump to '__HandleResponse'.
         ctx->trackAsync.SetELevel(ExecutionLevel::RESPONSE);
     }
 
@@ -266,21 +304,21 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
     if(node->callback.kind == CallbackKind::SYNC)
         node->callback.sync(userReq, userRes);
 
-    // Async, check if we have executed it entirely right now, if not-
-    // -schedule it for later
+    // Async, check if we have executed it entirely right now, if not
+    // schedule it for later.
     else {
         // Set context (type erased) at http api side before calling async callback
-        // And also erase it after callback is done, if the callback hasn't finished, the-
-        // -scheduler will set the ptr later on when needed, no need to keep a dangling pointer
-        httpApi->SetGlobalPtrData(static_cast<void*>(ctx));
+        // And also erase it after callback is done, if the callback hasn't finished, the
+        // scheduler will set the ptr later on when needed, no need to keep a dangling pointer.
+        httpApi->setGlobalPtrData(static_cast<void*>(ctx));
 
         node->callback.async(userReq, userRes, CoreEngine::OnCoroutineComplete, ctx);
 
-        httpApi->SetGlobalPtrData(nullptr);
+        httpApi->setGlobalPtrData(nullptr);
 
-        // If the coroutine already completed synchronously ('final_suspend' already fired the callback),-
-        // -the response is already handled
-        // If still suspended, it will fire later. Either way, we are done here
+        // If the coroutine already completed synchronously ('final_suspend' already fired the callback),
+        // the response is already handled.
+        // If still suspended, it will fire later. Either way, we are done here.
         FinishRequest(ctx);
         return;
     }
@@ -315,13 +353,48 @@ void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
     engine->HandleResponse(ctx);
 }
 
+void CoreEngine::RecordRouteMetrics(ClientCtx* ctx)
+{
+    auto& req = *ctx->requestInfo;
+    auto& res = *ctx->responseInfo;
+
+    // Unmatched traffic (404, public file) has no route to attribute to, so it is not recorded
+    const auto* node = static_cast<const TrieNode*>(req.routeNode_);
+    if(!node)
+        return;
+
+    auto* rm = MetricTracer::CurrentRoute(node->metricsIdx);
+    if(!rm)
+        return;
+
+    rm->requests++;
+
+    const auto code = static_cast<std::uint16_t>(res.GetStatus());
+    rm->status1xx += (code >= 100 && code < 200);
+    rm->status2xx += (code >= 200 && code < 300);
+    rm->status3xx += (code >= 300 && code < 400);
+    rm->status4xx += (code >= 400 && code < 500);
+    rm->status5xx += (code >= 500 && code < 600);
+
+    // dataLength is the fully serialized response for buffered bodies. File and stream bodies
+    // live outside rwBuffer, so this counts their headers only, the true wire total stays in
+    // network.bytesWritten.
+    if(ctx->rwBuffer.IsWriteInitialized())
+        if(const auto* wm = ctx->rwBuffer.GetWriteMeta())
+            rm->bytesOut += wm->dataLength;
+
+    // routeStartUs stays 0 when latency is off (the stamp is gated), so this also skips the read
+    if(ctx->routeStartUs != 0)
+        MetricTracer::RecordRouteLatencyUs(node->metricsIdx, NowUs() - ctx->routeStartUs);
+}
+
 void CoreEngine::FinishRequest(ClientCtx* ctx)
 {
     ctx->SetParseState(HttpParseState::PARSE_IDLE);
     connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
-void CoreEngine::HandleError(ClientCtx* ctx, Shared::HttpStatus code, std::string_view message)
+void CoreEngine::HandleError(ClientCtx* ctx, HttpStatus code, std::string_view message)
 {
     auto& res = *ctx->responseInfo;
 
@@ -334,7 +407,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
 {
     std::uint8_t mask = ConnectionHeader::NONE;
     std::size_t start = 0;
-    std::size_t size = header.size();
+    const std::size_t size = header.size();
 
     while(start < size) {
         // Find comma
@@ -343,7 +416,7 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
             end = size;
 
         // Extract token substring trimming leading and trailing spaces / tabs
-        std::string_view token = StringUtils::TrimView(header.substr(start, end - start));
+        const std::string_view token = StringUtils::TrimView(header.substr(start, end - start));
 
         // CLOSE
         if(StringUtils::InsensitiveStringCompare(token, "close")) {
@@ -376,28 +449,123 @@ std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
     return mask;
 }
 
+RateLimitResult CoreEngine::AllowRequest(ClientCtx* ctx)
+{
+    // Resolve + count against ConnectionLimiter once per connection, on its very first request
+    if(!ctx->ipAcquired) {
+        ctx->connInfo = IpUtils::ResolveClientIp(ctx->connInfo, ctx->requestInfo->headers, config_.ipConfig);
+
+        if(!connectionLimiter_.AllowConnection(ctx->connInfo))
+            return RateLimitResult::CONNECTION_LIMIT;
+
+        ctx->ipAcquired = 1;
+    }
+
+    // Own bit, own retry: Acquire() can fail on a full tracked-identity cap independently of
+    // ConnectionLimiter, and that failure is transient, not one-shot like ipAcquired above.
+    if(!ctx->rateLimiterAcquired) {
+        if(!requestRateLimiter_.Acquire(ctx->connInfo))
+            return RateLimitResult::REQUEST_LIMIT;
+
+        ctx->rateLimiterAcquired = 1;
+    }
+
+    return requestRateLimiter_.AllowRequest(ctx->connInfo) ? RateLimitResult::ALLOWED : RateLimitResult::REQUEST_LIMIT;
+}
+
+void CoreEngine::HandleClose(ClientCtx* ctx)
+{
+    // Both bits are only ever cleared by ClientCtx::Reset(), right after this call returns, on
+    // slot recycle. Each release is gated on its own bit, mirroring which Acquire() succeeded.
+    if(ctx->ipAcquired)
+        connectionLimiter_.ReleaseConnection(ctx->connInfo);
+
+    if(ctx->rateLimiterAcquired)
+        requestRateLimiter_.Release(ctx->connInfo);
+}
+
+bool CoreEngine::HandleCors(ClientCtx* ctx)
+{
+    auto& cors = config_.corsConfig;
+    if(!cors.enabled)
+        return false;
+
+    auto& req = *ctx->requestInfo;
+    auto& res = *ctx->responseInfo;
+
+    const std::string_view origin = req.headers.GetHeader("Origin");
+    if(origin.empty())
+        return false;
+
+    if(!cors.wildcardOrigin && !cors.allowedOrigins.contains(origin))
+        return false;
+
+    // Caches must not serve one origin's CORS headers back to a different origin
+    res.WritePersistentHeader("Vary", "Origin");
+    res.WritePersistentHeader("Access-Control-Allow-Origin", cors.wildcardOrigin ? std::string_view{"*"} : origin);
+
+    if(cors.allowCredentials)
+        res.WritePersistentHeader("Access-Control-Allow-Credentials", "true");
+
+    if(!cors.exposedHeaders.empty())
+        res.WritePersistentHeader("Access-Control-Expose-Headers", cors.exposedHeaders);
+
+    // Everything past here is preflight-only. Check the method first, cheap enum compare, so the
+    // header table is only ever scanned for actual OPTIONS requests, not every GET/POST/etc.
+    if(req.method != HttpMethod::OPTIONS)
+        return false;
+
+    // A real request never sends this header, only the browser's own preflight OPTIONS does
+    if(req.headers.GetHeader("Access-Control-Request-Method").empty())
+        return false;
+
+    res.WriteHeader("Access-Control-Allow-Methods", cors.allowedMethods);
+
+    if(!cors.allowedHeaders.empty())
+        res.WriteHeader("Access-Control-Allow-Headers", cors.allowedHeaders);
+    else {
+        const std::string_view requestedHeaders = req.headers.GetHeader("Access-Control-Request-Headers");
+        if(!requestedHeaders.empty())
+            res.WriteHeader("Access-Control-Allow-Headers", requestedHeaders);
+    }
+
+    res.WriteHeader("Access-Control-Max-Age", cors.maxAge);
+
+    res.WriteStatus(HttpStatus::NO_CONTENT);
+    res.Commit();
+    return true;
+}
+
+bool CoreEngine::HandleGenericOptions(ClientCtx* ctx)
+{
+    auto& req = *ctx->requestInfo;
+    if(req.method != HttpMethod::OPTIONS)
+        return false;
+
+    auto methods = router_.MethodsAt(req.path);
+    if(methods.empty())
+        return false;
+
+    std::string allow;
+    allow.reserve(methods.size() * 6); // Average method name (~4-5 chars) plus ", " per entry
+
+    for(auto m : methods) {
+        if(!allow.empty())
+            allow += ", ";
+
+        const StringView sv = HttpMethodToStringView(m);
+        allow.append(sv.data, sv.length);
+    }
+
+    auto& res = *ctx->responseInfo;
+    res.WriteHeader("Allow", allow);
+    res.WriteStatus(HttpStatus::NO_CONTENT);
+    res.Commit();
+    return true;
+}
+
 void CoreEngine::HandleUserDLLInjection(const char* dllPath)
 {
-#if defined(_WIN32)
-    // Windows
-    HMODULE userModule = LoadLibraryA(dllPath);
-    if(!userModule) {
-        DWORD err = GetLastError();
-        logger_.Fatal("[CoreEngine]: ", dllPath, " was not found. Error: ", err);
-        return;
-    }
-
-    FARPROC rawProc = GetProcAddress(userModule, "RegisterMasterAPI");
-    if(!rawProc) {
-        DWORD err = GetLastError();
-        logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user DLL. Error: ", err);
-        return;
-    }
-
-    // Cast to your function type
-    auto registerFn = reinterpret_cast<Shared::RegisterMasterAPIFn>(rawProc);
-#else
-    // POSIX (Linux / macOS / *nix)
     // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed
     void* handle = dlopen(dllPath, RTLD_NOW | RTLD_GLOBAL);
     if(!handle) {
@@ -413,10 +581,10 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
         logger_.Fatal("[CoreEngine]: Failed to find RegisterMasterAPI() in user SO. Error: ",
                       (dlsymErr ? dlsymErr : "symbol not found"));
 
-    auto registerFn = reinterpret_cast<Shared::RegisterMasterAPIFn>(rawSym);
-#endif
+    auto registerFn = reinterpret_cast<RegisterMasterAPIFn>(rawSym);
+
     // Call into the user module to inject the API
-    registerFn(Shared::GetMasterAPI());
+    registerFn(GetMasterAPI());
     logger_.Info("[CoreEngine]: Successfully injected API and initialized user module: ", dllPath);
 }
 
@@ -424,8 +592,8 @@ void CoreEngine::HandleMiddlewareLoading()
 {
     middleware_.LoadMiddlewareFromConfig(config_.projectConfig.middlewareList);
 
-    // After we load the middleware, we no longer need the map thingy as all the stuff is properly loaded-
-    // -inside of middlewareCallbacks_ stack
+    // After we load the middleware, we no longer need the map thingy as all the stuff is properly loaded
+    // inside of middlewareCallbacks_ stack.
     // K I L L
     // I T
     middleware_.DiscardFactoryMap();

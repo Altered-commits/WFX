@@ -24,7 +24,8 @@ int ArgumentParser::Parse(int argc, char* argv[])
         return 0;
     }
 
-    std::string commandName = argv[1];
+    const std::string commandName = argv[1];
+
     auto cmdIt = commands_.find(commandName);
     if(cmdIt == commands_.end()) {
         logger_.Error("[ArgumentParser]: Unknown command: ", commandName);

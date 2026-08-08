@@ -19,20 +19,26 @@ header_timeout               = 15      # Max time limit for entire header to arr
 body_timeout                 = 20      # Max time limit for entire body to arrive (in seconds)
 idle_timeout                 = 40      # Max time limit for a connection to stay idle (in seconds)
 max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
-max_connections_per_ip       = 512     # ENDPOINT TEST: the audit drives many concurrent inbound
-                                       # requests from a single IP (127.0.0.1) to exercise pool
-                                       # exhaustion + coalescing, so the per-IP caps are raised
-                                       # well above the burst sizes the harness fires.
-max_request_burst_per_ip     = 512     # Initial request tokens per IP (was 10 -> throttled 16-way bursts)
-max_requests_per_ip_per_sec  = 512     # Refill rate (tokens per second per IP)
 
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
+[IP]
+max_connections_per_ip       = 512     # ENDPOINT TEST: the audit drives many concurrent inbound
+                                       # requests from a single IP (127.0.0.1) to exercise pool
+                                       # exhaustion + coalescing, so the per-IP caps are raised
+                                       # well above the burst sizes the harness fires.
+max_request_burst_per_ip     = 8000    # ENDPOINT TEST: the soak phase fires thousands of
+                                       # sequential requests to march a multiplexed slot's
+                                       # write buffer to the cap, faster than 512/s, so the
+                                       # inbound rate cap is raised above that to keep the
+                                       # silting signal from being masked by throttling.
+max_requests_per_ip_per_sec  = 8000    # Refill rate (tokens per second per IP)
+
 [SSL]
 cert_path                   = "..."           # Path to the server certificate (PEM format)
 key_path                    = "..."           # Path to the private key corresponding to the certificate
-ca_cert_path                = ""              # Path to the CA certificate for client verification (PEM format) [Keep empty if not used]
+outbound_ca_path            = "/home/atomic/c_cpp_projects/WFX/tests/endpoint_audit/certs/ca.pem"              # Extra CA to trust for outbound TLS (PEM format) [Keep empty if not used]
 tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
                                            # ^^^ Colon-separated TLSv1.3 ciphers in preference order
 tls12_ciphers               = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
@@ -53,8 +59,8 @@ request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
 worker_processes        = 1      # ENDPOINT TEST: single worker so the outbound connection pool
-                                 # (and coalescing dedup) is a single shared instance — makes
-                                 # keep-alive reuse and coalesce hit-counts deterministic.
+                                 # (and coalescing dedup) is a single shared instance (makes
+                                 # keep-alive reuse and coalesce hit-counts deterministic).
 worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
 backlog                 = 1024   # Max pending connections in OS listen queue
 
@@ -75,6 +81,11 @@ enable_timestamps = true       # Prepend [HH:MM:SS.mmm] to each line
 enable_file       = true      # Write to log files
 max_file_size     = 16777216   # Max log file size before rotation (in bytes) [if enable_file = true]
 max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [if enable_file = true]
+
+[Metrics]
+max_routes    = 256    # Max routes tracked in the per-route metrics table
+max_endpoints = 256    # Max endpoints tracked in the per-endpoint metrics table
+latency       = true   # AUDIT: on so the metrics phase can assert endpoint latency histograms
 
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)

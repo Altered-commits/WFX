@@ -79,7 +79,7 @@ void TimerWheel::Schedule(std::uint32_t pos, std::uint32_t extra, std::uint64_t 
     if(tickVal_ > 1) {
         if((tickVal_ & (tickVal_ - 1)) == 0) {
             // For power of two, we can use bitwise operations which is far faster than normal div
-            unsigned shift = static_cast<unsigned>(std::countr_zero(tickVal_));
+            const unsigned shift = static_cast<unsigned>(std::countr_zero(tickVal_));
             ticks = timeout >> shift;
         }
         // Not a power of two, use div
@@ -89,10 +89,10 @@ void TimerWheel::Schedule(std::uint32_t pos, std::uint32_t extra, std::uint64_t 
     else
         ticks = timeout;
 
-    std::uint64_t expireTick = nowTick_ + ticks;
+    const std::uint64_t expireTick = nowTick_ + ticks;
 
-    std::uint32_t bucket = static_cast<std::uint32_t>(expireTick & mask_);
-    std::uint8_t rounds = static_cast<std::uint8_t>((expireTick >> shift_) - (nowTick_ >> shift_));
+    const std::uint32_t bucket = static_cast<std::uint32_t>(expireTick & mask_);
+    const std::uint8_t rounds = static_cast<std::uint8_t>((expireTick >> shift_) - (nowTick_ >> shift_));
 
     SlotMeta& m = meta_[pos];
     m.bucket = bucket;
@@ -120,14 +120,14 @@ void TimerWheel::Cancel(std::uint32_t pos)
 void TimerWheel::Tick(std::uint64_t nowTick)
 {
     while(nowTick_ < nowTick) {
-        std::uint32_t bucket = static_cast<std::uint32_t>(nowTick_ & mask_);
+        const std::uint32_t bucket = static_cast<std::uint32_t>(nowTick_ & mask_);
         std::uint32_t curr = wheelHeads_[bucket];
 
         // Process bucket entries
         while(curr != NIL) {
             SlotMeta& m = meta_[curr];
-            std::uint32_t extra = m.extra;
-            std::uint32_t next = m.next;
+            const std::uint32_t extra = m.extra;
+            const std::uint32_t next = m.next;
 
             if(m.rounds == 0) {
                 onExpire_(curr, extra);

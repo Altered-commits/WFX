@@ -3,6 +3,7 @@ project(wfx)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # used by scripts/tidy.sh
 
 # -----------------------------
 # Default to Release when no build type is specified
@@ -26,6 +27,25 @@ else()
 endif()
 
 # -----------------------------
+# Sanitizers (opt-in, off by default, catches dangling/use-after-free bugs-
+# -like the buffer-relocation one audits found; run audits against a build-
+# -with this on to sweep for more of the same class)
+# -----------------------------
+option(WFX_ENABLE_ASAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+if(WFX_ENABLE_ASAN)
+    if(MSVC)
+        message(FATAL_ERROR "WFX_ENABLE_ASAN is not supported with MSVC")
+    endif()
+
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+
+    # Tells crash_tracer.cpp to leave SIGSEGV/SIGABRT/etc alone so ASan's own handler-
+    # -stays in control and prints its actual report instead of a generic WFX crash dump
+    add_compile_definitions(WFX_ASAN_BUILD)
+endif()
+
+# -----------------------------
 # Include third-party dependencies
 # -----------------------------
 include(cmake/third_party.cmake)
@@ -41,9 +61,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 function(filter_sources_by_os out_var)
     set(filtered_sources "")
     foreach(src IN LISTS ${out_var})
-        if(NOT src MATCHES "/(windows|linux|macos)/")
+        if(NOT src MATCHES "/(windows|linux|macos|posix)/")
             list(APPEND filtered_sources "${src}")
         elseif(src MATCHES "/${CURRENT_OS}/")
+            list(APPEND filtered_sources "${src}")
+        elseif(src MATCHES "/posix/" AND NOT CURRENT_OS STREQUAL "windows")
+            # 'posix/' sources build for both linux and macos, only excluded on windows
             list(APPEND filtered_sources "${src}")
         endif()
     endforeach()
@@ -55,6 +78,7 @@ endfunction()
 # -----------------------------
 add_compile_definitions(
     $<$<CONFIG:Debug>:WFX_DEBUG>
+    WFX_ENGINE_BUILD
 )
 
 # -----------------------------
@@ -127,9 +151,16 @@ target_compile_options(wfx PRIVATE
 # Linker options
 # -----------------------------
 target_link_options(wfx PRIVATE
-    # Release (GCC / Clang / AppleClang / Intel)
-    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:IntelLLVM>>>:
+    # Release (GCC / Intel)
+    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:IntelLLVM>>>:
         -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto
+    >
+
+    # Release (Clang / AppleClang): bfd's LTO plugin doesn't treat ASan's per-TU-
+    # -ctor/dtor sections as GC roots, so --gc-sections can discard one while-
+    # -.init_array/.fini_array still references it. lld does this correctly
+    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:
+        -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto -fuse-ld=lld
     >
 
     # Release (MSVC)
@@ -141,20 +172,8 @@ target_link_options(wfx PRIVATE
 # -----------------------------
 # OS-specific system libraries
 # -----------------------------
-if(WIN32)
-    target_link_libraries(wfx PRIVATE
-        Ws2_32
-        Dbghelp
-        mswsock
-        bcrypt
-        Dnsapi
-    )
-elseif(UNIX)
+if(UNIX)
     target_link_libraries(wfx PRIVATE dl pthread resolv)
-
-    if(WFX_LINUX_USE_IO_URING)
-        target_link_libraries(wfx PRIVATE uring)
-    endif()
 endif()
 
 # -----------------------------
@@ -163,6 +182,28 @@ endif()
 target_link_libraries(wfx PRIVATE
     tlsf
     tomlplusplus
+)
+
+# -----------------------------
+# Header completeness check (include/misc/header_check.cpp)
+#
+# Nothing under engine/, http/, os_specific/, etc. ever includes include/wfx/*. Those exist
+# purely for user .so builds and tests/*/app/ is excluded from scripts/tidy.sh's file scan
+# (it only walks *.cpp outside tests/). Without a real translation unit somewhere else, neither
+# the compiler nor clang-tidy ever actually see that code. This target exists only so both do,
+# compiled the same way a real user .so sees it: WFX_ENGINE_BUILD is deliberately NOT defined
+# for it, unlike the wfx target above.
+#
+# EXCLUDE_FROM_ALL: compile_commands.json (what tidy.sh needs) is emitted at CMake CONFIGURE
+# time for every target regardless of this flag, so this only has to exist, not be built by
+# default. Without it, a plain './scripts/install.sh' (cmake --build with no --target) would
+# compile this too, on every install, for a target nothing ever links against. Build it
+# on demand with 'cmake --build build --target wfx_header_check' to actually verify it compiles.
+# -----------------------------
+add_library(wfx_header_check OBJECT EXCLUDE_FROM_ALL include/misc/header_check.cpp)
+target_include_directories(wfx_header_check PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/include
 )
 
 # -----------------------------

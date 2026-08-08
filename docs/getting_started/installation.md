@@ -18,7 +18,6 @@ This section covers installing WFX, what it puts on your system, and how to remo
 
 - **C++20 compiler** (GCC or Clang)
 - **CMake 3.20+**
-- **OpenSSL development headers**
 - **Git**
 - **Ninja** (optional, recommended for faster builds)
 
@@ -27,7 +26,7 @@ Install required tools on common Linux distributions:
 - Ubuntu / Debian
     ```bash
     sudo apt update
-    sudo apt install -y build-essential cmake git libssl-dev
+    sudo apt install -y build-essential cmake git
 
     # Optional (recommended)
     sudo apt install -y ninja-build
@@ -35,7 +34,7 @@ Install required tools on common Linux distributions:
 
 - Fedora
     ```bash
-    sudo dnf install -y gcc-c++ cmake git openssl-devel
+    sudo dnf install -y gcc-c++ cmake git
 
     # Optional (recommended)
     sudo dnf install -y ninja-build
@@ -43,7 +42,7 @@ Install required tools on common Linux distributions:
 
 - Arch Linux
     ```bash
-    sudo pacman -S --needed base-devel cmake git openssl
+    sudo pacman -S --needed base-devel cmake git
 
     # Optional (recommended)
     sudo pacman -S ninja
@@ -83,14 +82,18 @@ You should see **WFX** printed.
 
 ### What the installer does
 
-The installer creates the following structure under your home directory:
+For a plain end-user install (no flags), the installer creates the following structure under
+your home directory:
 
 ```
 ~/.wfx/
 ~/.wfx/bin/         # wfx binary lives here
-~/.wfx/src/         # cloned repository and build artifacts
+~/.wfx/src/         # cloned repository, built in ~/.wfx/src/build_install
 ~/.wfx/daemons/     # PID files for running servers (managed by wfx itself)
 ```
+
+See [Local install](#local-install) below for how `--local-debug`/`--local-release`
+(contributor mode) differ.
 
 It also appends the following line to your shell config (`~/.bashrc` on Linux):
 
@@ -102,13 +105,26 @@ That is all it touches. No system directories, no sudo required after dependenci
 
 ### Local install
 
-If you already have the source code cloned and want to build from it directly:
+If you already have the source code cloned and want to build from it directly (the path
+contributors use), there are two local modes, both making `~/.wfx/src` a **symlink** to your
+checkout and building directly into its own `build/` directory:
 
 ```bash
-bash scripts/install.sh --local
+# Dev mode: Debug build (full symbols, no optimization), ASan + UBSan on
+# This is what you want day to day, bugs surface immediately
+# Noticeably slower than a real install
+bash scripts/install.sh --local-debug
+
+# Perf-testing mode: same optimized, sanitizer-free settings as an-
+# -end-user install, just built from your own checkout
+bash scripts/install.sh --local-release
 ```
 
-This copies your current directory to `~/.wfx/src` (excluding `.git`, `build`, and `.venv`) and builds from there.
+Either way the resulting binary is moved to `~/.wfx/bin/wfx`, same as the end-user path. Re-run
+whichever of the two you last used after pulling/editing to refresh the PATH binary, or just run
+`./wfx` directly from the checkout root while iterating. Switching between the two modes
+reconfigures and recompiles whatever the flag change touches, they share the same `build/`
+directory.
 
 ---
 

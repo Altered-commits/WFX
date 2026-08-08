@@ -43,14 +43,14 @@ public: // Main Functions
     // vvv 'std::string' overload vvv
     void Push(const std::string& s)
     {
-        std::uint32_t len = static_cast<std::uint32_t>(s.size());
+        const std::uint32_t len = static_cast<std::uint32_t>(s.size());
         Push(len);
         userData.insert(userData.end(), s.begin(), s.end());
     }
 
     std::string PopString(std::size_t& offset) const
     {
-        std::uint32_t len = Pop<std::uint32_t>(offset);
+        const std::uint32_t len = Pop<std::uint32_t>(offset);
         std::string s(userData.data() + offset, userData.data() + offset + len);
         offset += len;
         return s;
@@ -67,7 +67,7 @@ public: // Metadata
 using FileBuffer = std::vector<char>;
 using FileMetaMap = std::unordered_map<std::string, FileMetadata>;
 
-enum class FileMetaStatus { SUCCESS, NOT_FOUND, TOO_LARGE, TOO_MANY_ENTRIES, CORRUPTED, IO_ERROR };
+enum class FileMetaStatus : std::uint8_t { SUCCESS, NOT_FOUND, TOO_LARGE, TOO_MANY_ENTRIES, CORRUPTED, IO_ERROR };
 
 class FileMeta {
 public:

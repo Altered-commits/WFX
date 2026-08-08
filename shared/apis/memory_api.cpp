@@ -2,27 +2,28 @@
 // Copyright (c) 2025-2026 Altered-commits
 
 #include "memory_api.hpp"
-#include "utils/pool/buffer_pool.hpp"
+#include "shared/utils/memory.hpp"
 
 namespace WFX::Shared {
 
-const MEMORY_API_EXT1* GetMemoryAPIExt1()
+const MemoryAPIExt1* GetMemoryAPIExt1()
 {
     // clang-format off
-    static MEMORY_API_EXT1 __GlobalAsyncAPIExt1 = {
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
+    static const MemoryAPIExt1 GlobalMemoryAPIExt1 = {
         [](std::uint64_t size) { // AllocFn
-            return Utils::GetBufferPool().Alloc(size);
+            return Alloc(size);
         },
         [](void* ptr, std::uint64_t newSize) { // ReallocFn
-            return Utils::GetBufferPool().Realloc(ptr, newSize);
+            return Realloc(ptr, newSize);
         },
         [](void* ptr) { // FreeFn
-            Utils::GetBufferPool().Free(ptr);
+            Free(ptr);
         }
     };
     // clang-format on
 
-    return &__GlobalAsyncAPIExt1;
+    return &GlobalMemoryAPIExt1;
 }
 
 } // namespace WFX::Shared

@@ -41,17 +41,18 @@ int ControlCommand(const std::string& subcommand, const std::string& project)
 // vvv Helpers vvv
 std::string FormatUptime(std::int64_t started)
 {
-    std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
     std::int64_t elapsed = now - started;
 
     if(elapsed < 0)
         elapsed = 0;
 
-    std::int64_t hours = elapsed / 3600;
-    std::int64_t minutes = (elapsed % 3600) / 60;
+    const std::int64_t hours = elapsed / 3600;
+    const std::int64_t minutes = (elapsed % 3600) / 60;
 
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "%lldh %02lldm", static_cast<long long>(hours), static_cast<long long>(minutes));
+    (void)std::snprintf(buf, sizeof(buf), "%lldh %02lldm", static_cast<long long>(hours),
+                        static_cast<long long>(minutes));
 
     return std::string(buf);
 }
@@ -83,14 +84,14 @@ int CmdList()
     std::vector<const DaemonInfo*> truncated;
 
     for(const auto& d : daemons) {
-        std::string displayName = Truncate(d.project, 16);
+        const std::string displayName = Truncate(d.project, 16);
         if(displayName != d.project)
             truncated.push_back(&d);
 
         char row[256];
-        std::snprintf(row, sizeof(row), " %-20s %-9d %-19s %-7d %-7s %-7d %s", displayName.c_str(),
-                      static_cast<int>(d.pid), d.host.c_str(), static_cast<int>(d.port), d.https ? "yes" : "no",
-                      d.workers, FormatUptime(d.started).c_str());
+        (void)std::snprintf(row, sizeof(row), " %-20s %-9d %-19s %-7d %-7s %-7d %s", displayName.c_str(),
+                            static_cast<int>(d.pid), d.host.c_str(), static_cast<int>(d.port), d.https ? "yes" : "no",
+                            d.workers, FormatUptime(d.started).c_str());
 
         logger.Print(row);
     }
@@ -116,7 +117,7 @@ int CmdFolder()
     }
 
     // DaemonsDir is always ~/.wfx/daemons, root is one level up
-    std::string root = dir.substr(0, dir.find_last_of("/\\"));
+    const std::string root = dir.substr(0, dir.find_last_of("/\\"));
 
     logger.Print("Root Dir   -> ", root);
     logger.Print("Daemon Dir -> ", dir);

@@ -8,7 +8,8 @@
 #include "http/headers/http_headers.hpp"
 #include "http/request/http_request.hpp"
 #include "utils/string/string.hpp"
-#include "utils/string/string.hpp"
+#include "shared/utils/memory.hpp"
+#include <cstring>
 
 namespace WFX::Http {
 
@@ -26,6 +27,7 @@ bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from, std::siz
                   std::string_view& outLine);
 bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos);
 std::string_view Trim(std::string_view sv);
+bool PrepareForBody(ClientCtx* ctx, std::size_t headerEnd, std::size_t contentLen, std::uint32_t maxBufferSize);
 
 // vvv Function definitions vvv
 HttpParseState Parse(ClientCtx* ctx)
@@ -38,17 +40,17 @@ HttpParseState Parse(ClientCtx* ctx)
         return HttpParseState::PARSE_ERROR;
 
     // Config variables
-    std::uint32_t maxBufferSize = GetConfig().networkConfig.maxReadBufferSize;
-    std::uint32_t maxBodyTotalSize = GetConfig().networkConfig.maxBodyTotalSize;
-    std::uint32_t maxHeaderTotalSize = GetConfig().networkConfig.maxHeaderTotalSize;
+    const std::uint32_t maxBufferSize = GetConfig().networkConfig.maxReadBufferSize;
+    const std::uint32_t maxBodyTotalSize = GetConfig().networkConfig.maxBodyTotalSize;
+    const std::uint32_t maxHeaderTotalSize = GetConfig().networkConfig.maxHeaderTotalSize;
 
     // Connection Context variables
     std::uint32_t& trackBytes = ctx->trackBytes;
-    std::size_t size = readMeta->dataLength;
+    const std::size_t size = readMeta->dataLength;
 
     // Ensure requestInfo is allocated. If not, lazy initialize it
     if(!ctx->requestInfo)
-        ctx->requestInfo = new HttpRequest{};
+        ctx->requestInfo = Shared::New<HttpRequest>();
 
     HttpRequest& request = *ctx->requestInfo;
 
@@ -62,20 +64,23 @@ HttpParseState Parse(ClientCtx* ctx)
 
         case HttpParseState::PARSE_INCOMPLETE_HEADERS: {
             std::size_t headerEnd = 0;
-            // Even if we werent able to find header end, update trackBytes so we don't start reading-
-            // -from beginning everytime.
+
+            // Even if we weren't able to find the header end, update trackBytes so we don't start
+            // reading from the beginning every time.
             if(!SafeFindHeaderEnd(data, size, trackBytes, headerEnd)) {
-                // Even if we haven't reached the end of header, check if the data we received exceeds-
-                // -header limit. If it does, GG
+                // Even if we haven't reached the end of the header, check if the data we received
+                // exceeds the header limit. If it does, GG.
                 if(size > maxHeaderTotalSize)
                     return HttpParseState::PARSE_ERROR;
 
-                trackBytes = size;
+                // Back off up to 3 bytes: \r\n\r\n can straddle two reads, and jumping straight
+                // to 'size' would permanently skip past a straddling match.
+                trackBytes = (size >= 3) ? size - 3 : 0;
                 return HttpParseState::PARSE_INCOMPLETE_HEADERS;
             }
 
-            // We found the end of the headers. Now check if the total header size-
-            // -(from 'GET /...' to '\r\n\r\n') exceeds the limit
+            // We found the end of the headers. Now check if the total header size
+            // (from 'GET /...' to '\r\n\r\n') exceeds the limit.
             if(headerEnd > maxHeaderTotalSize)
                 return HttpParseState::PARSE_ERROR;
 
@@ -83,6 +88,7 @@ HttpParseState Parse(ClientCtx* ctx)
             trackBytes = headerEnd;
 
             std::size_t pos = 0;
+
             // Parsing of requests will be done from starting
             if(!ParseRequest(data, size, pos, request))
                 return HttpParseState::PARSE_ERROR;
@@ -95,10 +101,10 @@ HttpParseState Parse(ClientCtx* ctx)
             auto contentLengthHeader = request.headers.GetHeader("Content-Length");
             auto encodingHeader = request.headers.GetHeader("Transfer-Encoding");
 
-            bool hasExpectHeader =
+            const bool hasExpectHeader =
                 !expectHeader.empty() && StringUtils::InsensitiveStringCompare(expectHeader, "100-continue");
-            bool hasContentLengthHeader = !contentLengthHeader.empty();
-            bool hasEncodingHeader = !encodingHeader.empty();
+            const bool hasContentLengthHeader = !contentLengthHeader.empty();
+            const bool hasEncodingHeader = !encodingHeader.empty();
 
             // RFC Spec Violation: Both headers cannot be present at the same time
             if(hasEncodingHeader && hasContentLengthHeader)
@@ -128,6 +134,9 @@ HttpParseState Parse(ClientCtx* ctx)
 
                 if(hasExpectHeader) {
                     // Set the state so the next time parser returns to this, it knows to parse body not header
+                    if(!PrepareForBody(ctx, headerEnd, contentLen, maxBufferSize))
+                        return HttpParseState::PARSE_ERROR;
+
                     ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
                     return HttpParseState::PARSE_EXPECT_100;
                 }
@@ -135,13 +144,14 @@ HttpParseState Parse(ClientCtx* ctx)
                 // Body exists
                 if(contentLen > 0) {
                     // Calc total body which recv got till now
-                    std::size_t availableBody = size - trackBytes;
+                    const std::size_t availableBody = size - trackBytes;
 
                     // Still waiting for more body data
                     if(availableBody < contentLen) {
                         // In INCOMPLETE_BODY, this means: wait until ctx.dataLength >= trackBytes
-                        trackBytes = headerEnd + contentLen;
-                        ctx->expectedBodyLength = contentLen;
+                        if(!PrepareForBody(ctx, headerEnd, contentLen, maxBufferSize))
+                            return HttpParseState::PARSE_ERROR;
+
                         ctx->SetParseState(HttpParseState::PARSE_INCOMPLETE_BODY);
                         return HttpParseState::PARSE_INCOMPLETE_BODY;
                     }
@@ -216,27 +226,52 @@ bool ParseRequest(const char* data, std::size_t size, std::size_t& pos, HttpRequ
 
     pos = nextPos;
 
-    std::size_t mEnd = line.find(' ');
+    const std::size_t mEnd = line.find(' ');
     if(mEnd == std::string_view::npos)
         return false;
 
-    std::string_view methodStr = line.substr(0, mEnd);
+    const std::string_view methodStr = line.substr(0, mEnd);
     outRequest.method = HttpMethodToEnum(Shared::StringView{methodStr.data(), methodStr.size()});
     if(outRequest.method == Shared::HttpMethod::UNKNOWN)
         return false;
 
-    std::size_t pathStart = mEnd + 1;
-    std::size_t pathEnd = line.find(' ', pathStart);
+    const std::size_t pathStart = mEnd + 1;
+    const std::size_t pathEnd = line.find(' ', pathStart);
     if(pathEnd == std::string_view::npos || pathEnd == pathStart)
         return false;
 
-    outRequest.path = std::string_view(data + pathStart, pathEnd - pathStart);
+    const std::string_view rawTarget(data + pathStart, pathEnd - pathStart);
 
-    // Normalize the path, reject if its malformed
-    if(!StringUtils::NormalizeURIPathInplace(outRequest.path))
+    // Split off the query string before normalizing: NormalizeURIPathInplace's slash-collapsing
+    // and '.'/'..' dot-segment resolution is path-traversal defense for the PATH, it has no idea
+    // '?' means anything. Left unsplit, a query value containing a literal '/', '.', or '..' (a
+    // redirect_uri param, anything path-shaped) would get silently mangled by logic that was
+    // never meant to touch it
+    const std::size_t qpos = rawTarget.find('?');
+    std::string_view pathPart = (qpos == std::string_view::npos) ? rawTarget : rawTarget.substr(0, qpos);
+
+    if(!StringUtils::NormalizeURIPathInplace(pathPart))
         return false;
 
-    std::string_view versionStr = line.substr(pathEnd + 1);
+    if(qpos == std::string_view::npos)
+        outRequest.path = pathPart;
+    else {
+        // NormalizeURIPathInplace only ever shrinks (collapses/removes bytes, never adds), and its
+        // loop only ever looked at [0, qpos), so the query bytes are still sitting untouched at
+        // their original offset, just no longer adjacent to the now-shorter path. One memmove
+        // (not memcpy: source and destination can overlap, both inside the same original buffer)
+        // slides them into place right after it, then '?' goes back in the gap between them
+        char* buf = const_cast<char*>(rawTarget.data());
+        const std::size_t newPathLen = pathPart.size();
+        const std::size_t queryLen = rawTarget.size() - (qpos + 1);
+
+        std::memmove(buf + newPathLen + 1, buf + qpos + 1, queryLen);
+        buf[newPathLen] = '?';
+
+        outRequest.path = std::string_view(buf, newPathLen + 1 + queryLen);
+    }
+
+    const std::string_view versionStr = line.substr(pathEnd + 1);
     outRequest.version = HttpVersionToEnum(Shared::StringView{versionStr.data(), versionStr.size()});
     if(outRequest.version == Shared::HttpVersion::UNKNOWN)
         return false;
@@ -256,18 +291,17 @@ bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestH
         if(!SafeFindCRLF(data, size, pos, nextPos, line))
             return false;
 
-        std::size_t lineBytes = nextPos - pos;
         pos = nextPos;
 
         if(line.empty())
             break;
 
-        std::size_t colon = line.find(':');
+        const std::size_t colon = line.find(':');
         if(colon == std::string_view::npos || colon == 0)
             return false;
 
-        std::string_view key = line.substr(0, colon);
-        std::string_view val = Trim(line.substr(colon + 1));
+        const std::string_view key = line.substr(0, colon);
+        const std::string_view val = Trim(line.substr(colon + 1));
 
         // Null-terminate key and value in-place, so even if we use pointer as is, its harmless
         char* writableKey = const_cast<char*>(data + (key.data() - data));
@@ -294,6 +328,17 @@ bool ParseBody(const char* data, std::size_t size, std::size_t& pos, std::size_t
     outRequest.body = std::string_view{data + pos, contentLen};
     pos += contentLen;
     return true;
+}
+
+bool PrepareForBody(ClientCtx* ctx, std::size_t headerEnd, std::size_t contentLen, std::uint32_t maxBufferSize)
+{
+    ctx->trackBytes = static_cast<std::uint32_t>(headerEnd + contentLen);
+    ctx->expectedBodyLength = static_cast<std::uint32_t>(contentLen);
+
+    // Grow to the final size in one step instead of however many 'growSize' increments the
+    // receive loop would take. 'ClientCtx::GrowReadBuffer' rebases request.path/headers itself
+    // if this relocates the buffer, so nothing further to do here.
+    return ctx->GrowReadBuffer(1, maxBufferSize, ctx->trackBytes);
 }
 
 // vvv Helpers vvv

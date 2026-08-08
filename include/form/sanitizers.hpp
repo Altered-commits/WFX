@@ -19,14 +19,14 @@ using UIntOutputType = DecayedType<UInt>::Type;
 using FloatOutputType = DecayedType<Float>::Type;
 
 // No processing needed, validation handles everything
-static inline bool DefaultSanitizeText(std::string_view sv, const void* _, TextOutputType& out)
+static inline bool DefaultSanitizeText(std::string_view sv, const void* /*_*/, TextOutputType& out)
 {
     out = sv;
     return true;
 }
 
 // Same as text. Real email normalization goes in user's custom sanitizer
-static inline bool DefaultSanitizeEmail(std::string_view sv, const void* _, EmailOutputType& out)
+static inline bool DefaultSanitizeEmail(std::string_view sv, const void* /*_*/, EmailOutputType& out)
 {
     out = sv;
     return true;

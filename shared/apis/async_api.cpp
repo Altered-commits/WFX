@@ -8,27 +8,28 @@
 namespace WFX::Shared {
 
 // Important stuff :)
-static AsyncAPIDataExt1 __GlobalAsyncDataExt1;
+static AsyncAPIDataExt1 GlobalAsyncDataExt1;
 
-const ASYNC_API_EXT1* GetAsyncAPIExt1()
+const AsyncAPIExt1* GetAsyncAPIExt1()
 {
     // clang-format off
-    static ASYNC_API_EXT1 __GlobalAsyncAPIExt1 = {
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
+    static const AsyncAPIExt1 GlobalAsyncAPIExt1 = {
         // vvv Async Functions vvv
         [](void* ctx, std::uint32_t delayMs, AsyncData asyncData) { // RegisterAsyncTimer
             auto& logger = Utils::GetLogger();
 
             if(!ctx) {
-                logger.Warn("[AsyncApiExt1]: 'RegisterAsyncTimer' recived null context");
+                logger.Warn("[AsyncAPIExt1]: 'RegisterAsyncTimer' recived null context");
                 return false;
             }
 
             auto cctx = static_cast<Http::ClientCtx*>(ctx);
-            auto* connHandler = __GlobalAsyncDataExt1.connHandler;
+            auto* connHandler = GlobalAsyncDataExt1.connHandler;
 
             // Shouldn't happen considering we set it in core_engine.cpp
             if(!connHandler) {
-                logger.Warn("[AsyncApiExt1]: 'RegisterAsyncTimer' recived null connection handler");
+                logger.Warn("[AsyncAPIExt1]: 'RegisterAsyncTimer' recived null connection handler");
                 return false;
             }
 
@@ -37,12 +38,12 @@ const ASYNC_API_EXT1* GetAsyncAPIExt1()
     };
     // clang-format on
 
-    return &__GlobalAsyncAPIExt1;
+    return &GlobalAsyncAPIExt1;
 }
 
 void InitAsyncAPIExt1(Http::HttpConnectionHandler* connHandler)
 {
-    __GlobalAsyncDataExt1.connHandler = connHandler;
+    GlobalAsyncDataExt1.connHandler = connHandler;
 }
 
 } // namespace WFX::Shared

@@ -13,24 +13,25 @@ using WFX::Shared::AsyncResult;
 using WFX::Shared::AsyncStatus;
 
 template <typename Derived> struct AwaitableBase {
-    AsyncResult result_ = {nullptr, 0, Shared::MiddlewareAction::CONTINUE, AsyncStatus::NONE};
-    std::coroutine_handle<> handle_;
+    AsyncResult result = {nullptr, 0, Shared::MiddlewareAction::CONTINUE, AsyncStatus::NONE};
+    std::coroutine_handle<> handle;
 
 public: // 'AsyncAPI' Callback
     static void OnComplete(void* ud, AsyncResult result) noexcept
     {
         auto* self = static_cast<Derived*>(ud);
-        self->result_ = result;
-        self->handle_.resume();
+        self->result = result;
+        self->handle.resume();
     }
 
     static void OnDestroy(void* ud) noexcept
     {
         auto* self = static_cast<Derived*>(ud);
-        self->handle_.destroy();
+        self->handle.destroy();
     }
 
 public: // Always suspend
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     bool await_ready() const noexcept
     {
         return false;

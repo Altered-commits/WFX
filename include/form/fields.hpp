@@ -22,6 +22,16 @@ struct BaseRule {
     bool required = true;
 };
 
+// Kept as the full representable range (rather than 0) so that sanitizers.hpp's
+// unconditional `out >= min && out <= max` check never rejects input when a
+// field's bound was never explicitly set.
+inline constexpr std::int64_t INT_UNBOUNDED_MIN = INT64_MIN;
+inline constexpr std::int64_t INT_UNBOUNDED_MAX = INT64_MAX;
+inline constexpr std::uint64_t UINT_UNBOUNDED_MIN = 0;
+inline constexpr std::uint64_t UINT_UNBOUNDED_MAX = UINT64_MAX;
+inline constexpr double FLOAT_UNBOUNDED_MIN = -1e308;
+inline constexpr double FLOAT_UNBOUNDED_MAX = 1e308;
+
 // vvv Builtin Form Rules vvv
 struct Text : BaseRule {
     bool ascii = false;
@@ -34,18 +44,18 @@ struct Email : BaseRule {
 };
 
 struct Int : BaseRule {
-    std::int64_t min = INT64_MIN;
-    std::int64_t max = INT64_MAX;
+    std::int64_t min = INT_UNBOUNDED_MIN;
+    std::int64_t max = INT_UNBOUNDED_MAX;
 };
 
 struct UInt : BaseRule {
-    std::uint64_t min = 0;
-    std::uint64_t max = UINT64_MAX;
+    std::uint64_t min = UINT_UNBOUNDED_MIN;
+    std::uint64_t max = UINT_UNBOUNDED_MAX;
 };
 
 struct Float : BaseRule {
-    double min = -1e308;
-    double max = 1e308;
+    double min = FLOAT_UNBOUNDED_MIN;
+    double max = FLOAT_UNBOUNDED_MAX;
 };
 
 // vvv Form Type Traits vvv

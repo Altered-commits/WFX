@@ -36,7 +36,7 @@ static std::size_t SafeStrLen(const char* s) noexcept
 
 void CrashTracer::SafeWrite(int fd, const char* s) noexcept
 {
-#if defined(WFX_PLATFORM_WINDOWS)
+#ifdef WFX_PLATFORM_WINDOWS
     DWORD w;
     WriteFile(reinterpret_cast<HANDLE>(static_cast<intptr_t>(fd)), s, (DWORD)SafeStrLen(s), &w, nullptr);
 #else
@@ -50,14 +50,14 @@ void CrashTracer::SafeWriteInt(int fd, long long v) noexcept
     int i = 31;
     buf[i--] = '\0';
 
-    bool neg = v < 0;
+    const bool neg = v < 0;
     unsigned long long x = neg ? (unsigned long long)(-(v + 1)) + 1 : (unsigned long long)v;
 
     if(x == 0)
         buf[i--] = '0';
 
     while(x && i >= 0) {
-        buf[i--] = '0' + (x % 10);
+        buf[i--] = static_cast<char>('0' + (x % 10));
         x /= 10;
     }
 
@@ -69,7 +69,7 @@ void CrashTracer::SafeWriteInt(int fd, long long v) noexcept
 
 void CrashTracer::SafeWriteHex(int fd, unsigned long long v) noexcept
 {
-    static constexpr char kHexChars[] = "0123456789abcdef";
+    static constexpr char K_HEX_CHARS[] = "0123456789abcdef";
 
     char buf[32];
     int i = 31;
@@ -79,7 +79,7 @@ void CrashTracer::SafeWriteHex(int fd, unsigned long long v) noexcept
         buf[i--] = '0';
 
     while(v && i >= 0) {
-        buf[i--] = kHexChars[v & 0xF];
+        buf[i--] = K_HEX_CHARS[v & 0xF];
         v >>= 4;
     }
 
@@ -107,7 +107,7 @@ void CrashTracer::SafeWriteFrame(int fd, const Frame& f, int i) noexcept
 // vvv Common time getter vvv
 long long CrashTracer::GetEpochNow() noexcept
 {
-#if defined(WFX_PLATFORM_WINDOWS)
+#ifdef WFX_PLATFORM_WINDOWS
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
 
@@ -132,22 +132,22 @@ CrashTracer::UTCTime CrashTracer::EpochToUTC(long long sec) noexcept
         --days;
     }
 
-    int h = (int)(rem / 3600);
+    const int h = (int)(rem / 3600);
     rem %= 3600;
-    int m = (int)(rem / 60);
-    int s = (int)(rem % 60);
+    const int m = (int)(rem / 60);
+    const int s = (int)(rem % 60);
 
-    long long z = days + 719468;
-    long long era = (z >= 0 ? z : z - 146096) / 146097;
-    unsigned doe = (unsigned)(z - era * 146097);
+    const long long z = days + 719468;
+    const long long era = (z >= 0 ? z : z - 146096) / 146097;
+    const unsigned doe = (unsigned)(z - era * 146097);
 
-    unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
     long long y = (long long)yoe + era * 400;
 
-    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    unsigned mp = (5 * doy + 2) / 153;
-    unsigned d = doy - (153 * mp + 2) / 5 + 1;
-    unsigned mth = mp + (mp < 10 ? 3 : -9);
+    const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const unsigned mp = (5 * doy + 2) / 153;
+    const unsigned d = doy - (153 * mp + 2) / 5 + 1;
+    const unsigned mth = mp + (mp < 10 ? 3 : -9);
 
     y += (mth <= 2);
 
@@ -213,18 +213,18 @@ void CrashTracer::BuildLogPath(char* out, std::size_t max, long long epoch) noex
         }
         else
             while(x && i >= 0) {
-                buf[i--] = '0' + (x % 10);
+                buf[i--] = static_cast<char>('0' + (x % 10));
                 x /= 10;
             }
 
         append(buf + i + 1);
     };
 
-    append(logDir_);
+    append(GlobalLogDir);
     append("/");
     appendInt(epoch);
     append("_wfx_");
-    append(workerName_);
+    append(GlobalWorkerName);
     append(".log");
 
     out[pos] = '\0';
@@ -751,7 +751,7 @@ void CrashTracer::WriteCrashBody(int fd, int sig, void* siginfo, void* uctx, lon
 
     SafeWriteTimestamp(fd, epoch);
     SafeWrite(fd, "  Worker   : ");
-    SafeWrite(fd, workerName_);
+    SafeWrite(fd, GlobalWorkerName);
     SafeWrite(fd, "\n");
 
 #if defined(WFX_PLATFORM_POSIX)
@@ -864,11 +864,11 @@ void CrashTracer::WriteCrashBody(int fd, int sig, void* siginfo, void* uctx, lon
 #endif
 
     SafeWrite(fd, "\n--- Traceback (most recent call last) ---\n");
-    if(depth_ <= 0)
+    if(GlobalDepth <= 0)
         SafeWrite(fd, "  (empty, no trace hit)\n");
     else
-        for(int i = 0; i < depth_; i++)
-            SafeWriteFrame(fd, frames_[i], i);
+        for(int i = 0; i < GlobalDepth; i++)
+            SafeWriteFrame(fd, GlobalFrames[i], i);
 
     SafeWrite(fd, "\n==================== END ====================");
 }
@@ -877,7 +877,7 @@ void CrashTracer::WriteCrashBody(int fd, int sig, void* siginfo, void* uctx, lon
 #if defined(WFX_PLATFORM_POSIX)
 void CrashTracer::PosixHandler(int sig, siginfo_t* info, void* uctx) noexcept
 {
-    long long epoch = GetEpochNow();
+    const long long epoch = GetEpochNow();
 
     char path[320];
     BuildLogPath(path, sizeof(path), epoch);
@@ -896,14 +896,14 @@ void CrashTracer::PosixHandler(int sig, siginfo_t* info, void* uctx) noexcept
     sa.sa_handler = SIG_DFL;
     ::sigemptyset(&sa.sa_mask);
     ::sigaction(sig, &sa, nullptr);
-    ::raise(sig);
+    (void)::raise(sig);
 }
 
 void CrashTracer::InstallPosix() noexcept
 {
     stack_t ss{};
-    ss.ss_sp = altStack_;
-    ss.ss_size = sizeof(altStack_);
+    ss.ss_sp = GlobalAltStack;
+    ss.ss_size = sizeof(GlobalAltStack);
     ::sigaltstack(&ss, nullptr);
 
     struct sigaction sa {};
@@ -955,21 +955,25 @@ void CrashTracer::Install(const char* logDir) noexcept
 {
     if(logDir)
         for(int i = 0; i < 255 && logDir[i]; i++)
-            logDir_[i] = logDir[i];
+            GlobalLogDir[i] = logDir[i];
     else {
-#if defined(WFX_PLATFORM_WINDOWS)
+#ifdef WFX_PLATFORM_WINDOWS
         const char* def = "C:\\Temp";
 #else
         const char* def = "/tmp";
 #endif
         for(int i = 0; i < 255 && def[i]; i++)
-            logDir_[i] = def[i];
+            GlobalLogDir[i] = def[i];
     }
 
+    // Under ASan, its own SIGSEGV/SIGABRT handler is more useful than ours (prints the actual
+    // allocation/free site).
+#ifndef WFX_ASAN_BUILD
 #if defined(WFX_PLATFORM_POSIX)
     InstallPosix();
 #elif defined(WFX_PLATFORM_WINDOWS)
     InstallWindows();
+#endif
 #endif
 }
 
@@ -979,7 +983,7 @@ void CrashTracer::SetWorkerName(const char* name) noexcept
         return;
 
     for(int i = 0; i < 31 && name[i]; i++)
-        workerName_[i] = name[i];
+        GlobalWorkerName[i] = name[i];
 }
 
 } // namespace WFX::Utils

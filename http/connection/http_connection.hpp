@@ -5,25 +5,17 @@
 #define WFX_HTTP_CONNECTION_HANDLER_HPP
 
 #include "shared/abis/types.hpp"
-#include "utils/hash/hash.hpp"
+#include "utils/crypto/hash.hpp"
 #include "utils/rw_buffer/rw_buffer.hpp"
 #include "utils/resolver/dns_resolver.hpp"
+#include "utils/diagnostics/logger.hpp"
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <WinSock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "Ws2_32.lib")
-
-using WFXSocket = SOCKET;
-constexpr WFXSocket WFX_INVALID_SOCKET = INVALID_SOCKET;
-#else
 #include <netinet/in.h> // in_addr, in6_addr
 #include <arpa/inet.h>  // inet_ntop, inet_pton
+#include <functional>
 
 using WFXSocket = int; // On Linux/Unix, sockets are file descriptors (ints)
 constexpr WFXSocket WFX_INVALID_SOCKET = -1;
-#endif
 
 namespace WFX::Http {
 
@@ -53,8 +45,8 @@ struct WFXIpAddress {
 };
 static_assert(sizeof(WFXIpAddress) == 20, "'WFXIpAddress' must be exactly 20 bytes");
 
-// Might be weird to define it here but its important, these states are further used in-
-// -both connection backend and parser so yeah
+// Might be weird to define it here but it's important, these states are further used in both
+// connection backend and parser so yeah.
 enum class HttpParseState : std::uint8_t {
     PARSE_INCOMPLETE_HEADERS, // Header end sequence (\r\n\r\n) not found yet
     PARSE_INCOMPLETE_BODY,    // Buffering body (Content-Length not fully received)
@@ -87,6 +79,8 @@ enum class EventType : std::uint8_t {
 };
 
 enum class ConnectionState : std::uint8_t { CONNECTION_CLOSE, CONNECTION_ALIVE };
+static_assert(static_cast<std::uint8_t>(ConnectionState::CONNECTION_ALIVE) <= 1,
+              "'ConnectionState' no longer fits EndpointCtx's 1-bit connectionState field");
 
 enum class EndpointState : std::uint8_t {
     ENDPOINT_NONE,     // Not an endpoint type
@@ -97,18 +91,12 @@ enum class EndpointState : std::uint8_t {
 // Forward declare it so compilers won't cry
 struct ClientCtx;
 
-using ReceiveCallback = std::function<void(ClientCtx*)>;
+using ClientCtxCallback = std::function<void(ClientCtx*)>;
 
 struct FileInfo {
-#if defined(_WIN32)
-    HANDLE handle{0};          // HANDLE is pointer-sized
-    std::uint64_t fileSize{0}; // 64-bit for large files
-    std::uint64_t offset{0};   // current send offset
-#else
     int fd = -1;        // Linux file descriptor
     off_t fileSize = 0; // File size
     off_t offset = 0;   // current send offset
-#endif
 };
 
 // Used inside of AsyncTrack if needed by 'HandleSuccess'
@@ -157,20 +145,14 @@ struct AsyncTrack {
     }
 };
 
-// Simply to assert that eventType must exist in anything related to connection-
-// -and must be the first member as well (offset == 0)
+// Simply to assert that eventType must exist in anything related to connection and must be the
+// first member as well (offset == 0).
 struct ConnectionTag {
     EventType eventType = EventType::EVENT_ACCEPT; // 1 byte
 };
 
-// Per-stream entry for a multiplexed slot (mirrors CoalesceWaiter's shape below, including-
-// -the generationId staleness guard). Owned by EndpointCtx::pendingStreams; erased on-
-// -completion (parse() reports a non-zero completedKey for it). Only populated when the-
-// -endpoint's EndpointDesc::hasCapacity is set; non-multiplexed slots never touch this
-// Completion delivery reuses clientCtx->asyncData (set once by SendPayload), same as the-
-// -single-slot path and CoalesceWaiter, so no separate AsyncData copy is stored here. No-
-// -outputObj field: the protocol owns per-stream output internally and hands it over via-
-// -EndpointDesc::takeStreamOutput when the stream completes (or is abandoned early)
+// Per-stream entry for a multiplexed slot (mirrors CoalesceWaiter's shape below, including the
+// generationId staleness guard).
 struct PendingStream {
     ClientCtx* clientCtx = nullptr;
     void* parseState = nullptr;
@@ -181,21 +163,31 @@ using PendingStreamMap = std::unordered_map<std::uint64_t, PendingStream>;
 
 struct EndpointCtx : public ConnectionTag {
     // ------------------------------------------ 1 byte from ConnectionTag
+    std::uint8_t padding0 = 0; // 1 byte, aligns the 2-byte flags union below
+
     union {
         struct {
-            std::uint8_t connectionState : 2;
-            std::uint8_t endpointState : 2;
-            std::uint8_t isShuttingDown : 1;
-            std::uint8_t inOnConnectPhase : 1;
-            std::uint8_t isPooledIdle : 1;
-            std::uint8_t isAwaitingReconnect : 1;
+            std::uint16_t endpointState : 2;
+            std::uint16_t connectionState : 1; // 1 bit, ConnectionState is only CLOSE/ALIVE
+            std::uint16_t isShuttingDown : 1;
+            std::uint16_t inOnConnectPhase : 1;
+            std::uint16_t isPooledIdle : 1;
+            std::uint16_t isAwaitingReconnect : 1;
+            std::uint16_t isReserved : 1;       // Pinned by Reserve(), never auto-returned to the pool
+            std::uint16_t isStreaming : 1;      // Request delivers in chunks, stays in flight between them
+            std::uint16_t needsFetch : 1;       // Next chunk needs a re-serialize (CHUNK_READY_FETCH)
+            std::uint16_t isAborted : 1;        // Client bailed mid-request, real response still pending
+            std::uint16_t isSideConnection : 1; // Ephemeral, lives in auxPool not pool
+            std::uint16_t reserved : 4;
         };
-        std::uint8_t flags = 0;
-    }; // 1 bytes
+        std::uint16_t flags = 0;
+    }; // 2 bytes
 
     std::uint16_t generationId = 1;      // 2 bytes
     std::uint16_t endpointIdx = 0;       // 2 bytes
-    std::uint16_t reconnectAttempts = 0; // 2 bytes, backoff attempt count, fits in existing padding
+    std::uint16_t reconnectAttempts = 0; // 2 bytes, backoff attempt count
+    std::uint16_t padding1 = 0;          // |
+    std::uint32_t padding2 = 0;          // | -> 6 bytes, aligns the pointers below to 8
 
     ClientCtx* clientCtx = nullptr; // 8 bytes
     void* sslConn = nullptr;        // 8 bytes
@@ -238,7 +230,9 @@ struct ClientCtx : public ConnectionTag {
             std::uint16_t isAsyncTimerOperation : 1;
             std::uint16_t isShuttingDown : 1;
             std::uint16_t streamChunked : 1;
-            std::uint16_t reserved : 6;
+            std::uint16_t ipAcquired : 1; // set once connInfo holds the resolved IP and ConnectionLimiter counted it
+            std::uint16_t rateLimiterAcquired : 1; // set once RequestRateLimiter has counted this connection too
+            std::uint16_t reserved : 4;
         };
         std::uint16_t flags = 0;
     }; // 2 bytes
@@ -259,12 +253,20 @@ struct ClientCtx : public ConnectionTag {
     HttpRequest* requestInfo = nullptr;   // 8 bytes
     HttpResponse* responseInfo = nullptr; // 8 bytes
 
+    // Monotonic microsecond stamps for latency, both 0 until stamped. Only written when [Metrics]
+    // latency is on, so the two clock reads they cost are never paid otherwise. routeStartUs is
+    // set when the request is dispatched; endpointStartUs when this client issues an outbound
+    // request, and holds for whichever endpoint path (single-slot, streaming, multiplexed) serves
+    // it, since a client only ever has one endpoint call in flight.
+    std::uint64_t routeStartUs = 0;    // 8 bytes
+    std::uint64_t endpointStartUs = 0; // 8 bytes
+
     Utils::RWBuffer rwBuffer;                     // 16 bytes
     Shared::AsyncData asyncData = {};             // 24 bytes
     FileInfo fileInfo = {};                       // 24 bytes
     Shared::StreamGenerator streamGenerator = {}; // 24 bytes
 
-    WFXIpAddress connInfo = {};            // 20 bytes
+    WFXIpAddress connInfo = {};            // 20 bytes, wire IP until ipAcquired, then the resolved IP for both limiters
     WFXSocket socket = WFX_INVALID_SOCKET; // 4 | 8 bytes depending on OS
 
 public:
@@ -279,8 +281,12 @@ public:
     ConnectionState GetConnectionState() const;
 
     bool IsAsyncOperation() const;
+
+    // Single entry point for growing 'rwBuffer's read side: a grow can relocate the buffer,
+    // invalidating any 'requestInfo->path'/'headers' views already parsed into it.
+    bool GrowReadBuffer(std::uint32_t growSize, std::uint32_t maxSize, std::uint32_t minSize = 0);
 };
-static_assert(sizeof(ClientCtx) <= 168, "'ClientCtx' must be <= 168 bytes");
+static_assert(sizeof(ClientCtx) <= 184, "'ClientCtx' must be <= 184 bytes");
 
 // Per-waiter entry for a coalesced in-flight request
 // Both pointers are non-owning (lifetime is tied to the owning CoalesceEntry)
@@ -304,10 +310,12 @@ struct EndpointMetadata {
     std::uint16_t nextAddrIdx = 0;
     std::uint16_t port = 0;
     std::uint32_t timerBase = 0;            // Specific to timer wheel
+    std::uint32_t auxTimerBase = 0;         // Timer wheel base for auxPool, = timerBase + pool.GetSlots()
     std::uint32_t lastMultiplexHintIdx = 0; // Last slot idx that had multiplex capacity, tried first next time
     Shared::EndpointDesc desc = {0};
     Shared::EndpointConfig config = {0};
     std::unordered_map<std::uint64_t, CoalesceEntry> coalescePending; // TODO: Gotta switch to our hashmap
+    void* cachedTlsSession = nullptr;                                 // Opaque SSL_SESSION*, see HttpWFXSSL::WrapClient
 };
 static_assert(sizeof(EndpointMetadata) <= 512, "'EndpointMetadata' must be <= 512 bytes");
 
@@ -316,9 +324,14 @@ struct HttpConnectionHandler {
     virtual ~HttpConnectionHandler() = default;
 
     virtual void Initialize(const std::string& host, std::uint16_t port) = 0;
-    virtual void SetEngineCallback(ReceiveCallback onData) = 0;
+    virtual void SetEngineCallbacks(ClientCtxCallback onData, ClientCtxCallback onClose) = 0;
     virtual std::uint16_t AllocateEndpoint(const char* host, Shared::EndpointDesc desc,
                                            Shared::EndpointConfig config) = 0;
+
+    // Registration data read back when metrics are scraped. Count is the number of allocated
+    // endpoints, HostAt returns an empty view for an out-of-range index.
+    virtual std::uint16_t EndpointCount() const = 0;
+    virtual Shared::StringView EndpointHostAt(std::uint16_t endpointIdx) const = 0;
 
     // vvv Client operations vvv
     virtual void ResumeReceive(ClientCtx* ctx) = 0;
@@ -331,11 +344,19 @@ struct HttpConnectionHandler {
 
     // vvv Endpoint operations vvv
     virtual Shared::EndpointStatus SendPayload(ClientCtx* clientCtx, std::uint16_t endpointIdx, const void* req,
-                                               Shared::AsyncData asyncData) = 0;
+                                               Shared::AsyncData asyncData, std::uint64_t pinnedSlot = 0) = 0;
     virtual void SlotSend(EndpointCtx* slotCtx, const void* data, std::uint32_t size, Shared::AsyncData asyncData) = 0;
-    virtual void SlotReceive(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
-    // Empty if the slot isn't TLS or the handshake hasn't completed yet. Not HTTP-specific: any-
-    // -ALPN-aware protocol can call this from onConnect to decide how to speak on this connection
+    virtual void SlotReceive(EndpointCtx* slotCtx, std::uint32_t consumed, Shared::AsyncData asyncData) = 0;
+    virtual void SlotUpgradeTls(EndpointCtx* slotCtx, Shared::AsyncData asyncData) = 0;
+    virtual std::uint64_t ReserveSlot(std::uint16_t endpointIdx) = 0;
+    virtual void ReleaseSlot(std::uint64_t pinnedSlot) = 0;
+    // Opens a throwaway second connection to ownerCtx's endpoint. Valid from onConnect and onAbort
+    virtual void OpenSideConnection(EndpointCtx* ownerCtx, Shared::AsyncData asyncData) = 0;
+    virtual void CloseSideConnection(EndpointCtx* auxCtx) = 0;
+    virtual Shared::EndpointStatus StreamNext(ClientCtx* clientCtx, const void* req, Shared::AsyncData asyncData) = 0;
+    virtual const void* StreamChunk(ClientCtx* clientCtx) = 0;
+    // Empty if the slot isn't TLS or the handshake hasn't completed yet. Not HTTP-specific: any
+    // ALPN-aware protocol can call this from onConnect to decide how to speak on this connection.
     virtual Shared::StringView NegotiatedProtocol(EndpointCtx* slotCtx) = 0;
     virtual void Close(EndpointCtx* ctx, bool forceClose = false,
                        Shared::DisconnectReason reason = Shared::DisconnectReason::ERROR) = 0;
@@ -350,26 +371,22 @@ struct HttpConnectionHandler {
 
 // Write a std::hash specialization for WFXIpAddress
 namespace std {
-using WFX::Http::WFXIpAddress;
-using WFX::Utils::GetLogger;
-using WFX::Utils::GetRandomPool;
-using WFX::Utils::Hasher::SipHash24;
-
-template <> struct hash<WFXIpAddress> {
-    std::size_t operator()(const WFXIpAddress& addr) const
+template <> struct hash<WFX::Http::WFXIpAddress> {
+    std::size_t operator()(const WFX::Http::WFXIpAddress& addr) const
     {
-        static std::uint8_t sipKey[16];
+        static std::uint8_t GlobalSipKey[16];
 
         // Run only once
         static const struct InitKeyOnce {
             InitKeyOnce()
             {
-                if(!GetRandomPool().GetBytes(sipKey, sizeof(sipKey)))
-                    GetLogger().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
+                if(!WFX::Utils::GetRandomPool().GetBytes(GlobalSipKey, sizeof(GlobalSipKey)))
+                    WFX::Utils::GetLogger().Fatal("[WFXIpAddress-Hash]: Failed to initialize SipHash key");
             }
-        } _initOnce;
+        } INIT_ONCE;
 
-        return SipHash24(addr.ip.raw, addr.type == AF_INET ? sizeof(in_addr) : sizeof(in6_addr), sipKey);
+        return WFX::Utils::Hasher::SipHash24(addr.ip.raw, addr.type == AF_INET ? sizeof(in_addr) : sizeof(in6_addr),
+                                             GlobalSipKey);
     }
 };
 } // namespace std

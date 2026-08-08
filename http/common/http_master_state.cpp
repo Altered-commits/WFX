@@ -5,11 +5,11 @@
 
 namespace WFX::Http {
 
-static WFXMasterState __GlobalMasterState;
+static WFXMasterState GlobalMasterState;
 
 WFXMasterState& GetMasterState() noexcept
 {
-    return __GlobalMasterState;
+    return GlobalMasterState;
 }
 
 } // namespace WFX::Http

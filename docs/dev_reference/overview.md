@@ -15,9 +15,7 @@ It is still in active development. Things will change.
 
 ## Core idea
 
-WFX separates engine state from user code. The engine owns connections, buffers, routing tables, SSL context, and timers. User code owns only the logic inside handler functions and is compiled into a shared library loaded at runtime.
-
-This separation is what makes hot reload possible. When user code changes, the engine reloads the library without dropping connections or restarting workers.
+WFX separates engine state from user code. The engine owns connections, buffers, routing tables, SSL context, and timers. User code owns only the logic inside handler functions and is compiled into a shared library, loaded once at worker startup via a single `dlopen` call. This split is what keeps the ABI boundary below stable across rebuilds: the engine and user code can be compiled independently, at different times, without either side needing the other's headers.
 
 The engine itself runs as a coordinating process plus a fixed number of independent workers, each with its own event loop and no shared state on the hot path. See [Architecture](architecture.md) for exactly how that's implemented on the current (Linux) backend.
 

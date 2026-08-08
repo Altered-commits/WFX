@@ -13,17 +13,17 @@ using DeferredCallback = std::function<void()>;
 using DeferredVector = std::vector<DeferredCallback>;
 
 // vvv Global Registries vvv
-inline DeferredVector __WFXDeferred;
+inline DeferredVector GlobalWFXDeferred;
 
 // vvv Helper Functions vvv
-inline void __ExecuteAndEraseDeferred()
+inline void ExecuteAndEraseDeferred()
 {
     // Run tasks
-    for(const auto& func : __WFXDeferred)
+    for(const auto& func : GlobalWFXDeferred)
         func();
 
-    __WFXDeferred.clear();
-    __WFXDeferred.shrink_to_fit();
+    GlobalWFXDeferred.clear();
+    GlobalWFXDeferred.shrink_to_fit();
 }
 
 } // namespace WFX::Core

@@ -23,7 +23,7 @@ bool RouteSegment::IsStatic() const
 
 bool RouteSegment::IsParam() const
 {
-    std::uint8_t t = routeValue.Tag();
+    const std::uint8_t t = routeValue.Tag();
     return t == SEG_VARIANT_U64 || t == SEG_VARIANT_I64 || t == SEG_VARIANT_STR || t == SEG_VARIANT_UUID;
 }
 

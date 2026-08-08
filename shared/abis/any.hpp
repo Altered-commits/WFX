@@ -62,8 +62,8 @@ public:
 public: // vvv Factory vvv
     template <typename T> static std::uint64_t TypeIDOf() noexcept
     {
-        static const std::uint8_t tag = 0;
-        return reinterpret_cast<std::uint64_t>(&tag);
+        static const std::uint8_t TAG = 0;
+        return reinterpret_cast<std::uint64_t>(&TAG);
     }
 };
 

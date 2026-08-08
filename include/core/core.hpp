@@ -12,38 +12,42 @@
 
 namespace WFX::Core {
 
-inline const Shared::MASTER_API_TABLE* __WFXApi = nullptr;
+inline const Shared::MasterAPITable* GlobalWFXApi = nullptr;
 
 // Master
-inline void SetMasterApi(const Shared::MASTER_API_TABLE* api) noexcept
+inline void SetMasterApi(const Shared::MasterAPITable* api) noexcept
 {
-    __WFXApi = api;
+    GlobalWFXApi = api;
 }
-inline const Shared::MASTER_API_TABLE* MasterApi() noexcept
+inline const Shared::MasterAPITable* MasterApi() noexcept
 {
-    return __WFXApi;
+    return GlobalWFXApi;
 }
 
 // Ext1
-inline const Shared::HTTP_API_EXT1* HttpApiExt1() noexcept
+inline const Shared::HttpAPIExt1* HttpApiExt1() noexcept
 {
-    return __WFXApi->GetHttpAPIExt1();
+    return GlobalWFXApi->getHttpAPIExt1();
 }
-inline const Shared::ENDPOINT_API_EXT1* EndpointApiExt1() noexcept
+inline const Shared::EndpointAPIExt1* EndpointApiExt1() noexcept
 {
-    return __WFXApi->GetEndpointAPIExt1();
+    return GlobalWFXApi->getEndpointAPIExt1();
 }
-inline const Shared::ASYNC_API_EXT1* AsyncApiExt1() noexcept
+inline const Shared::AsyncAPIExt1* AsyncApiExt1() noexcept
 {
-    return __WFXApi->GetAsyncAPIExt1();
+    return GlobalWFXApi->getAsyncAPIExt1();
 }
-inline const Shared::MEMORY_API_EXT1* MemoryApiExt1() noexcept
+inline const Shared::MemoryAPIExt1* MemoryApiExt1() noexcept
 {
-    return __WFXApi->GetMemoryAPIExt1();
+    return GlobalWFXApi->getMemoryAPIExt1();
 }
-inline const Shared::UTILS_API_EXT1* UtilsApiExt1() noexcept
+inline const Shared::UtilsAPIExt1* UtilsApiExt1() noexcept
 {
-    return __WFXApi->GetUtilsAPIExt1();
+    return GlobalWFXApi->getUtilsAPIExt1();
+}
+inline const Shared::CryptoApiExt1* CryptoApiExt1() noexcept
+{
+    return GlobalWFXApi->getCryptoApiExt1();
 }
 
 } // namespace WFX::Core

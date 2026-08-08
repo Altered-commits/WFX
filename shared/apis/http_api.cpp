@@ -15,10 +15,10 @@ namespace WFX::Shared {
 
 using namespace WFX::Http; // For 'Router', 'Middleware', ...
 
-// '__GlobalHttpDataExt1.data' Can be set via the http api, the reason why this is safe to set even-
-// -with multiple connections is our entire flow of data is single threaded and will remain that way
-static HttpAPIDataExt1 __GlobalHttpDataExt1;
-static EndpointAPIDataExt1 __GlobalEndpointDataExt1;
+// 'GlobalHttpDataExt1.data' can be set via the http api. It's safe to set even with multiple
+// connections because our entire flow of data is single threaded and will remain that way.
+static HttpAPIDataExt1 GlobalHttpDataExt1;
+static EndpointAPIDataExt1 GlobalEndpointDataExt1;
 
 // vvv Helper functions vvv
 static HttpRequest* ToReq(void* backend)
@@ -35,23 +35,24 @@ static HttpResponse* ToRes(void* backend)
 }
 
 // vvv Http API vvv
-const HTTP_API_EXT1* GetHttpAPIExt1()
+const HttpAPIExt1* GetHttpAPIExt1()
 {
     // clang-format off
-    static HTTP_API_EXT1 __GlobalHttpAPIExt1 = {
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
+    static const HttpAPIExt1 GlobalHttpAPIExt1 = {
         // vvv Routing vvv
         [](HttpMethod method, StringView path, RouteCallback cb) {  // RegisterRoute
-            if(!__GlobalHttpDataExt1.router)
+            if(!GlobalHttpDataExt1.router)
                 Utils::GetLogger().Fatal("[HttpAPI]: Router was nullptr for 'RegisterRoute'");
 
-            (void)__GlobalHttpDataExt1.router->RegisterRoute(
-                method, std::string_view{path.Data(), path.Size()}, std::move(cb)
+            (void)GlobalHttpDataExt1.router->RegisterRoute(
+                method, std::string_view{path.Data(), path.Size()}, cb
             );
         },
         [](HttpMethod method, StringView path, const MwCallback* mwStack, std::size_t mwStackSize, RouteCallback cb) { // RegisterRouteEx
             auto& logger = Utils::GetLogger();
 
-            if(!__GlobalHttpDataExt1.router || !__GlobalHttpDataExt1.middleware)
+            if(!GlobalHttpDataExt1.router || !GlobalHttpDataExt1.middleware)
                 logger.Fatal("[HttpAPI]: Router or Middleware was nullptr for 'RegisterRouteEx'");
 
             if(mwStackSize == 0)
@@ -62,31 +63,31 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
             for(std::size_t i = 0; i < mwStackSize; i++)
                 mwVector.push_back(mwStack[i]);
 
-            auto* node = __GlobalHttpDataExt1.router->RegisterRoute(
+            auto* node = GlobalHttpDataExt1.router->RegisterRoute(
                 method, std::string_view{path.Data(), path.Size()}, cb
             );
 
-            __GlobalHttpDataExt1.middleware->RegisterPerRouteMiddleware(node, std::move(mwVector));
+            GlobalHttpDataExt1.middleware->RegisterPerRouteMiddleware(node, std::move(mwVector));
         },
         [](StringView prefix) {  // PushRoutePrefix
-            if(!__GlobalHttpDataExt1.router)
+            if(!GlobalHttpDataExt1.router)
                 Utils::GetLogger().Fatal("[HttpAPI]: Router was nullptr for 'PushRoutePrefix'");
 
-            __GlobalHttpDataExt1.router->PushRouteGroup(std::string_view{prefix.Data(), prefix.Size()});
+            GlobalHttpDataExt1.router->PushRouteGroup(std::string_view{prefix.Data(), prefix.Size()});
         },
         [] {  // PopRoutePrefix
-            if(!__GlobalHttpDataExt1.router)
+            if(!GlobalHttpDataExt1.router)
                 Utils::GetLogger().Fatal("[HttpAPI]: Router was nullptr for 'PopRoutePrefix'");
 
-            __GlobalHttpDataExt1.router->PopRouteGroup();
+            GlobalHttpDataExt1.router->PopRouteGroup();
         },
 
         // vvv Middleware vvv
         [](StringView name, MwCallback cb) { // RegisterMiddleware
-            if(!__GlobalHttpDataExt1.middleware)
+            if(!GlobalHttpDataExt1.middleware)
                 Utils::GetLogger().Fatal("[HttpAPI]: Middleware was nullptr for 'RegisterMiddleware'");
 
-            __GlobalHttpDataExt1.middleware->RegisterMiddleware(
+            GlobalHttpDataExt1.middleware->RegisterMiddleware(
                 std::string_view{name.Data(), name.Size()}, cb
             );
         },
@@ -177,6 +178,12 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
                 std::string_view{value.Data(), value.Size()}
             );
         },
+        [](void* backend, StringView key, StringView value) { // SetPersistentHeaderFn
+            ToRes(backend)->WritePersistentHeader(
+                std::string_view{key.Data(), key.Size()},
+                std::string_view{value.Data(), value.Size()}
+            );
+        },
         [](void* backend, StringView data) { // WriteBodyFn
             ToRes(backend)->WriteBodyData(std::string_view{data.Data(), data.Size()});
         },
@@ -195,56 +202,83 @@ const HTTP_API_EXT1* GetHttpAPIExt1()
 
         // vvv Data API vvv
         [](void* data) { // SetGlobalPtrData
-            __GlobalHttpDataExt1.data = data;
+            GlobalHttpDataExt1.data = data;
         },
         []() { // GetGlobalPtrData
-            return __GlobalHttpDataExt1.data;
+            return GlobalHttpDataExt1.data;
         }
     };
     // clang-format on
 
-    return &__GlobalHttpAPIExt1;
+    return &GlobalHttpAPIExt1;
 }
 
 void InitHttpAPIExt1(Router* extRouter, HttpMiddleware* extMiddleware)
 {
-    __GlobalHttpDataExt1.router = extRouter;
-    __GlobalHttpDataExt1.middleware = extMiddleware;
+    GlobalHttpDataExt1.router = extRouter;
+    GlobalHttpDataExt1.middleware = extMiddleware;
 }
 
 // vvv Endpoint API vvv
-const ENDPOINT_API_EXT1* GetEndpointAPIExt1()
+const EndpointAPIExt1* GetEndpointAPIExt1()
 {
     // clang-format off
-    static ENDPOINT_API_EXT1 __GlobalHttpAPIExt1 = {
+    // NOLINTNEXTLINE(readability-identifier-naming): singleton table, treated as a global variable.
+    static const EndpointAPIExt1 GlobalEndpointAPIExt1 = {
         [](const char* host, EndpointDesc desc, EndpointConfig config) -> std::uint16_t {
-            return __GlobalEndpointDataExt1.connHandler->AllocateEndpoint(host, desc, config);
+            return GlobalEndpointDataExt1.connHandler->AllocateEndpoint(host, desc, config);
         },
-        [](void* clientCtx, std::uint16_t endpointIdx, const void* req, AsyncData asyncData) -> EndpointStatus {
+        [](void* clientCtx, std::uint16_t endpointIdx, const void* req, AsyncData asyncData, std::uint64_t pinnedSlot) -> EndpointStatus {
             auto* ctx = static_cast<ClientCtx*>(clientCtx);
-            return __GlobalEndpointDataExt1.connHandler->SendPayload(ctx, endpointIdx, req, asyncData);
+            return GlobalEndpointDataExt1.connHandler->SendPayload(ctx, endpointIdx, req, asyncData, pinnedSlot);
         },
         [](void* endpointCtx, const void* data, std::uint32_t size, AsyncData asyncData) -> void {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
-            __GlobalEndpointDataExt1.connHandler->SlotSend(ctx, data, size, asyncData);
+            GlobalEndpointDataExt1.connHandler->SlotSend(ctx, data, size, asyncData);
+        },
+        [](void* endpointCtx, std::uint32_t consumed, AsyncData asyncData) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, consumed, asyncData);
         },
         [](void* endpointCtx, AsyncData asyncData) -> void {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
-            __GlobalEndpointDataExt1.connHandler->SlotReceive(ctx, asyncData);
+            GlobalEndpointDataExt1.connHandler->SlotUpgradeTls(ctx, asyncData);
         },
         [](void* endpointCtx) -> StringView {
             auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
-            return __GlobalEndpointDataExt1.connHandler->NegotiatedProtocol(ctx);
+            return GlobalEndpointDataExt1.connHandler->NegotiatedProtocol(ctx);
+        },
+        [](std::uint16_t endpointIdx) -> std::uint64_t {
+            return GlobalEndpointDataExt1.connHandler->ReserveSlot(endpointIdx);
+        },
+        [](std::uint64_t pinnedSlot) -> void {
+            GlobalEndpointDataExt1.connHandler->ReleaseSlot(pinnedSlot);
+        },
+        [](void* clientCtx, const void* req, AsyncData asyncData) -> EndpointStatus {
+            auto* ctx = static_cast<ClientCtx*>(clientCtx);
+            return GlobalEndpointDataExt1.connHandler->StreamNext(ctx, req, asyncData);
+        },
+        [](void* clientCtx) -> const void* {
+            auto* ctx = static_cast<ClientCtx*>(clientCtx);
+            return GlobalEndpointDataExt1.connHandler->StreamChunk(ctx);
+        },
+        [](void* ownerCtx, AsyncData asyncData) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(ownerCtx);
+            GlobalEndpointDataExt1.connHandler->OpenSideConnection(ctx, asyncData);
+        },
+        [](void* endpointCtx) -> void {
+            auto* ctx = static_cast<EndpointCtx*>(endpointCtx);
+            GlobalEndpointDataExt1.connHandler->CloseSideConnection(ctx);
         }
     };
     // clang-format on
 
-    return &__GlobalHttpAPIExt1;
+    return &GlobalEndpointAPIExt1;
 }
 
 void InitEndpointAPIExt1(Http::HttpConnectionHandler* connHandler)
 {
-    __GlobalEndpointDataExt1.connHandler = connHandler;
+    GlobalEndpointDataExt1.connHandler = connHandler;
 }
 
 } // namespace WFX::Shared

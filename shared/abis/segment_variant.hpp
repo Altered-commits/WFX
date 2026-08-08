@@ -22,7 +22,7 @@ enum : std::uint8_t {
 struct alignas(8) SegmentVariant {
 public:
     std::uint8_t tag;
-    std::uint8_t _Pad[7];
+    std::uint8_t pad[7];
 
     union {
         std::uint64_t u64;

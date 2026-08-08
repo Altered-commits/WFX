@@ -6,12 +6,13 @@
 namespace WFX::Utils {
 
 // Heap allocated intentionally as logger must outlive all other globals
-// Static destruction order across translation units is undefined, so any-
-// -global that logs in its destructor would crash if logger destructed first
+// Static destruction order across translation units is undefined, so any
+// global that logs in its destructor would crash if logger destructed first.
 Logger& GetLogger() noexcept
 {
-    static Logger* __GlobalLogger = new Logger();
-    return *__GlobalLogger;
+    // NOLINTNEXTLINE(bugprone-unhandled-exception-at-new) - function is noexcept, bad_alloc terminating is intended
+    static Logger* GlobalLogger = new Logger();
+    return *GlobalLogger;
 }
 
 // vvv Constructor vvv
@@ -50,7 +51,6 @@ bool Logger::OpenFile(const char* path, std::size_t maxBytes, int keepFiles) noe
 
 // vvv Helper Functions vvv
 //  Logger
-#ifndef _WIN32
 void Logger::WriteRetry(int fd, const char* data, std::size_t len) noexcept
 {
     while(len > 0) {
@@ -63,7 +63,6 @@ void Logger::WriteRetry(int fd, const char* data, std::size_t len) noexcept
             break;
     }
 }
-#endif
 
 //  TimestampCache
 void TimestampCache::Sync(std::chrono::steady_clock::time_point now) noexcept
@@ -92,9 +91,9 @@ void CircularFileSink::CloseInternal() noexcept
     if(!file_)
         return;
 
-    // Call Close() explicitly before reset so LinuxFile gets fd_ = -1-
-    // -before the unique_ptr destructor runs. This prevents double close-
-    // -if the LinuxFile destructor also calls Close()
+    // Call Close() explicitly before reset so LinuxFile gets fd_ = -1
+    // before the unique_ptr destructor runs. This prevents double close
+    // if the LinuxFile destructor also calls Close().
     file_->Close();
     file_.reset();
 }
@@ -102,7 +101,7 @@ void CircularFileSink::CloseInternal() noexcept
 bool CircularFileSink::Open(const char* path, std::size_t maxBytes, int keepFiles) noexcept
 {
     maxBytes_ = maxBytes;
-    keepFiles_ = (keepFiles > 0 && keepFiles <= kMaxKeep) ? keepFiles : kDefaultKeepFiles;
+    keepFiles_ = (keepFiles > 0 && keepFiles <= K_MAX_KEEP) ? keepFiles : K_DEFAULT_KEEP_FILES;
 
     std::strncpy(path_, path, sizeof(path_) - 1);
     path_[sizeof(path_) - 1] = '\0';
@@ -133,12 +132,12 @@ void CircularFileSink::Rotate() noexcept
     char dst[512];
 
     for(int i = keepFiles_ - 1; i >= 1; --i) {
-        std::snprintf(src, sizeof(src), "%s.%d", path_, i);
-        std::snprintf(dst, sizeof(dst), "%s.%d", path_, i + 1);
+        (void)std::snprintf(src, sizeof(src), "%s.%d", path_, i);
+        (void)std::snprintf(dst, sizeof(dst), "%s.%d", path_, i + 1);
         FileSystem::RenameFile(src, dst);
     }
 
-    std::snprintf(dst, sizeof(dst), "%s.1", path_);
+    (void)std::snprintf(dst, sizeof(dst), "%s.1", path_);
     FileSystem::RenameFile(path_, dst);
 
     OpenFresh();

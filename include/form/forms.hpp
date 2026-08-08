@@ -21,10 +21,10 @@ namespace Detail {
 
 constexpr std::uint8_t HexNibble(std::uint8_t c) noexcept
 {
-    std::uint8_t lo = static_cast<std::uint8_t>(c - '0');
-    std::uint8_t hi = static_cast<std::uint8_t>((c | 0x20) - 'a');
-    bool isDigit = lo < 10;
-    bool isHex = hi < 6;
+    const std::uint8_t lo = static_cast<std::uint8_t>(c - '0');
+    const std::uint8_t hi = static_cast<std::uint8_t>((c | 0x20) - 'a');
+    const bool isDigit = lo < 10;
+    const bool isHex = hi < 6;
     return isDigit ? lo : (isHex ? static_cast<std::uint8_t>(hi + 10) : std::uint8_t{0xFF});
 }
 
@@ -65,13 +65,13 @@ inline bool DecodePercentInplace(std::string_view& buf) noexcept
         return true;
 
     char* data = const_cast<char*>(buf.data());
-    std::size_t len = buf.size();
+    const std::size_t len = buf.size();
     std::size_t out = 0;
 
     for(std::size_t i = 0; i < len; ++i) {
         if(data[i] == '%' && i + 2 < len) {
-            std::uint8_t hi = HexNibble(static_cast<std::uint8_t>(data[i + 1]));
-            std::uint8_t lo = HexNibble(static_cast<std::uint8_t>(data[i + 2]));
+            const std::uint8_t hi = HexNibble(static_cast<std::uint8_t>(data[i + 1]));
+            const std::uint8_t lo = HexNibble(static_cast<std::uint8_t>(data[i + 2]));
 
             if(hi == 0xFF || lo == 0xFF)
                 return false;
@@ -166,28 +166,28 @@ template <typename... Fields> struct FormSchema {
      * Fields is 'FieldBuilder' returned by 'Field' function
      */
 public: // Aliases
-    static constexpr std::size_t FieldCount = sizeof...(Fields);
+    static constexpr std::size_t FIELD_COUNT = sizeof...(Fields);
 
     // Stored
     using FieldsTuple = std::tuple<typename Fields::DescType...>;
-    using NamesArray = std::array<std::string_view, FieldCount>;
+    using NamesArray = std::array<std::string_view, FIELD_COUNT>;
 
     // Helper
     using CleanedType = typename CleanedTupleFor<typename Fields::DescType...>::Type;
-    using InputType = std::array<std::string_view, FieldCount>;
+    using InputType = std::array<std::string_view, FIELD_COUNT>;
 
 public:
     template <std::size_t N>
     constexpr FormSchema(const char (&formName)[N], Fields&&... f)
-        : formName{formName, N - 1}, fieldNames{f.GetName()...}, fieldRules{std::move(f).GetDesc()...}
+        : formName_{formName, N - 1}, fieldNames_{f.GetName()...}, fieldRules_{std::move(f).GetDesc()...}
     {
         static_assert(N > 1, "FormSchema.formName cannot be empty");
 
         // Avoid too many reallocs
-        preRenderedFields.reserve(FieldCount * 100);
+        preRenderedFields_.reserve(FIELD_COUNT * 100);
 
         // Render each field
-        RenderFields(std::make_index_sequence<FieldCount>{});
+        RenderFields(std::make_index_sequence<FIELD_COUNT>{});
     }
 
 public: // Main Functions
@@ -217,13 +217,14 @@ public: // Main Functions
         if(!SplitIntoArray(body, input))
             return FormError::MALFORMED;
 
-        return (!Clean(input, out, std::make_index_sequence<FieldCount>{}) ? FormError::CLEAN_FAILED : FormError::NONE);
+        return (!Clean(input, out, std::make_index_sequence<FIELD_COUNT>{}) ? FormError::CLEAN_FAILED
+                                                                            : FormError::NONE);
     }
 
     // Returns view to pre-rendered fields. NOTE: <form></form> needs to be written by user
     std::string_view Render() const
     {
-        return preRenderedFields;
+        return preRenderedFields_;
     }
 
 private: // Helper Functions
@@ -233,13 +234,13 @@ private: // Helper Functions
         std::size_t pos = 0;
 
         while(pos <= body.size()) {
-            std::size_t start = pos;
+            const std::size_t start = pos;
             std::size_t end = body.find('&', pos);
             if(end == std::string_view::npos)
                 end = body.size();
 
             // More pairs than expected
-            if(fieldIdx >= FieldCount)
+            if(fieldIdx >= FIELD_COUNT)
                 return false;
 
             auto kv = body.substr(start, end - start);
@@ -252,7 +253,7 @@ private: // Helper Functions
             std::string_view value = kv.substr(eqPos + 1);
 
             // Check key matches the schema field at this index
-            if(key != fieldNames[fieldIdx])
+            if(key != fieldNames_[fieldIdx])
                 return false;
 
             // Decode value in place
@@ -264,7 +265,7 @@ private: // Helper Functions
             pos = end + 1;
         }
 
-        return fieldIdx == FieldCount;
+        return fieldIdx == FIELD_COUNT;
     }
 
     // Validate Then Sanitize
@@ -293,7 +294,7 @@ private: // Helper Functions
 
     template <std::size_t... Is> bool Clean(const InputType& input, CleanedType& out, std::index_sequence<Is...>) const
     {
-        return (... && VTSField(std::get<Is>(fieldRules), input[Is], std::get<Is>(out)));
+        return (... && VTSField(std::get<Is>(fieldRules_), input[Is], std::get<Is>(out)));
     }
 
 private: // Rendering
@@ -305,39 +306,39 @@ private: // Rendering
 
     template <std::size_t I> void RenderOneField()
     {
-        const auto& name = fieldNames[I];
-        const auto& fd = std::get<I>(fieldRules);
+        const auto& name = fieldNames_[I];
+        const auto& fd = std::get<I>(fieldRules_);
 
         // Label
-        preRenderedFields += "  <label for=\"";
-        preRenderedFields += formName;
-        preRenderedFields += "__";
-        preRenderedFields += name;
-        preRenderedFields += "\">";
-        preRenderedFields += name;
-        preRenderedFields += "</label>\n";
+        preRenderedFields_ += "  <label for=\"";
+        preRenderedFields_ += formName_;
+        preRenderedFields_ += "__";
+        preRenderedFields_ += name;
+        preRenderedFields_ += "\">";
+        preRenderedFields_ += name;
+        preRenderedFields_ += "</label>\n";
 
         // Input start
-        preRenderedFields += "  <input id=\"";
-        preRenderedFields += formName;
-        preRenderedFields += "__";
-        preRenderedFields += name;
-        preRenderedFields += "\" name=\"";
-        preRenderedFields += name;
-        preRenderedFields += "\" ";
+        preRenderedFields_ += "  <input id=\"";
+        preRenderedFields_ += formName_;
+        preRenderedFields_ += "__";
+        preRenderedFields_ += name;
+        preRenderedFields_ += "\" name=\"";
+        preRenderedFields_ += name;
+        preRenderedFields_ += "\" ";
 
         // Rule attributes
-        RenderInputAttributes(preRenderedFields, fd.rule);
+        RenderInputAttributes(preRenderedFields_, fd.rule);
 
         // Close input
-        preRenderedFields += "/>\n";
+        preRenderedFields_ += "/>\n";
     }
 
 private: // Storage
-    std::string_view formName;
-    NamesArray fieldNames;
-    FieldsTuple fieldRules;
-    std::string preRenderedFields;
+    std::string_view formName_;
+    NamesArray fieldNames_;
+    FieldsTuple fieldRules_;
+    std::string preRenderedFields_;
 };
 
 } // namespace WFX::Form

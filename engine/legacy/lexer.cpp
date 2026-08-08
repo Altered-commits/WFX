@@ -115,7 +115,7 @@ void Lexer::lex_string_literal()
 
     while(true) {
         if(cur_chr == '\0') {
-            logger_.Fatal("[LegacyCode].[LexerError]: Unterminated string literal: ", value);
+            logger.Fatal("[LegacyCode].[LexerError]: Unterminated string literal: ", value);
             return;
         }
 
@@ -145,7 +145,7 @@ void Lexer::lex_string_literal()
                     value.push_back('\\');
                     break; // Escaped backslash
                 case '\0': // Escape at end of file
-                    logger_.Fatal("[LegacyCode].[LexerError]: Unterminated string literal (ends with escape)");
+                    logger.Fatal("[LegacyCode].[LexerError]: Unterminated string literal (ends with escape)");
                     return;
                 default:
                     // Just append the character as is (e.g., \a becomes 'a')
@@ -255,7 +255,7 @@ void Lexer::lex()
                     set_token("&&", TOKEN_AND);
                     return;
                 }
-                logger_.Fatal("[LegacyCode].[LexerError]: '&' bitwise operator currently not supported");
+                logger.Fatal("[LegacyCode].[LexerError]: '&' bitwise operator currently not supported");
                 return;
             case '|':
                 advance();
@@ -264,7 +264,7 @@ void Lexer::lex()
                     set_token("||", TOKEN_OR);
                     return;
                 }
-                logger_.Fatal("[LegacyCode].[LexerError]: '|' bitwise operator currently not supported");
+                logger.Fatal("[LegacyCode].[LexerError]: '|' bitwise operator currently not supported");
                 return;
             // Functions self explanatory
             case '<':
@@ -322,7 +322,7 @@ void Lexer::lex()
                 return;
 
             default:
-                logger_.Fatal("[LegacyCode].[LexerError]: Character not supported, Character: ", cur_chr);
+                logger.Fatal("[LegacyCode].[LexerError]: Character not supported, Character: ", cur_chr);
         }
     }
 }
@@ -341,9 +341,9 @@ Token& Lexer::get_current_token()
 Token Lexer::peek_next_token()
 {
     // Save lexer state
-    Token saved_token = token;
-    std::uint64_t saved_pos = cur_pos;
-    char saved_char = cur_chr;
+    const Token saved_token = token;
+    const std::uint64_t saved_pos = cur_pos;
+    const char saved_char = cur_chr;
 
     // Lex
     lex();

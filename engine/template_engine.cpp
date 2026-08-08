@@ -6,20 +6,21 @@
 #include "config/config.hpp"
 #include "utils/fileops/filemeta.hpp"
 #include "utils/string/string.hpp"
+#include "shared/utils/detection_macro.hpp"
 #include <cstring>
 
-#if defined(__linux__)
+#ifdef WFX_PLATFORM_POSIX
 #include <dlfcn.h>
 #endif
 
 namespace WFX::Core {
 
 // Global engine instance
-static TemplateEngine __GlobalTemplateEngine;
+static TemplateEngine GlobalTemplateEngine;
 
 TemplateEngine& GetTemplateEngine() noexcept
 {
-    return __GlobalTemplateEngine;
+    return GlobalTemplateEngine;
 }
 
 // vvv Main Functions vvv
@@ -86,13 +87,13 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         // Strip leading slash cuz we will use this as key inside of templates_ map
         // We expect that user, inside of 'SendTemplate' function, inputs path without leading slash
         // And because 'SendTemplate' uses templates_ map, we cannot use leading slash
-        std::string relPath = std::string(inPath.begin() + inputDir.size(), inPath.end());
+        std::string relPath = std::string(inPath.begin() + static_cast<std::ptrdiff_t>(inputDir.size()), inPath.end());
         relPath.erase(0, relPath.find_first_not_of("/\\"));
 
         // Every file is initially written to the static folder, even the dynamic .html files.
-        // After the .html file is completely stripped off static tags, and IF dynamic tags still-
-        // -remain, we move onto stage two of compiling. That is when we use the dynamic folder
-        const std::string outPath = staticOutputDir + "/" + relPath;
+        // After the .html file is completely stripped off static tags, and IF dynamic tags still
+        // remain, we move onto stage two of compiling. That is when we use the dynamic folder.
+        std::string outPath = staticOutputDir + "/" + relPath;
 
         // Cache checking
         FileStats diskStats = {};
@@ -101,13 +102,13 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
         if(FileSystem::GetFileStats(inPath.c_str(), diskStats)) {
             if(cacheStats) {
                 std::size_t offset{0};
-                TemplateType cachedType = cacheStats->Pop<TemplateType>(offset);
-                std::size_t cachedSize = cacheStats->Pop<std::size_t>(offset);
+                const TemplateType cachedType = cacheStats->Pop<TemplateType>(offset);
+                const std::size_t cachedSize = cacheStats->Pop<std::size_t>(offset);
 
-                // Cache is only trustworthy if the file is unchanged AND, for dynamic-
-                // -templates, the compiled .so it depends on actually still exists
-                bool cacheValid = diskStats.modifiedNs == cacheStats->modifiedTime &&
-                                  (cachedType != TemplateType::DYNAMIC || dynamicLibExists);
+                // Cache is only trustworthy if the file is unchanged AND, for dynamic
+                // templates, the compiled .so it depends on actually still exists.
+                const bool cacheValid = diskStats.modifiedNs == cacheStats->modifiedTime &&
+                                        (cachedType != TemplateType::DYNAMIC || dynamicLibExists);
 
                 if(cacheValid) {
                     templates_.emplace(std::move(relPath), TemplateMeta{cachedType, cachedSize, std::move(outPath)});
@@ -131,7 +132,7 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
                          ". Continuing with full compilation");
 
         // Ensure target directory exists
-        std::string relOutputDir = outPath.substr(0, outPath.find_last_of("/\\"));
+        const std::string relOutputDir = outPath.substr(0, outPath.find_last_of("/\\"));
         if(!FileSystem::DirectoryExists(relOutputDir.c_str()) && !FileSystem::CreateDirectory(relOutputDir, true)) {
             logger_.Error("[TemplateEngine]: Failed to create template output directory: ", staticOutputDir);
             return;
@@ -186,10 +187,10 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
             logger_.Info("[TemplateEngine]: Staging dynamic template for compilation: ", relPath);
 
             // Create a unique, C compatible function name
-            std::string funcName = StringUtils::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
+            const std::string funcName = StringUtils::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
 
             // Define path for the new .cpp file
-            std::string cppPath = dynamicCxxOutputDir + "/" + relPath + ".cpp";
+            const std::string cppPath = dynamicCxxOutputDir + "/" + relPath + ".cpp";
 
             // Create cxx representation of templates now
             if(!GenerateCxxFromTemplate(outPath, cppPath, funcName)) {
@@ -239,18 +240,14 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
 
 void TemplateEngine::LoadDynamicTemplatesFromLib()
 {
-    // Load the user_templates.[dll/so/dylib] from <project>/build/ if it exists-
-    // -else we just ignore this entirely
+    // Load the user_templates.[dll/so/dylib] from <project>/build/ if it exists
+    // else we just ignore this entirely.
     const std::string inputDir = config_.projectConfig.projectName + STATIC_FOLDER;
     const std::string dllPath = config_.projectConfig.projectName + TEMPLATE_LIB_PATH;
 
     if(!FileSystem::FileExists(dllPath.c_str()))
         return;
 
-#if defined(_WIN32)
-    static_assert(false, "No impl for TemplateEngine.LoadDynamicTemplatesFromLib for Windows");
-#else
-    // POSIX (Linux / macOS / *nix)
     // RTLD_NOW: resolve symbols immediately; RTLD_GLOBAL: let module export symbols globally if needed
     void* handle = dlopen(dllPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
     if(!handle) {
@@ -259,8 +256,8 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
     }
 
     // Loop over the templates_ and find the ones with TemplateType::DYNAMIC
-    // It will contain the functions name in 'pathOrName' member, use it to get-
-    // -Generator class inside of .dll/.so
+    // It will contain the functions name in 'pathOrName' member, use it to get
+    // Generator class inside of .dll/.so.
     for(auto& templateMeta : templates_) {
         auto& tmpl = templateMeta.second;
         if(tmpl.type != TemplateType::DYNAMIC)
@@ -270,10 +267,11 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
         dlerror();
 
         // Extract the symbol name from the filePath
-        std::string relPath = std::string(tmpl.filePath.begin() + inputDir.size(), tmpl.filePath.end());
+        std::string relPath =
+            std::string(tmpl.filePath.begin() + static_cast<std::ptrdiff_t>(inputDir.size()), tmpl.filePath.end());
         relPath.erase(0, relPath.find_first_not_of("/\\"));
 
-        std::string symbol = StringUtils::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
+        const std::string symbol = StringUtils::NormalizePathToIdentifier(relPath, DYNAMIC_FUNC_PREFIX);
 
         void* rawSym = dlsym(handle, symbol.c_str());
         const char* dlsymErr = dlerror();
@@ -287,13 +285,12 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
             logger_.Fatal("[TemplateEngine]: Failed to create template generator for: ", symbol);
     }
 
-#endif
     logger_.Info("[TemplateEngine]: Successfully initialized dynamic template(s) from: ", dllPath);
 }
 
 TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
 {
-    auto templateMeta = templates_.find(std::move(relPath));
+    auto templateMeta = templates_.find(relPath);
     if(templateMeta != templates_.end())
         return &(templateMeta->second);
 
@@ -303,7 +300,7 @@ TemplateMeta* TemplateEngine::GetTemplate(std::string&& relPath)
 // vvv Helper Functions vvv
 TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFilePtr outTemplate)
 {
-    std::uint32_t chunkSize = GetConfig().miscConfig.templateChunkSize;
+    const std::uint32_t chunkSize = GetConfig().miscConfig.templateChunkSize;
     CompilationContext ctx = {std::move(outTemplate), chunkSize};
 
     // Initialize stack with main template
@@ -324,6 +321,7 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
     std::string_view tagView{};
 
     while(!stack.empty()) {
+        const std::size_t frameIdx = stack.size() - 1;
         TemplateFrame& frame = stack.back();
 
         // If we have any readOffset remaining, complete it before reading in more data
@@ -357,7 +355,7 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
     __ContinueReading:
         // Convinience purpose
         char* bufPtr = frame.readBuf.get();
-        std::size_t bufLen = static_cast<std::size_t>(frame.bytesRead);
+        const std::size_t bufLen = static_cast<std::size_t>(frame.bytesRead);
 
         // CASE 0: If the first 13 bytes are {% partial %}, skip them + skip '\n' with +1
         // Quite strict ({% partial %} needs to be written perfectly)
@@ -414,7 +412,7 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
 
             // Found tag end in this chunk, but before we append, check the length of tag
             // It cannot cross MAX_TAG_LENGTH
-            std::size_t appendCount = tagEnd + 2;
+            const std::size_t appendCount = tagEnd + 2;
             if(frame.carry.size() + appendCount > MAX_TAG_LENGTH) {
                 logger_.Error("[TemplateEngine].[ParsingError]: OC; Length of the tag: '", frame.carry,
                               "' crosses the 'MAX_TAG_LENGTH' limit which is ", MAX_TAG_LENGTH);
@@ -436,8 +434,8 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
         while(frame.readOffset < bufLen) {
             bodyView = {bufPtr + frame.readOffset, frame.bytesRead - frame.readOffset};
 
-            // If we are processing a child template (one that extends a parent)-
-            // -or skipUntilFlag is set, we should NOT write any content from it
+            // If we are processing a child template (one that extends a parent)
+            // or skipUntilFlag is set, we should NOT write any content from it.
             isExtending = !ctx.currentExtendsName.empty();
             skipLiterals = isExtending || ctx.skipUntilFlag;
             tagStart = bodyView.find("{%");
@@ -449,7 +447,7 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
                 // Example -> Data: <...> {% block id %} <...>
                 //         -> Chunk 1: "<...> {" , Chunk 2: "% block id %} <...>"
                 // So we write what we know is a literal to output and throw '{' inside of carry
-                bool maybeTag = bodyView.ends_with("{");
+                const bool maybeTag = bodyView.ends_with("{");
                 outSize = maybeTag ? bodyView.size() - 1 : bodyView.size();
 
                 // We only append content to block if we aren't in parent template
@@ -487,8 +485,8 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
             tagEnd = bodyView.find("%}");
 
             // Incomplete tag, carry over for next read
-            // Why use assign? Tags can only span one chunk at max, so either the '{%' or '%}' spans-
-            // -at a single time, not both at the same time
+            // Why use assign? Tags can only span one chunk at max, so either the '{%' or '%}' spans
+            // at a single time, not both at the same time.
             if(tagEnd == std::string::npos) {
                 frame.carry.assign(bodyView.data(), bodyView.size());
                 goto __NextChunk;
@@ -496,8 +494,8 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
 
             tagView = {bodyView.data(), tagEnd + 2};
 
-            // Tag cannot be larger than 'MAX_TAG_LENGTH', so uk people don't just 'accidentally'-
-            // -make it a billion bytes :)
+            // Tag cannot be larger than 'MAX_TAG_LENGTH', so uk people don't just 'accidentally'
+            // make it a billion bytes :)
             if(tagView.size() > MAX_TAG_LENGTH) {
                 logger_.Error("[TemplateEngine].[ParsingError]: IC; Length of the tag: '", tagView,
                               "' crosses the 'MAX_TAG_LENGTH' limit which is ", MAX_TAG_LENGTH);
@@ -508,7 +506,7 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
 
             // Common functionality for both partial and fully completed tags
         __ProcessTag:
-            TemplateEngine::TagResult tagResult = ProcessTag(ctx, tagView);
+            const TemplateEngine::TagResult tagResult = ProcessTag(ctx, tagView);
             if(tagResult == TagResult::FAILURE)
                 return {TemplateType::FAILURE, 0};
 
@@ -524,6 +522,19 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
                     return {TemplateType::FAILURE, 0};
             }
 
+            // An include just pushed a new frame via PushFile() -> stack.emplace_back(),
+            // which can reallocate the backing vector and leave 'frame' dangling. Re-fetch
+            // it by index before touching it in that case instead of using the stale ref.
+            if(tagResult == TagResult::CONTROL_TO_ANOTHER_FILE) {
+                TemplateFrame& parentFrame = stack[frameIdx];
+                if(!parentFrame.carry.empty())
+                    parentFrame.carry.clear();
+                else
+                    parentFrame.readOffset += tagView.length();
+
+                goto __ContinueOuterLoop;
+            }
+
             if(!frame.carry.empty())
                 frame.carry.clear();
 
@@ -531,16 +542,13 @@ TemplateResult TemplateEngine::CompileTemplate(BaseFilePtr inTemplate, BaseFileP
             // 'bodyView', which starts at 'frame.readOffset'
             else
                 frame.readOffset += tagView.length();
-
-            if(tagResult == TagResult::CONTROL_TO_ANOTHER_FILE)
-                goto __ContinueOuterLoop;
         }
         // Set the read offset to be zero before reading more bytes
     __NextChunk:
         frame.readOffset = 0;
 
-        // Skip the read loop entirely if needed. Also the ';' is there for suppressing compiler warnings-
-        // -because empty label is ig not allowed in cxx version < C++2b
+        // Skip the read loop entirely if needed. Also the ';' is there for suppressing compiler warnings
+        // because empty label is ig not allowed in cxx version < C++2b.
     __ContinueOuterLoop:;
     }
 
@@ -552,7 +560,7 @@ bool TemplateEngine::PushFile(CompilationContext& context, const std::string& re
 {
     auto& config = GetConfig();
 
-    std::string fullPath = config.projectConfig.templateDir + "/" + relPath;
+    const std::string fullPath = config.projectConfig.templateDir + "/" + relPath;
 
     BaseFilePtr newFile = FileSystem::OpenFileRead(fullPath.c_str());
     if(!newFile) {
@@ -566,32 +574,32 @@ bool TemplateEngine::PushFile(CompilationContext& context, const std::string& re
 Tag TemplateEngine::ExtractTag(std::string_view line)
 {
     // Find the content between {% and %}
-    std::size_t start = line.find("{%");
-    std::size_t end = line.rfind("%}");
+    const std::size_t start = line.find("{%");
+    const std::size_t end = line.rfind("%}");
 
     if(start == std::string_view::npos || end == std::string_view::npos || start >= end)
         return {};
 
     // Get the inner content, e.g., "  extends   'file-a.html'  "
-    std::string_view content = line.substr(start + 2, end - (start + 2));
+    const std::string_view content = line.substr(start + 2, end - (start + 2));
 
     // Trim leading whitespace to find the start of the tag name
-    std::size_t nameStart = content.find_first_not_of(" \t\n\r");
+    const std::size_t nameStart = content.find_first_not_of(" \t\n\r");
     if(nameStart == std::string_view::npos)
         return {};
 
     // Find the end of the tag name (the next whitespace)
-    std::size_t nameEnd = content.find_first_of(" \t\n\r", nameStart);
+    const std::size_t nameEnd = content.find_first_of(" \t\n\r", nameStart);
 
     // Tag has no arguments
     if(nameEnd == std::string_view::npos)
         return {content.substr(nameStart), {}};
 
-    std::string_view tagName = content.substr(nameStart, nameEnd - nameStart);
-    std::string_view tagArgs = content.substr(nameEnd);
+    const std::string_view tagName = content.substr(nameStart, nameEnd - nameStart);
+    const std::string_view tagArgs = content.substr(nameEnd);
 
     // Trim leading space from arguments
-    std::size_t argsStart = tagArgs.find_first_not_of(" \t\n\r");
+    const std::size_t argsStart = tagArgs.find_first_not_of(" \t\n\r");
 
     // Tag has no arguments
     if(argsStart == std::string_view::npos)
@@ -620,8 +628,8 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(CompilationContext& context
     }
 
     // Get the tag type we working with
-    auto it = tagViewToType.find(tagName);
-    if(it == tagViewToType.end())
+    auto it = tagViewToType_.find(tagName);
+    if(it == tagViewToType_.end())
         goto __Failure;
 
     // Some dictionary type shit
@@ -633,8 +641,8 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(CompilationContext& context
                 return TagResult::FAILURE;
             }
 
-            std::size_t q1 = tagArgs.find_first_of("'\"");
-            std::size_t q2 = tagArgs.find_last_of("'\"");
+            const std::size_t q1 = tagArgs.find_first_of("'\"");
+            const std::size_t q2 = tagArgs.find_last_of("'\"");
 
             if(q1 == std::string::npos || q2 <= q1) {
                 logger_.Error(
@@ -643,7 +651,7 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(CompilationContext& context
                 return TagResult::FAILURE;
             }
 
-            std::string includePath = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));
+            const std::string includePath = std::string(tagArgs.substr(q1 + 1, q2 - q1 - 1));
 
             return PushFile(context, includePath) ? TagResult::CONTROL_TO_ANOTHER_FILE : TagResult::FAILURE;
         }
@@ -654,8 +662,8 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(CompilationContext& context
                 return TagResult::FAILURE;
             }
 
-            std::size_t q1 = tagArgs.find_first_of("'\"");
-            std::size_t q2 = tagArgs.find_last_of("'\"");
+            const std::size_t q1 = tagArgs.find_first_of("'\"");
+            const std::size_t q2 = tagArgs.find_last_of("'\"");
 
             if(q1 == std::string::npos || q2 <= q1) {
                 logger_.Error(
@@ -698,8 +706,8 @@ TemplateEngine::TagResult TemplateEngine::ProcessTag(CompilationContext& context
                 return TagResult::SUCCESS;
             }
 
-            // Now in another case, we would want to substitute the original content inplace-
-            // -if we couldn't find a replacement above, that is if we are in original parent file now
+            // Now in another case, we would want to substitute the original content inplace
+            // if we couldn't find a replacement above, that is if we are in original parent file now.
             if(context.currentExtendsName.empty()) {
                 context.inBlock = true;
                 return TagResult::SUCCESS;
@@ -792,8 +800,8 @@ bool TemplateEngine::SafeWrite(IOContext& ctx, const void* data, std::size_t siz
         return true;
 
     while(size > 0) {
-        std::size_t available = ctx.chunkSize - ctx.offset;
-        std::size_t toCopy = std::min(size, available);
+        const std::size_t available = ctx.chunkSize - ctx.offset;
+        const std::size_t toCopy = std::min(size, available);
 
         std::memcpy(ctx.buffer.get() + ctx.offset, ptr, toCopy);
 

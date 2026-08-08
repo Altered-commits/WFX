@@ -6,17 +6,14 @@
 #include "engine/core_engine.hpp"
 #include "engine/template_engine.hpp"
 #include "http/common/http_master_state.hpp"
+#include "utils/pool/buffer_pool.hpp"
 #include "utils/daemon/daemon_registry.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
 #include "utils/diagnostics/metric_tracer.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#else
 #include <wait.h>
 #include <signal.h>
 #include <fcntl.h>
-#endif
 
 #include <ctime>
 #include <thread>
@@ -28,9 +25,6 @@ using namespace WFX::Http;  // For 'WFXGlobalState', ...
 using namespace WFX::Utils; // For 'Logger', 'BufferPool', 'FileCache', ...
 using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 
-#ifdef _WIN32
-// Windows: future work
-#else
 // vvv Constants vvv
 // Slot state encoding via workerPids:
 //   >= 0  -> live worker PID
@@ -40,6 +34,12 @@ static constexpr pid_t SLOT_PENDING = -1;
 static constexpr pid_t SLOT_DEAD = -2;
 
 // vvv Helper Functions vvv
+static void InstallSignal(int sig, void (*handler)(int), const char* name)
+{
+    if(signal(sig, handler) == SIG_ERR)
+        GetLogger().Fatal("[WFX-Master]: Failed to install handler for '", name, "'");
+}
+
 static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::string& logsDir,
                         const std::string& crashLogsDir, bool useHttps, bool pinToCpu, const std::string& host,
                         std::uint16_t port)
@@ -49,7 +49,7 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
     auto& config = GetConfig();
     auto& loggingConfig = config.loggingConfig;
 
-    pid_t pid = fork();
+    const pid_t pid = fork();
 
     // --- Child Worker ---
     if(pid == 0) {
@@ -64,7 +64,7 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
 
         // AND A CRASH tracer for good luck
         char workerName[32];
-        std::snprintf(workerName, sizeof(workerName), "worker-%d", slotIndex);
+        (void)std::snprintf(workerName, sizeof(workerName), "worker-%d", slotIndex);
         CrashTracer::SetWorkerName(workerName);
         CrashTracer::Install(crashLogsDir.c_str());
 
@@ -77,10 +77,10 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
         GetBufferPool().Init(1024 * 1024, [](std::size_t curSize) { return curSize * 2; });
         GetFileCache().Init(config.miscConfig.fileCacheSize);
 
-        signal(SIGTERM, HandleWorkerSignal);
-        signal(SIGINT, SIG_IGN);  // SigTerm will kill it, SigInt handled by master
-        signal(SIGPIPE, SIG_IGN); // We will handle it internally
-        signal(SIGHUP, SIG_IGN);  // Terminals should not kill workers
+        InstallSignal(SIGTERM, HandleWorkerSignal, "SIGTERM");
+        InstallSignal(SIGINT, SIG_IGN, "SIGINT");   // SigTerm will kill it, SigInt handled by master
+        InstallSignal(SIGPIPE, SIG_IGN, "SIGPIPE"); // We will handle it internally
+        InstallSignal(SIGHUP, SIG_IGN, "SIGHUP");   // Terminals should not kill workers
 
         if(pinToCpu)
             PinWorkerToCPU(slotIndex);
@@ -162,8 +162,8 @@ static void ReapDeadWorkers()
                         " (pid=", dead, ")");
 
         // -------------------- BACKOFF CHECK --------------------
-        std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
-        std::uint32_t attempts = slot->self.backoffAttempts;
+        const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+        const std::uint32_t attempts = slot->self.backoffAttempts;
 
         if(attempts >= miscConfig.maxWorkerRestarts) {
             logger.Error("[WFX-Master]: Worker ", slotIndex, " exceeded max restart attempts (",
@@ -173,8 +173,8 @@ static void ReapDeadWorkers()
         }
 
         // Compute backoff window and mark as pending revival
-        std::uint32_t base = miscConfig.workerBackoffBase;
-        std::uint32_t backoffSecs =
+        const std::uint32_t base = miscConfig.workerBackoffBase;
+        const std::uint32_t backoffSecs =
             (attempts >= 32) ? static_cast<std::uint32_t>(miscConfig.workerBackoffMax)
                              : std::min(base << attempts, static_cast<std::uint32_t>(miscConfig.workerBackoffMax));
 
@@ -195,7 +195,7 @@ static void RevivePendingWorkers(const std::string& dllDir, const std::string& l
     auto& logger = GetLogger();
     auto& miscConfig = GetConfig().miscConfig;
 
-    std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
+    const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
 
     for(int i = 0; i < static_cast<int>(globalState.workerPids.size()); i++) {
         if(globalState.workerPids[i] != SLOT_PENDING)
@@ -231,7 +231,7 @@ void PollWorkerMetrics()
     auto& globalState = GetMasterState();
 
     for(int i = 0; i < static_cast<int>(globalState.workerPids.size()); i++) {
-        pid_t pid = globalState.workerPids[i];
+        const pid_t pid = globalState.workerPids[i];
         if(pid <= 0)
             continue;
 
@@ -241,15 +241,15 @@ void PollWorkerMetrics()
 
         // Build /proc/<pid>/status path on stack
         char path[32];
-        std::snprintf(path, sizeof(path), "/proc/%d/status", static_cast<int>(pid));
+        (void)std::snprintf(path, sizeof(path), "/proc/%d/status", static_cast<int>(pid));
 
-        int fd = ::open(path, O_RDONLY);
+        const int fd = ::open(path, O_RDONLY);
         if(fd < 0)
             continue;
 
         // proc files report size 0, just read directly into stack buffer
         char buf[2048];
-        ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
+        const ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
         ::close(fd);
 
         if(n <= 0)
@@ -272,7 +272,7 @@ void PollWorkerMetrics()
             if(!lineEnd)
                 lineEnd = end;
 
-            std::size_t lineLen = static_cast<std::size_t>(lineEnd - ptr);
+            const std::size_t lineLen = static_cast<std::size_t>(lineEnd - ptr);
 
             // VmRSS and VmSize are 6 - 7 chars + ':'
             if(lineLen > 7) {
@@ -318,20 +318,22 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     auto& osConfig = config.osSpecificConfig;
     auto& buildConfig = config.buildConfig;
     auto& loggingConfig = config.loggingConfig;
+    auto& metricsConfig = config.metricsConfig;
 
     // Used in daemon registry
     auto& projectName = config.projectConfig.projectName;
     auto& projectAbsolutePath = config.projectConfig.projectPath;
 
     // -------------------- INITIALIZING PHASE --------------------
-    signal(SIGINT, HandleMasterSignal);
-    signal(SIGTERM, HandleMasterSignal);
-    signal(SIGCHLD, [](int) {}); // Used to wake master up from 'nanosleep'
+    InstallSignal(SIGINT, HandleMasterSignal, "SIGINT");
+    InstallSignal(SIGTERM, HandleMasterSignal, "SIGTERM");
+    InstallSignal(SIGCHLD, [](int) {}, "SIGCHLD"); // Used to wake master up from 'nanosleep'
 
     if(!GetRandomPool().GenerateSSLKey())
         logger.Fatal("[WFX-Master]: Failed to generate SSL key");
 
-    if(!MetricTracer::Create(osConfig.workerProcesses))
+    if(!MetricTracer::Create(static_cast<int>(osConfig.workerProcesses), metricsConfig.maxRoutes,
+                             metricsConfig.maxEndpoints, metricsConfig.latency))
         logger.Fatal("[WFX-Master]: Failed to initialize metric tracer region");
 
     // -------------------- TEMPLATE / USER CODE COMPILATION PHASE --------------------
@@ -350,19 +352,19 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     // Load template library if it exists
     templateEngine.LoadDynamicTemplatesFromLib();
 
-    bool pinToCpu = cfg.GetFlag(ServerFlags::PIN_TO_CPU);
-    bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
-    bool ohp = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
+    const bool pinToCpu = cfg.GetFlag(ServerFlags::PIN_TO_CPU);
+    const bool useHttps = cfg.GetFlag(ServerFlags::USE_HTTPS);
+    const bool ohp = cfg.GetFlag(ServerFlags::OVERRIDE_HTTPS_PORT);
 
     // Switch ports if we enable https and we don't want to override https default port
-    std::uint16_t port = useHttps && !ohp ? 443U : cfg.port;
+    const std::uint16_t port = useHttps && !ohp ? 443U : cfg.port;
 
     logger.Info("[WFX-Master]: Server running at ", useHttps ? "https://" : "http://", cfg.host, ':', port);
     logger.Info("[WFX-Master]: Press Ctrl+C to stop");
 
     // -------------------- DAEMON CONVERSION PHASE (IF ENABLED) --------------------
     if(cfg.GetFlag(ServerFlags::USE_DAEMON)) {
-        pid_t pid = fork();
+        const pid_t pid = fork();
 
         if(pid < 0)
             logger.Fatal("[WFX-Master]: Failed to detach from terminal");
@@ -378,7 +380,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
             logger.Fatal("[WFX-Master]: Failed to create new session");
 
         // Redirect stdio to /dev/null
-        int devNull = open("/dev/null", O_RDWR);
+        const int devNull = open("/dev/null", O_RDWR);
         if(devNull < 0)
             logger.Fatal("[WFX-Master]: Failed to open /dev/null: ", strerror(errno));
 
@@ -396,7 +398,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         info.host = cfg.host;
         info.port = port;
         info.https = useHttps;
-        info.workers = osConfig.workerProcesses;
+        info.workers = static_cast<int>(osConfig.workerProcesses);
         info.workerShutdownTimeout = static_cast<int>(osConfig.workerShutdownTimeout);
         info.started = static_cast<std::int64_t>(std::time(nullptr));
         info.pid = getpid();
@@ -434,7 +436,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     // --- Master wait loop ---
     while(!globalState.shouldStop) {
         // Sleep for poll interval, wake early on any signal
-        struct timespec ts {
+        const struct timespec ts {
             config.miscConfig.masterPollInterval, 0
         };
         nanosleep(&ts, nullptr);
@@ -456,13 +458,13 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     logger.Info("[WFX-Master]: Signal received (INT / TERM), waiting for workers to shutdown...");
 
     // -------------------- SHUTDOWN PHASE --------------------
-    // Wait on every worker CONCURRENTLY, inside one shared 'workerShutdownTimeout' window,-
-    // -instead of one worker's full timeout at a time: N workers waited on serially could take-
-    // -N times as long as configured, long enough for an external 'wfx control stop' to give up-
-    // -and kill this process first, orphaning whichever workers hadn't been reached yet
+    // Wait on every worker CONCURRENTLY, inside one shared 'workerShutdownTimeout' window,
+    // instead of one worker's full timeout at a time: N workers waited on serially could take
+    // N times as long as configured, long enough for an external 'wfx control stop' to give up
+    // and kill this process first, orphaning whichever workers hadn't been reached yet.
     std::vector<pid_t> pending;
     for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(osConfig.workerProcesses); i++) {
-        pid_t pid = globalState.workerPids[i];
+        const pid_t pid = globalState.workerPids[i];
 
         // Slot may be dead from backoff exhaustion or failed restart
         if(pid > 0)
@@ -472,7 +474,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     for(std::uint32_t t = 0; !pending.empty() && t < config.osSpecificConfig.workerShutdownTimeout * 10; t++) {
         for(auto it = pending.begin(); it != pending.end();) {
             int status;
-            pid_t ret = waitpid(*it, &status, WNOHANG);
+            const pid_t ret = waitpid(*it, &status, WNOHANG);
 
             if(ret == *it)
                 it = pending.erase(it);
@@ -484,9 +486,9 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    // Anything still here ignored SIGTERM, or was spawned too late to receive it. Either way,-
-    // -force it and block until it's actually reaped, no worker is left running past this point
-    for(pid_t pid : pending) {
+    // Anything still here ignored SIGTERM, or was spawned too late to receive it. Either way,
+    // force it and block until it's actually reaped, no worker is left running past this point.
+    for(const pid_t pid : pending) {
         logger.Warn("[WFX-Master]: Worker (pid=", pid, ") did not exit in time, sending SIGKILL");
         kill(pid, SIGKILL);
         waitpid(pid, nullptr, 0);
@@ -502,7 +504,6 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     logger.Info("[WFX-Master]: Shutdown successfully");
     return 0;
 }
-#endif // _WIN32
 
 void CheckAlreadyRunning(const std::string& projectName)
 {

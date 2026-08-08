@@ -39,6 +39,9 @@ This page describes the top-level layout of the WFX repository.
     - `base_audit/` - phased correctness and security audit of the inbound server.
     - `endpoint_audit/` - adversarial audit of the outbound `WFX::HttpEndpoint` client against a hostile upstream.
     - `tls_audit/` - adversarial audit of the outbound client over TLS (untrusted/hostname-mismatched/expired certs, protocol downgrade).
+    - `crypto_audit/` - correctness audit of `wfx/utils/crypto.hpp` (hashing, HMAC, AEAD, KDFs, CSPRNG) against Python stdlib oracles where one exists.
+    - `ip_audit/` - adversarial audit of real-IP resolution and the connection/rate limiters it feeds.
+    - `common/` - the shared `Suite`/`Report`/`Server`/`net`/`logs`/`term` package every audit above is built on, see [Testing](testing.md).
 
 - `utils/`  
     Internal engine utilities. Not exposed to user code. Contains the logger, buffer pool, file cache, crash tracer, metric tracer, and other engine-side tools.
@@ -62,18 +65,20 @@ This page describes the top-level layout of the WFX repository.
 
 - `.github/`  
     GitHub Actions workflows, under `workflows/`.
-    - `entry.yml` - The only workflow actually triggered on push/PR. Orchestrates the four reusable workflows below, linearly: filter, then format, then compile, then audit, gating each on the previous one succeeding. Also reports one collected status for branch protection.
+    - `entry.yml` - The only workflow actually triggered on push/PR. Orchestrates the five reusable workflows below: filter, then format, then compile, then audit and tidy in parallel (both gated on compile succeeding, not on each other). Also reports one collected status for branch protection.
     - `filter_check.yml` - Reusable, called by `entry.yml`. Decides whether CI should run at all based on which files changed, using `.ciignore`.
-    - `format_check.yml` - Reusable, called by `entry.yml` after the filter passes. Validates code formatting using `scripts/format.sh --dry-run`.
-    - `compile_check.yml` - Reusable, called by `entry.yml` after formatting passes. Checks for successful compilation of WFX.
-    - `audit_check.yml` - Reusable, called by `entry.yml` after compile passes. Never builds `wfx` itself: downloads the binary `compile_check.yml`'s gcc leg already uploaded as an artifact (headers come from its own checkout, they're tracked source), then runs the three test audits (`base`, `endpoint`, `tls`) as parallel matrix jobs via `tests/run_audits.sh`.
+    - `format_check.yml` - Reusable, called by `entry.yml` after the filter passes. Validates code formatting using `scripts/format.sh` (dry run by default, same convention as `tidy.sh`).
+    - `compile_check.yml` - Reusable, called by `entry.yml` after formatting passes. Checks for successful compilation of WFX, always built `Debug` with `-DWFX_ENABLE_ASAN=ON` (see [Build Macros](build_macros.md)) since the artifact never leaves CI - `Debug` keeps full symbols so ASan crash traces are actually readable.
+    - `audit_check.yml` - Reusable, called by `entry.yml` after compile passes. Never builds `wfx` itself: downloads the ASan-instrumented binary `compile_check.yml` already uploaded as an artifact, restores that same job's `build/` cache for the custom OpenSSL `.so`s `wfx` links against (headers come from its own checkout, they're tracked source), then runs the five test audits (`base`, `endpoint`, `tls`, `crypto`, `ip`) as parallel matrix jobs via `tests/run_audits.sh`.
+    - `tidy_check.yml` - Reusable, called by `entry.yml` after compile passes, in parallel with `audit_check.yml`. Runs `scripts/tidy.sh` (clang-tidy static analysis).
     - `docs_build.yml` - Independent, triggers on push to `main`. Builds and deploys this documentation site.
 
 - `scripts/`  
     Shell scripts for project tooling.
-    - `install.sh` - Installs WFX to `~/.wfx`, builds / updates from source, and adds the binary to PATH.
+    - `install.sh` - Installs WFX to `~/.wfx`, builds / updates from source, and adds the binary to PATH. `--local-debug` (contributor mode) symlinks `~/.wfx/src` to the checkout and builds Debug with ASan+UBSan on; `--local-release` does the same symlink but builds an optimized Release with sanitizers off (perf testing); the plain end-user path (no flags) does a real clone and an optimized Release build.
     - `uninstall.sh` - Removes `~/.wfx` entirely and cleans up PATH entries from shell configs.
-    - `format.sh` - Runs clang-format across the codebase. Supports `--dry-run` for CI validation and `--files` for targeted formatting.
+    - `format.sh` - Runs clang-format across the codebase. Dry run by default (used for CI validation); `--fix` applies formatting in-place, `--files` targets specific files.
+    - `tidy.sh` - Runs clang-tidy static analysis, self-caching results (`py/tidy_cache.py`) and parallelized across jobs. Supports `--changed` (only files changed vs `main`) and `--fix` (apply auto-fixes).
 
 - `.ciignore`  
     Defines file patterns that do not trigger CI when changed. Works together with `filter_check.yml`. If every file changed in a commit matches a pattern in this file, the build is skipped.

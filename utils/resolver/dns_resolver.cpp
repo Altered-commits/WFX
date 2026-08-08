@@ -5,23 +5,15 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
-
-#ifdef _WIN32
-#error "Windows DNS resolver not implemented"
-#else
 #include <resolv.h>
 #include <arpa/nameser.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#endif // _WIN32
 
 namespace WFX::Utils {
 namespace DNSResolver {
 
-#ifdef _WIN32
-...
-#else
 // Linux / macOS, both use the BSD resolver API
 
 // Builds a single ResolvedAddr from an already-known IP (literal or loopback alias)
@@ -56,10 +48,10 @@ static void AppendLiteralAddr(int family, const void* rawAddr, std::uint16_t por
 }
 
 // Handles literal IPs and the well-known 'localhost' hostname without touching DNS at all
-// 'localhost' specifically is NOT guaranteed to be forwardable to a real DNS server. It-
-// -typically only resolves via /etc/hosts at the NSS layer, which res_query bypasses-
-// -entirely. Returns true and populates outAddrs if 'host' was handled here, false if-
-// -the caller should fall through to a real DNS query
+// 'localhost' specifically is NOT guaranteed to be forwardable to a real DNS server. It
+// typically only resolves via /etc/hosts at the NSS layer, which res_query bypasses
+// entirely. Returns true and populates outAddrs if 'host' was handled here, false if
+// the caller should fall through to a real DNS query.
 static bool TryResolveLocal(const char* host, std::uint16_t port, ResolvedAddrs& outAddrs)
 {
     in_addr v4{};
@@ -76,9 +68,9 @@ static bool TryResolveLocal(const char* host, std::uint16_t port, ResolvedAddrs&
     }
 
     if(std::strcmp(host, "localhost") == 0) {
-        // Standard loopback addresses per RFC 6761. Both families, since dual-stack-
-        // -is the common case and round-robin/connect-failure-skip handles either-
-        // -being unreachable on a given system
+        // Standard loopback addresses per RFC 6761. Both families, since dual-stack
+        // is the common case and round-robin/connect-failure-skip handles either
+        // being unreachable on a given system.
         in_addr loopback4{};
         loopback4.s_addr = htonl(INADDR_LOOPBACK);
         AppendLiteralAddr(AF_INET, &loopback4, port, outAddrs);
@@ -95,7 +87,7 @@ static bool TryResolveLocal(const char* host, std::uint16_t port, ResolvedAddrs&
 static bool QueryRecordType(const char* host, int recordType, std::uint16_t port, ResolvedAddrs& outAddrs)
 {
     unsigned char response[NS_PACKETSZ];
-    int len = res_query(host, ns_c_in, recordType, response, sizeof(response));
+    const int len = res_query(host, ns_c_in, recordType, response, sizeof(response));
     if(len < 0)
         return false;
 
@@ -103,7 +95,7 @@ static bool QueryRecordType(const char* host, int recordType, std::uint16_t port
     if(ns_initparse(response, len, &handle) < 0)
         return false;
 
-    int count = ns_msg_count(handle, ns_s_an);
+    const int count = ns_msg_count(handle, ns_s_an);
     bool foundAny = false;
 
     for(int i = 0; i < count; i++) {
@@ -161,8 +153,8 @@ bool Resolve(const char* host, std::uint16_t port, ResolvedAddrs& outAddrs, std:
         return true;
     }
 
-    bool gotA = QueryRecordType(host, ns_t_a, port, outAddrs);
-    bool gotAAAA = QueryRecordType(host, ns_t_aaaa, port, outAddrs);
+    const bool gotA = QueryRecordType(host, ns_t_a, port, outAddrs);
+    const bool gotAAAA = QueryRecordType(host, ns_t_aaaa, port, outAddrs);
 
     if(!gotA && !gotAAAA)
         return false;
@@ -174,8 +166,6 @@ bool Resolve(const char* host, std::uint16_t port, ResolvedAddrs& outAddrs, std:
     outMinTtlSeconds = minTtl;
     return true;
 }
-
-#endif
 
 } // namespace DNSResolver
 } // namespace WFX::Utils

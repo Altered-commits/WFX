@@ -6,11 +6,11 @@
 #include "config/config.hpp"
 #include "engine/template_engine.hpp"
 #include "http/common/http_detector.hpp"
-#include "utils/pool/buffer_pool.hpp"
 #include "utils/fileops/filecache.hpp"
 #include "utils/fileops/filesystem.hpp"
 #include "utils/diagnostics/logger.hpp"
 #include "utils/string/string.hpp"
+#include "shared/utils/memory.hpp"
 
 #include <cstring>
 
@@ -21,6 +21,7 @@ using namespace WFX::Shared;
 using namespace WFX::Utils;
 
 // vvv Constants vvv
+// Fixed-width placeholder patched in place once the real body size is known, see Commit()
 static constexpr std::uint32_t CL_FIELD_WIDTH = 10;
 static constexpr const char* CL_HEADER_PREFIX = "Content-Length: ";
 static constexpr std::uint32_t CL_HEADER_PREFIX_LEN = 16;
@@ -28,10 +29,15 @@ static constexpr const char* CL_PLACEHOLDER = "0000000000"; // 10 digits
 static constexpr const char* CL_ZERO = "Content-Length: 0\r\n";
 static constexpr std::uint32_t CL_ZERO_LEN = 19;
 
+// Fixed offset of the status code: "HTTP/1.1 "/"HTTP/1.0 " are both 9 bytes
+// reason-phrase left empty, RFC 7230 3.1.2
+static constexpr std::size_t STATUS_CODE_OFFSET = 9;
+static constexpr const char* STATUS_LINE_PLACEHOLDER = "200 \r\n";
+
 // vvv Static helpers vvv
 static bool HasCRLFOrNull(std::string_view s) noexcept
 {
-    for(char c : s)
+    for(const char c : s)
         if(c == '\r' || c == '\n' || c == '\0')
             return true;
 
@@ -41,7 +47,7 @@ static bool HasCRLFOrNull(std::string_view s) noexcept
 static void FormatFixed10(std::uint32_t value, char out[CL_FIELD_WIDTH])
 {
     for(int i = CL_FIELD_WIDTH - 1; i >= 0; --i) {
-        out[i] = '0' + (value % 10);
+        out[i] = static_cast<char>('0' + (value % 10));
         value /= 10;
     }
 }
@@ -58,7 +64,7 @@ static std::uint32_t FormatUInt64(std::uint64_t value, char out[20])
     int n = 0;
 
     while(value > 0) {
-        tmp[n++] = '0' + static_cast<char>(value % 10);
+        tmp[n++] = static_cast<char>('0' + (value % 10));
         value /= 10;
     }
 
@@ -70,7 +76,7 @@ static std::uint32_t FormatUInt64(std::uint64_t value, char out[20])
 
 static bool StatusForbidsBody(HttpStatus s)
 {
-    std::uint16_t code = static_cast<std::uint16_t>(s);
+    const std::uint16_t code = static_cast<std::uint16_t>(s);
     return (code >= 100 && code < 200) || code == 204 || code == 304;
 }
 
@@ -78,8 +84,8 @@ static bool StatusForbidsBody(HttpStatus s)
 void HttpResponse::Reset()
 {
     if(bodyKind_ == BodyKind::STREAM) {
-        if(stream_.ctx && stream_.Destroy)
-            stream_.Destroy(stream_.ctx);
+        if(stream_.ctx && stream_.destroy)
+            stream_.destroy(stream_.ctx);
 
         stream_ = {};
     }
@@ -89,6 +95,7 @@ void HttpResponse::Reset()
     status_ = HttpStatus::OK;
     clOffset_ = 0;
     bodyStartOffset_ = 0;
+    persistentHeadersEndOffset_ = 0;
     clNeeded_ = false;
     aborted_ = false;
 
@@ -99,7 +106,27 @@ void HttpResponse::Reset()
 // vvv Public Error API vvv
 void HttpResponse::AbortWithError(HttpStatus status, std::string_view message)
 {
-    Reset();
+    if(bodyKind_ == BodyKind::STREAM) {
+        if(stream_.ctx && stream_.destroy)
+            stream_.destroy(stream_.ctx);
+
+        stream_ = {};
+    }
+
+    // Unlike Reset(), truncates back to the status line + any persistent headers (CORS, etc.)
+    // instead of wiping everything: SendFile's auto-404 and other AbortWithError callers still
+    // need those on the response they're about to rebuild
+    if(rwBuffer_)
+        rwBuffer_->GetWriteMeta()->dataLength = persistentHeadersEndOffset_;
+
+    phase_ = (persistentHeadersEndOffset_ > 0) ? ResponsePhase::STATUS : ResponsePhase::FRESH;
+    bodyKind_ = BodyKind::NONE;
+    status_ = HttpStatus::OK;
+    clOffset_ = 0;
+    bodyStartOffset_ = 0;
+    clNeeded_ = false;
+    aborted_ = false;
+
     WriteStatus(status);
     SendText(message);
 }
@@ -126,22 +153,27 @@ bool HttpResponse::RejectIfCommitted(const char* caller)
     if(phase_ != ResponsePhase::COMMITTED)
         return false;
 
-    std::string what = std::string(caller) + "() called after Commit()";
+    const std::string what = std::string(caller) + "() called after Commit()";
     AbortContractViolation(what.c_str());
     return true;
 }
 
-void HttpResponse::EnsureStatusWritten()
+void HttpResponse::EnsureStatusLineReserved()
 {
     if(phase_ != ResponsePhase::FRESH)
         return;
 
-    WriteStatus(status_);
+    Append("HTTP/1.", 7);
+    Append(version_ == HttpVersion::HTTP_1_1 ? "1 " : "0 ", 2);
+    Append(STATUS_LINE_PLACEHOLDER, 6);
+
+    phase_ = ResponsePhase::STATUS;
+    persistentHeadersEndOffset_ = rwBuffer_->GetWriteMeta()->dataLength;
 }
 
 void HttpResponse::EnsureHeadersOpen()
 {
-    EnsureStatusWritten();
+    EnsureStatusLineReserved();
 
     // Inject Connection header exactly once, right after status line
     if(phase_ == ResponsePhase::STATUS) {
@@ -193,29 +225,60 @@ void HttpResponse::WriteStatus(HttpStatus code)
     if(RejectIfCommitted("WriteStatus"))
         return;
 
-    if(phase_ != ResponsePhase::FRESH) {
-        AbortContractViolation("WriteStatus() called after the status/headers were already written");
+    if(phase_ >= ResponsePhase::BODY) {
+        AbortContractViolation("WriteStatus() called after the body already started");
         return;
     }
 
+    EnsureStatusLineReserved(); // no-op if already reserved
+
     status_ = code;
 
-    Append("HTTP/1.", 7);
-    Append(version_ == HttpVersion::HTTP_1_1 ? "1 " : "0 ", 2);
-
-    std::uint16_t c = static_cast<std::uint16_t>(code);
-    char cs[4];
+    const std::uint16_t c = static_cast<std::uint16_t>(code);
+    char cs[3];
     cs[0] = static_cast<char>('0' + c / 100);
     cs[1] = static_cast<char>('0' + (c / 10) % 10);
     cs[2] = static_cast<char>('0' + c % 10);
-    cs[3] = ' ';
-    Append(cs, 4);
 
-    StringView reason = StringView::FromCString(HttpStatusToReason(code));
-    Append(reason.data, static_cast<std::uint32_t>(reason.length));
+    // Patch the 3-digit code in place, same technique Commit() uses for Content-Length
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage): rwBuffer_ always set by CoreEngine first
+    char* base = rwBuffer_->GetWriteData();
+    if(base)
+        std::memcpy(base + STATUS_CODE_OFFSET, cs, 3);
+}
+
+void HttpResponse::WritePersistentHeader(std::string_view key, std::string_view value)
+{
+    if(RejectIfCommitted("WritePersistentHeader"))
+        return;
+
+    if(phase_ >= ResponsePhase::HEADERS) {
+        AbortContractViolation("WritePersistentHeader() called after regular headers were already written");
+        return;
+    }
+
+    // Engine-owned header, user must not set this
+    if(Utils::StringUtils::InsensitiveStringCompare(key, "connection")) {
+        AbortContractViolation("'Connection' header is engine-owned and must not be set manually");
+        return;
+    }
+
+    // CR/LF/NUL in either the name or value would let a caller smuggle extra headers or split the
+    // response (CWE-113). Reject outright rather than writing attacker-controlled bytes straight
+    // onto the wire.
+    if(HasCRLFOrNull(key) || HasCRLFOrNull(value)) {
+        AbortContractViolation("WritePersistentHeader() key/value must not contain CR, LF, or NUL bytes");
+        return;
+    }
+
+    EnsureStatusLineReserved(); // no-op if already reserved
+
+    Append(key.data(), static_cast<std::uint32_t>(key.size()));
+    Append(": ", 2);
+    Append(value.data(), static_cast<std::uint32_t>(value.size()));
     Append("\r\n", 2);
 
-    phase_ = ResponsePhase::STATUS;
+    persistentHeadersEndOffset_ = rwBuffer_->GetWriteMeta()->dataLength;
 }
 
 void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
@@ -229,15 +292,14 @@ void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
     }
 
     // Engine-owned header, user must not set this
-    // TODO: Think if we should also block Content-Length and Transfer-Encoding key as well
     if(Utils::StringUtils::InsensitiveStringCompare(key, "connection")) {
         AbortContractViolation("'Connection' header is engine-owned and must not be set manually");
         return;
     }
 
-    // CR/LF/NUL in either the name or value would let a caller smuggle extra-
-    // -headers or split the response (CWE-113). Reject outright rather than-
-    // -writing attacker controlled bytes straight onto the wire
+    // CR/LF/NUL in either the name or value would let a caller smuggle extra headers or split the
+    // response (CWE-113). Reject outright rather than writing attacker-controlled bytes straight
+    // onto the wire.
     if(HasCRLFOrNull(key) || HasCRLFOrNull(value)) {
         AbortContractViolation("WriteHeader() key/value must not contain CR, LF, or NUL bytes");
         return;
@@ -295,11 +357,11 @@ void HttpResponse::WriteFile(std::string_view path, bool autoHandle404)
 
     EnsureHeadersOpen();
 
-    std::uint64_t fileSize = FileSystem::GetFileSize(path.data());
-    std::string_view mime = MimeDetector::DetectMimeFromExt({path.data(), path.size()});
+    const std::uint64_t fileSize = FileSystem::GetFileSize(path.data());
+    const std::string_view mime = MimeDetector::DetectMimeFromExt({path.data(), path.size()});
 
     char clVal[20];
-    std::uint32_t clLen = FormatUInt64(fileSize, clVal);
+    const std::uint32_t clLen = FormatUInt64(fileSize, clVal);
 
     Append("Content-Length: ", 16);
     Append(clVal, clLen);
@@ -341,8 +403,8 @@ void HttpResponse::WriteStream(StreamGenerator gen, bool chunked)
     // Close header section
     Append("\r\n", 2);
 
-    if(stream_.ctx && stream_.Destroy)
-        stream_.Destroy(stream_.ctx);
+    if(stream_.ctx && stream_.destroy)
+        stream_.destroy(stream_.ctx);
 
     stream_ = gen;
     bodyKind_ = BodyKind::STREAM;
@@ -370,7 +432,7 @@ void HttpResponse::Commit()
 
     // Patch Content-Length value in place using only 'GetWriteData()' + memcpy
     if(clNeeded_) {
-        std::size_t bodySize = rwBuffer_->GetWriteMeta()->dataLength - bodyStartOffset_;
+        const std::size_t bodySize = rwBuffer_->GetWriteMeta()->dataLength - bodyStartOffset_;
         char tmp[CL_FIELD_WIDTH];
         FormatFixed10(bodySize, tmp);
 
@@ -408,8 +470,8 @@ void HttpResponse::SendStream(StreamGenerator gen, bool chunked)
 static bool DrainCarry(const std::string& carry, char* bufBase, std::uint64_t bufSize, std::uint64_t& bufferOffset,
                        std::uint64_t& currentOffset, std::uint64_t maxSize)
 {
-    std::uint64_t remaining = maxSize - currentOffset;
-    std::uint64_t toRead = std::min(remaining, bufSize - bufferOffset);
+    const std::uint64_t remaining = maxSize - currentOffset;
+    const std::uint64_t toRead = std::min(remaining, bufSize - bufferOffset);
 
     std::memcpy(bufBase + bufferOffset, carry.c_str() + currentOffset, toRead);
 
@@ -422,9 +484,9 @@ static bool DrainCarry(const std::string& carry, char* bufBase, std::uint64_t bu
 static int DrainFile(BaseFilePtr& inFile, char* bufBase, std::uint64_t bufSize, std::uint64_t& bufferOffset,
                      std::uint64_t& currentOffset, std::uint64_t maxSize)
 {
-    std::uint64_t remaining = maxSize - currentOffset;
-    std::uint64_t toRead = std::min(remaining, bufSize - bufferOffset);
-    std::int64_t writtenBytes = inFile->ReadAt(bufBase + bufferOffset, toRead, currentOffset);
+    const std::uint64_t remaining = maxSize - currentOffset;
+    const std::uint64_t toRead = std::min(remaining, bufSize - bufferOffset);
+    const std::int64_t writtenBytes = inFile->ReadAt(bufBase + bufferOffset, toRead, currentOffset);
 
     if(writtenBytes < 0)
         return -1;
@@ -489,8 +551,10 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
     }
 
     // Static template, just a file send with html content type
+    // Charset is explicit: a browser left to sniff can land on UTF-7, where '+ADw-script+AD4-'
+    // decodes to '<script>'.
     if(meta->type == TemplateType::STATIC) {
-        WriteHeader("Content-Type", "text/html");
+        WriteHeader("Content-Type", "text/html; charset=utf-8");
         WriteFile(meta->filePath, false);
         return;
     }
@@ -514,7 +578,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
     }
 
     // All good, write headers before handing off to stream
-    WriteHeader("Content-Type", "text/html");
+    WriteHeader("Content-Type", "text/html; charset=utf-8");
 
     using State = struct {
         BaseFilePtr inFile;
@@ -527,14 +591,12 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
         std::string carry;
     };
 
-    auto* s = GetBufferPool().Alloc(sizeof(State));
+    auto* s = New<State>(std::move(inFile), std::move(ctx), meta->gen.get(), TemplateChunkType::MONOSTATE, 0, 0, 0,
+                         std::string{});
     if(!s) {
         AbortWithError(HttpStatus::INTERNAL_SERVER_ERROR, "Template allocation failed");
         return;
     }
-
-    // Construct object inplace
-    new (s) State{std::move(inFile), std::move(ctx), meta->gen.get(), TemplateChunkType::MONOSTATE, 0, 0, 0, {}};
 
     WriteStream(StreamGenerator{s,
 
@@ -543,21 +605,22 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
                                     auto& [inFile, ctx, gen, currentType, currentState, currentOffset, maxSize, carry] =
                                         *static_cast<State*>(c);
 
-                                    // So the way we will implement this is simple
-                                    // We will infinite loop and keep calling 'GetState', we will only break out if-
-                                    // -we reached end of state (checked by 'GetState' returning std::monostate) or-
-                                    // -buffer is full, we need to continue it in next loop
+                                    // So the way we will implement this is simple.
+                                    // We will infinite loop and keep calling 'GetState'. We only break out if we
+                                    // reached the end of state (checked by 'GetState' returning std::monostate) or
+                                    // the buffer is full, in which case we continue it in the next loop.
 
                                     std::uint64_t bufferOffset = 0;
                                     char* bufBase = buffer.buffer;
-                                    std::uint64_t bufSize = buffer.size;
+                                    const std::uint64_t bufSize = buffer.size;
 
-                                    // But before we do all the shit i said above, check if we have data remaining from-
-                                    // -previous call, if yes, complete it before moving to the actual 'GetState' stuff
+                                    // But before we do all the stuff described above, check if we have data remaining
+                                    // from the previous call. If we do, complete it before moving to the actual
+                                    // 'GetState' logic.
                                     if(currentType != TemplateChunkType::MONOSTATE) {
                                         if(currentType == TemplateChunkType::FILE) {
-                                            int r = DrainFile(inFile, bufBase, bufSize, bufferOffset, currentOffset,
-                                                              maxSize);
+                                            const int r = DrainFile(inFile, bufBase, bufSize, bufferOffset,
+                                                                    currentOffset, maxSize);
 
                                             if(r < 0)
                                                 return {0, StreamAction::STOP_AND_CLOSE_CONN};
@@ -565,8 +628,8 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
                                                 return {bufferOffset, StreamAction::CONTINUE}; // chunk unfinished
                                         }
                                         else {
-                                            bool done = DrainCarry(carry, bufBase, bufSize, bufferOffset, currentOffset,
-                                                                   maxSize);
+                                            const bool done = DrainCarry(carry, bufBase, bufSize, bufferOffset,
+                                                                         currentOffset, maxSize);
                                             if(!done)
                                                 return {bufferOffset, StreamAction::CONTINUE}; // chunk unfinished
                                         }
@@ -600,8 +663,8 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
                                             currentOffset = fc->offset;
                                             maxSize = fc->offset + fc->length;
 
-                                            int r = DrainFile(inFile, bufBase, bufSize, bufferOffset, currentOffset,
-                                                              maxSize);
+                                            const int r = DrainFile(inFile, bufBase, bufSize, bufferOffset,
+                                                                    currentOffset, maxSize);
 
                                             if(r < 0)
                                                 return {0, StreamAction::STOP_AND_CLOSE_CONN};
@@ -622,8 +685,8 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
                                             currentOffset = 0;
                                             maxSize = carry.size();
 
-                                            bool done = DrainCarry(carry, bufBase, bufSize, bufferOffset, currentOffset,
-                                                                   maxSize);
+                                            const bool done = DrainCarry(carry, bufBase, bufSize, bufferOffset,
+                                                                         currentOffset, maxSize);
                                             if(!done)
                                                 return {bufferOffset, StreamAction::CONTINUE};
 
@@ -636,10 +699,7 @@ void HttpResponse::WriteTemplate(std::string&& path, Shared::JsonObject&& ctx)
                                 },
 
                                 // Destroy
-                                [](void* c) {
-                                    static_cast<State*>(c)->~State();
-                                    GetBufferPool().Free(c);
-                                }
+                                [](void* c) { Delete(static_cast<State*>(c)); }
 
                 },
                 true);

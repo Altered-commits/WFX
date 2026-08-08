@@ -13,7 +13,7 @@ namespace WFX::Utils {
 
 using StringMap = std::unordered_map<std::string, std::string>;
 
-enum class EnvFlags : std::uint64_t {
+enum class EnvFlags : std::uint8_t {
     OVERWRITE_EXISTING = 1ull << 0,
     REQUIRE_OWNER_UID = 1ull << 1,
     REQUIRE_PERMS_600 = 1ull << 2,
@@ -41,7 +41,8 @@ public:
     static bool LoadFromFile(const std::string& path, const EnvConfig& opts = {});
 
 private: // Helper functions
-    static StringMap ParseFromBuffer(const std::vector<char>& buf);
+    // Zeroes buf in place once parsed
+    static StringMap ParseFromBuffer(std::vector<char>& buf);
 };
 
 } // namespace WFX::Utils

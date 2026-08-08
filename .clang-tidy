@@ -1,0 +1,96 @@
+---
+# ---------------------------------------------------------------
+# WFX clang-tidy configuration
+#
+# Focused on real bugs, correctness, performance, and security-
+# -(bugprone/clang-analyzer/performance/portability/cert), NOT on
+# style/naming - the project has its own established convention
+# (PascalCase functions, trailing-underscore members, manual
+# New/Delete over a pool allocator, no exceptions in hot paths)
+# that would just make readability-*/modernize-* naming checks
+# noise. Run via ./scripts/tidy.sh
+# ---------------------------------------------------------------
+
+Checks: >
+    -*,
+    bugprone-*,
+    clang-analyzer-*,
+    performance-*,
+    portability-*,
+    cert-*,
+    misc-*,
+    readability-identifier-naming,
+
+    -bugprone-easily-swappable-parameters,
+    -bugprone-implicit-widening-of-multiplication-result,
+
+    -misc-non-private-member-variables-in-classes,
+    -misc-no-recursion,
+    -misc-include-cleaner,
+    -misc-use-anonymous-namespace,
+
+    -cert-err58-cpp,
+    -cert-dcl21-cpp
+
+WarningsAsErrors: ''
+
+# clang-tidy uses POSIX ERE here, NOT PCRE (no lookahead support). Must be an-
+# -allowlist of our own source dirs, not a negative-lookahead denylist of-
+# -vendor dirs (that silently failed open and matched everything, including-
+# -every transitively-included STL/toml++/OpenSSL header)
+HeaderFilterRegex: '/(cli|cmake|config|engine|http|include|os_specific|shared|utils)/'
+
+FormatStyle: file
+UseColor: true
+
+# ---------------------------------------------------------------
+# Naming convention (matches existing project style, see any-
+# -recently-touched file for reference: hash_shard.hpp/.ipp)
+# ---------------------------------------------------------------
+CheckOptions:
+    - key: readability-identifier-naming.NamespaceCase
+      value: CamelCase
+    - key: readability-identifier-naming.ClassCase
+      value: CamelCase
+    - key: readability-identifier-naming.StructCase
+      value: CamelCase
+    - key: readability-identifier-naming.EnumCase
+      value: CamelCase
+    - key: readability-identifier-naming.EnumConstantCase
+      value: UPPER_CASE
+    - key: readability-identifier-naming.FunctionCase
+      value: CamelCase
+    - key: readability-identifier-naming.MethodCase
+      value: CamelCase
+    - key: readability-identifier-naming.ParameterCase
+      value: camelBack
+    - key: readability-identifier-naming.VariableCase
+      value: camelBack
+    - key: readability-identifier-naming.PrivateMemberCase
+      value: camelBack
+    - key: readability-identifier-naming.PrivateMemberSuffix
+      value: _
+    - key: readability-identifier-naming.ProtectedMemberCase
+      value: camelBack
+    - key: readability-identifier-naming.ProtectedMemberSuffix
+      value: _
+    - key: readability-identifier-naming.PublicMemberCase
+      value: camelBack
+    - key: readability-identifier-naming.GlobalVariableCase
+      value: CamelCase
+    - key: readability-identifier-naming.GlobalVariablePrefix
+      value: Global
+    - key: readability-identifier-naming.StaticVariableCase
+      value: CamelCase
+    - key: readability-identifier-naming.StaticVariablePrefix
+      value: Global
+    - key: readability-identifier-naming.ConstexprVariableCase
+      value: UPPER_CASE
+    - key: readability-identifier-naming.GlobalConstantCase
+      value: UPPER_CASE
+    - key: readability-identifier-naming.StaticConstantCase
+      value: UPPER_CASE
+    - key: readability-identifier-naming.MacroDefinitionCase
+      value: UPPER_CASE
+    - key: readability-identifier-naming.TemplateParameterCase
+      value: CamelCase

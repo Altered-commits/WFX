@@ -54,7 +54,7 @@ bool NormalizeURIPathInplace(std::string_view& path) noexcept
         return false;
 
     char* buf = const_cast<char*>(path.data());
-    std::size_t len = path.size();
+    const std::size_t len = path.size();
     std::size_t out = 0;
     std::size_t i = 0;
 
@@ -102,7 +102,7 @@ std::string NormalizePathToIdentifier(std::string_view path, std::string_view pr
     result.reserve(prefix.size() + path.size());
     result.append(prefix);
 
-    for(char c : path) {
+    for(const char c : path) {
         if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
             result += c;
         else

@@ -6,17 +6,13 @@
 #include "utils/fileops/filesystem.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
-
-#ifdef _WIN32
-// Windows: future work
-#else
 #include <signal.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <thread>
 #include <chrono>
-#endif
 
 namespace WFX::Utils::DaemonRegistry {
 
@@ -26,35 +22,16 @@ inline constexpr int MAX_FILE_SIZE = 1024;
 // vvv Path Helpers vvv
 std::string DaemonsDir() noexcept
 {
-#ifdef _WIN32
-    const char* home = std::getenv("USERPROFILE");
-    if(!home || home[0] == '\0') {
-        // Fallback: combine HOMEDRIVE + HOMEPATH
-        const char* drive = std::getenv("HOMEDRIVE");
-        const char* hpath = std::getenv("HOMEPATH");
-        if(!drive || !hpath)
-            return "";
-
-        return std::string(drive) + hpath + "\\.wfx\\daemons";
-    }
-
-    return std::string(home) + "\\.wfx\\daemons";
-#else
     const char* home = std::getenv("HOME");
     if(!home || home[0] == '\0')
         return "";
 
     return std::string(home) + "/.wfx/daemons";
-#endif
 }
 
 std::string PidFilePath(const std::string& project) noexcept
 {
-#ifdef _WIN32
-    return DaemonsDir() + "\\" + project + ".pid";
-#else
     return DaemonsDir() + "/" + project + ".pid";
-#endif
 }
 
 // vvv File Operations vvv
@@ -76,19 +53,19 @@ bool Write(const DaemonInfo& info) noexcept
     // Build content
     char buf[MAX_FILE_SIZE];
 
-    int len = std::snprintf(buf, sizeof(buf),
-                            "pid=%d\n"
-                            "project=%s\n"
-                            "path=%s\n"
-                            "host=%s\n"
-                            "port=%d\n"
-                            "https=%s\n"
-                            "workers=%d\n"
-                            "worker_shutdown_timeout=%d\n"
-                            "started=%lld\n",
-                            static_cast<int>(info.pid), info.project.c_str(), info.path.c_str(), info.host.c_str(),
-                            static_cast<int>(info.port), info.https ? "true" : "false", info.workers,
-                            info.workerShutdownTimeout, static_cast<long long>(info.started));
+    const int len = std::snprintf(buf, sizeof(buf),
+                                  "pid=%d\n"
+                                  "project=%s\n"
+                                  "path=%s\n"
+                                  "host=%s\n"
+                                  "port=%d\n"
+                                  "https=%s\n"
+                                  "workers=%d\n"
+                                  "worker_shutdown_timeout=%d\n"
+                                  "started=%lld\n",
+                                  static_cast<int>(info.pid), info.project.c_str(), info.path.c_str(),
+                                  info.host.c_str(), static_cast<int>(info.port), info.https ? "true" : "false",
+                                  info.workers, info.workerShutdownTimeout, static_cast<long long>(info.started));
 
     if(len <= 0 || len >= static_cast<int>(sizeof(buf)))
         return false;
@@ -107,7 +84,7 @@ ReadResult Read(const std::string& project, DaemonInfo& out) noexcept
     if(!f || !f->IsOpen())
         return ReadResult::IO_ERROR;
 
-    std::size_t size = f->Size();
+    const std::size_t size = f->Size();
     if(size == 0 || size > MAX_FILE_SIZE)
         return ReadResult::CORRUPTED;
 
@@ -128,29 +105,29 @@ ReadResult Read(const std::string& project, DaemonInfo& out) noexcept
         if(!line.empty() && line.back() == '\r')
             line.remove_suffix(1);
 
-        std::size_t eq = line.find('=');
+        const std::size_t eq = line.find('=');
         if(eq != std::string::npos) {
-            std::string_view key = line.substr(0, eq);
-            std::string_view val = line.substr(eq + 1);
+            const std::string_view key = line.substr(0, eq);
+            const std::string_view val = line.substr(eq + 1);
 
             if(key == "pid")
-                out.pid = static_cast<pid_t>(std::atoi(val.data()));
+                out.pid = static_cast<pid_t>(std::strtol(val.data(), nullptr, 10));
             else if(key == "project")
                 out.project.assign(val);
             else if(key == "host")
                 out.host.assign(val);
             else if(key == "port")
-                out.port = static_cast<std::uint16_t>(std::atoi(val.data()));
+                out.port = static_cast<std::uint16_t>(std::strtol(val.data(), nullptr, 10));
             else if(key == "https")
                 out.https = (val == "true");
             else if(key == "workers")
-                out.workers = std::atoi(val.data());
+                out.workers = static_cast<int>(std::strtol(val.data(), nullptr, 10));
             else if(key == "worker_shutdown_timeout")
-                out.workerShutdownTimeout = std::atoi(val.data());
+                out.workerShutdownTimeout = static_cast<int>(std::strtol(val.data(), nullptr, 10));
             else if(key == "path")
                 out.path.assign(val);
             else if(key == "started")
-                out.started = static_cast<std::int64_t>(std::atoll(val.data()));
+                out.started = static_cast<std::int64_t>(std::strtoll(val.data(), nullptr, 10));
         }
 
         pos = end + 1;
@@ -175,11 +152,11 @@ std::vector<DaemonInfo> List() noexcept
     if(!FileSystem::DirectoryExists(dir.c_str()))
         return result;
 
-    FileSystem::ListDirectory(dir, false, [&](std::string entry) {
+    FileSystem::ListDirectory(dir, false, [&](const std::string& entry) {
         std::string_view name = entry;
 
         // Extract filename from full path
-        std::size_t slash = name.find_last_of("/\\");
+        const std::size_t slash = name.find_last_of("/\\");
         if(slash != std::string_view::npos)
             name.remove_prefix(slash + 1);
 
@@ -187,7 +164,7 @@ std::vector<DaemonInfo> List() noexcept
         if(name.size() < 5 || name.substr(name.size() - 4) != ".pid")
             return;
 
-        std::string project(name.substr(0, name.size() - 4));
+        const std::string project(name.substr(0, name.size() - 4));
 
         DaemonInfo info;
         if(Read(project, info) != ReadResult::OK) {
@@ -220,11 +197,7 @@ bool IsAlive(pid_t pid) noexcept
     if(pid <= 0)
         return false;
 
-#ifdef _WIN32
-        // Windows: future work
-#else
     return kill(pid, 0) == 0;
-#endif
 }
 
 StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
@@ -248,9 +221,6 @@ StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
         return StopResult::NOT_RUNNING;
     }
 
-#ifdef _WIN32
-    // Windows: future work
-#else
     if(kill(info.pid, SIGTERM) != 0) {
         logger.Error("[DaemonRegistry]: Failed to send SIGTERM to '", project, "' (pid=", info.pid,
                      "): ", strerror(errno));
@@ -258,14 +228,14 @@ StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
         return StopResult::FAILED;
     }
 
-    // The master waits up to 'workerShutdownTimeout' (once, for every worker together, see-
-    // -the shutdown loop in 'RunServerImpl') before it force-kills stragglers itself. Wait at-
-    // -least that long here too, plus a small buffer for its own exit bookkeeping, so we never-
-    // -SIGKILL the master while it's still busy cleaning up its own children.
-    int timeoutSeconds = info.workerShutdownTimeout + extraGraceSeconds;
+    // The master waits up to 'workerShutdownTimeout' (once, for every worker together, see
+    // the shutdown loop in 'RunServerImpl') before it force-kills stragglers itself. Wait at
+    // least that long here too, plus a small buffer for its own exit bookkeeping, so we never
+    // SIGKILL the master while it's still busy cleaning up its own children.
+    const int timeoutSeconds = info.workerShutdownTimeout + extraGraceSeconds;
 
     // Poll for clean exit every 100ms
-    int polls = timeoutSeconds * 10;
+    const int polls = timeoutSeconds * 10;
     for(int i = 0; i < polls; i++) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -298,7 +268,6 @@ StopResult Stop(const std::string& project, int extraGraceSeconds) noexcept
     logger.Error("[DaemonRegistry]: Process '", project, "' (pid=", info.pid, ") survived SIGKILL, *wfx dies inside*");
 
     return StopResult::FAILED;
-#endif
 }
 
 } // namespace WFX::Utils::DaemonRegistry

@@ -22,13 +22,13 @@ struct AsyncAPIDataExt1 {
 using RegisterAsyncTimerFn = bool (*)(void* ctx, std::uint32_t delayMs, AsyncData asyncData);
 
 // vvv API declarations vvv
-struct ASYNC_API_EXT1 {
-    RegisterAsyncTimerFn RegisterAsyncTimer;
+struct AsyncAPIExt1 {
+    RegisterAsyncTimerFn registerAsyncTimer;
 };
-static_assert(std::is_standard_layout<ASYNC_API_EXT1>::value, "'ASYNC_API_EXT1' must be standard layout");
+static_assert(std::is_standard_layout<AsyncAPIExt1>::value, "'ASYNC_API_EXT1' must be standard layout");
 
 // vvv Getter & Initializers vvv
-const ASYNC_API_EXT1* GetAsyncAPIExt1();
+const AsyncAPIExt1* GetAsyncAPIExt1();
 void InitAsyncAPIExt1(Http::HttpConnectionHandler*);
 
 } // namespace WFX::Shared

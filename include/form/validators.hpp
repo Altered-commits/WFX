@@ -14,12 +14,12 @@ static inline bool DefaultValidateText(std::string_view sv, const void* fieldPtr
 {
     const Text& r = *static_cast<const Text*>(fieldPtr);
 
-    std::size_t n = sv.size();
+    const std::size_t n = sv.size();
     if(n < r.min || n > r.max)
         return false;
 
     if(r.ascii) {
-        for(unsigned char c : sv)
+        for(const unsigned char c : sv)
             if(c > 127)
                 return false;
     }
@@ -36,13 +36,13 @@ static inline bool DefaultValidateEmail(std::string_view sv, const void* fieldPt
 
     // ASCII-only check
     if(r.strict) {
-        for(unsigned char c : sv)
+        for(const unsigned char c : sv)
             if(c > 127)
                 return false;
     }
 
     // Find '@'
-    std::size_t atPos = sv.find('@');
+    const std::size_t atPos = sv.find('@');
     if(atPos == std::string_view::npos || atPos == 0 || atPos == sv.size() - 1)
         return false;
 
@@ -50,8 +50,8 @@ static inline bool DefaultValidateEmail(std::string_view sv, const void* fieldPt
     if(sv.find('@', atPos + 1) != std::string_view::npos)
         return false;
 
-    std::string_view local = sv.substr(0, atPos);
-    std::string_view domain = sv.substr(atPos + 1);
+    const std::string_view local = sv.substr(0, atPos);
+    const std::string_view domain = sv.substr(atPos + 1);
 
     // Local part checks
     if(local.empty() || local.front() == '.' || local.back() == '.')
@@ -59,7 +59,7 @@ static inline bool DefaultValidateEmail(std::string_view sv, const void* fieldPt
     if(local.find("..") != std::string_view::npos)
         return false;
 
-    for(char c : local)
+    for(const char c : local)
         if(!(isalnum(c) || c == '_' || c == '.' || c == '-'))
             return false;
 
@@ -69,7 +69,7 @@ static inline bool DefaultValidateEmail(std::string_view sv, const void* fieldPt
     if(domain.find("..") != std::string_view::npos)
         return false;
 
-    for(char c : domain)
+    for(const char c : domain)
         if(!(isalnum(c) || c == '-' || c == '.'))
             return false;
 
@@ -80,7 +80,7 @@ static inline bool DefaultValidateEmail(std::string_view sv, const void* fieldPt
     return true;
 }
 
-static inline bool DefaultValidateInt(std::string_view sv, const void* fieldPtr)
+static inline bool DefaultValidateInt(std::string_view /*sv*/, const void* /*fieldPtr*/)
 {
     /*
      * NOTE: Sanitizers will handle both validation and output, this just needs to return true
@@ -88,7 +88,7 @@ static inline bool DefaultValidateInt(std::string_view sv, const void* fieldPtr)
     return true;
 }
 
-static inline bool DefaultValidateUInt(std::string_view sv, const void* fieldPtr)
+static inline bool DefaultValidateUInt(std::string_view /*sv*/, const void* /*fieldPtr*/)
 {
     /*
      * NOTE: Sanitizers will handle both validation and output, this just needs to return true
@@ -96,7 +96,7 @@ static inline bool DefaultValidateUInt(std::string_view sv, const void* fieldPtr
     return true;
 }
 
-static inline bool DefaultValidateFloat(std::string_view sv, const void* fieldPtr)
+static inline bool DefaultValidateFloat(std::string_view /*sv*/, const void* /*fieldPtr*/)
 {
     /*
      * NOTE: Sanitizers will handle both validation and output, this just needs to return true
