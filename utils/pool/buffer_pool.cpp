@@ -7,10 +7,6 @@
 #include <cstring>
 #include <tlsf.h>
 
-/*
- * [02-11-2025]: i'm making buffer pool single sharded, no need for multiple shards, we won't be-
- *               -using threads and stuff
- */
 namespace WFX::Utils {
 
 // vvv Constants vvv

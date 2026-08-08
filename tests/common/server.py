@@ -52,8 +52,8 @@ class Server:
     def __init__(self, cfg, flags=(), cwd=None, app=None, probe=http_probe, label="/health"):
         self.cfg = cfg
         self.flags = list(flags)
-        # `wfx run` given an absolute app path from another cwd builds and logs "Server running",-
-        # -then the detached daemon fails to bind, so the app is always named relative to its parent
+        # `wfx run` given an absolute app path from another cwd builds and logs "Server running",
+        # then the detached daemon fails to bind, so the app is always named relative to its parent
         self.cwd = cwd or os.path.dirname(cfg.app_dir.rstrip("/"))
         self.app = app or os.path.basename(cfg.app_dir.rstrip("/"))
         self.probe = probe

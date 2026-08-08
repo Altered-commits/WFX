@@ -25,6 +25,8 @@ python3 base_audit.py
 python3 base_audit.py --phase security
 python3 base_audit.py --phase features
 python3 base_audit.py --phase forms
+python3 base_audit.py --phase query
+python3 base_audit.py --phase cors
 python3 base_audit.py --phase metrics
 python3 base_audit.py --phase soak
 python3 base_audit.py --phase chaos
@@ -45,7 +47,7 @@ python3 base_audit.py --ci
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `metrics`, `soak`, `chaos` |
+| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `query`, `cors`, `metrics`, `soak`, `chaos` |
 | `--host HOST` | `127.0.0.1` | Server hostname |
 | `--port N` | `8080` | HTTP port |
 | `--wfx PATH` | `wfx` | Path to the wfx binary |
@@ -170,12 +172,68 @@ Exit code 2 if header injection lands, 1 for other failures.
 
 ---
 
+### QUERY
+
+`Request::GetQueryParams()`: key lookup, raw (undecoded) values, duplicate keys
+(first wins), and correct behavior with no query string, an empty one, or one made
+entirely of empty segments.
+
+This is also the regression suite for a real parser fix: the request line used to be
+normalized (slash-collapsing, `.`/`..` resolution) as one blob covering both the path
+and the query string, so a query value shaped like a path (`/foo/../bar`, `//evil`)
+got silently mangled by traversal-defense logic that was never meant to touch it. The
+parser now splits the query off before normalizing and reassembles it byte-for-byte
+untouched afterward, so a set of traversal-shaped query values is checked to survive
+completely unchanged. Also covered: no auto-decoding (`+` and `%20` stay literal,
+same as header values), path normalization still working with a query attached, and
+buffer growth past `header_reserve_hint` (512 B) with a large query value.
+
+Exit code 2 if a traversal-shaped value gets mangled, 1 for other failures.
+
+---
+
+### CORS
+
+`CoreEngine::HandleCors` plus the generic `OPTIONS` `Allow:` fallback
+(`CoreEngine::HandleGenericOptions`), tested against `app/wfx.toml`'s real `[CORS]`
+section: two allowed origins, credentials on, `allowed_headers` empty (exercises the
+reflect-the-request branch), `exposed_headers` set (exercises the static-list
+branch). `wildcardOrigin` and the `"*"` + credentials load-time rejection aren't
+reachable from a live request (they're config-load-only), so they're not covered
+here.
+
+The check list is grounded in real CORS misconfiguration classes, not just feature
+coverage:
+
+- **basic origin reflection** (PortSwigger "CORS vulnerability with basic origin
+  reflection"): an unlisted `Origin` must get zero CORS headers, never an echoed
+  `Access-Control-Allow-Origin`
+- **trusted null origin** (CVE-2019-9580, StackStorm): `Origin: null` must not be
+  implicitly trusted just because it looks like a special case
+- **subdomain/prefix/suffix bypass** (PortSwigger's "trusted subdomains" lab class):
+  WFX matches origins by exact string only, so near-miss origins (scheme, port,
+  subdomain, case) must all fail closed rather than fuzzy-match
+- **reflected-origin-plus-credentials** (CVE-2026-54290, Hono CORS middleware):
+  credentials must never appear alongside an origin that was not actually matched
+  against the allowlist
+- **persistent-header survival**: CORS headers are written via
+  `WritePersistentHeader` specifically so they outlive a later `AbortWithError`
+  (404, etc.), asserted directly here
+
+Exit code 2 if an origin-matching bypass or credential leak lands, 1 for other
+failures.
+
+---
+
 ### METRICS
 
 Drives known request counts through `/status/<code:uint>` (one status class each)
 and `/health`, then confirms `/metrics` reflects exactly what was driven: per-route
 request counts, status-class buckets, byte counters, and latency histogram samples,
 with `/health` traffic never bleeding into `/status`'s counters or vice versa.
+`status1xx` is unreachable over HTTP (no response's *final* status is 1xx), so it's
+asserted to stay zero rather than driven. Runs before `chaos`, whose worker kills
+reset a slot's counters mid-flight and would break a delta.
 
 Exit code 1 for any mismatch.
 

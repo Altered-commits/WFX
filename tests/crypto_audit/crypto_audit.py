@@ -104,7 +104,7 @@ def hkdf_sha256(ikm, salt, info, length):
         counter += 1
     return okm[:length]
 
-# PHASE: one-shot + streaming hashing
+# PHASE: hash
 def phase_hash(ctx):
     cfg = ctx.cfg
     p = ctx.phase("hash")
@@ -123,7 +123,7 @@ def phase_hash(ctx):
                   bool(r2) and r2.get("status") == ST_OK and r2.get("hex") == expect,
                   "got %r want %s" % (r2, expect))
 
-# PHASE: response body actually streamed via res.Stream() + HashStream fed per-callback
+# PHASE: stream-response
 def phase_stream_response(ctx):
     cfg = ctx.cfg
     p = ctx.phase("stream-response")
@@ -158,7 +158,7 @@ def phase_stream_response(ctx):
             p.check(name, ok, "content match=%s digest got=%s want=%s" %
                   (content == expect_content, digest_hex, expect_digest))
 
-# PHASE: one-shot + streaming HMAC
+# PHASE: hmac
 def phase_hmac(ctx):
     cfg = ctx.cfg
     p = ctx.phase("hmac")
@@ -189,7 +189,7 @@ def phase_hmac(ctx):
     p.check("hmac sha256 RFC4231 case1", bool(r) and r.get("hex") == expect_sha256,
           "got %r want %s" % (r, expect_sha256))
 
-# PHASE: AEAD (AES-256-GCM + ChaCha20-Poly1305)
+# PHASE: aead
 def phase_aead(ctx):
     cfg = ctx.cfg
     p = ctx.phase("aead")
@@ -242,7 +242,7 @@ def phase_aead(ctx):
     bad_nonce = aead_call(cfg, "/crypto/aead/encrypt", "aesgcm", os.urandom(32), os.urandom(8), b"", b"x")
     p.check("short nonce -> invalid_arg", bool(bad_nonce) and bad_nonce.get("status") == ST_INVALID_ARG, "got %r" % bad_nonce)
 
-# PHASE: AEAD input-size cap (oversized plaintext rejected, not OOM'd)
+# PHASE: aead-cap
 def phase_aead_cap(ctx):
     cfg = ctx.cfg
     p = ctx.phase("aead-cap")
@@ -251,7 +251,7 @@ def phase_aead_cap(ctx):
     r = aead_call(cfg, "/crypto/aead/encrypt", "aesgcm", key, nonce, aad, over_cap, rtimeout=60.0)
     p.check("64MiB+1 rejected (INVALID_ARG)", bool(r) and r.get("status") == ST_INVALID_ARG, "got %r" % r)
 
-# PHASE: key derivation
+# PHASE: kdf
 def phase_kdf(ctx):
     cfg = ctx.cfg
     p = ctx.phase("kdf")
@@ -296,7 +296,7 @@ def phase_kdf(ctx):
           bool(r3) and r3.get("status") == ST_OK and r3.get("hex") != r1.get("hex"),
           "r1=%r r3=%r" % (r1, r3))
 
-# PHASE: misc (RandomBytes, ConstantTimeEquals)
+# PHASE: misc
 def phase_misc(ctx):
     cfg = ctx.cfg
     p = ctx.phase("misc")
@@ -346,10 +346,7 @@ def phase_misc(ctx):
         p.check("malformed aead hex survives: %r" % bad_hex,
               rr is not None and "status" in rr, "got %r" % rr)
 
-########################################################################################
 # vvv Asymmetric / JWK / Encoding helpers vvv
-########################################################################################
-
 def asym_call(cfg, path, headers=None, body=b"", rtimeout=30.0):
     return call(cfg, "POST", path, headers or {}, body, rtimeout=rtimeout)
 
@@ -477,7 +474,7 @@ WYCHEPROOF_ED25519 = [
     (85, 'InvalidKtv', '100fdf47fb94f1536a4f7c3fda27383fa03375a8f527c537e6f1703c47f94f86', '6a0bc2b0057cedfc0fa2e3f7f7d39279b30f454a69dfd1117c758d86b19d85e0', '0971f86d2c9c78582524a103cb9cf949522ae528f8054dc20107d999be673ff4e25ebf2f2928766b1248bec6e91697775f8446639ede46ad4df4053000000010', False, 'Signature with S just above the bound. [David Benjamin]'),
 ]
 
-# PHASE: keygen + export round trip, including cross-loading a key WFX did not itself generate
+# PHASE: asym-roundtrip
 def phase_asym_roundtrip(ctx):
     cfg = ctx.cfg
     p = ctx.phase("asym-roundtrip")
@@ -526,7 +523,7 @@ def phase_asym_roundtrip(ctx):
               bool(r) and r.get("status") == ST_OK and public_key_material(hexfield(r)) == public_key_material(qp),
               "got %r" % r)
 
-# PHASE: sign/verify cross-checked against `cryptography` in both directions, for every scheme
+# PHASE: asym-cross-oracle
 def phase_asym_cross_oracle(ctx):
     cfg = ctx.cfg
     p = ctx.phase("asym-cross-oracle")
@@ -575,7 +572,7 @@ def phase_asym_cross_oracle(ctx):
                 p.check("%s tamper msg detected len=%d" % (scheme, len(msg)),
                       bool(rt2) and rt2.get("status") == ST_AUTH_FAILED, "got %r" % rt2, security=True)
 
-# PHASE: algorithm/key confusion defenses (the API-level guard against RS256-vs-HS256-style attacks)
+# PHASE: asym-key-confusion
 def phase_asym_key_confusion(ctx):
     cfg = ctx.cfg
     p = ctx.phase("asym-key-confusion")
@@ -627,7 +624,7 @@ def phase_asym_key_confusion(ctx):
     p.check("ECDSA (r, n-s) malleated signature also verifies (expected, not a bug)",
           bool(r) and r.get("status") == ST_OK, "got %r" % r)
 
-# PHASE: known-answer checks against real third-party Ed25519 test vectors (see WYCHEPROOF_ED25519)
+# PHASE: asym-wycheproof
 def phase_asym_wycheproof(ctx):
     cfg = ctx.cfg
     p = ctx.phase("asym-wycheproof")
@@ -645,7 +642,7 @@ def phase_asym_wycheproof(ctx):
               accepted == expect_valid, "got %r want valid=%s" % (r, expect_valid),
               security=(flag in security_flags))
 
-# PHASE: adversarial inputs at the raw-component construction boundary (JWKS-sourced key material)
+# PHASE: asym-hostile
 def phase_asym_hostile(ctx):
     cfg = ctx.cfg
     p = ctx.phase("asym-hostile")
@@ -707,7 +704,7 @@ def ec_jwk(kid, key, crv):
     return {"kty": "EC", "kid": kid, "crv": crv,
             "x": b64url(n.x.to_bytes(width, "big")), "y": b64url(n.y.to_bytes(width, "big"))}
 
-# PHASE: JWKS parsing - normal lookup, malformed-shape survival, kid-confusion, oversized body
+# PHASE: jwk
 def phase_jwk(ctx):
     cfg = ctx.cfg
     p = ctx.phase("jwk")
@@ -764,7 +761,7 @@ def phase_jwk(ctx):
     p.check("JWKS with 50 decoys resolves correctly and quickly (%.1fs)" % elapsed,
           bool(r) and r.get("status") == ST_OK and elapsed < 10.0, "got %r after %.1fs" % (r, elapsed))
 
-# PHASE: Base64 / Hex / Url encoding, functional round trips plus adversarial decode inputs
+# PHASE: encoding
 def phase_encoding(ctx):
     cfg = ctx.cfg
     p = ctx.phase("encoding")

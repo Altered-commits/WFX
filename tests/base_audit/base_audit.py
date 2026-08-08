@@ -4,21 +4,7 @@
 #
 # WFX base audit
 #
-# Phases:
-#   security   path traversal, CRLF/response-splitting, info leakage,
-#              header attacks, contract violations
-#   protocol   malformed and abusive request vectors: server must survive without crashing
-#   features   every route verified: correct status, body, headers; plus buffer-relocation
-#              integrity, exact body/header size limits, and byte-at-a-time drip sends
-#   forms      WFX::Form: Content-Type matching, field structure, percent-decoding,
-#              validator bounds, decoded-value-into-header injection
-#   query      Request::GetQueryParams(): key lookup, raw (undecoded) values, duplicate
-#              keys, and query values surviving byte-for-byte through path normalization
-#   cors       CORS (HandleCors) and the generic OPTIONS Allow: fallback (HandleGenericOptions):
-#              origin allowlist matching, credentials, preflight, persistent-header survival
-#              across a 404, and real misconfiguration classes (origin reflection, trusted null
-#              origin, subdomain/prefix/suffix bypass, reflected-origin-plus-credentials)
-#   chaos      worker kills, SIGSTOP/SIGCONT, kill under mixed load
+# See README.md for what each phase proves.
 #
 # Usage:
 #   python3 base_audit.py                   # all phases
@@ -713,11 +699,11 @@ def _verify_all_routes(host, port):
     lock = threading.Lock()
 
     def _check(method, path, hdrs, body, expect_st, needle, hdr_check):
-        # /health back up only means the master accepted a connection again, not that every-
-        # -respawned worker slot has finished re-listening yet. Retry until a real HTTP status-
-        # -comes back, same as _probe(), so a route landing on a still-starting worker isn't a-
-        # -false failure - CONN_ERR (refused), IO_ERR (reset), and a None status (accepted then-
-        # -closed with zero bytes) are all the same "not ready yet" signal, not just CONN_ERR
+        # /health back up only means the master accepted a connection again, not that every
+        # respawned worker slot has finished re-listening yet. Retry until a real HTTP status
+        # comes back, same as _probe(), so a route landing on a still-starting worker isn't a
+        # false failure - CONN_ERR (refused), IO_ERR (reset), and a None status (accepted then
+        # closed with zero bytes) are all the same "not ready yet" signal, not just CONN_ERR
         for attempt in range(3):
             st, raw = req(host, port, method, path, headers=hdrs, body=body,
                           rtimeout=5.0, ctimeout=3.0)
@@ -789,7 +775,7 @@ def _light_flood(host, port, n=8):
         t.start()
     return stop, ts
 
-# Phase 1: SECURITY
+# PHASE: security
 def phase_security(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -934,8 +920,7 @@ def phase_security(ctx):
                                  vectors=stats["trav_url"] + stats["trav_hdr"] + stats["crlf"]
                                          + stats["leak"] + stats["violate_ok"] + stats["violate_bad"])
 
-# Phase 2: PROTOCOL
-# Server must survive every single vector. No assertion on status codes: # 400/500/501 are all fine. Crash = fail
+# PHASE: protocol
 def phase_protocol(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -975,9 +960,7 @@ def phase_protocol(ctx):
 
     ctx.phase("protocol").record(findings, vectors=sent)
 
-# Phase 3: FEATURES
-# Every route verified for correct status, body content, and headers
-# Additional invariant checks beyond simple status
+# PHASE: features
 def phase_features(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -1120,9 +1103,9 @@ def phase_features(ctx):
         # /echo-full under forced buffer relocation: request.Path()/GetHeader()/Body() are
         # all string_views into the connection's read buffer - a body big enough to outgrow
         # the initial recv buffer (recv_buffer_incr=8192) forces RWBuffer to relocate
-        # mid-parse (see PrepareForBody in http/parser/http_parser.cpp). This regression-
-        # tests that every one of those views still points at the right bytes afterward,
-        # not just the body - a previous bug here caused false 404s and corrupted routing
+        # mid-parse (see PrepareForBody in http/parser/http_parser.cpp). This test proves
+        # every one of those views still points at the right bytes afterward, not just the
+        # body - a previous bug here caused false 404s and corrupted routing
         with term.progress("features", "realloc:integrity") as pr:
             marker = "REALLOC-MARK-%d" % random.randint(100000, 999999)
             big_body = b"R" * 50000  # > recv_buffer_incr (8192), < max_body_size (65536)
@@ -1222,7 +1205,6 @@ def phase_features(ctx):
     term.log("features", _green("all clear") if nf == 0 else _red("%d failure(s)" % nf))
     ctx.phase("features").record(findings, vectors=len(ROUTE_CHECKS))
 
-# Phase 4: FORMS
 def _form(host, port, path, content_type, body, rtimeout=3.0):
     hdrs = {} if content_type is None else {"Content-Type": content_type}
     return req(host, port, "POST", path, headers=hdrs, body=body, rtimeout=rtimeout)
@@ -1234,6 +1216,7 @@ def _form_json(host, port, path, content_type, body, rtimeout=3.0):
     except Exception:
         return st, None
 
+# PHASE: forms
 def phase_forms(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -1417,15 +1400,6 @@ def phase_forms(ctx):
     ctx.phase("forms").record(findings, security=("FORM_HEADER_INJECT", "FORM_DECODE_BYPASS"),
                               vectors=checks)
 
-# QUERY PARAMS
-#
-# Request::GetQueryParams() / QueryParams::Get(), added alongside a real parser fix: the request
-# line used to be normalized (slash-collapsing, '.'/'..' resolution) as one blob covering BOTH the
-# path and the query string, so a query value shaped like a path ("/foo/../bar", "//evil") got
-# silently mangled by traversal-defense logic that was never meant to touch it. The parser now
-# splits the query off before normalizing and reassembles it byte-for-byte untouched afterward,
-# so the traversal-shaped-value cases below are regression tests for that fix, not just new
-# feature coverage.
 def _query_json(host, port, path, rtimeout=3.0):
     st, raw = req(host, port, "GET", path, rtimeout=rtimeout)
     try:
@@ -1433,6 +1407,7 @@ def _query_json(host, port, path, rtimeout=3.0):
     except Exception:
         return st, None
 
+# PHASE: query
 def phase_query(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -1554,26 +1529,6 @@ def phase_query(ctx):
 
     ctx.phase("query").record(findings, security=("QUERY_TRAVERSAL_MANGLED",), vectors=checks)
 
-# CORS
-#
-# CoreEngine::HandleCors plus CoreEngine::HandleGenericOptions (engine/core_engine.cpp), tested
-# against app/wfx.toml's real [CORS] section: two allowed origins, credentials on, allowed_headers
-# empty (exercises the reflect-the-request branch), exposed_headers set (exercises the static-list
-# branch). wildcardOrigin and the "*"+credentials load-time rejection aren't reachable from a live
-# request (they're config-load-only), so they're not covered here.
-#
-# The check list is grounded in real CORS misconfiguration classes, not just feature coverage:
-#   - basic origin reflection (PortSwigger "CORS vulnerability with basic origin reflection"):
-#     an unlisted Origin must get zero CORS headers, never an echoed Access-Control-Allow-Origin
-#   - trusted null origin (CVE-2019-9580, StackStorm): "Origin: null" must not be implicitly
-#     trusted just because it looks like a special case
-#   - subdomain/prefix/suffix bypass (PortSwigger's "trusted subdomains" lab class): WFX matches
-#     origins by exact string only, so near-miss origins (scheme, port, subdomain, case) must all
-#     fail closed rather than fuzzy-match
-#   - reflected-origin-plus-credentials (CVE-2026-54290, Hono CORS middleware): credentials must
-#     never appear alongside an origin that was not actually matched against the allowlist
-#   - persistent-header survival: CORS headers are written via WritePersistentHeader specifically
-#     so they outlive a later AbortWithError (404, etc.), asserted directly here
 def _cors_headers(host, port, method, path, headers=None, rtimeout=3.0):
     st, raw = req(host, port, method, path, headers=headers, rtimeout=rtimeout)
     _, hdrs, body = parse_hdrs(raw)
@@ -1583,6 +1538,7 @@ def _h(hdrs, name):
     vals = hdrs.get(name.lower().encode())
     return vals[0].decode(errors="replace") if vals else None
 
+# PHASE: cors
 def phase_cors(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
@@ -1774,16 +1730,6 @@ def phase_cors(ctx):
 
     ctx.phase("cors").record(findings, security=("CORS_ORIGIN_LEAK",), vectors=checks)
 
-# Phase 5: METRICS
-#
-# The per-route metrics table: identity plumbing (path + method attached at read
-# time), counters that match driven traffic, status-class bucketing, and - since
-# the audit toml sets [Metrics] latency = true - the route latency histogram.
-#
-# Every assertion is delta-based (snapshot, drive a known count, snapshot again),
-# so earlier phases' traffic and the two-worker aggregation don't matter: only the
-# change caused by this phase's own requests is checked. Runs before chaos, whose
-# worker kills reset a slot's counters mid-flight and would break a delta.
 def _find_route(metrics, pred):
     for r in metrics.get("routes", []):
         if pred(r):
@@ -1796,9 +1742,7 @@ def _route_exact(method, path):
 def _route_prefix(method, prefix):
     return lambda r: r.get("method") == method and (r.get("path") or "").startswith(prefix)
 
-# Every RouteMetrics field: requests, status1xx..5xx, bytesOut, plus the latency
-# histogram. status1xx is unreachable over HTTP (no response's FINAL status is 1xx),
-# so it is asserted to stay zero rather than driven
+# PHASE: metrics
 def phase_metrics(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
@@ -1879,7 +1823,7 @@ def phase_metrics(ctx):
     if not ctx.server.alive():
         p.failed("SERVER_DEAD", "unreachable after metrics phase")
 
-# Phase 6: CHAOS
+# PHASE: chaos
 def phase_chaos(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -2049,15 +1993,6 @@ def phase_chaos(ctx):
 
     ctx.phase("chaos").record(findings, vectors=stats.get("kills", 0) + stats.get("stops", 0))
 
-# Phase 7: KEEP-ALIVE SOAK
-#
-# Every other phase opens a fresh Connection: close socket per request, so WFX's
-# INBOUND keep-alive path - many sequential requests parsed off ONE persistent
-# connection, each reusing the same per-connection read/write buffers and parser
-# state - is barely exercised anywhere. This drives a long run of back-to-back
-# requests on a single socket and asserts every response is byte-exact, which is
-# what catches read/write buffer offsets that never reset, parser state that
-# carries across requests, and cross-request body/header bleed on reuse
 def _read_http_response(sock, buf):
     """Read exactly one CL-framed HTTP response off `sock`. Returns (status, body, leftover)."""
     while b"\r\n\r\n" not in buf:
@@ -2096,6 +2031,7 @@ def _read_http_response(sock, buf):
 
     return status, rest[:clen], rest[clen:]
 
+# PHASE: soak
 def phase_soak(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port

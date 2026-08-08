@@ -141,8 +141,8 @@ def serve_conn(raw_sock, name, opts):
         _send(sock, b"220 2.0.0 Ready to start TLS\r\n", opts)
 
         if opts.get("inject"):
-            # CVE-2011-0411 / CVE-2026-41319 class: plaintext appended right after the-
-            # -go-ahead, before the handshake. Must never be visible to the protocol post-upgrade
+            # CVE-2011-0411 / CVE-2026-41319 class: plaintext appended right after the
+            # go-ahead, before the handshake. Must never be visible to the protocol post-upgrade
             _send(sock, opts["inject"], opts)
 
         if opts.get("drop_after") == "starttls_pre_handshake":

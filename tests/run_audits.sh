@@ -124,9 +124,9 @@ run_one() {
     args+=("${extra_args[@]}")
 
     # CI always starts from a clean checkout, so its template cache is never stale
-    # Locally it's gitignored and persists across runs, which can hide a template-
-    # -engine bug that a real recompile would've caught. Delete just the cache-
-    # -file so every run (local or CI) recompiles templates from current source
+    # Locally it's gitignored and persists across runs, which can hide a template
+    # engine bug that a real recompile would've caught. Delete just the cache
+    # file so every run (local or CI) recompiles templates from current source
     rm -f "$REPO_ROOT/tests/$dir/app/intermediate/template.wfxmeta"
 
     echo "==> running $name audit"

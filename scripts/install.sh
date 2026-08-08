@@ -6,37 +6,37 @@ set -e
 # Supports: Linux only
 # Usage: curl -fsSL https://raw.githubusercontent.com/.../install.sh | sh
 #
-# Three distinct modes, same last step: CMake always drops the built 'wfx'-
-# -binary at the source root, and this script moves it into ~/.wfx/bin/wfx.
+# Three distinct modes, same last step: CMake always drops the built 'wfx'
+# binary at the source root, and this script moves it into ~/.wfx/bin/wfx.
 #
-#   End-user (no flag, curl-style): ~/.wfx/src is a real clone, built in-
-#   -~/.wfx/src/build_install as a plain optimized Release build, sanitizers-
-#   -off. Nothing here depends on any local checkout; this is the "just-
-#   -install and use it" path.
+#   End-user (no flag, curl-style): ~/.wfx/src is a real clone, built in
+#   ~/.wfx/src/build_install as a plain optimized Release build, sanitizers
+#   off. Nothing here depends on any local checkout; this is the "just
+#   install and use it" path.
 #
-#   --local-debug (contributor/dev mode): run from inside a git checkout of-
-#   -this repo. ~/.wfx/src is a SYMLINK to that checkout (never a copy) so-
-#   -nothing is duplicated, built directly in the checkout's own ./build as-
-#   -a Debug build (full symbols, no optimization) with ASan+UBSan on, so-
-#   -memory bugs surface immediately during normal dev use instead of only-
-#   -in CI. Noticeably slower than the other two modes, that's expected.
+#   --local-debug (contributor/dev mode): run from inside a git checkout of
+#   this repo. ~/.wfx/src is a SYMLINK to that checkout (never a copy) so
+#   nothing is duplicated, built directly in the checkout's own ./build as
+#   a Debug build (full symbols, no optimization) with ASan+UBSan on, so
+#   memory bugs surface immediately during normal dev use instead of only
+#   in CI. Noticeably slower than the other two modes, that's expected.
 #
-#   --local-release (contributor/perf-testing mode): same checkout symlink-
-#   -and ./build directory as --local-debug, but configured as an optimized-
-#   -Release build with sanitizers off - identical settings to the end-user-
-#   -build, just from your own checkout. Switching between this and-
-#   ---local-debug reconfigures and recompiles whatever the flag change-
-#   -touches, same as changing any other CMake option.
+#   --local-release (contributor/perf-testing mode): same checkout symlink
+#   and ./build directory as --local-debug, but configured as an optimized
+#   Release build with sanitizers off - identical settings to the end-user
+#   build, just from your own checkout. Switching between this and
+#   --local-debug reconfigures and recompiles whatever the flag change
+#   touches, same as changing any other CMake option.
 #
-#   Re-run whichever of the two --local-* flags you last used after-
-#   -pulling/editing to refresh the PATH binary, or just run ./wfx directly-
-#   -from the checkout root while iterating.
+#   Re-run whichever of the two --local-* flags you last used after
+#   pulling/editing to refresh the PATH binary, or just run ./wfx directly
+#   from the checkout root while iterating.
 #
-# A machine is locked to whichever mode it first installed with (recorded-
-# -in ~/.wfx/.install_type) - re-running install.sh with a different mode-
-# -family (end-user vs local) is refused. --local-debug and --local-release-
-# -both count as "local" and can be freely re-run interchangeably. Run-
-# -scripts/uninstall.sh first to switch between end-user and local.
+# A machine is locked to whichever mode it first installed with (recorded
+# in ~/.wfx/.install_type) - re-running install.sh with a different mode
+# family (end-user vs local) is refused. --local-debug and --local-release
+# both count as "local" and can be freely re-run interchangeably. Run
+# scripts/uninstall.sh first to switch between end-user and local.
 #
 # Final folder structure (end-user mode):
 #   ~/.wfx/
@@ -54,9 +54,9 @@ WFX_REPO="https://github.com/Altered-commits/WFX.git"
 WFX_BINARY="$WFX_BIN/wfx"
 WFX_INSTALL_TYPE_FILE="$WFX_HOME/.install_type"
 
-# Absolute path to this checkout's root (scripts/install.sh -> repo root),-
-# -needed so the local-mode symlinks stay valid regardless of how this script-
-# -was invoked (relative path, symlinked into PATH, etc.)
+# Absolute path to this checkout's root (scripts/install.sh -> repo root),
+# needed so the local-mode symlinks stay valid regardless of how this script
+# was invoked (relative path, symlinked into PATH, etc.)
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # ---------------------------------------------------------------
@@ -89,12 +89,12 @@ fi
 # ---------------------------------------------------------------
 # Enforce a single install type per machine
 # ---------------------------------------------------------------
-# Once a machine has installed WFX as either local (--local-debug/--local-release)-
-# -or end-user, it stays that type until 'uninstall.sh' wipes $WFX_HOME (which-
-# -removes this marker along with everything else). Mixing the two on the same-
-# -$WFX_HOME is what causes $WFX_SRC to flip between a symlink and a real clone-
-# -from under whichever mode isn't currently active - not supported, so refuse-
-# -instead of silently clobbering the other mode's state
+# Once a machine has installed WFX as either local (--local-debug/--local-release)
+# or end-user, it stays that type until 'uninstall.sh' wipes $WFX_HOME (which
+# removes this marker along with everything else). Mixing the two on the same
+# $WFX_HOME is what causes $WFX_SRC to flip between a symlink and a real clone
+# from under whichever mode isn't currently active - not supported, so refuse
+# instead of silently clobbering the other mode's state
 if [ -f "$WFX_INSTALL_TYPE_FILE" ]; then
     EXISTING_TYPE="$(cat "$WFX_INSTALL_TYPE_FILE")"
     if [ "$EXISTING_TYPE" != "$REQUESTED_TYPE" ]; then
@@ -152,16 +152,16 @@ mkdir -p "$WFX_HOME/daemons"
 # ---------------------------------------------------------------
 if [ -n "$LOCAL_MODE" ]; then
     info "Dev mode: linking $WFX_SRC -> $REPO_ROOT..."
-    # Clear out whatever end-user (or older --local) state might already be-
-    # -there - a plain real directory has nothing worth preserving (it's-
-    # -entirely install-generated), and 'ln -sfn' can't replace one on its own
+    # Clear out whatever end-user (or older --local) state might already be
+    # there - a plain real directory has nothing worth preserving (it's
+    # entirely install-generated), and 'ln -sfn' can't replace one on its own
     if [ -d "$WFX_SRC" ] && [ ! -L "$WFX_SRC" ]; then
         rm -rf "$WFX_SRC"
     fi
     ln -sfn "$REPO_ROOT" "$WFX_SRC" || error "Failed to link $WFX_SRC to $REPO_ROOT."
 else
-    # Clear out a stale local-mode symlink before treating $WFX_SRC as a real-
-    # -clone target below
+    # Clear out a stale local-mode symlink before treating $WFX_SRC as a real
+    # clone target below
     if [ -L "$WFX_SRC" ]; then
         rm -f "$WFX_SRC"
     fi
@@ -181,13 +181,13 @@ fi
 # ---------------------------------------------------------------
 info "Configuring build..."
 if [ -n "$LOCAL_MODE" ]; then
-    # Configure against the real checkout, not the $WFX_SRC symlink. CMake bakes-
-    # -whatever '-S' it's given verbatim into compile_commands.json's file paths,-
-    # -so configuring via the symlink poisons it for any tool (clang-tidy) that-
-    # -does exact-string path matching against the real checkout path
+    # Configure against the real checkout, not the $WFX_SRC symlink. CMake bakes
+    # whatever '-S' it's given verbatim into compile_commands.json's file paths,
+    # so configuring via the symlink poisons it for any tool (clang-tidy) that
+    # does exact-string path matching against the real checkout path
     SOURCE_DIR="$REPO_ROOT"
-    # Same build dir for both local modes - switching between them just makes-
-    # -CMake reconfigure and Ninja recompile whatever the flag change touches
+    # Same build dir for both local modes - switching between them just makes
+    # CMake reconfigure and Ninja recompile whatever the flag change touches
     BUILD_DIR="$REPO_ROOT/build"
 
     if [ "$LOCAL_MODE" = "release" ]; then
@@ -219,17 +219,17 @@ cmake --build "$BUILD_DIR" --config "$BUILD_TYPE" \
 # Install binary
 # ---------------------------------------------------------------
 info "Installing binary to $WFX_BINARY..."
-# CMake always drops the built binary at the source root ($WFX_SRC/wfx),-
-# -same for both modes. $WFX_BIN itself is never a symlink, only $WFX_SRC-
-# -is (in local mode) - remove whatever's currently at $WFX_BINARY first-
-# -since 'mv' onto an existing symlink would write through it instead of-
-# -replacing the link itself
+# CMake always drops the built binary at the source root ($WFX_SRC/wfx),
+# same for both modes. $WFX_BIN itself is never a symlink, only $WFX_SRC
+# is (in local mode) - remove whatever's currently at $WFX_BINARY first
+# since 'mv' onto an existing symlink would write through it instead of
+# replacing the link itself
 rm -f "$WFX_BINARY"
 mv "$WFX_SRC/wfx" "$WFX_BINARY" || error "Failed to move binary to $WFX_BIN."
 chmod +x "$WFX_BINARY"
 
-# Record the install type so future runs on this machine are locked to it-
-# -(see the enforcement check above)
+# Record the install type so future runs on this machine are locked to it
+# (see the enforcement check above)
 echo "$REQUESTED_TYPE" > "$WFX_INSTALL_TYPE_FILE"
 
 # ---------------------------------------------------------------

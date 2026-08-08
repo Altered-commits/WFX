@@ -5,7 +5,7 @@
 # WFX HttpEndpoint audit
 #
 # Boots a hostile mock upstream (http_upstream.py) and the WFX endpoint test app, then
-# drives 150+ adversarial vectors THROUGH WFX at the mock and asserts the client-
+# drives 150+ adversarial vectors THROUGH WFX at the mock and asserts the client
 # side parser/serializer in include/wfx/endpoint/http.hpp behaves: never crashes,
 # never hangs past its timeout, never mis-frames one response into another, never
 # smuggles a request, never lets a hostile upstream poison a pooled connection
@@ -47,8 +47,8 @@ EP_SSL_FAILURE       = 9
 EP_INTERNAL          = 10   # parse / protocol error surfaces here; also where SmtpOnConnect's
                             # co_return EpFatal lands for every non-timeout handshake refusal
                             # (bad cert, wrong AUTH creds, STARTTLS-stripping, ...): the coroutine
-                            # only ever returns EpReady/EpFatal, so the engine's generic connect-
-                            # -failure funnel is what classifies it, not a per-cause SMTP status
+                            # only ever returns EpReady/EpFatal, so the engine's generic
+                            # connect-failure funnel classifies it, not a per-cause SMTP status
 EP_SERIALIZE         = 11
 EP_HANDSHAKE_TIMEOUT = 13
 EP_REQ_TIMEOUT       = 14
@@ -450,8 +450,8 @@ def _agg_lat(metrics, field):
     return sum((e.get("latency") or {}).get(field, 0) for e in metrics.get("endpoints", []))
 
 # /proto/* helpers
-# onConnect / onDisconnect / multiplexing, driven against app/src/proto.cpp's raw-
-# -WFX::Endpoint<> instances (good/bad/slow/reset)
+# onConnect / onDisconnect / multiplexing, driven against app/src/proto.cpp's raw
+# WFX::Endpoint<> instances (good/bad/slow/reset)
 def proto_call(cfg, key="hello", proto="good", rtimeout=8.0):
     headers = {"X-Proto": proto, "X-Key": key}
     raw = raw_send(cfg.host, cfg.port, _build("GET", "/proto/call", headers), rtimeout=rtimeout)
@@ -585,7 +585,7 @@ def R(status_line, headers=(), body=b""):
 def CHUNKED(chunks_raw):
     return b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + chunks_raw
 
-# PHASE 1: happy-path framing (the client must accept the whole legal matrix)
+# PHASE: framing
 def phase_framing(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("framing")
@@ -609,7 +609,7 @@ def phase_framing(ctx):
     p.check("status 204 no body",         is_ok(drive(cfg, "/status/204"), 204, ""))
     p.check("status 304 no body",         is_ok(drive(cfg, "/status/304"), 304, ""))
 
-# PHASE 2: status-line fuzz (malformed first line must be rejected, not crash)
+# PHASE: statusline
 def phase_statusline(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("statusline")
@@ -692,7 +692,7 @@ def phase_statusline(ctx):
         r = drive_staged(cfg, mock, (line + "\r\n\r\n").encode("latin-1"))
         p.check("line bad: %s" % name, is_err(r), "expected err, got %r" % r)
 
-# PHASE 3: header fuzz (malformed / smuggling headers)
+# PHASE: headers
 def phase_headers(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("headers")
@@ -774,7 +774,7 @@ def phase_headers(ctx):
         blob = ("HTTP/1.1 200 OK\r\nTransfer-Encoding: %s\r\n\r\n3\r\nabc\r\n0\r\n\r\n" % te).encode("latin-1")
         p.check("hdr ok: %s" % name, is_ok(drive_staged(cfg, mock, blob), 200, "abc"))
 
-# PHASE 4: chunked-body fuzz
+# PHASE: chunked
 def phase_chunked(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("chunked")
@@ -839,7 +839,7 @@ def phase_chunked(ctx):
     # 4 GiB single chunk: valid hex, but must be rejected against the body cap
     p.check("chunk 4GiB > cap", is_err(drive_staged(cfg, mock, CHUNKED(b"FFFFFFFF\r\n"))))
 
-# PHASE 5: EOF / truncation at every parser phase (client must error, not hang)
+# PHASE: eof
 def phase_eof(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("eof")
@@ -878,7 +878,7 @@ def phase_eof(ctx):
     for name, blob in drip_trunc:
         p.check("eof %s" % name, is_err(drive_drip(cfg, mock, blob, piece=1, keep=False)), "expected err")
 
-# PHASE 6: DESYNC / SMUGGLING / keep-alive poisoning  (SECURITY)
+# PHASE: desync
 def _reuse_clean(cfg, ep, n=10):
     """After a poison request on `ep`, every following /ok must be pristine."""
     for _ in range(n):
@@ -915,7 +915,7 @@ def phase_desync(ctx):
     drive(cfg, "/status/204", ep="small")
     p.check("legit 204 keeps conn clean", _reuse_clean(cfg, "small"))
 
-# PHASE 7: serialize / request-side (dedup + injection)  (injection is SECURITY)
+# PHASE: serialize
 def phase_serialize(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("serialize")
@@ -1029,7 +1029,7 @@ def phase_serialize(ctx):
     p.check("buffer-grow big body", is_ok(r, 200) and ("|clen=%d|" % len(bigbody)) in (r.get("body") or "") and
           ("|blen=%d|" % len(bigbody)) in (r.get("body") or ""), "reflected clen/blen mismatch")
 
-# PHASE 8: limit enforcement (boundaries on the small-caps endpoint)
+# PHASE: limits
 def phase_limits(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("limits")
@@ -1085,7 +1085,7 @@ def phase_limits(ctx):
     # A 1xx that hides a body must not desync (client ignores the CL on 1xx)
     p.check("1xx with body rejected", is_err(drive_staged(cfg, mock, b"HTTP/1.1 100 Continue\r\nContent-Length: 3\r\n\r\nXXXHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")), security=True)
 
-# PHASE 9: resource exhaustion, timeouts, coalescing
+# PHASE: resource
 def _concurrent(fn, n, stagger=0.01):
     # A tiny stagger between thread starts spreads the inbound connection burst so
     # WFX's accept path isn't hit by N simultaneous SYNs (which dropped a few as
@@ -1162,7 +1162,7 @@ def phase_resource(ctx):
     p.check("coalesce 2 keys no cross-delivery", small_ok and big_ok, "results: %r" % res, security=True)
     p.check("coalesce 2 keys hit twice", hits == 2, "backend hits = %d (expected 2)" % hits)
 
-# PHASE 10: fragmentation (the incremental parser under recv() splitting)
+# PHASE: fragmentation
 def phase_fragmentation(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("fragmentation")
@@ -1205,7 +1205,7 @@ def phase_fragmentation(ctx):
     p.check("split big body mid",  (lambda r: is_ok(r, 200) and r.get("bodylen") == 500)(drive_split(cfg, mock, big, len(big) // 2)))
     p.check("drip big 8-byte",     (lambda r: is_ok(r, 200) and r.get("bodylen") == 500)(drive_drip(cfg, mock, big, piece=8)))
 
-# PHASE 11: methods (each verb serializes correctly; typed API body rules)
+# PHASE: methods
 def phase_methods(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("methods")
@@ -1228,7 +1228,7 @@ def phase_methods(ctx):
     # HEAD stays bodyless even when the upstream advertises a Content-Length
     p.check("HEAD bodyless", is_ok(drive(cfg, "/evil/headbody", method="HEAD"), 200, ""))
 
-# PHASE 12: SECURITY: smuggling, poisoning, cross-request bleed, leaks, DoS
+# PHASE: security
 def phase_security(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("security")
@@ -1337,7 +1337,7 @@ def phase_security(ctx):
     p.check("pipelined burst first only", is_ok(r, 200) and r.get("body") == "R00",
           "delivered smuggled pipelined response: %r" % r, security=True)
 
-# PHASE 13: connection lifecycle (connect failure/timeout, reconnect, idle, prewarm)
+# PHASE: lifecycle
 def _wfx_healthy(cfg):
     raw = raw_send(cfg.host, cfg.port, _build("GET", "/health"), rtimeout=2.0, ctimeout=2.0)
     return bool(raw) and _status_of(raw) == 200
@@ -1393,19 +1393,7 @@ def phase_lifecycle(ctx):
     p.check("prewarm opened idle conns", idle_prewarmed >= 3,
           "idle prewarmed conns at boot = %d (expected >= 3)" % idle_prewarmed)
 
-# PHASE 14: onConnect / onDisconnect / multiplexing (raw WFX::Endpoint<>)
-#
-# HttpEndpoint (every other phase) structurally cannot exercise any of this:
-# HTTP/1.1 has no connection handshake and no concept of concurrent requests
-# sharing one connection. app/src/main.cpp's ProtoGood/Bad/Slow/Reset instances
-# drive the raw primitive against http_upstream.py's second listener instead
-#
-# The two security-shaped guarantees this phase actually cares about:
-#   - a request must never be served over a connection whose handshake did not
-#     complete successfully (auth bypass would be a real vulnerability class);
-#   - under multiplexing, one caller must never receive another caller's
-#     response (the same "cross-request bleed" class the security phase checks
-#     for HTTP, just here at the connection-sharing layer instead)
+# PHASE: protocol
 def phase_protocol(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("protocol")
@@ -1437,16 +1425,16 @@ def phase_protocol(ctx):
     p.check("onDisconnect: error counted (bad + reset)", dc.get("error", 0) >= 2, "counters=%r" % dc)
 
     # Recovery
-    # A rejected, dropped or timed-out handshake must not poison the pool for the NEXT-
-    # -legitimate connection attempt
+    # A rejected, dropped or timed-out handshake must not poison the pool for the
+    # next legitimate connection attempt
     p.check("good connection still works after prior failures",
           (lambda r: is_alive(r) and r.get("ep") == EP_SUCCESS and r.get("value") == "still-good")(
               proto_call(cfg, key="still-good", proto="good")))
 
     # Multiplexing
-    # N concurrent requests over one connLimit=1 slot, deliberately resolved out of order-
-    # -(varied sleep delays): every caller must get back EXACTLY its own value, never-
-    # -another caller's, which is the bleed check
+    # N concurrent requests over one connLimit=1 slot, deliberately resolved out
+    # of order (varied sleep delays): every caller must get back exactly its own
+    # value, never another caller's, which is the bleed check
     conns_before = mock.proto_conn_count()
     n = 12
     delays = [0.30, 0.02, 0.18, 0.05, 0.25, 0.01, 0.12, 0.28, 0.08, 0.22, 0.03, 0.15]
@@ -1473,26 +1461,7 @@ def phase_protocol(ctx):
     dc2 = proto_disconnects(cfg)
     p.check("onDisconnect: idle timeout counted", dc2.get("idle", 0) >= 1, "counters=%r" % dc2)
 
-# PHASE: sustained multiplexed load (write-buffer reclaim regression)
-#
-# phase_protocol fires the multiplexing check exactly once (12 concurrent
-# requests, ~240 bytes total on the write buffer) and then lets the connection
-# idle-recycle. That never comes close to send_buffer_max, so it cannot see what
-# happens to a multiplexed slot's WRITE buffer over a long-lived connection.
-#
-# ProtoGood is connLimit=1 with hasCapacity set, so every request multiplexes
-# onto ONE persistent connection. SerializeMultiplexed appends each request to
-# the TAIL of that slot's write buffer and never clears it (other in-flight
-# streams' queued bytes must survive a clear). The failure this guards against:
-# if the engine never reclaims the already-flushed prefix, dataLength marches
-# monotonically toward send_buffer_max (16384 here) and, once the writable tail
-# is too small for the next "REQ <id> <key>\n" (~14 bytes), every further request
-# fails with a buffer error even though the socket is idle and fully drained.
-#
-# Only sustained sequential load reaches that ceiling: ~16384/14 ~= 1150 requests.
-# Drive well past it and assert EVERY request still succeeds on the SAME physical
-# connection. A first-failure index in the low thousands with the connection count
-# unchanged is the silting signature.
+# PHASE: soak
 def phase_soak(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("soak")
@@ -1544,13 +1513,7 @@ def phase_soak(ctx):
 
     p.check("worker healthy after soak phase", _wfx_healthy(cfg) and mock.ping())
 
-# PHASE: slot pinning (Reserve/Release)
-#
-# Threat model is the connection-pool contamination class: a pooled connection
-# handed to a second caller while it still carries the first caller's session
-# state (open transaction, SET, LISTEN). Pinning exists to make that impossible,
-# so these assert isolation, lifetime, and that coalescing can never merge two
-# pinned callers no matter how identical their bytes are
+# PHASE: pinning
 def phase_pinning(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("pinning")
@@ -1606,11 +1569,7 @@ def phase_pinning(ctx):
 
     p.check("worker healthy after pinning phase", _wfx_healthy(cfg) and mock.ping())
 
-# PHASE: server-initiated push (onPush)
-#
-# Unsolicited bytes on an idle pooled slot. Before onPush the engine closed the
-# connection outright, so this surface is new: a backend that can push must not
-# be able to wedge the slot, desync framing, or grow the client without bound
+# PHASE: push
 def phase_push(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("push")
@@ -1684,11 +1643,7 @@ def phase_push(ctx):
 
     p.check("worker healthy after push phase", _wfx_healthy(cfg) and mock.ping())
 
-# PHASE: streaming (Stream / CHUNK_READY / CHUNK_READY_FETCH)
-#
-# The headline property is bounded memory: peak RSS must track ONE chunk, not the
-# total response size. The rest guard paths that could quietly break that
-# guarantee (abandonment, cursor continuation, concurrency)
+# PHASE: streaming
 def phase_streaming(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("streaming")
@@ -1765,21 +1720,7 @@ def phase_streaming(ctx):
 
     p.check("worker healthy after streaming phase", _wfx_healthy(cfg) and mock.ping())
 
-# PHASE: in-band TLS upgrade, the half that needs no certificates
-#
-# UpgradeToTLS is a generic STARTTLS primitive, so it inherits that family's CVE
-# history. Two vectors here need no working handshake and so live in this suite:
-#
-#   - downgrade-when-required: the server refuses to upgrade and the client must
-#     fail closed. MySQL's --ssl (CVE-2015-3152 "BACKRONYM") and pgJDBC
-#     (CVE-2025-49146) both continued in plaintext instead, which is what made
-#     them MITM-able
-#   - agree-then-garbage: the server says yes, then sends bytes that are not a
-#     ServerHello. The upgrade must fail and tear the slot down, not hang
-#
-# The third vector, plaintext buffered across the upgrade boundary
-# (CVE-2011-0411 / CVE-2026-41319), needs a real handshake to establish the
-# trust boundary it crosses, so it lives in tests/tls_audit
+# PHASE: upgrade
 def phase_upgrade(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("upgrade")
@@ -1808,21 +1749,7 @@ def phase_upgrade(ctx):
 
     p.check("worker healthy after upgrade phase", _wfx_healthy(cfg) and mock.ping())
 
-# PHASE: per-endpoint metrics
-#
-# The outbound counterpart to base_audit's route metrics. Covers every EndpointMetrics
-# field: requests, completed, status_2xx/3xx/4xx/5xx, connect_failures, tls_failures,
-# request_timeouts, pool_exhausted, other_errors, coalesce_hits, bytes_out, bytes_in,
-# slots_in_use, plus the latency histogram.
-#
-# Delta-based on the aggregate across all endpoint slots (host repeats across instances,
-# so a slot can't be mapped back to one instance by host alone). Each sub-check snapshots
-# immediately before its own traffic, so unrelated prior phases and the several endpoint
-# instances don't affect the measured change.
-#
-# Two fields are asserted structurally rather than driven: status_1xx (no response's
-# FINAL status is 1xx over HTTP) and reconnects (only the background pool-healing path
-# bumps it, on a timer, so it can't be pinned to a delta window here)
+# PHASE: metrics
 def phase_metrics(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("metrics")
@@ -1956,22 +1883,13 @@ def phase_metrics(ctx):
 
     p.check("worker healthy after metrics phase", _wfx_healthy(cfg) and mock.ping())
 
-    p.check("worker healthy after metrics phase", _wfx_healthy(cfg) and mock.ping())
-
-# PHASE: onAbort (graceful cancel over a side connection when the client bails)
-#
-# Threat model mirrors a real Postgres CancelRequest / MySQL COM_PROCESS_KILL: a
-# side connection opened purely to cancel work in flight on a DIFFERENT, still-live
-# connection. Confusing which connection a cancel targets, corrupting the primary's
-# own in-flight state, or a hostile/buggy onAbort implementation taking the worker
-# down are all real-world failure classes for this feature, not hypothetical ones -
-# every assertion here maps to one of them, not just "does the happy path work"
+# PHASE: abort
 def phase_abort(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("abort")
 
-    # --- 1. Happy path: cancel delivered, references the right connection, the-
-    # -original connection survives (isn't force-closed) and gets reused afterward
+    # --- 1. Happy path: cancel delivered, references the right connection, the
+    # original connection survives (isn't force-closed) and gets reused afterward
     mock.cancel_reset()
     r0 = sp_get(cfg, key="warmup", sp="abort")
     p.check("abort: warmup request succeeds", is_ok_sp(r0), "r=%r" % r0)
@@ -2007,10 +1925,10 @@ def phase_abort(ctx):
     time.sleep(1.0)
     p.check("abortnoaux: worker still healthy", _wfx_healthy(cfg) and mock.ping())
 
-    # --- 3. Concurrent aborts on the same endpoint's aux pool. auxConnLimit=1 rounds-
-    # -up to 64 internally (BitmapPool stays branch-free, see EndpointConfig doc), so-
-    # -2 concurrent side connections comfortably both succeed - this proves concurrent-
-    # -aborts on one endpoint don't corrupt or fight over each other, not a hard cap
+    # --- 3. Concurrent aborts on the same endpoint's aux pool. auxConnLimit=1 rounds
+    # up to 64 internally (BitmapPool stays branch-free, see EndpointConfig doc), so
+    # 2 concurrent side connections comfortably both succeed - this proves concurrent
+    # aborts on one endpoint don't corrupt or fight over each other, not a hard cap
     mock.cancel_reset()
     b = sp_json(cfg, "/sp/abort") or {}
 
@@ -2028,9 +1946,9 @@ def phase_abort(ctx):
     p.check("abort: mock received both cancels", mock.cancel_count() == 2, "count=%d" % mock.cancel_count())
     p.check("worker healthy after concurrent aborts", _wfx_healthy(cfg) and mock.ping())
 
-    # --- 4. Leaked side connection (onAbort forgets/chooses not to Close()) must never-
-    # -hang or crash the worker, and connectTimeoutSeconds is the real, working safety-
-    # -net that eventually reclaims it - not just a config value nobody exercises
+    # --- 4. Leaked side connection (onAbort forgets/chooses not to Close()) must
+    # never hang or crash the worker, and connectTimeoutSeconds is the real, working
+    # safety net that eventually reclaims it - not just a config value nobody exercises
     mock.cancel_reset()
     b = sp_json(cfg, "/sp/abort") or {}
     net.send_and_abandon(cfg.host, cfg.port,
@@ -2048,10 +1966,10 @@ def phase_abort(ctx):
     p.check("abort: endpoint still fully usable after a leaked side connection", is_ok_sp(r), "r=%r" % r)
     p.check("worker healthy after leak-reclaim sequence", _wfx_healthy(cfg) and mock.ping())
 
-    # --- 5. Regression guard: client disconnects while onConnect (AUTH) is still-
-    # -in flight. onAbort must NOT fire here - it would steal onConnect's own-
-    # -asyncData mid-await and strand its coroutine forever. Force-close instead,
-    # -exactly the pre-onAbort behavior, since no request ever reached the backend
+    # --- 5. Regression guard: client disconnects while onConnect (AUTH) is still
+    # in flight. onAbort must not fire here - it would steal onConnect's own
+    # asyncData mid-await and strand its coroutine forever. Force-close instead,
+    # exactly the pre-onAbort behavior, since no request ever reached the backend
     mock.cancel_reset()
     b = sp_json(cfg, "/sp/abort") or {}
     net.send_and_abandon(cfg.host, cfg.port,
@@ -2068,10 +1986,10 @@ def phase_abort(ctx):
     p.check("abort: endpoint still healthy after mid-connect abort", is_ok_sp(r), "r=%r" % r)
     p.check("worker healthy after mid-connect abort race", _wfx_healthy(cfg) and mock.ping())
 
-    # --- 6. Hostile onAbort: closes its side connection three times and keeps the-
-    # -handle around afterward. A real protocol author will get this wrong at least-
-    # -once; the engine must survive it (no double-free, no corrupting whatever-
-    # -connection the freed aux slot gets reused for next), not just the well-behaved case
+    # --- 6. Hostile onAbort: closes its side connection three times and keeps the
+    # handle around afterward. A real protocol author will get this wrong at least
+    # once; the engine must survive it (no double-free, no corrupting whatever
+    # connection the freed aux slot gets reused for next), not just the well-behaved case
     mock.cancel_reset()
     net.send_and_abandon(cfg.host, cfg.port,
                         net.request("GET", "/sp/get", {"X-Sp": "abortbadclose", "X-Key": "slow:0.8"}),
@@ -2084,9 +2002,9 @@ def phase_abort(ctx):
     r = sp_get(cfg, key="after-badclose", sp="abortbadclose")
     p.check("abort: endpoint still usable after hostile onAbort misuse", is_ok_sp(r), "r=%r" % r)
 
-    # --- 7. Scope cut: once a request is already streaming (isStreaming=1, i.e. past-
-    # -its first chunk), a client disconnect must still force-close as before. onAbort-
-    # -is defined for single-slot in-flight requests only, never a stream mid-delivery
+    # --- 7. Scope cut: once a request is already streaming (isStreaming=1, i.e. past
+    # its first chunk), a client disconnect must still force-close as before. onAbort
+    # is defined for single-slot in-flight requests only, never a stream mid-delivery
     mock.cancel_reset()
     b = sp_json(cfg, "/sp/abort") or {}
     net.send_and_abandon(cfg.host, cfg.port,
@@ -2102,9 +2020,9 @@ def phase_abort(ctx):
     r = sp_get(cfg, key="after-stream-abort", sp="abort")
     p.check("abort: endpoint healthy after abandoning a stream mid-flight", is_ok_sp(r), "r=%r" % r)
 
-    # --- 8. Cross-endpoint isolation: each EndpointEntry owns its own auxPool. One-
-    # -endpoint's aux slot being fully held must never block or interfere with a-
-    # -completely different endpoint's own (separate) aux pool
+    # --- 8. Cross-endpoint isolation: each EndpointEntry owns its own auxPool. One
+    # endpoint's aux slot being fully held must never block or interfere with a
+    # completely different endpoint's own (separate) aux pool
     mock.cancel_reset()
     b = sp_json(cfg, "/sp/abort") or {}
     net.send_and_abandon(cfg.host, cfg.port,
@@ -2123,9 +2041,9 @@ def phase_abort(ctx):
     time.sleep(5.5) # let SpAbort's leaked slot self-heal before anything else runs
     p.check("worker healthy after cross-endpoint isolation check", _wfx_healthy(cfg) and mock.ping())
 
-    # --- 9. Soak: rapid repeated abort/reclaim cycles must never leak a primary-
-    # -slot, an aux slot, or a coroutine frame. slots_in_use returning to 0 is the-
-    # -same invariant phase_metrics checks after every other phase, under abort load
+    # --- 9. Soak: rapid repeated abort/reclaim cycles must never leak a primary
+    # slot, an aux slot, or a coroutine frame. slots_in_use returning to 0 is the
+    # same invariant phase_metrics checks after every other phase, under abort load
     mock.cancel_reset()
     n_soak = 20
     for i in range(n_soak):
@@ -2142,11 +2060,11 @@ def phase_abort(ctx):
           "expected 0, got %d" % _agg(end, "slots_in_use"))
     p.check("worker healthy after abort soak", _wfx_healthy(cfg) and mock.ping())
 
-    # --- 10. Backend that never responds, even after the cancel: onAbort still runs-
-    # -and sends its cancel normally (it has no idea whether the cancel "worked"),-
-    # -but if the backend genuinely never replies, requestTimeoutSeconds is what-
-    # -eventually force-closes the already-aborted slot. onAbort adds no new timer-
-    # -plumbing of its own, this is the exact same budget every other request gets
+    # --- 10. Backend that never responds, even after the cancel: onAbort still runs
+    # and sends its cancel normally (it has no idea whether the cancel "worked"),
+    # but if the backend genuinely never replies, requestTimeoutSeconds is what
+    # eventually force-closes the already-aborted slot. onAbort adds no new timer
+    # plumbing of its own, this is the exact same budget every other request gets
     mock.cancel_reset()
     r0 = sp_get(cfg, key="warmup-timeout", sp="abort")
     p.check("abort: warmup before timeout test succeeds", is_ok_sp(r0), "r=%r" % r0)
@@ -2179,12 +2097,13 @@ def phase_abort(ctx):
 # path is unambiguous (traced directly against os_specific/linux/epoll_connection.cpp, not
 # guessed): a co_return EpFatal from SmtpOnConnect with no timeout involved always surfaces as
 # EP_INTERNAL (the engine's generic connect-failure funnel, DisconnectReasonToStatus's default
-# case), a connect-phase hang surfaces as EP_HANDSHAKE_TIMEOUT, and a hang on an already-
-# -established connection (mid-transaction) surfaces as EP_REQ_TIMEOUT
+# case), a connect-phase hang surfaces as EP_HANDSHAKE_TIMEOUT, and a hang on an already
+# established connection (mid-transaction) surfaces as EP_REQ_TIMEOUT
 
 def _smtp_skip(p, label):
     p.check(label + " (skipped, no cert)", True)
 
+# PHASE: smtp_handshake
 def phase_smtp_handshake(ctx):
     cfg, mock = ctx.cfg, ctx.smtp_mock
     p = ctx.phase("smtp_handshake")
@@ -2211,6 +2130,7 @@ def phase_smtp_handshake(ctx):
     p.check("good: leading-dot line preserved, not swallowed as the terminator",
           "\r\n.leading dot line\r\n" in got, "got=%r" % got)
 
+# PHASE: smtp_auth
 def phase_smtp_auth(ctx):
     cfg, mock = ctx.cfg, ctx.smtp_mock
     p = ctx.phase("smtp_auth")
@@ -2232,6 +2152,7 @@ def phase_smtp_auth(ctx):
     p.check("no_auth_mechs: refused rather than falling back to an unimplemented mechanism",
           smtp_errc(r, EP_INTERNAL), "r=%r" % r)
 
+# PHASE: smtp_starttls
 def phase_smtp_starttls(ctx):
     cfg, mock = ctx.cfg, ctx.smtp_mock
     p = ctx.phase("smtp_starttls")
@@ -2262,6 +2183,7 @@ def phase_smtp_starttls(ctx):
     r = smtp_send(cfg, "malformed_greeting")
     p.check("malformed_greeting: non-SMTP banner refused", smtp_errc(r, EP_INTERNAL), "r=%r" % r)
 
+# PHASE: smtp_certs
 def phase_smtp_certs(ctx):
     cfg, mock = ctx.cfg, ctx.smtp_mock
     p = ctx.phase("smtp_certs")
@@ -2282,6 +2204,7 @@ def phase_smtp_certs(ctx):
         p.check(name + ": client bailed at the TLS layer", st.get("hs_fail", 0) >= 1,
               "stats=%r (want at least one failed handshake)" % st, security=True)
 
+# PHASE: smtp_resource
 def phase_smtp_resource(ctx):
     cfg = ctx.cfg
     p = ctx.phase("smtp_resource")
@@ -2307,6 +2230,7 @@ def phase_smtp_resource(ctx):
     p.check("silent_data: times out at the data_start stage",
           bool(r) and r.get("stage") == "data_start", "r=%r" % r)
 
+# PHASE: smtp_drops
 def phase_smtp_drops(ctx):
     cfg = ctx.cfg
     p = ctx.phase("smtp_drops")
@@ -2324,6 +2248,7 @@ def phase_smtp_drops(ctx):
     p.check("drop_data_prompt: abrupt close after the DATA prompt refused, not hung",
           smtp_err(r), "r=%r" % r)
 
+# PHASE: smtp_inject
 def phase_smtp_inject(ctx):
     cfg = ctx.cfg
     p = ctx.phase("smtp_inject")

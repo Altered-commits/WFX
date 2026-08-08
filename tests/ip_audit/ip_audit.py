@@ -8,28 +8,10 @@
 # http/limits/ip_utils.cpp) and the two limiters it feeds (ConnectionLimiter,
 # RequestRateLimiter, wired through CoreEngine::AllowRequest in engine/core_engine.cpp).
 # app/wfx.toml keeps [IP] permanently small (cap=3, burst=5, rate=2/s, tracked-identity
-# cap=64, BitmapPool's real minimum) instead of patching config mid-run, so every phase-
-# -but dualstack runs against the same server the whole time.
+# cap=64, BitmapPool's real minimum) instead of patching config mid-run, so every phase
+# but dualstack runs against the same server the whole time.
 #
-# Phases:
-#   trust_boundary   XFF trust-boundary spoofing, CIDR-block trust, recursive/non-recursive
-#                    chain walking, an adversarial worst-case recursive-chain timing check,
-#                    hostile/malformed header parsing, IPv4-mapped-IPv6 literal
-#   connection_cap   ConnectionLimiter: fill/refuse/release, distinct identities, spoofing
-#                    cannot dodge the peer's own cap, a concurrent burst still holds exactly
-#                    at the cap (no accept-race lets it over-count)
-#   rate_limit       RequestRateLimiter: burst/refill on one held connection, reconnect
-#                    cannot reset a bucket, 429 respects keep-alive per the Connection header
-#   eviction         LRU eviction under real capacity pressure: live entries protected,
-#                    a saturated-cap connection recovers once capacity frees up
-#   dualstack        IPv4-mapped-IPv6 peer collapse: distinct v4 clients over a dual-stack
-#                    listener must not share one limiter identity; a native (non-mapped)
-#                    IPv6 peer is enforced correctly too
-#   scale            ConnectionLimiter's HashShard under real cardinality: hundreds of
-#                    distinct identities, all correct, no pathological slowdown
-#   multiworker      Documents and demonstrates a real architectural limitation: each
-#                    worker process has independent limiter state, so the effective cap
-#                    is (configured cap) x (worker count), not the configured cap alone
+# See README.md for what each phase proves.
 #
 # Usage:
 #   python3 ip_audit.py                    # all phases
@@ -48,29 +30,28 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import common
 from common import net, term
 
-# Config baked into app/wfx.toml's [IP] section, kept here so the numbers in this file-
-# -read the same as the ones a phase actually drives against
+# Config baked into app/wfx.toml's [IP] section, kept here so the numbers in this file
+# read the same as the ones a phase actually drives against
 CAP        = 3   # max_connections_per_ip
 BURST      = 5   # max_request_burst_per_ip
 RATE       = 2   # max_requests_per_ip_per_sec
-TRACK_CAP  = 64  # max_tracked_identities, rounded up to 64 by BitmapPool regardless of the-
-                 # -configured value, so 64 is the real cap a phase has to actually fill
+TRACK_CAP  = 64  # max_tracked_identities, rounded up to 64 by BitmapPool regardless of the
+                 # configured value, so 64 is the real cap a phase has to actually fill
 
 TRUSTED    = "127.0.0.1"  # matches trusted_proxies in wfx.toml
-# UNTRUSTED/UNTRUSTED2 deliberately differ from TRUSTED (and each other) in more than the-
-# -last octet: NormalizeIp's /24 mask would otherwise collapse "127.0.0.1" and "127.0.0.2"-
-# -into the identical identity, and the suite's own startup wait_ready() probe (which hits-
-# -TRUSTED's bare identity with no XFF, before any phase runs at all) would then silently-
-# -eat a token from whatever bucket UNTRUSTED also happens to share
+# UNTRUSTED/UNTRUSTED2 deliberately differ from TRUSTED (and each other) in more than the
+# last octet: NormalizeIp's /24 mask would otherwise collapse "127.0.0.1" and "127.0.0.2"
+# into the same identity, and the suite's own startup wait_ready() probe (which hits
+# TRUSTED's bare identity with no XFF) would then silently eat a token from whatever
+# bucket UNTRUSTED happens to share.
 UNTRUSTED  = "127.0.2.2"  # loopback, but deliberately NOT in trusted_proxies
-UNTRUSTED2 = "127.0.1.2"  # a SECOND, distinct untrusted identity: connection_cap needs its own,-
-                          # -since trust_boundary's G1 already drains UNTRUSTED's own bucket
+UNTRUSTED2 = "127.0.1.2"  # a second, distinct untrusted identity: connection_cap needs its
+                          # own, since trust_boundary's G1 already drains UNTRUSTED's bucket
 
-# Dedicated identity for liveness probes only: nothing else in this suite ever sends from-
-# -this address, so a phase's own attack traffic can never make _alive() misreport "dead"-
-# -just because it correctly rate-limited some OTHER identity that happens to share a bucket-
-# -with a generic health check (this is exactly what happened to common.health() during-
-# -development: it uses the bare peer identity with no way to route around a drained bucket)
+# Dedicated identity for liveness probes only. Nothing else in this suite ever sends from
+# this address, so a phase's own attack traffic can never make _alive() misreport "dead"
+# just because it rate-limited some other identity sharing a bucket with a generic health
+# check (this is exactly what happened to common.health() during development).
 _ALIVE_PROBE = "127.9.9.9"
 
 _REFILL_WAIT = 1.0 / RATE + 0.3  # time for >=1 token to refill, plus margin
@@ -87,8 +68,8 @@ def _build(method, path, headers=None, close=True):
     return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1")
 
 def _read_http_response(sock, buf, rtimeout=4.0):
-    """Reads exactly one CL-framed response off 'sock'. Returns (status, leftover-buf), or-
-    -(None, buf) on a closed/dead socket - the caller decides what that means"""
+    """Reads exactly one CL-framed response off 'sock'. Returns (status, leftover-buf),
+    or (None, buf) on a closed/dead socket - the caller decides what that means."""
     sock.settimeout(rtimeout)
 
     while b"\r\n\r\n" not in buf:
@@ -128,9 +109,9 @@ def _read_http_response(sock, buf, rtimeout=4.0):
     return status, rest[clen:]
 
 def _send_from(host, port, source_ip, method, path, headers=None, rtimeout=4.0):
-    """One-shot Connection: close request from a bound source address - the only way to-
-    -make WFX see a different peer IP without root (any 127.0.0.0/8 address is a distinct,-
-    -valid loopback source on Linux). Returns the status, or 'CONN_ERR' on a failed connect"""
+    """One-shot Connection: close request from a bound source address - the only way to
+    make WFX see a different peer IP without root (any 127.0.0.0/8 address is a distinct,
+    valid loopback source on Linux). Returns the status, or 'CONN_ERR' on a failed connect."""
     sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -150,9 +131,9 @@ def _send_from(host, port, source_ip, method, path, headers=None, rtimeout=4.0):
                 pass
 
 def _open_held(host, port, source_ip, path="/health", headers=None, rtimeout=4.0):
-    """Opens a socket bound to 'source_ip', sends one Connection: keep-alive request, reads-
-    -exactly one response, and returns (status, sock, buf) leaving the socket OPEN so a later-
-    -request can be sent on it via _send_on(). (None, None, b'') on a failed connect"""
+    """Opens a socket bound to 'source_ip', sends one Connection: keep-alive request, reads
+    exactly one response, and returns (status, sock, buf) leaving the socket OPEN so a later
+    request can be sent on it via _send_on(). (None, None, b'') on a failed connect."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.bind((source_ip, 0))
@@ -169,8 +150,8 @@ def _open_held(host, port, source_ip, path="/health", headers=None, rtimeout=4.0
         return None, None, b""
 
 def _send_on(sock, buf, path="/health", headers=None, close=False, rtimeout=4.0):
-    """Sends one more request over an already-open socket from _open_held(). Returns-
-    -(status, leftover-buf), or (None, buf) if the socket was already closed server-side"""
+    """Sends one more request over an already-open socket from _open_held(). Returns
+    (status, leftover-buf), or (None, buf) if the socket was already closed server-side."""
     try:
         sock.sendall(_build("GET", path, headers, close=close))
     except OSError:
@@ -225,8 +206,8 @@ def _alive(host, port, rtimeout=4.0):
     a phase's own attack traffic against some OTHER identity can never cause a false reading"""
     return isinstance(_send_from(host, port, _ALIVE_PROBE, "GET", "/health"), int)
 
-# TOML patching, only phases that need a config variant other than app/wfx.toml's-
-# -permanent baseline use this (currently just the non-recursive sub-case below)
+# TOML patching, only used by phases that need a config variant other than
+# app/wfx.toml's permanent baseline
 def _patch_toml(path, pattern, replacement):
     with open(path) as f:
         original = f.read()
@@ -248,14 +229,14 @@ def _restart_with_flags(ctx, flags):
     ctx.server.flags = list(flags)
     return _restart(ctx)
 
-# Phase: TRUST_BOUNDARY
+# PHASE: trust_boundary
 def phase_trust_boundary(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
     p = ctx.phase("trust_boundary")
 
-    # G1: untrusted peer - rotating a spoofed XFF buys nothing, the header is never honored-
-    # -for a peer outside trusted_proxies, so every attempt is billed to 127.0.0.2 itself
+    # G1: untrusted peer - rotating a spoofed XFF buys nothing, the header is never
+    # honored for a peer outside trusted_proxies, so every attempt is billed to 127.0.0.2
     hit, st, seen = None, None, []
     for i in range(BURST + 1):
         st = _send_from(host, port, UNTRUSTED, "GET", "/health", {"X-Forwarded-For": "10.10.0.%d" % i})
@@ -275,8 +256,8 @@ def phase_trust_boundary(ctx):
     p.secure("trusted peer: identity B is untouched by identity A's drained bucket",
              st2 == 200, "status=%r, expected 200 (distinct /24 = distinct identity)" % st2)
 
-    # G3: trusted peer - reconnecting every request cannot reset one identity's bucket-
-    # -(direct regression test: this used to erase-and-reseed the bucket on every reconnect)
+    # G3: trusted peer - reconnecting every request cannot reset one identity's bucket
+    # (regression test: this used to erase-and-reseed the bucket on every reconnect)
     hit, st, seen = _drain_burst(host, port, TRUSTED, headers={"X-Forwarded-For": "10.10.3.1"})
     p.secure("trusted peer: reconnecting every request cannot reset one identity's bucket",
              hit == BURST and st == 429, "expected 429 at #%d, got %r at #%r, sequence=%r"
@@ -287,8 +268,9 @@ def phase_trust_boundary(ctx):
     st = _send_from(host, port, TRUSTED, "GET", "/health", {"X-Forwarded-For": "10.10.3.1"})
     p.check("bucket refills after waiting", st == 200, "status=%r after waiting for refill" % st)
 
-    # G5: resolution only happens on a connection's first request - rotating XFF mid-stream-
-    # -on the SAME connection cannot escape the identity that request resolved to
+    # G5: resolution only happens on a connection's first request - rotating XFF
+    # mid-stream on the SAME connection cannot escape the identity that first request
+    # resolved to
     st0, sock, buf = _open_held(host, port, TRUSTED, headers={"X-Forwarded-For": "10.10.5.1"})
     hit, st = None, st0
     if sock is not None:
@@ -306,15 +288,16 @@ def phase_trust_boundary(ctx):
 
     toml_path = os.path.join(cfg.app_dir, "wfx.toml")
 
-    # G6: recursive chain walking - walks right-to-left past trusted hops, stops at the-
-    # -first untrusted one and uses that as the real client
+    # G6: recursive chain walking - walks right-to-left past trusted hops, stops at
+    # the first untrusted one and uses that as the real client
     hit, st, seen = _drain_burst(host, port, TRUSTED, headers={"X-Forwarded-For": "10.10.6.1, 127.0.0.1"})
     p.check("recursive: one trusted hop, real client resolved past it",
             hit == BURST and st == 429, "got %r at #%r, sequence=%r" % (st, hit, seen))
 
-    # The real client (10.71.1.1) and the blocking untrusted hop (10.72.2.2) MUST differ in-
-    # -more than their last octet, or NormalizeIp's /24 mask collapses them into one identity-
-    # -and this test can't tell "resolved past the block" from "just the same bucket"
+    # The real client (10.71.1.1) and the blocking untrusted hop (10.72.2.2) must differ
+    # in more than their last octet, or NormalizeIp's /24 mask collapses them into one
+    # identity and this test can't tell "resolved past the block" from "just the same
+    # bucket"
     hit, st, seen = _drain_burst(host, port, TRUSTED,
                                  headers={"X-Forwarded-For": "10.71.1.1, 10.72.2.2, 127.0.0.1"})
     p.check("recursive: walk stops at the first untrusted hop from the right",
@@ -323,9 +306,9 @@ def phase_trust_boundary(ctx):
     p.secure("recursive: the hop beyond the untrusted stop point is never reached or billed",
              st_untouched == 200, "status=%r, expected 200 (10.71.1.1 should be fresh)" % st_untouched)
 
-    # G6b: trusted_proxies matches a whole CIDR block, not just the one /32 baked into-
-    # -wfx.toml - a source inside the block gets the header honored, a source just outside-
-    # -it (still loopback, still "close" numerically) does not
+    # G6b: trusted_proxies matches a whole CIDR block, not just the one /32 baked into
+    # wfx.toml - a source inside the block gets the header honored, a source just
+    # outside it (still loopback, still "close" numerically) does not
     original_cidr = _patch_toml(toml_path, r'(?m)^(\s*trusted_proxies\s*=\s*)\[.*\]',
                                 r'\g<1>["127.0.10.0/24"]')
     try:
@@ -347,30 +330,28 @@ def phase_trust_boundary(ctx):
         if not _restart(ctx):
             p.failed("TRUST_CIDR_RESTORE_BOOT", "server never came back after restoring trusted_proxies")
 
-    # G6c: regression for a whitespace-trim bug found via manual code review, not by any test-
-    # -until now: when the recursive walk exits because the ENTIRE chain, including its-
-    # -leftmost hop, is trusted, the old code left 'candidate' holding the untrimmed original-
-    # -text instead of the already-trimmed 'hop' - a leading/trailing space on that leftmost-
-    # -token then made the final ParseIpAddress fail and silently fall back to the peer.
-    # -Whitespace around the WHOLE header value is already stripped by the HTTP parser itself-
-    # -(http_parser.cpp's own Trim() on every header value) before this code ever sees it, so-
-    # -the trigger has to be INTERNAL whitespace next to a comma inside a multi-hop chain -
-    # -a bare single value wrapped in spaces never reaches ResolveClientIp with any left at all
+    # G6c: regression for a whitespace-trim bug found by code review, not by any test
+    # until now. When the recursive walk exits because the whole chain (including the
+    # leftmost hop) is trusted, the old code left 'candidate' holding the untrimmed
+    # original text instead of the already-trimmed 'hop', so a leading/trailing space on
+    # that leftmost token made ParseIpAddress fail and silently fall back to the peer.
+    # The HTTP parser already strips whitespace around the whole header value, so the
+    # trigger has to be internal whitespace next to a comma inside a multi-hop chain.
     original_ws = _patch_toml(toml_path, r'(?m)^(\s*trusted_proxies\s*=\s*)\[.*\]',
                               r'\g<1>["127.0.0.1/32", "10.10.12.5/32"]')
     try:
         if not _restart(ctx):
             p.failed("TRUST_WS_BOOT", "server never came back with a second trusted_proxies entry")
         else:
-            # Drain the peer's own bare identity first, so a silent fallback-to-peer is-
-            # -distinguishable from a correct resolution to 10.10.12.5 (a fresh identity)
+            # Drain the peer's own bare identity first, so a silent fallback-to-peer is
+            # distinguishable from a correct resolution to 10.10.12.5 (a fresh identity)
             hit0, st0, seen0 = _drain_burst(host, port, TRUSTED, headers=None, n=BURST + 2)
             p.check("whitespace regression: peer's own bare identity can be drained first",
                     hit0 is not None and st0 == 429, "sequence=%r" % seen0)
 
-            # Two hops, both trusted: a space sits right before the comma, on the LEFTMOST-
-            # -hop specifically - candidate.substr(0, comma) preserves that trailing space,-
-            # -and it's still there when the loop exits via the "ran out of commas" path
+            # Two hops, both trusted: a space sits right before the comma, on the leftmost
+            # hop specifically. candidate.substr(0, comma) preserves that trailing space,
+            # and it's still there when the loop exits via the "ran out of commas" path
             st_ws = _send_from(host, port, TRUSTED, "GET", "/health",
                                {"X-Forwarded-For": "10.10.12.5 , 127.0.0.1"})
             p.secure("whitespace next to a comma on an all-trusted chain's leftmost hop still "
@@ -382,8 +363,8 @@ def phase_trust_boundary(ctx):
         if not _restart(ctx):
             p.failed("TRUST_WS_RESTORE_BOOT", "server never came back after restoring trusted_proxies")
 
-    # G7: non-recursive mode takes the header value as-is, no chain walking. A multi-value-
-    # -chain fails to parse as one address and falls back to the peer IP - fails safe
+    # G7: non-recursive mode takes the header value as-is, no chain walking. A
+    # multi-value chain fails to parse as one address and falls back to the peer IP
     original = _patch_toml(toml_path, r'(?m)^(\s*real_ip_recursive\s*=\s*)true', r'\g<1>false')
     try:
         if not _restart(ctx):
@@ -393,11 +374,11 @@ def phase_trust_boundary(ctx):
             p.check("non-recursive: a bare single value still resolves directly",
                     hit == BURST and st == 429, "got %r at #%r, sequence=%r" % (st, hit, seen))
 
-            # Not an exact-count check like the others: _restart() above just ran wait_ready(),
-            # -which itself probes TRUSTED's bare identity (no XFF) once, so this bucket can-
-            # -start already one token short. The property under test is just "the bare peer-
-            # -identity is rate-limited at all in non-recursive mode", so a generous margin-
-            # -over BURST is used instead of asserting the exact index
+            # Not an exact-count check like the others: _restart() above just ran
+            # wait_ready(), which itself probes TRUSTED's bare identity (no XFF) once, so
+            # this bucket can start already one token short. The property under test is
+            # just "the bare peer identity is rate-limited at all in non-recursive mode",
+            # so a generous margin over BURST is used instead of asserting the exact index
             hit2, st2, seen2 = _drain_burst(host, port, TRUSTED, headers=None, n=BURST + 2)
             p.check("non-recursive: peer's own bare identity can be drained",
                     hit2 is not None and st2 == 429,
@@ -443,8 +424,9 @@ def phase_trust_boundary(ctx):
     p.secure("duplicate X-Forwarded-For headers do not crash or 500-fault the server",
              st != 500 and st is not None, "status=%r" % st)
 
-    # Regression: an IPv4-mapped IPv6 literal INSIDE the header text must resolve identically-
-    # -to its plain IPv4 form (ip_utils.cpp's ParseIpAddress collapses ::ffff:a.b.c.d to AF_INET)
+    # Regression: an IPv4-mapped IPv6 literal inside the header text must resolve
+    # identically to its plain IPv4 form (ip_utils.cpp's ParseIpAddress collapses
+    # ::ffff:a.b.c.d to AF_INET)
     hit, st, seen = _drain_burst(host, port, TRUSTED, headers={"X-Forwarded-For": "::ffff:10.10.10.5"})
     p.check("v4-mapped XFF literal: drains its own burst like a normal address",
             hit == BURST and st == 429, "got %r at #%r, sequence=%r" % (st, hit, seen))
@@ -452,16 +434,17 @@ def phase_trust_boundary(ctx):
     p.secure("v4-mapped XFF literal collapses to the same identity as its plain IPv4 form",
              st_plain == 429, "status=%r, expected 429 (::ffff:10.10.10.5 and 10.10.10.5 must be one identity)" % st_plain)
 
-    # G9: adversarial cost of the recursive walk itself. IsTrustedProxy re-scans the WHOLE-
-    # -trusted_proxies list, unmemoized, for every single hop in the chain - so a long chain-
-    # -against a long trusted_proxies list is O(hops * proxies) CIDR parses per request, on the-
-    # -single-threaded event loop every other client is also waiting on. Worst case: every hop-
-    # -matches only the LAST entry in trusted_proxies, so nothing short-circuits early
+    # G9: adversarial cost of the recursive walk itself. IsTrustedProxy re-scans the
+    # whole trusted_proxies list, unmemoized, for every hop in the chain, so a long chain
+    # against a long trusted_proxies list is O(hops * proxies) CIDR parses per request on
+    # the single-threaded event loop every other client is also waiting on. Worst case:
+    # every hop matches only the last entry in trusted_proxies, so nothing short-circuits
     decoys = ['"127.200.%d.1/32"' % i for i in range(1, 300)]
     matching_hop = "127.5.5.5"
     proxies_toml = "[" + ", ".join(decoys + ['"%s/32"' % matching_hop]) + "]"
-    # Real client goes LEFTMOST (walked last): the walk starts at the RIGHTMOST hop and moves-
-    # -left, so 300 trusted hops must sit to the right of it, or the walk stops after one step
+    # Real client goes leftmost (walked last): the walk starts at the rightmost hop and
+    # moves left, so 300 trusted hops must sit to the right of it, or the walk stops
+    # after one step
     chain = ", ".join(["10.10.11.1"] + [matching_hop] * 300)
 
     original_scale = _patch_toml(toml_path, r'(?m)^(\s*trusted_proxies\s*=\s*)\[.*\]',
@@ -473,9 +456,9 @@ def phase_trust_boundary(ctx):
             start = time.time()
             st_cost = _send_from(host, port, matching_hop, "GET", "/health", {"X-Forwarded-For": chain})
             elapsed = time.time() - start
-            # Generous bound: a well-behaved O(hops*proxies) walk finishes in low milliseconds:
-            # -a multi-second stall here would mean every other client on this worker is also-
-            # -blocked for that long, which is the actual DoS surface being checked for
+            # Generous bound: a well-behaved O(hops*proxies) walk finishes in low
+            # milliseconds. A multi-second stall here would mean every other client on
+            # this worker is blocked for that long too, which is the actual DoS surface
             p.secure("worst-case recursive chain (300 hops x 300 trusted_proxies) stays fast",
                      elapsed < 2.0, "took %.3fs, status=%r (expected well under 2s)" % (elapsed, st_cost))
     finally:
@@ -486,7 +469,7 @@ def phase_trust_boundary(ctx):
     if not _alive(host, port):
         p.failed("TRUST_SERVER_DEAD", "did not answer the dedicated liveness probe")
 
-# Phase: CONNECTION_CAP
+# PHASE: connection_cap
 def phase_connection_cap(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
@@ -519,10 +502,10 @@ def phase_connection_cap(ctx):
     finally:
         _close_all(socks)
 
-    # G1b: the SAME cap, but every attempt fired at once instead of one at a time. The accept-
-    # -loop drains the whole backlog in a single 'while(true) accept4(...)' pass per epoll wake,-
-    # -so a burst of simultaneous connections is exactly the case where an off-by-one in-
-    # -AllowConnection's counting would show up as MORE than CAP getting through
+    # G1b: the same cap, but every attempt fired at once instead of one at a time. The
+    # accept loop drains the whole backlog in a single 'while(true) accept4(...)' pass
+    # per epoll wake, so a burst of simultaneous connections is exactly the case where
+    # an off-by-one in AllowConnection's counting would let more than CAP through
     socks = []
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
@@ -539,9 +522,9 @@ def phase_connection_cap(ctx):
     finally:
         _close_all(socks)
 
-    # G2: distinct identities (varied THIRD octet, so each is a genuinely different /24, not-
-    # -the last-octet-only mistake that collapses under NormalizeIp's /24 mask) each get their-
-    # -own cap, none of them touch each other
+    # G2: distinct identities (varied third octet, so each is a genuinely different /24,
+    # not the last-octet-only mistake that collapses under NormalizeIp's /24 mask) each
+    # get their own cap, none of them touch each other
     socks = []
     try:
         all_ok, bad_i = True, None
@@ -555,10 +538,11 @@ def phase_connection_cap(ctx):
     finally:
         _close_all(socks)
 
-    # G3: untrusted peer - a distinct spoofed XFF per connection cannot dodge the peer's own cap.
-    # -Uses UNTRUSTED2, not UNTRUSTED: trust_boundary's G1 already deliberately drains UNTRUSTED's-
-    # -own rate-limit bucket, and that state persists (no restart between phases), so reusing it-
-    # -here would hit an already-empty bucket before this test ever reaches the connection cap
+    # G3: untrusted peer - a distinct spoofed XFF per connection cannot dodge the peer's
+    # own cap. Uses UNTRUSTED2, not UNTRUSTED: trust_boundary's G1 already drains
+    # UNTRUSTED's own rate-limit bucket, and that state persists (no restart between
+    # phases), so reusing it here would hit an already-empty bucket before this test
+    # ever reaches the connection cap
     socks = []
     try:
         hit, st, seen = None, None, []
@@ -578,15 +562,15 @@ def phase_connection_cap(ctx):
     if not _alive(host, port):
         p.failed("CONN_CAP_SERVER_DEAD", "did not answer the dedicated liveness probe")
 
-# Phase: RATE_LIMIT
+# PHASE: rate_limit
 def phase_rate_limit(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
     p = ctx.phase("rate_limit")
 
-    # G1: burst-then-throttle-then-refill, entirely on ONE held connection (not reconnecting):
-    # -exercises the token-bucket arithmetic itself, separate from the reconnect-resistance-
-    # -already covered in trust_boundary
+    # G1: burst-then-throttle-then-refill, entirely on one held connection (not
+    # reconnecting). Exercises the token-bucket arithmetic itself, separate from the
+    # reconnect-resistance already covered in trust_boundary
     st0, sock, buf = _open_held(host, port, TRUSTED, headers={"X-Forwarded-For": "10.30.1.1"})
     ok_count, hit, st = (1 if st0 == 200 else 0), None, st0
     if sock is not None:
@@ -601,8 +585,8 @@ def phase_rate_limit(ctx):
         p.secure("rate limit: the (burst+1)th request on the same connection is throttled",
                  st_over == 429, "status=%r, expected 429" % st_over)
 
-        # 429 must not force-close a connection the client asked to keep alive: the socket-
-        # -should still be usable once the bucket refills
+        # 429 must not force-close a connection the client asked to keep alive: the
+        # socket should still be usable once the bucket refills
         time.sleep(_REFILL_WAIT)
         st_refilled, buf = _send_on(sock, buf, headers={"X-Forwarded-For": "10.30.1.1"})
         p.secure("429 keeps a keep-alive connection open: it recovers without reconnecting",
@@ -611,8 +595,9 @@ def phase_rate_limit(ctx):
     else:
         p.failed("RATE_LIMIT_CONNECT", "could not open the held connection for G1")
 
-    # G2: a request that explicitly asks for Connection: close, even while being throttled,-
-    # -must still actually close - keep-alive-on-limit only applies when the client asked for it
+    # G2: a request that explicitly asks for Connection: close, even while being
+    # throttled, must still actually close - keep-alive-on-limit only applies when the
+    # client asked for it
     st0, sock, buf = _open_held(host, port, TRUSTED, headers={"X-Forwarded-For": "10.30.2.1"})
     if sock is not None:
         for _ in range(1, BURST):
@@ -621,8 +606,8 @@ def phase_rate_limit(ctx):
         p.check("throttled request with Connection: close still gets a response",
                 st_close == 429, "status=%r" % st_close)
 
-        # Server should have closed its end: a further read either times out immediately-
-        # -with nothing, or the socket errors - either way, nothing more must arrive
+        # Server should have closed its end: a further read either times out immediately
+        # with nothing, or the socket errors - either way, nothing more must arrive
         sock.settimeout(1.0)
         try:
             trailing = sock.recv(4096)
@@ -637,7 +622,7 @@ def phase_rate_limit(ctx):
     if not _alive(host, port):
         p.failed("RATE_LIMIT_SERVER_DEAD", "did not answer the dedicated liveness probe")
 
-# Phase: EVICTION
+# PHASE: eviction
 def phase_eviction(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
@@ -656,8 +641,8 @@ def phase_eviction(ctx):
         p.check("eviction: %d distinct live identities all fit the tracked-identity cap" % TRACK_CAP,
                 all_ok, "identity #%r was refused" % bad_i)
 
-        # Every tracked slot is now live: a brand new (TRACK_CAP+1)th identity has nothing-
-        # -evictable and must be denied outright, not silently unthrottled
+        # Every tracked slot is now live: a brand new (TRACK_CAP+1)th identity has
+        # nothing evictable and must be denied outright, not silently unthrottled
         st_new, sock_new, buf_new = _open_held(host, port, TRUSTED, headers={"X-Forwarded-For": "10.40.99.1"})
         p.secure("eviction: a new identity is denied while every tracked slot is live",
                  st_new == 429, "status=%r, expected 429 (cap saturated with live entries)" % st_new)
@@ -665,25 +650,28 @@ def phase_eviction(ctx):
         if sock_new is None:
             p.failed("EVICTION_CONNECT", "could not open the (cap+1)th connection")
         else:
-            # Free exactly one slot: close the first held identity, dropping its refCount to 0-
-            # -(it stays tracked, just no longer live, so it becomes the LRU eviction candidate)
+            # Free exactly one slot: close the first held identity, dropping its refCount
+            # to 0 (it stays tracked, just no longer live, so it becomes the LRU eviction
+            # candidate)
             if socks and socks[0] is not None:
                 socks[0].close()
                 socks[0] = None
             time.sleep(0.1)
 
-            # Retry on the SAME still-open (thanks to 429 no longer force-closing keep-alive-
-            # -connections) socket from the denied identity above: this is the direct regression-
-            # -test for the ipAcquired/rateLimiterAcquired split - the first attempt failed to-
-            # -track the identity, but a later request on the same connection must retry it-
-            # -instead of being permanently stuck once capacity actually frees up
+            # Retry on the same still-open (thanks to 429 no longer force-closing
+            # keep-alive connections) socket from the denied identity above: this is the
+            # direct regression test for the ipAcquired/rateLimiterAcquired split - the
+            # first attempt failed to track the identity, but a later request on the
+            # same connection must retry it instead of being permanently stuck once
+            # capacity actually frees up
             st_retry, buf_new = _send_on(sock_new, buf_new, headers={"X-Forwarded-For": "10.40.99.1"})
             p.secure("eviction: a previously cap-denied connection recovers once capacity frees up",
                      st_retry == 200, "status=%r, expected 200 after an evictable slot opened up" % st_retry)
             sock_new.close()
 
-        # The evicted identity (10.40.1.1, closed above) is fully forgotten, not half-tracked:-
-        # -reconnecting it gets a fresh, working, full-burst bucket rather than an error
+        # The evicted identity (10.40.1.1, closed above) is fully forgotten, not
+        # half-tracked: reconnecting it gets a fresh, working, full-burst bucket rather
+        # than an error
         st_evicted = _send_from(host, port, TRUSTED, "GET", "/health", {"X-Forwarded-For": "10.40.1.1"})
         p.check("eviction: a previously evicted identity reconnects cleanly with a fresh bucket",
                 st_evicted == 200, "status=%r" % st_evicted)
@@ -693,7 +681,7 @@ def phase_eviction(ctx):
     if not _alive(host, port):
         p.failed("EVICTION_SERVER_DEAD", "did not answer the dedicated liveness probe")
 
-# Phase: DUALSTACK
+# PHASE: dualstack
 def phase_dualstack(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
@@ -708,9 +696,10 @@ def phase_dualstack(ctx):
         _restart_with_flags(ctx, [])
         return
 
-    # Peer A and peer B MUST differ in more than their last octet, or NormalizeIp's own /24-
-    # -mask would collapse them into one identity regardless of whether the v4-mapped fix-
-    # -works at all - this test could never have proven anything with "127.0.0.3"/"127.0.0.4"
+    # Peer A and peer B must differ in more than their last octet, or NormalizeIp's own
+    # /24 mask would collapse them into one identity regardless of whether the v4-mapped
+    # fix works at all - this test could never have proven anything with
+    # "127.0.0.3"/"127.0.0.4"
     peer_a, peer_b = "127.1.3.3", "127.2.4.4"
 
     try:
@@ -741,11 +730,11 @@ def phase_dualstack(ctx):
             _close_all(socks_a)
             _close_all(socks_b)
 
-        # A genuine (non-mapped) native IPv6 peer must be enforced correctly too - this-
-        # -exercises NormalizeIp's actual v6 branch (/64 mask on a real v6 address) and-
-        # -ConnectionLimiter/RequestRateLimiter keyed on type=AF_INET6, neither of which any-
-        # -other phase touches at all (::1 is the only v6 loopback address without root, so-
-        # -this can't prove two distinct v6 peers are told apart, only that ::1 itself works)
+        # A genuine (non-mapped) native IPv6 peer must be enforced correctly too. This
+        # exercises NormalizeIp's actual v6 branch (/64 mask on a real v6 address) and
+        # ConnectionLimiter/RequestRateLimiter keyed on type=AF_INET6, neither of which
+        # any other phase touches (::1 is the only v6 loopback address without root, so
+        # this can't prove two distinct v6 peers are told apart, only that ::1 works)
         socks_v6 = []
         try:
             seen_v6 = []
@@ -769,19 +758,19 @@ def phase_dualstack(ctx):
         if not _restart_with_flags(ctx, []):
             p.failed("DUALSTACK_RESTORE_BOOT", "server never came back up after restoring normal host binding")
 
-# Phase: SCALE
+# PHASE: scale
 def phase_scale(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
     p = ctx.phase("scale")
 
-    # ConnectionLimiter's HashShard has no eviction or cap at all (unlike RequestRateLimiter's
-    # BitmapPool-bound pool) - it self-bounds only via erase-on-refCount-0, so its real size
-    # tracks however many distinct identities are truly concurrent. This drives real
-    # cardinality through it: hundreds of genuinely distinct identities (varying both the
-    # second and third octet, not the last-octet mistake made elsewhere this session),
-    # confirming the SipHash-keyed table and its grow-only resize neither fail nor slow down
-    # pathologically at real scale, not just the handful of addresses every other phase uses
+    # ConnectionLimiter's HashShard has no eviction or cap at all (unlike
+    # RequestRateLimiter's BitmapPool-bound pool) - it self-bounds only via
+    # erase-on-refCount-0, so its real size tracks however many distinct identities are
+    # truly concurrent. This drives real cardinality through it: hundreds of genuinely
+    # distinct identities (varying both the second and third octet, not just the last
+    # octet), confirming the SipHash-keyed table and its grow-only resize neither fail
+    # nor slow down at real scale, not just the handful of addresses other phases use
     n = 800
     addrs = ["127.%d.%d.9" % (1 + (i // 40), 1 + (i % 40)) for i in range(n)]
 
@@ -794,16 +783,16 @@ def phase_scale(ctx):
     p.check("scale: %d distinct identities all succeed" % n, not failed,
             "%d/%d failed, first few: %r" % (len(failed), n, failed[:5]))
 
-    # Generous bound: this is dominated by Python/socket-syscall overhead, not the server -
-    # -a pathological O(n^2) HashShard (a broken resize, or a degenerate, non-random hash)-
-    # -would blow past this bound by orders of magnitude, not by a little
+    # Generous bound: this is dominated by Python/socket-syscall overhead, not the
+    # server. A pathological O(n^2) HashShard (a broken resize, or a degenerate,
+    # non-random hash) would blow past this bound by orders of magnitude, not a little
     p.secure("scale: %d distinct identities complete without pathological slowdown" % n,
              elapsed < 20.0, "took %.2fs for %d identities (expected well under 20s)" % (elapsed, n))
 
     if not _alive(host, port):
         p.failed("SCALE_SERVER_DEAD", "did not answer the dedicated liveness probe")
 
-# Phase: MULTIWORKER
+# PHASE: multiworker
 def phase_multiworker(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
@@ -813,9 +802,9 @@ def phase_multiworker(ctx):
     # confirmed in os_specific/linux/epoll_connection.cpp's Initialize()) owns its own
     # in-memory ConnectionLimiter/RequestRateLimiter. The kernel load-balances connections
     # across worker listening sockets by a hash of the connection 4-tuple, so distinct
-    # source ports from the SAME source IP land on different workers - meaning the EFFECTIVE
-    # cap for one identity is (configured cap) x (worker count), not the configured cap
-    # alone. This demonstrates that directly instead of just asserting it from reading code
+    # source ports from the same source IP land on different workers, meaning the
+    # effective cap for one identity is (configured cap) x (worker count), not the
+    # configured cap alone. This demonstrates that directly instead of just asserting it
     workers = 4
     toml_path = os.path.join(cfg.app_dir, "wfx.toml")
     original = _patch_toml(toml_path, r'(?m)^(\s*worker_processes\s*=\s*)\d+', r'\g<1>%d' % workers)
@@ -853,7 +842,6 @@ def phase_multiworker(ctx):
         if not _restart(ctx):
             p.failed("MULTIWORKER_RESTORE_BOOT", "server never came back after restoring worker_processes")
 
-# WFX IP audit: real-IP resolution + ConnectionLimiter + RequestRateLimiter
 class IpAudit(common.Suite):
     name = "ip_audit"
     description = "WFX IP audit: real-IP resolution, connection cap, rate limit, LRU eviction, dual-stack"

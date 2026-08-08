@@ -51,8 +51,8 @@ class Context:
 class Heartbeat:
     """Prints "still running" every `interval` seconds, for CI only.
 
-    A long phase that prints a dot per vector looks alive on a terminal and looks hung in a build-
-    -log, where the dots are suppressed and some CI runners kill a job that prints nothing
+    A long phase that prints a dot per vector looks alive on a terminal and looks hung in a
+    build log, where the dots are suppressed and some CI runners kill a job that prints nothing
     """
 
     def __init__(self, interval):

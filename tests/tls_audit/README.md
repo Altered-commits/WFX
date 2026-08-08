@@ -30,7 +30,13 @@ handshake only needs to be *attempted*.
 
 Note the `upgrade` persona below is the one listener here that does **not** start
 in TLS: it speaks plaintext until the client asks to upgrade, which is the entire
-point of the boundary test.
+point of the boundary test. `UpgradeToTLS` is a generic STARTTLS primitive, so it
+inherits that family's CVE history: the mock can append trailing plaintext right
+after its upgrade go-ahead, before actually wrapping the socket, the same class of
+bug as CVE-2011-0411 (Postfix) and CVE-2026-41319 (MailKit) - an engine that reuses
+its read buffer across the upgrade hands attacker bytes to the protocol as though
+the authenticated peer had sent them. The `upgrade` phase proves those bytes are
+never trusted post-upgrade.
 
 ```
 audit --(TLS)--> WFX (HTTPS) /call --(TLS)--> hostile mock personality
@@ -64,7 +70,11 @@ hold under encryption), request-timeout under TLS, request-serialization injecti
 (CR/LF/NUL), a raw **truncation** attack (RST with no `close_notify`) that must
 never be delivered as a complete response, and (`resumption` phase) verifying the
 outbound client actually resumes a cached TLS session after a forced reconnect,
-not just that it completes handshakes.
+not just that it completes handshakes. WFX caches one TLS session per configured
+`HttpEndpoint` and offers it back on the next connection to that endpoint, but a
+live pooled connection just stays alive and reused, so resumption only gets a
+chance to fire once that connection actually dies; `resumption` uses `/truncate`
+to force that reconnect.
 
 ### Inbound (`mtls` phase)
 

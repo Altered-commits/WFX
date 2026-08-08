@@ -640,9 +640,9 @@ def _serve_sp_conn(sock):
 
                 # Optional stall: chunk 'stall_after' onward is delayed stall_ms milliseconds.
                 # Absent (0) is a no-op, so every pre-existing STREAM call is unaffected.
-                # Lets the audit abandon the client AFTER isStreaming is already set-
-                # -(the first chunk got through), proving onAbort's scope cut holds:
-                # a client bailing mid-stream still force-closes, never fires onAbort
+                # Lets the audit abandon the client after isStreaming is already set (the
+                # first chunk got through), proving onAbort's scope cut holds: a client
+                # bailing mid-stream still force-closes, never fires onAbort
                 stall_after = _int(bits[3], 0) if len(bits) > 3 else 0
                 stall_secs = (_int(bits[4], 0) if len(bits) > 4 else 0) / 1000.0
 
