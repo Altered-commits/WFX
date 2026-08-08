@@ -97,7 +97,39 @@ Below are the primary members exposed by the `Request` structure.
 
     !!! note
         If a segment's value fails to parse as its declared type (e.g. a non-numeric value against `<id:uint>`), the route simply does not match and the request falls through to a normal 404 - it is never a runtime error.
-    
+
+- **`Query Params`**  
+    `Path()` keeps the raw `?...` suffix exactly as it arrived, so `GetQueryParams()` is what actually reads it. It parses `key=value&key=value` once into a `QueryParams` object, then `Get()` looks a key up against that parsed set.
+
+    ```cpp
+    WFX_GET("/search", [](WFX::Request req, WFX::Response res) {
+        auto qp = req.GetQueryParams();
+
+        std::string_view q;
+        if(!qp.Get("q", q)) {
+            res.Status(WFX::HttpStatus::BAD_REQUEST).SendText("missing q");
+            return;
+        }
+
+        res.SendText(q);
+    });
+    ```
+
+    For `GET /search?q=hello&page=2`, `qp.Get("q", q)` returns `true` and sets `q` to `"hello"`.
+
+    `Count()` returns how many pairs were parsed:
+
+    ```cpp
+    std::uint64_t total = qp.Count();
+    ```
+
+    !!! important
+        - `Get()` returns the raw value exactly as it appeared on the wire. It is not percent-decoded, the same way `GetHeader()` does not decode header values either. If a client sends `?email=a%40b.com`, `Get("email", out)` gives you `"a%40b.com"`, not `"a@b.com"`, decode it yourself if you need to.
+        - If a key appears more than once (`?v=first&v=second`), `Get()` returns the first one it finds.
+
+    !!! tip
+        `GetQueryParams()` parses the whole query string every time it's called. If a handler reads several keys, call it once and reuse the result rather than calling it once per key.
+
 - **`Context Store`**  
     Allows storing request-scoped values for the lifetime of the active request lifecycle.
 
@@ -191,18 +223,23 @@ Unlike traditional buffered HTTP abstractions, `Response` operates as a strict f
 
 Response operations write into the engine-managed response pipeline buffers and metadata structures. Actual network transmission occurs later under backend control after route execution completes.
 
-!!! note
-    `Response` instances are only valid for the lifetime of the route execution scope managed by the engine.
-
-    Users must not store, move across execution boundaries, or access `Response` objects outside their intended request lifecycle unless explicitly supported by the active execution model.
-
 !!! danger
-    `Response` enforces a strict ordered lifecycle model.
+    `Response` enforces an ordered lifecycle, but it is not one single chain. There are two
+    independent rules, and they are easy to mix up:
 
-    The valid response progression is:
+    - **`Status(...)` and `Header(...)` are order-free with each other.** Either can come first,
+      and `Status(...)` can be called more than once, whichever call happens last before the body
+      starts is the one that takes effect.
+    - **`PersistentHeader(...)` must come before the *first* `Header(...)` call.** It composes
+      freely with `Status(...)` in either order, but the moment any `Header(...)` call happens,
+      every later `PersistentHeader(...)` call on that same response is a contract violation, no
+      matter how many more `Status(...)`/`Header(...)` calls follow it.
+
+    Both rules stop applying once a body operation starts, which is where the real forward-only
+    lock begins:
 
     ```text
-    Status -> Header(s) -> Body Operations -> Commit (optional)
+    [ Status(...) / Header(...) / PersistentHeader(...) ] -> Body Operations -> Commit (optional)
     ```
 
     Where body operations include:
@@ -213,31 +250,31 @@ Response operations write into the engine-managed response pipeline buffers and 
     - `SendTemplate(...)`
     - `Stream(...)`
 
-    Each lifecycle stage permanently locks all previous stages.
-
-    This means:
-
-    - once headers are added, status modification becomes invalid,
-    - once body operations begin, both status and headers become immutable,
-    - once committed, the entire response becomes immutable.
+    Once a body operation begins, status and every kind of header become immutable. Once
+    committed, the entire response becomes immutable.
 
     Invalid lifecycle transitions do not crash or terminate the engine. WFX logs an error, discards whatever was written so far, and forces the response to `500 Internal Server Error` with the message `Response contract violation`. Any further calls made on that same response are silently ignored.
 
     Invalid operation examples include:
 
     ```cpp
-    res.Header("X-Test", "1");
-    res.Status(HttpStatus::OK); // INVALID
+    res.Header("Content-Type", "text/plain");
+    res.PersistentHeader("Access-Control-Allow-Origin", "*"); // INVALID: a Header() already ran
     ```
 
     ```cpp
     res.Write("Hello");
-    res.Header("Content-Type", "text/plain"); // INVALID
+    res.Status(HttpStatus::OK); // INVALID: status after a body operation
+    ```
+
+    ```cpp
+    res.Write("Hello");
+    res.Header("Content-Type", "text/plain"); // INVALID: header after a body operation
     ```
 
     ```cpp
     res.SendText("Hello");
-    res.Write("More"); // INVALID
+    res.Write("More"); // INVALID: write after commit
     ```
 
     ```cpp
@@ -245,18 +282,26 @@ Response operations write into the engine-managed response pipeline buffers and 
     res.Commit(); // INVALID
     ```
 
+!!! important "Status line has no reason phrase"
+    WFX sends `HTTP/1.1 200 ` rather than `HTTP/1.1 200 OK`. The reason phrase is optional per
+    RFC 7230 (clients are told to ignore it, and HTTP/2 has no reason phrase at all), and dropping
+    it is what makes the status code patchable in place at a fixed byte offset, which is what lets
+    `Status(...)` be called more than once instead of only as the very first call on the response.
+
 Below are the primary methods exposed by `Response`.
 
 - **`Status(HttpStatus code)`**  
   **`Status(std::uint16_t code)`**  
     Sets the HTTP status code for the response. Returns a reference to `Response` to allow chaining.
 
-    If no explicit status is provided before body operations begin, the engine automatically defaults the response status to `200 OK`.
+    If no explicit status is provided before body operations begin, the engine automatically defaults the response status to `200`.
 
     !!! important
-        Status may only be configured before headers or body operations begin.
+        `Status(...)` can be called at any point before a body operation starts, in any order
+        relative to `Header(...)` and `PersistentHeader(...)` calls, and more than once, the last
+        call before the body starts is the one that wins.
 
-        Once headers are added or body transmission starts, the response status becomes permanently locked.
+        Once a body operation begins, the status becomes permanently locked.
 
     **Without chaining**:
     ```cpp
@@ -270,13 +315,23 @@ Below are the primary methods exposed by `Response`.
         .Header("Location", "/users/42");
     ```
 
+    **Headers before status is fine too**:
+    ```cpp
+    res.Header("X-Request-Id", requestId); // the eventual status isn't known yet
+    // ... later, once the real outcome is known:
+    res.Status(HttpStatus::NOT_FOUND).SendText("not found");
+    ```
+
 - **`Header(std::string_view key, std::string_view value)`**  
     Adds an HTTP response header to the outgoing response metadata. Returns a reference to `Response` to allow chaining.
 
     The engine automatically appends all required protocol-level response headers internally, regardless of whether custom headers were provided by the user.
 
     !!! important
-        Headers may only be added after status configuration and before body operations begin.
+        `Header(...)` can be called before, after, or interleaved with `Status(...)` calls, in any
+        order, as long as no body operation has started yet.
+
+        The first `Header(...)` call closes the window for `PersistentHeader(...)`, see below.
 
         Once the response body starts, all response metadata becomes permanently immutable.
 
@@ -291,6 +346,48 @@ Below are the primary methods exposed by `Response`.
     res.Header("Content-Type", "application/json")
         .Header("X-Powered-By", "WFX");
     ```
+
+- **`PersistentHeader(std::string_view key, std::string_view value)`**  
+    Adds a header the same way `Header(...)` does, but built for code that runs before the route
+    handler, most commonly middleware, and that has no idea yet what the eventual status will be.
+
+    It differs from `Header(...)` in one behavior that matters specifically for error paths: if
+    something later forces the response into an error rebuild (a contract violation, `SendFile`'s
+    automatic `404` for a missing file, a missing template), a `Header(...)` call gets discarded
+    along with everything else that was written. A `PersistentHeader(...)` call survives that
+    rebuild and still shows up on the response that actually gets sent.
+
+    This exists for headers that need to be on *every* response regardless of outcome, CORS
+    headers being the motivating case: middleware has to add `Access-Control-Allow-Origin` before
+    the route handler has run, and it still needs to be there even if the request ends in a `404`
+    or a `500`.
+
+    !!! important
+        `PersistentHeader(...)` must be called before the *first* `Header(...)` call on the
+        response. It can be called before or after `Status(...)` freely, but once any
+        `Header(...)` call has happened, every later `PersistentHeader(...)` call is a contract
+        violation, regardless of how many more `Status(...)`/`Header(...)` calls follow it.
+
+    **Example (middleware setting a header the handler doesn't know about yet)**:
+    ```cpp
+    WFX_MIDDLEWARE("cors", [](WFX::Request req, WFX::Response res) {
+        res.PersistentHeader("Access-Control-Allow-Origin", "https://example.com");
+        return WFX::MwContinue;
+    });
+
+    // Whichever status the handler ends up picking, the header above is still on the response,
+    // even if this route doesn't exist and the request ends in a 404
+    WFX_GET("/users/<id:uint>", [](WFX::Request req, WFX::Response res) {
+        res.Status(HttpStatus::NOT_FOUND).SendText("no such user");
+    });
+    ```
+
+    !!! tip "WFX has built-in CORS support"
+        The example above is illustrative of what `PersistentHeader(...)` is for, hand-writing CORS
+        headers in your own middleware like this. In practice you don't need to: WFX has CORS
+        built into the engine itself, origin allowlisting, preflight, credentials, all of it,
+        turned on with a `[CORS]` section in `wfx.toml`. See [Routing](routing.md#cors-and-options)
+        for how it behaves and [WFX Settings](../core_concepts/wfx_toml.md#cors) for the config.
 
 - **`Write(...)`**  
     Writes response body data incrementally into the engine-managed response pipeline buffers.

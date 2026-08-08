@@ -53,11 +53,21 @@
 // Simple routes
 #define WFX_GET(path, ...) WFX_INTERNAL_ROUTE_REGISTER(GET, path, __VA_ARGS__)
 #define WFX_POST(path, ...) WFX_INTERNAL_ROUTE_REGISTER(POST, path, __VA_ARGS__)
+#define WFX_PUT(path, ...) WFX_INTERNAL_ROUTE_REGISTER(PUT, path, __VA_ARGS__)
+#define WFX_PATCH(path, ...) WFX_INTERNAL_ROUTE_REGISTER(PATCH, path, __VA_ARGS__)
+#define WFX_DELETE(path, ...) WFX_INTERNAL_ROUTE_REGISTER(DELETE, path, __VA_ARGS__)
+#define WFX_HEAD(path, ...) WFX_INTERNAL_ROUTE_REGISTER(HEAD, path, __VA_ARGS__)
+#define WFX_OPTIONS(path, ...) WFX_INTERNAL_ROUTE_REGISTER(OPTIONS, path, __VA_ARGS__)
 
 // Routes with per-route middleware
 // Usage: WFX_GET_EX("/path", WFX::Http::MakeMiddleware(mw1, mw2), handler)
 #define WFX_GET_EX(path, mw, ...) WFX_INTERNAL_ROUTE_REGISTER_EX(GET, path, mw, __VA_ARGS__)
 #define WFX_POST_EX(path, mw, ...) WFX_INTERNAL_ROUTE_REGISTER_EX(POST, path, mw, __VA_ARGS__)
+#define WFX_PUT_EX(path, mw, ...) WFX_INTERNAL_ROUTE_REGISTER_EX(PUT, path, mw, __VA_ARGS__)
+#define WFX_PATCH_EX(path, mw, ...) WFX_INTERNAL_ROUTE_REGISTER_EX(PATCH, path, mw, __VA_ARGS__)
+#define WFX_DELETE_EX(path, mw, ...) WFX_INTERNAL_ROUTE_REGISTER_EX(DELETE, path, mw, __VA_ARGS__)
+#define WFX_HEAD_EX(path, mw, ...) WFX_INTERNAL_ROUTE_REGISTER_EX(HEAD, path, mw, __VA_ARGS__)
+#define WFX_OPTIONS_EX(path, mw, ...) WFX_INTERNAL_ROUTE_REGISTER_EX(OPTIONS, path, mw, __VA_ARGS__)
 
 // vvv ROUTE GROUPING vvv
 #define WFX_GROUP_START_IMPL(path, id)                                                                                 \

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 
-#include "config.hpp"
 #include "config_helper.hpp"
 #include "utils/fileops/filesystem.hpp"
 
@@ -45,6 +44,9 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "IP", "real_ip_header", ipConfig.realIpHeader);
         ExtractValue(tbl, "IP", "real_ip_recursive", ipConfig.realIpRecursive);
         ExtractStringArray(tbl, "IP", "trusted_proxies", ipConfig.trustedProxies);
+
+        // vvv CORS vvv
+        ExtractCors(tbl, corsConfig);
 
         // vvv SSL vvv
         ExtractValue(tbl, "SSL", "cert_path", sslConfig.certPath, true);

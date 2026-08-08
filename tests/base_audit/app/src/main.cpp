@@ -64,6 +64,12 @@ WFX_POST("/echo-full", [](WFX::Request req, WFX::Response res) {
         .SendText(req.Body());
 })
 
+// Same path, three methods, no OPTIONS handler: the generic OPTIONS Allow: fallback
+// (CoreEngine::HandleGenericOptions) has real methods to report here instead of an empty set
+WFX_GET("/cors/multi", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("get"); })
+WFX_POST("/cors/multi", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("post"); })
+WFX_PUT("/cors/multi", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("put"); })
+
 // Query-string parsing: GetQueryParams()/QueryParams::Get(). Always looks up "v" and also
 // reports how many pairs the parser found overall, so one request can assert on both a specific
 // key's raw (undecoded) value and how the whole set got parsed (duplicate keys, empty segments

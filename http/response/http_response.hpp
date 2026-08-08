@@ -38,6 +38,7 @@ public:
 public: // Phase-enforced write API
     void WriteStatus(Shared::HttpStatus code);
     void WriteHeader(std::string_view key, std::string_view value);
+    void WritePersistentHeader(std::string_view key, std::string_view value);
     void WriteBodyData(std::string_view data);
     void WriteFile(std::string_view path, bool autoHandle404);
     void WriteStream(Shared::StreamGenerator gen, bool chunked);
@@ -99,10 +100,10 @@ public: // Queries used by CoreEngine / Serializer
     }
 
 private:
-    void EnsureStatusWritten(); // Auto-default 200 if FRESH
-    void EnsureHeadersOpen();   // Auto-default status if needed, switch phase to HEADERS
-    bool EnsureBodyOpen();      // Writes CL slot + \r\n separator, switch phase to BODY. False if rejected
-    void InjectContentLength(); // Writes the fixed-width CL header line, saves 'clOffset_'
+    void EnsureStatusLineReserved(); // Writes the fixed-width status line placeholder
+    void EnsureHeadersOpen();        // Ensures the status line exists, switch phase to HEADERS
+    bool EnsureBodyOpen();           // Writes CL slot + \r\n separator, switch phase to BODY. False if rejected
+    void InjectContentLength();      // Writes the fixed-width CL header line, saves 'clOffset_'
 
     // Response-contract enforcement. A handler that violates the build rules (write after commit,
     // body on a bodyless status, header after body, etc.) does not get its bad output forwarded.
@@ -113,6 +114,7 @@ private:
 private:
     inline void Append(const char* data, std::uint32_t len)
     {
+        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage): rwBuffer_ always set by CoreEngine first
         rwBuffer_->AppendWriteData(data, len, networkConfig_.sendBufferIncSize, networkConfig_.maxSendBufferSize);
     }
 
@@ -130,6 +132,10 @@ private:
     bool aborted_ = false;            // A contract violation already replaced this with a 500
     std::size_t clOffset_ = 0;        // Offset of CL value field in rwBuffer
     std::size_t bodyStartOffset_ = 0; // Offset where body data begins
+
+    // End of the status line + any WritePersistentHeader calls so far. AbortWithError truncates
+    // back to here instead of a full Reset(), so persistent headers survive a forced-error rebuild
+    std::size_t persistentHeadersEndOffset_ = 0;
 
     std::string filePath_;           // When bodyKind_ == FILE
     Shared::StreamGenerator stream_; // When bodyKind_ == STREAM

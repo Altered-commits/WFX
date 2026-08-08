@@ -6,8 +6,8 @@
 
 #include "route_trie.hpp"
 #include "shared/abis/constants.hpp"
+#include <array>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace WFX::Http {
@@ -38,6 +38,10 @@ public:
     const TrieNode* RegisterRoute(Shared::HttpMethod method, std::string_view path, Shared::RouteCallback handler);
     const TrieNode* MatchRoute(Shared::HttpMethod method, std::string_view path, PathSegments& outParams) const;
 
+    // Every method with a route registered at 'path', for OPTIONS/Allow: and CORS preflight.
+    // Not on the hot path, so probing each method's trie here is fine
+    std::vector<Shared::HttpMethod> MethodsAt(std::string_view path) const;
+
     void PushRouteGroup(std::string_view prefix);
     void PopRouteGroup();
 
@@ -56,8 +60,11 @@ public:
     }
 
 private:
-    RouteTrie getRoutes_;
-    RouteTrie postRoutes_;
+    // GET..OPTIONS, contiguous at enum values 0-6 in Shared::HttpMethod. CONNECT/TRACE/UNKNOWN
+    // are not registerable routes
+    static constexpr std::size_t ROUTABLE_METHOD_COUNT = 7;
+
+    std::array<RouteTrie, ROUTABLE_METHOD_COUNT> routesByMethod_;
 
     // Indexed by TrieNode::metricsIdx
     std::vector<RouteIdentity> identities_;

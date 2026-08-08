@@ -42,6 +42,20 @@ max_connections_per_ip       = 100000     # = max_connections: single-IP siege m
 max_request_burst_per_ip     = 100000000  # Effectively off for localhost siege
 max_requests_per_ip_per_sec  = 100000000  # Effectively off for localhost siege
 
+# One origin plus credentials so the credentials-header and origin-echo paths are both live;
+# allowed_headers empty so the reflect-Access-Control-Request-Headers branch runs; exposed_headers
+# non-empty so the static-list branch runs too. Between this and query params, the two config
+# fields never exercised here (wildcardOrigin, "*" + allow_credentials rejection) are load-time-
+# only and covered by reading config.cpp, not something a live request can reach.
+[CORS]
+enabled           = true
+allowed_origins   = ["https://allowed.example", "https://second.example"]
+allowed_methods   = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+allowed_headers   = []
+exposed_headers   = ["X-Exposed-Data"]
+allow_credentials = true
+max_age           = 300
+
 [SSL]
 cert_path                   = "..."           # Path to the server certificate (PEM format)
 key_path                    = "..."           # Path to the private key corresponding to the certificate

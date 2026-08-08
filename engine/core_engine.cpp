@@ -182,6 +182,12 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
                     break;
             }
 
+            // Matched-origin requests get their CORS headers persisted here so they still survive
+            // a later 404 or handler error. Preflight requests are fully answered here too, before
+            // routing ever sees them.
+            if(HandleCors(ctx))
+                goto __HandleResponse;
+
             // Public file shortcut
             if(reqInfo.path.starts_with("/public/")) {
                 const std::string_view relativePath = reqInfo.path.substr(7);
@@ -194,6 +200,9 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
             {
                 auto node = router_.MatchRoute(reqInfo.method, reqInfo.path, reqInfo.pathSegments);
                 if(!node) {
+                    if(HandleGenericOptions(ctx))
+                        goto __HandleResponse;
+
                     HandleError(ctx, HttpStatus::NOT_FOUND, "404: Route not found :(");
                     goto __HandleResponse;
                 }
@@ -473,6 +482,86 @@ void CoreEngine::HandleClose(ClientCtx* ctx)
 
     if(ctx->rateLimiterAcquired)
         requestRateLimiter_.Release(ctx->connInfo);
+}
+
+bool CoreEngine::HandleCors(ClientCtx* ctx)
+{
+    auto& cors = config_.corsConfig;
+    if(!cors.enabled)
+        return false;
+
+    auto& req = *ctx->requestInfo;
+    auto& res = *ctx->responseInfo;
+
+    const std::string_view origin = req.headers.GetHeader("Origin");
+    if(origin.empty())
+        return false;
+
+    if(!cors.wildcardOrigin && !cors.allowedOrigins.contains(origin))
+        return false;
+
+    // Caches must not serve one origin's CORS headers back to a different origin
+    res.WritePersistentHeader("Vary", "Origin");
+    res.WritePersistentHeader("Access-Control-Allow-Origin", cors.wildcardOrigin ? std::string_view{"*"} : origin);
+
+    if(cors.allowCredentials)
+        res.WritePersistentHeader("Access-Control-Allow-Credentials", "true");
+
+    if(!cors.exposedHeaders.empty())
+        res.WritePersistentHeader("Access-Control-Expose-Headers", cors.exposedHeaders);
+
+    // Everything past here is preflight-only. Check the method first, cheap enum compare, so the
+    // header table is only ever scanned for actual OPTIONS requests, not every GET/POST/etc.
+    if(req.method != HttpMethod::OPTIONS)
+        return false;
+
+    // A real request never sends this header, only the browser's own preflight OPTIONS does
+    if(req.headers.GetHeader("Access-Control-Request-Method").empty())
+        return false;
+
+    res.WriteHeader("Access-Control-Allow-Methods", cors.allowedMethods);
+
+    if(!cors.allowedHeaders.empty())
+        res.WriteHeader("Access-Control-Allow-Headers", cors.allowedHeaders);
+    else {
+        const std::string_view requestedHeaders = req.headers.GetHeader("Access-Control-Request-Headers");
+        if(!requestedHeaders.empty())
+            res.WriteHeader("Access-Control-Allow-Headers", requestedHeaders);
+    }
+
+    res.WriteHeader("Access-Control-Max-Age", cors.maxAge);
+
+    res.WriteStatus(HttpStatus::NO_CONTENT);
+    res.Commit();
+    return true;
+}
+
+bool CoreEngine::HandleGenericOptions(ClientCtx* ctx)
+{
+    auto& req = *ctx->requestInfo;
+    if(req.method != HttpMethod::OPTIONS)
+        return false;
+
+    auto methods = router_.MethodsAt(req.path);
+    if(methods.empty())
+        return false;
+
+    std::string allow;
+    allow.reserve(methods.size() * 6); // Average method name (~4-5 chars) plus ", " per entry
+
+    for(auto m : methods) {
+        if(!allow.empty())
+            allow += ", ";
+
+        const StringView sv = HttpMethodToStringView(m);
+        allow.append(sv.data, sv.length);
+    }
+
+    auto& res = *ctx->responseInfo;
+    res.WriteHeader("Allow", allow);
+    res.WriteStatus(HttpStatus::NO_CONTENT);
+    res.Commit();
+    return true;
 }
 
 void CoreEngine::HandleUserDLLInjection(const char* dllPath)

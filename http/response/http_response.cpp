@@ -21,12 +21,18 @@ using namespace WFX::Shared;
 using namespace WFX::Utils;
 
 // vvv Constants vvv
+// Fixed-width placeholder patched in place once the real body size is known, see Commit()
 static constexpr std::uint32_t CL_FIELD_WIDTH = 10;
 static constexpr const char* CL_HEADER_PREFIX = "Content-Length: ";
 static constexpr std::uint32_t CL_HEADER_PREFIX_LEN = 16;
 static constexpr const char* CL_PLACEHOLDER = "0000000000"; // 10 digits
 static constexpr const char* CL_ZERO = "Content-Length: 0\r\n";
 static constexpr std::uint32_t CL_ZERO_LEN = 19;
+
+// Fixed offset of the status code: "HTTP/1.1 "/"HTTP/1.0 " are both 9 bytes
+// reason-phrase left empty, RFC 7230 3.1.2
+static constexpr std::size_t STATUS_CODE_OFFSET = 9;
+static constexpr const char* STATUS_LINE_PLACEHOLDER = "200 \r\n";
 
 // vvv Static helpers vvv
 static bool HasCRLFOrNull(std::string_view s) noexcept
@@ -89,6 +95,7 @@ void HttpResponse::Reset()
     status_ = HttpStatus::OK;
     clOffset_ = 0;
     bodyStartOffset_ = 0;
+    persistentHeadersEndOffset_ = 0;
     clNeeded_ = false;
     aborted_ = false;
 
@@ -99,7 +106,27 @@ void HttpResponse::Reset()
 // vvv Public Error API vvv
 void HttpResponse::AbortWithError(HttpStatus status, std::string_view message)
 {
-    Reset();
+    if(bodyKind_ == BodyKind::STREAM) {
+        if(stream_.ctx && stream_.destroy)
+            stream_.destroy(stream_.ctx);
+
+        stream_ = {};
+    }
+
+    // Unlike Reset(), truncates back to the status line + any persistent headers (CORS, etc.)
+    // instead of wiping everything: SendFile's auto-404 and other AbortWithError callers still
+    // need those on the response they're about to rebuild
+    if(rwBuffer_)
+        rwBuffer_->GetWriteMeta()->dataLength = persistentHeadersEndOffset_;
+
+    phase_ = (persistentHeadersEndOffset_ > 0) ? ResponsePhase::STATUS : ResponsePhase::FRESH;
+    bodyKind_ = BodyKind::NONE;
+    status_ = HttpStatus::OK;
+    clOffset_ = 0;
+    bodyStartOffset_ = 0;
+    clNeeded_ = false;
+    aborted_ = false;
+
     WriteStatus(status);
     SendText(message);
 }
@@ -131,17 +158,22 @@ bool HttpResponse::RejectIfCommitted(const char* caller)
     return true;
 }
 
-void HttpResponse::EnsureStatusWritten()
+void HttpResponse::EnsureStatusLineReserved()
 {
     if(phase_ != ResponsePhase::FRESH)
         return;
 
-    WriteStatus(status_);
+    Append("HTTP/1.", 7);
+    Append(version_ == HttpVersion::HTTP_1_1 ? "1 " : "0 ", 2);
+    Append(STATUS_LINE_PLACEHOLDER, 6);
+
+    phase_ = ResponsePhase::STATUS;
+    persistentHeadersEndOffset_ = rwBuffer_->GetWriteMeta()->dataLength;
 }
 
 void HttpResponse::EnsureHeadersOpen()
 {
-    EnsureStatusWritten();
+    EnsureStatusLineReserved();
 
     // Inject Connection header exactly once, right after status line
     if(phase_ == ResponsePhase::STATUS) {
@@ -193,29 +225,60 @@ void HttpResponse::WriteStatus(HttpStatus code)
     if(RejectIfCommitted("WriteStatus"))
         return;
 
-    if(phase_ != ResponsePhase::FRESH) {
-        AbortContractViolation("WriteStatus() called after the status/headers were already written");
+    if(phase_ >= ResponsePhase::BODY) {
+        AbortContractViolation("WriteStatus() called after the body already started");
         return;
     }
 
+    EnsureStatusLineReserved(); // no-op if already reserved
+
     status_ = code;
 
-    Append("HTTP/1.", 7);
-    Append(version_ == HttpVersion::HTTP_1_1 ? "1 " : "0 ", 2);
-
     const std::uint16_t c = static_cast<std::uint16_t>(code);
-    char cs[4];
+    char cs[3];
     cs[0] = static_cast<char>('0' + c / 100);
     cs[1] = static_cast<char>('0' + (c / 10) % 10);
     cs[2] = static_cast<char>('0' + c % 10);
-    cs[3] = ' ';
-    Append(cs, 4);
 
-    const StringView reason = StringView::FromCString(HttpStatusToReason(code));
-    Append(reason.data, static_cast<std::uint32_t>(reason.length));
+    // Patch the 3-digit code in place, same technique Commit() uses for Content-Length
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage): rwBuffer_ always set by CoreEngine first
+    char* base = rwBuffer_->GetWriteData();
+    if(base)
+        std::memcpy(base + STATUS_CODE_OFFSET, cs, 3);
+}
+
+void HttpResponse::WritePersistentHeader(std::string_view key, std::string_view value)
+{
+    if(RejectIfCommitted("WritePersistentHeader"))
+        return;
+
+    if(phase_ >= ResponsePhase::HEADERS) {
+        AbortContractViolation("WritePersistentHeader() called after regular headers were already written");
+        return;
+    }
+
+    // Engine-owned header, user must not set this
+    if(Utils::StringUtils::InsensitiveStringCompare(key, "connection")) {
+        AbortContractViolation("'Connection' header is engine-owned and must not be set manually");
+        return;
+    }
+
+    // CR/LF/NUL in either the name or value would let a caller smuggle extra headers or split the
+    // response (CWE-113). Reject outright rather than writing attacker-controlled bytes straight
+    // onto the wire.
+    if(HasCRLFOrNull(key) || HasCRLFOrNull(value)) {
+        AbortContractViolation("WritePersistentHeader() key/value must not contain CR, LF, or NUL bytes");
+        return;
+    }
+
+    EnsureStatusLineReserved(); // no-op if already reserved
+
+    Append(key.data(), static_cast<std::uint32_t>(key.size()));
+    Append(": ", 2);
+    Append(value.data(), static_cast<std::uint32_t>(value.size()));
     Append("\r\n", 2);
 
-    phase_ = ResponsePhase::STATUS;
+    persistentHeadersEndOffset_ = rwBuffer_->GetWriteMeta()->dataLength;
 }
 
 void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
@@ -229,7 +292,6 @@ void HttpResponse::WriteHeader(std::string_view key, std::string_view value)
     }
 
     // Engine-owned header, user must not set this
-    // TODO: Think if we should also block Content-Length and Transfer-Encoding key as well
     if(Utils::StringUtils::InsensitiveStringCompare(key, "connection")) {
         AbortContractViolation("'Connection' header is engine-owned and must not be set manually");
         return;

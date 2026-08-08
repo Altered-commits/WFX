@@ -7,6 +7,7 @@
 #include "shared/utils/detection_macro.hpp"
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace WFX::Core {
@@ -70,6 +71,32 @@ struct IPConfig {
     // CIDR blocks allowed to set 'realIpHeader'. Empty means nothing matches, so the header is
     // never honored even if 'realIpHeader' is set (fails safe by construction).
     std::vector<std::string> trustedProxies;
+};
+
+// Hashes a string_view the same way its equivalent std::string would, so allowedOrigins below can
+// be looked up with the request's Origin header directly, no temporary std::string per lookup
+struct TransparentStringHash {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view sv) const noexcept
+    {
+        return std::hash<std::string_view>{}(sv);
+    }
+};
+
+// Every field is the final, ready-to-write-on-the-wire form. See the ExtractCors* helpers in
+// config_helper.hpp for where the raw wfx.toml values get turned into these (origins split off "*"
+// into wildcardOrigin, header lists joined into a single comma-separated string, max_age stringified)
+struct CORSConfig {
+    bool enabled = false;
+    bool allowCredentials = false;
+    bool wildcardOrigin = false; // "*" in allowed_origins, rejected at load time if allowCredentials is also true
+
+    std::unordered_set<std::string, TransparentStringHash, std::equal_to<>> allowedOrigins; // "*" filtered out above
+
+    std::string allowedMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+    std::string allowedHeaders; // Empty means reflect the preflight's Access-Control-Request-Headers
+    std::string exposedHeaders; // Empty omits the header entirely
+    std::string maxAge = "600"; // Browsers cap this regardless (Chrome 7200s, Firefox 86400s, Safari 300s)
 };
 
 struct SSLConfig {
@@ -148,6 +175,7 @@ public: // Main storage space for configurations
     NetworkConfig networkConfig;
     ENVConfig envConfig;
     IPConfig ipConfig;
+    CORSConfig corsConfig;
     SSLConfig sslConfig;
     OSSpecificConfig osSpecificConfig;
     LoggingConfig loggingConfig;

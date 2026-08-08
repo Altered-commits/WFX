@@ -4,10 +4,9 @@
 #ifndef WFX_CONFIG_HELPERS_HPP
 #define WFX_CONFIG_HELPERS_HPP
 
+#include "config.hpp"
 #include "utils/diagnostics/logger.hpp"
 #include <toml++/toml.hpp>
-#include <string>
-#include <vector>
 
 namespace WFX::Core::ConfigHelpers {
 
@@ -83,6 +82,50 @@ inline void ExtractStringArray(const toml::table& tbl, const char* section, cons
     }
 
     target = std::move(parsed);
+}
+
+inline void ExtractCors(const toml::table& tbl, CORSConfig& cors)
+{
+    ExtractValue(tbl, "CORS", "enabled", cors.enabled);
+    ExtractValue(tbl, "CORS", "allow_credentials", cors.allowCredentials);
+
+    std::vector<std::string> rawOrigins;
+    ExtractStringArray(tbl, "CORS", "allowed_origins", rawOrigins);
+    for(auto& origin : rawOrigins) {
+        if(origin == "*")
+            cors.wildcardOrigin = true;
+        else
+            cors.allowedOrigins.insert(std::move(origin));
+    }
+
+    ExtractValue(tbl, "CORS", "allowed_methods", cors.allowedMethods);
+
+    auto joinCsv = [](const std::vector<std::string>& items) {
+        std::string joined;
+        for(const auto& item : items) {
+            if(!joined.empty())
+                joined += ", ";
+            joined += item;
+        }
+        return joined;
+    };
+
+    std::vector<std::string> rawAllowedHeaders;
+    ExtractStringArray(tbl, "CORS", "allowed_headers", rawAllowedHeaders);
+    cors.allowedHeaders = joinCsv(rawAllowedHeaders);
+
+    std::vector<std::string> rawExposedHeaders;
+    ExtractStringArray(tbl, "CORS", "exposed_headers", rawExposedHeaders);
+    cors.exposedHeaders = joinCsv(rawExposedHeaders);
+
+    std::uint32_t maxAgeSeconds = 600;
+    ExtractValue(tbl, "CORS", "max_age", maxAgeSeconds);
+    cors.maxAge = std::to_string(maxAgeSeconds);
+
+    // Browsers refuse "*" combined with credentials, catch it at load time
+    if(cors.allowCredentials && cors.wildcardOrigin)
+        Utils::GetLogger().Fatal("[Config]: [CORS] allow_credentials = true cannot be combined with a '*' entry "
+                                 "in allowed_origins, browsers refuse that combination. List exact origins instead");
 }
 
 } // namespace WFX::Core::ConfigHelpers

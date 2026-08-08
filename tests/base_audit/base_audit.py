@@ -14,6 +14,10 @@
 #              validator bounds, decoded-value-into-header injection
 #   query      Request::GetQueryParams(): key lookup, raw (undecoded) values, duplicate
 #              keys, and query values surviving byte-for-byte through path normalization
+#   cors       CORS (HandleCors) and the generic OPTIONS Allow: fallback (HandleGenericOptions):
+#              origin allowlist matching, credentials, preflight, persistent-header survival
+#              across a 404, and real misconfiguration classes (origin reflection, trusted null
+#              origin, subdomain/prefix/suffix bypass, reflected-origin-plus-credentials)
 #   chaos      worker kills, SIGSTOP/SIGCONT, kill under mixed load
 #
 # Usage:
@@ -1550,6 +1554,226 @@ def phase_query(ctx):
 
     ctx.phase("query").record(findings, security=("QUERY_TRAVERSAL_MANGLED",), vectors=checks)
 
+# CORS
+#
+# CoreEngine::HandleCors plus CoreEngine::HandleGenericOptions (engine/core_engine.cpp), tested
+# against app/wfx.toml's real [CORS] section: two allowed origins, credentials on, allowed_headers
+# empty (exercises the reflect-the-request branch), exposed_headers set (exercises the static-list
+# branch). wildcardOrigin and the "*"+credentials load-time rejection aren't reachable from a live
+# request (they're config-load-only), so they're not covered here.
+#
+# The check list is grounded in real CORS misconfiguration classes, not just feature coverage:
+#   - basic origin reflection (PortSwigger "CORS vulnerability with basic origin reflection"):
+#     an unlisted Origin must get zero CORS headers, never an echoed Access-Control-Allow-Origin
+#   - trusted null origin (CVE-2019-9580, StackStorm): "Origin: null" must not be implicitly
+#     trusted just because it looks like a special case
+#   - subdomain/prefix/suffix bypass (PortSwigger's "trusted subdomains" lab class): WFX matches
+#     origins by exact string only, so near-miss origins (scheme, port, subdomain, case) must all
+#     fail closed rather than fuzzy-match
+#   - reflected-origin-plus-credentials (CVE-2026-54290, Hono CORS middleware): credentials must
+#     never appear alongside an origin that was not actually matched against the allowlist
+#   - persistent-header survival: CORS headers are written via WritePersistentHeader specifically
+#     so they outlive a later AbortWithError (404, etc.), asserted directly here
+def _cors_headers(host, port, method, path, headers=None, rtimeout=3.0):
+    st, raw = req(host, port, method, path, headers=headers, rtimeout=rtimeout)
+    _, hdrs, body = parse_hdrs(raw)
+    return st, hdrs, body
+
+def _h(hdrs, name):
+    vals = hdrs.get(name.lower().encode())
+    return vals[0].decode(errors="replace") if vals else None
+
+def phase_cors(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    findings = []
+    checks = 0
+
+    def check(name, cond, detail="", tag="CORS_FAIL"):
+        nonlocal checks
+        checks += 1
+
+        if cond:
+            pr.ok()
+        else:
+            pr.bad()
+            findings.append((tag, "%s: %s" % (name, detail)))
+
+    term.log("cors", "started")
+
+    # Simple (non-preflight) requests: the matched origin is echoed back exactly, every other
+    # config-driven header appears, and the handler's own headers still work normally alongside it
+    with term.progress("cors", "simple request, matched origin") as pr:
+        for origin in ("https://allowed.example", "https://second.example"):
+            st, hdrs, body = _cors_headers(host, port, "GET", "/health", headers={"Origin": origin})
+            check("origin echoed exactly: %s" % origin,
+                  st == 200 and _h(hdrs, "access-control-allow-origin") == origin,
+                  "status=%s aco=%r" % (st, _h(hdrs, "access-control-allow-origin")))
+            check("credentials true: %s" % origin,
+                  _h(hdrs, "access-control-allow-credentials") == "true",
+                  "%r" % _h(hdrs, "access-control-allow-credentials"))
+            check("vary: origin present: %s" % origin, _h(hdrs, "vary") == "Origin", "%r" % _h(hdrs, "vary"))
+            check("expose-headers static list: %s" % origin,
+                  _h(hdrs, "access-control-expose-headers") == "X-Exposed-Data",
+                  "%r" % _h(hdrs, "access-control-expose-headers"))
+            check("preflight-only headers absent on a simple request: %s" % origin,
+                  _h(hdrs, "access-control-allow-methods") is None
+                  and _h(hdrs, "access-control-allow-headers") is None
+                  and _h(hdrs, "access-control-max-age") is None,
+                  "methods=%r headers=%r max-age=%r" % (_h(hdrs, "access-control-allow-methods"),
+                                                        _h(hdrs, "access-control-allow-headers"),
+                                                        _h(hdrs, "access-control-max-age")))
+            check("handler's own headers untouched: %s" % origin,
+                  body == b"ok" and _h(hdrs, "content-type") == "text/plain",
+                  "body=%r content-type=%r" % (body, _h(hdrs, "content-type")))
+
+    # Basic origin reflection (real vuln class): an origin NOT on the allowlist must get nothing,
+    # not an echo, and the request itself must still succeed normally, CORS is enforced by the
+    # browser, the server just chooses whether to hand out the headers that let it read the result
+    with term.progress("cors", "unmatched origin rejected") as pr:
+        for name, origin in [
+            ("attacker domain",                   "https://evil.attacker.example"),
+            ("null origin (CVE-2019-9580 class)",  "null"),
+            ("suffix bypass",                      "https://allowed.example.evil.com"),
+            ("prefix bypass",                      "https://evilallowed.example"),
+            ("scheme mismatch",                    "http://allowed.example"),
+            ("port mismatch",                      "https://allowed.example:8443"),
+            ("case mismatch",                      "https://ALLOWED.EXAMPLE"),
+        ]:
+            st, hdrs, body = _cors_headers(host, port, "GET", "/health", headers={"Origin": origin})
+            no_cors = (_h(hdrs, "access-control-allow-origin") is None
+                       and _h(hdrs, "access-control-allow-credentials") is None
+                       and _h(hdrs, "vary") is None
+                       and _h(hdrs, "access-control-expose-headers") is None)
+            check("no CORS headers leak: %s (%s)" % (name, origin), st == 200 and no_cors and body == b"ok",
+                  "status=%s body=%r aco=%r acac=%r" % (st, body, _h(hdrs, "access-control-allow-origin"),
+                                                        _h(hdrs, "access-control-allow-credentials")),
+                  tag="CORS_ORIGIN_LEAK")
+
+    # No Origin header at all: a non-browser client (curl, server-to-server) is unaffected
+    with term.progress("cors", "no origin header") as pr:
+        st, hdrs, body = _cors_headers(host, port, "GET", "/health")
+        check("plain request unaffected",
+              st == 200 and body == b"ok" and _h(hdrs, "access-control-allow-origin") is None,
+              "status=%s body=%r" % (st, body))
+
+    # Persistent headers survive AbortWithError: matched-origin CORS headers must still be on a
+    # 404, not just successful responses, this is the entire reason WritePersistentHeader exists
+    with term.progress("cors", "persistent headers survive 404") as pr:
+        st, hdrs, body = _cors_headers(host, port, "GET", "/definitely/not/a/route",
+                                       headers={"Origin": "https://allowed.example"})
+        check("CORS headers present on a 404",
+              st == 404 and _h(hdrs, "access-control-allow-origin") == "https://allowed.example"
+              and _h(hdrs, "access-control-allow-credentials") == "true"
+              and _h(hdrs, "vary") == "Origin",
+              "status=%s aco=%r" % (st, _h(hdrs, "access-control-allow-origin")))
+
+    # Real preflight: Origin + Access-Control-Request-Method both present
+    with term.progress("cors", "preflight, matched origin") as pr:
+        st, hdrs, body = _cors_headers(host, port, "OPTIONS", "/health", headers={
+            "Origin": "https://allowed.example",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "X-Custom-Header",
+        })
+        check("204 no body", st == 204 and body == b"", "status=%s body=%r" % (st, body))
+        check("allow-methods is the static configured list",
+              _h(hdrs, "access-control-allow-methods") == "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+              "%r" % _h(hdrs, "access-control-allow-methods"))
+        check("allow-headers reflects the request (allowed_headers is empty in config)",
+              _h(hdrs, "access-control-allow-headers") == "X-Custom-Header",
+              "%r" % _h(hdrs, "access-control-allow-headers"))
+        check("max-age matches config", _h(hdrs, "access-control-max-age") == "300",
+              "%r" % _h(hdrs, "access-control-max-age"))
+        check("origin/credentials/vary/expose still present on preflight",
+              _h(hdrs, "access-control-allow-origin") == "https://allowed.example"
+              and _h(hdrs, "access-control-allow-credentials") == "true"
+              and _h(hdrs, "vary") == "Origin"
+              and _h(hdrs, "access-control-expose-headers") == "X-Exposed-Data",
+              "aco=%r acac=%r vary=%r expose=%r" % (_h(hdrs, "access-control-allow-origin"),
+                                                    _h(hdrs, "access-control-allow-credentials"),
+                                                    _h(hdrs, "vary"), _h(hdrs, "access-control-expose-headers")))
+
+        # A preflight for a completely unregistered path still gets a full answer: CORS validates
+        # the origin's cross-origin intent, not whether the eventual real request has anywhere to
+        # land, matches how Flask-CORS/Express cors both behave
+        st2, hdrs2, _ = _cors_headers(host, port, "OPTIONS", "/no/such/route/at/all", headers={
+            "Origin": "https://allowed.example",
+            "Access-Control-Request-Method": "GET",
+        })
+        check("preflight answered even for a path with no real route",
+              st2 == 204 and _h(hdrs2, "access-control-allow-origin") == "https://allowed.example",
+              "status=%s aco=%r" % (st2, _h(hdrs2, "access-control-allow-origin")))
+
+    # Preflight omitting Access-Control-Request-Headers: the allow-headers response header must
+    # be omitted entirely, not sent empty
+    with term.progress("cors", "preflight without requested headers") as pr:
+        st, hdrs, _ = _cors_headers(host, port, "OPTIONS", "/health", headers={
+            "Origin": "https://allowed.example",
+            "Access-Control-Request-Method": "GET",
+        })
+        check("allow-headers omitted, not empty",
+              st == 204 and _h(hdrs, "access-control-allow-headers") is None,
+              "%r" % _h(hdrs, "access-control-allow-headers"))
+
+    # Preflight-shaped request from an origin NOT on the allowlist: must not be answered as CORS
+    # at all. It still falls through to the generic OPTIONS/Allow: fallback since /health has a
+    # real GET route, but it must carry zero CORS headers
+    with term.progress("cors", "preflight-shaped request, unmatched origin") as pr:
+        st, hdrs, _ = _cors_headers(host, port, "OPTIONS", "/health", headers={
+            "Origin": "https://evil.attacker.example",
+            "Access-Control-Request-Method": "GET",
+        })
+        check("falls through to generic Allow, no CORS headers",
+              st == 204 and _h(hdrs, "allow") == "GET"
+              and _h(hdrs, "access-control-allow-origin") is None
+              and _h(hdrs, "access-control-allow-methods") is None,
+              "status=%s allow=%r aco=%r" % (st, _h(hdrs, "allow"), _h(hdrs, "access-control-allow-origin")),
+              tag="CORS_ORIGIN_LEAK")
+
+    # Generic OPTIONS (CoreEngine::HandleGenericOptions): no Origin at all, just a bare capability
+    # probe against a path with several real methods and no explicit OPTIONS handler
+    with term.progress("cors", "generic OPTIONS, no CORS involved") as pr:
+        st, hdrs, body = _cors_headers(host, port, "OPTIONS", "/cors/multi")
+        check("Allow lists exactly the registered methods",
+              st == 204 and _h(hdrs, "allow") == "GET, POST, PUT" and body == b"",
+              "status=%s allow=%r body=%r" % (st, _h(hdrs, "allow"), body))
+        check("no CORS headers on a plain capability probe",
+              _h(hdrs, "access-control-allow-origin") is None,
+              "%r" % _h(hdrs, "access-control-allow-origin"))
+
+        # A real preflight on the same path uses the CORS-configured method list, not the route's
+        # own registered methods, the two mechanisms are deliberately independent
+        st2, hdrs2, _ = _cors_headers(host, port, "OPTIONS", "/cors/multi", headers={
+            "Origin": "https://allowed.example",
+            "Access-Control-Request-Method": "POST",
+        })
+        check("preflight on the same path uses the CORS config list, not the route's methods",
+              st2 == 204 and _h(hdrs2, "access-control-allow-methods") == "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+              "%r" % _h(hdrs2, "access-control-allow-methods"))
+
+    # OPTIONS on a path with no route under any method at all: plain 404 either way
+    with term.progress("cors", "OPTIONS on a truly nonexistent path") as pr:
+        st, hdrs, _ = _cors_headers(host, port, "OPTIONS", "/no/route/for/any/method")
+        check("plain 404, no Allow header", st == 404 and _h(hdrs, "allow") is None,
+              "status=%s allow=%r" % (st, _h(hdrs, "allow")))
+
+    # Oversized bogus Origin: must fail the set lookup cleanly, no crash, no partial match
+    with term.progress("cors", "oversized origin value") as pr:
+        big_origin = "https://" + ("x" * 2000) + ".example"
+        st, hdrs, body = _cors_headers(host, port, "GET", "/health", headers={"Origin": big_origin},
+                                       rtimeout=4.0)
+        check("large unmatched origin handled cleanly",
+              st == 200 and body == b"ok" and _h(hdrs, "access-control-allow-origin") is None,
+              "status=%s body_len=%d" % (st, len(body)))
+
+    if not common.health(host, port, 4.0):
+        findings.append(("SERVER_DEAD", "server unreachable after cors phase"))
+
+    nf = len(findings)
+    term.log("cors", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
+
+    ctx.phase("cors").record(findings, security=("CORS_ORIGIN_LEAK",), vectors=checks)
+
 # Phase 5: METRICS
 #
 # The per-route metrics table: identity plumbing (path + method attached at read
@@ -1951,6 +2175,7 @@ class BaseAudit(common.Suite):
         "features": phase_features,
         "forms":    phase_forms,
         "query":    phase_query,
+        "cors":     phase_cors,
         "metrics":  phase_metrics,
         "soak":     phase_soak,
         "chaos":    phase_chaos,
