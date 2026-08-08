@@ -4,7 +4,6 @@
 #include "router.hpp"
 #include "config/config.hpp"
 #include "utils/diagnostics/logger.hpp"
-#include "shared/utils/compiler_macro.hpp"
 
 namespace WFX::Http {
 
@@ -34,22 +33,11 @@ const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, 
     if(path.empty() || path[0] != '/')
         GetLogger().Fatal("[Router]: Path is either empty or does not start with '/'.");
 
-    TrieNode* node = nullptr;
+    const auto methodIdx = static_cast<std::uint8_t>(method);
+    if(methodIdx >= ROUTABLE_METHOD_COUNT)
+        GetLogger().Fatal("[Router]: Unsupported HTTP method found in RegisterRoute.");
 
-    switch(method) {
-        case HttpMethod::GET:
-            node = getRoutes_.Insert(path, handler);
-            break;
-
-        case HttpMethod::POST:
-            node = postRoutes_.Insert(path, handler);
-            break;
-
-        default:
-            GetLogger().Fatal(
-                "[Router]: Unsupported HTTP method found in RegisterRoute. Use HttpMethod::GET or HttpMethod::POST.");
-            WFX_UNREACHABLE;
-    }
+    TrieNode* node = routesByMethod_[methodIdx].Insert(path, handler);
 
     // Re-registering the same method and path lands on the same node, which already owns an index
     if(node->metricsIdx == METRICS_IDX_UNASSIGNED) {
@@ -72,17 +60,29 @@ const TrieNode* Router::RegisterRoute(HttpMethod method, std::string_view path, 
 
 const TrieNode* Router::MatchRoute(HttpMethod method, std::string_view path, PathSegments& outSegments) const
 {
+    const auto methodIdx = static_cast<std::uint8_t>(method);
+    if(methodIdx >= ROUTABLE_METHOD_COUNT)
+        return nullptr;
+
     // Strip query string before matching
     const std::string_view queryStrippedPath = path.substr(0, path.find('?'));
+    return routesByMethod_[methodIdx].Match(queryStrippedPath, outSegments);
+}
 
-    switch(method) {
-        case HttpMethod::GET:
-            return getRoutes_.Match(queryStrippedPath, outSegments);
-        case HttpMethod::POST:
-            return postRoutes_.Match(queryStrippedPath, outSegments);
-        default:
-            return nullptr;
+std::vector<HttpMethod> Router::MethodsAt(std::string_view path) const
+{
+    const std::string_view queryStrippedPath = path.substr(0, path.find('?'));
+
+    std::vector<HttpMethod> methods;
+    PathSegments scratch;
+
+    for(std::size_t i = 0; i < ROUTABLE_METHOD_COUNT; ++i) {
+        scratch.clear();
+        if(routesByMethod_[i].Match(queryStrippedPath, scratch))
+            methods.push_back(static_cast<HttpMethod>(i));
     }
+
+    return methods;
 }
 
 void Router::PushRouteGroup(std::string_view prefix)
@@ -90,8 +90,8 @@ void Router::PushRouteGroup(std::string_view prefix)
     groupLenStack_.push_back(groupPrefix_.size());
     JoinPath(groupPrefix_, prefix);
 
-    getRoutes_.PushGroup(prefix);
-    postRoutes_.PushGroup(prefix);
+    for(auto& trie : routesByMethod_)
+        trie.PushGroup(prefix);
 }
 
 void Router::PopRouteGroup()
@@ -101,8 +101,8 @@ void Router::PopRouteGroup()
         groupLenStack_.pop_back();
     }
 
-    getRoutes_.PopGroup();
-    postRoutes_.PopGroup();
+    for(auto& trie : routesByMethod_)
+        trie.PopGroup();
 }
 
 } // namespace WFX::Http

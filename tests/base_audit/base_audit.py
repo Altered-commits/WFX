@@ -4,17 +4,7 @@
 #
 # WFX base audit
 #
-# Phases:
-#   security   path traversal, CRLF/response-splitting, info leakage,
-#              header attacks, contract violations
-#   protocol   malformed and abusive request vectors: server must survive without crashing
-#   features   every route verified: correct status, body, headers; plus buffer-relocation
-#              integrity, exact body/header size limits, and byte-at-a-time drip sends
-#   forms      WFX::Form: Content-Type matching, field structure, percent-decoding,
-#              validator bounds, decoded-value-into-header injection
-#   query      Request::GetQueryParams(): key lookup, raw (undecoded) values, duplicate
-#              keys, and query values surviving byte-for-byte through path normalization
-#   chaos      worker kills, SIGSTOP/SIGCONT, kill under mixed load
+# See README.md for what each phase proves.
 #
 # Usage:
 #   python3 base_audit.py                   # all phases
@@ -709,11 +699,11 @@ def _verify_all_routes(host, port):
     lock = threading.Lock()
 
     def _check(method, path, hdrs, body, expect_st, needle, hdr_check):
-        # /health back up only means the master accepted a connection again, not that every-
-        # -respawned worker slot has finished re-listening yet. Retry until a real HTTP status-
-        # -comes back, same as _probe(), so a route landing on a still-starting worker isn't a-
-        # -false failure - CONN_ERR (refused), IO_ERR (reset), and a None status (accepted then-
-        # -closed with zero bytes) are all the same "not ready yet" signal, not just CONN_ERR
+        # /health back up only means the master accepted a connection again, not that every
+        # respawned worker slot has finished re-listening yet. Retry until a real HTTP status
+        # comes back, same as _probe(), so a route landing on a still-starting worker isn't a
+        # false failure - CONN_ERR (refused), IO_ERR (reset), and a None status (accepted then
+        # closed with zero bytes) are all the same "not ready yet" signal, not just CONN_ERR
         for attempt in range(3):
             st, raw = req(host, port, method, path, headers=hdrs, body=body,
                           rtimeout=5.0, ctimeout=3.0)
@@ -785,7 +775,7 @@ def _light_flood(host, port, n=8):
         t.start()
     return stop, ts
 
-# Phase 1: SECURITY
+# PHASE: security
 def phase_security(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -930,8 +920,7 @@ def phase_security(ctx):
                                  vectors=stats["trav_url"] + stats["trav_hdr"] + stats["crlf"]
                                          + stats["leak"] + stats["violate_ok"] + stats["violate_bad"])
 
-# Phase 2: PROTOCOL
-# Server must survive every single vector. No assertion on status codes: # 400/500/501 are all fine. Crash = fail
+# PHASE: protocol
 def phase_protocol(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -971,9 +960,7 @@ def phase_protocol(ctx):
 
     ctx.phase("protocol").record(findings, vectors=sent)
 
-# Phase 3: FEATURES
-# Every route verified for correct status, body content, and headers
-# Additional invariant checks beyond simple status
+# PHASE: features
 def phase_features(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -1116,9 +1103,9 @@ def phase_features(ctx):
         # /echo-full under forced buffer relocation: request.Path()/GetHeader()/Body() are
         # all string_views into the connection's read buffer - a body big enough to outgrow
         # the initial recv buffer (recv_buffer_incr=8192) forces RWBuffer to relocate
-        # mid-parse (see PrepareForBody in http/parser/http_parser.cpp). This regression-
-        # tests that every one of those views still points at the right bytes afterward,
-        # not just the body - a previous bug here caused false 404s and corrupted routing
+        # mid-parse (see PrepareForBody in http/parser/http_parser.cpp). This test proves
+        # every one of those views still points at the right bytes afterward, not just the
+        # body - a previous bug here caused false 404s and corrupted routing
         with term.progress("features", "realloc:integrity") as pr:
             marker = "REALLOC-MARK-%d" % random.randint(100000, 999999)
             big_body = b"R" * 50000  # > recv_buffer_incr (8192), < max_body_size (65536)
@@ -1218,7 +1205,6 @@ def phase_features(ctx):
     term.log("features", _green("all clear") if nf == 0 else _red("%d failure(s)" % nf))
     ctx.phase("features").record(findings, vectors=len(ROUTE_CHECKS))
 
-# Phase 4: FORMS
 def _form(host, port, path, content_type, body, rtimeout=3.0):
     hdrs = {} if content_type is None else {"Content-Type": content_type}
     return req(host, port, "POST", path, headers=hdrs, body=body, rtimeout=rtimeout)
@@ -1230,6 +1216,7 @@ def _form_json(host, port, path, content_type, body, rtimeout=3.0):
     except Exception:
         return st, None
 
+# PHASE: forms
 def phase_forms(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -1413,15 +1400,6 @@ def phase_forms(ctx):
     ctx.phase("forms").record(findings, security=("FORM_HEADER_INJECT", "FORM_DECODE_BYPASS"),
                               vectors=checks)
 
-# QUERY PARAMS
-#
-# Request::GetQueryParams() / QueryParams::Get(), added alongside a real parser fix: the request
-# line used to be normalized (slash-collapsing, '.'/'..' resolution) as one blob covering BOTH the
-# path and the query string, so a query value shaped like a path ("/foo/../bar", "//evil") got
-# silently mangled by traversal-defense logic that was never meant to touch it. The parser now
-# splits the query off before normalizing and reassembles it byte-for-byte untouched afterward,
-# so the traversal-shaped-value cases below are regression tests for that fix, not just new
-# feature coverage.
 def _query_json(host, port, path, rtimeout=3.0):
     st, raw = req(host, port, "GET", path, rtimeout=rtimeout)
     try:
@@ -1429,6 +1407,7 @@ def _query_json(host, port, path, rtimeout=3.0):
     except Exception:
         return st, None
 
+# PHASE: query
 def phase_query(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -1550,16 +1529,207 @@ def phase_query(ctx):
 
     ctx.phase("query").record(findings, security=("QUERY_TRAVERSAL_MANGLED",), vectors=checks)
 
-# Phase 5: METRICS
-#
-# The per-route metrics table: identity plumbing (path + method attached at read
-# time), counters that match driven traffic, status-class bucketing, and - since
-# the audit toml sets [Metrics] latency = true - the route latency histogram.
-#
-# Every assertion is delta-based (snapshot, drive a known count, snapshot again),
-# so earlier phases' traffic and the two-worker aggregation don't matter: only the
-# change caused by this phase's own requests is checked. Runs before chaos, whose
-# worker kills reset a slot's counters mid-flight and would break a delta.
+def _cors_headers(host, port, method, path, headers=None, rtimeout=3.0):
+    st, raw = req(host, port, method, path, headers=headers, rtimeout=rtimeout)
+    _, hdrs, body = parse_hdrs(raw)
+    return st, hdrs, body
+
+def _h(hdrs, name):
+    vals = hdrs.get(name.lower().encode())
+    return vals[0].decode(errors="replace") if vals else None
+
+# PHASE: cors
+def phase_cors(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    findings = []
+    checks = 0
+
+    def check(name, cond, detail="", tag="CORS_FAIL"):
+        nonlocal checks
+        checks += 1
+
+        if cond:
+            pr.ok()
+        else:
+            pr.bad()
+            findings.append((tag, "%s: %s" % (name, detail)))
+
+    term.log("cors", "started")
+
+    # Simple (non-preflight) requests: the matched origin is echoed back exactly, every other
+    # config-driven header appears, and the handler's own headers still work normally alongside it
+    with term.progress("cors", "simple request, matched origin") as pr:
+        for origin in ("https://allowed.example", "https://second.example"):
+            st, hdrs, body = _cors_headers(host, port, "GET", "/health", headers={"Origin": origin})
+            check("origin echoed exactly: %s" % origin,
+                  st == 200 and _h(hdrs, "access-control-allow-origin") == origin,
+                  "status=%s aco=%r" % (st, _h(hdrs, "access-control-allow-origin")))
+            check("credentials true: %s" % origin,
+                  _h(hdrs, "access-control-allow-credentials") == "true",
+                  "%r" % _h(hdrs, "access-control-allow-credentials"))
+            check("vary: origin present: %s" % origin, _h(hdrs, "vary") == "Origin", "%r" % _h(hdrs, "vary"))
+            check("expose-headers static list: %s" % origin,
+                  _h(hdrs, "access-control-expose-headers") == "X-Exposed-Data",
+                  "%r" % _h(hdrs, "access-control-expose-headers"))
+            check("preflight-only headers absent on a simple request: %s" % origin,
+                  _h(hdrs, "access-control-allow-methods") is None
+                  and _h(hdrs, "access-control-allow-headers") is None
+                  and _h(hdrs, "access-control-max-age") is None,
+                  "methods=%r headers=%r max-age=%r" % (_h(hdrs, "access-control-allow-methods"),
+                                                        _h(hdrs, "access-control-allow-headers"),
+                                                        _h(hdrs, "access-control-max-age")))
+            check("handler's own headers untouched: %s" % origin,
+                  body == b"ok" and _h(hdrs, "content-type") == "text/plain",
+                  "body=%r content-type=%r" % (body, _h(hdrs, "content-type")))
+
+    # Basic origin reflection (real vuln class): an origin NOT on the allowlist must get nothing,
+    # not an echo, and the request itself must still succeed normally, CORS is enforced by the
+    # browser, the server just chooses whether to hand out the headers that let it read the result
+    with term.progress("cors", "unmatched origin rejected") as pr:
+        for name, origin in [
+            ("attacker domain",                   "https://evil.attacker.example"),
+            ("null origin (CVE-2019-9580 class)",  "null"),
+            ("suffix bypass",                      "https://allowed.example.evil.com"),
+            ("prefix bypass",                      "https://evilallowed.example"),
+            ("scheme mismatch",                    "http://allowed.example"),
+            ("port mismatch",                      "https://allowed.example:8443"),
+            ("case mismatch",                      "https://ALLOWED.EXAMPLE"),
+        ]:
+            st, hdrs, body = _cors_headers(host, port, "GET", "/health", headers={"Origin": origin})
+            no_cors = (_h(hdrs, "access-control-allow-origin") is None
+                       and _h(hdrs, "access-control-allow-credentials") is None
+                       and _h(hdrs, "vary") is None
+                       and _h(hdrs, "access-control-expose-headers") is None)
+            check("no CORS headers leak: %s (%s)" % (name, origin), st == 200 and no_cors and body == b"ok",
+                  "status=%s body=%r aco=%r acac=%r" % (st, body, _h(hdrs, "access-control-allow-origin"),
+                                                        _h(hdrs, "access-control-allow-credentials")),
+                  tag="CORS_ORIGIN_LEAK")
+
+    # No Origin header at all: a non-browser client (curl, server-to-server) is unaffected
+    with term.progress("cors", "no origin header") as pr:
+        st, hdrs, body = _cors_headers(host, port, "GET", "/health")
+        check("plain request unaffected",
+              st == 200 and body == b"ok" and _h(hdrs, "access-control-allow-origin") is None,
+              "status=%s body=%r" % (st, body))
+
+    # Persistent headers survive AbortWithError: matched-origin CORS headers must still be on a
+    # 404, not just successful responses, this is the entire reason WritePersistentHeader exists
+    with term.progress("cors", "persistent headers survive 404") as pr:
+        st, hdrs, body = _cors_headers(host, port, "GET", "/definitely/not/a/route",
+                                       headers={"Origin": "https://allowed.example"})
+        check("CORS headers present on a 404",
+              st == 404 and _h(hdrs, "access-control-allow-origin") == "https://allowed.example"
+              and _h(hdrs, "access-control-allow-credentials") == "true"
+              and _h(hdrs, "vary") == "Origin",
+              "status=%s aco=%r" % (st, _h(hdrs, "access-control-allow-origin")))
+
+    # Real preflight: Origin + Access-Control-Request-Method both present
+    with term.progress("cors", "preflight, matched origin") as pr:
+        st, hdrs, body = _cors_headers(host, port, "OPTIONS", "/health", headers={
+            "Origin": "https://allowed.example",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "X-Custom-Header",
+        })
+        check("204 no body", st == 204 and body == b"", "status=%s body=%r" % (st, body))
+        check("allow-methods is the static configured list",
+              _h(hdrs, "access-control-allow-methods") == "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+              "%r" % _h(hdrs, "access-control-allow-methods"))
+        check("allow-headers reflects the request (allowed_headers is empty in config)",
+              _h(hdrs, "access-control-allow-headers") == "X-Custom-Header",
+              "%r" % _h(hdrs, "access-control-allow-headers"))
+        check("max-age matches config", _h(hdrs, "access-control-max-age") == "300",
+              "%r" % _h(hdrs, "access-control-max-age"))
+        check("origin/credentials/vary/expose still present on preflight",
+              _h(hdrs, "access-control-allow-origin") == "https://allowed.example"
+              and _h(hdrs, "access-control-allow-credentials") == "true"
+              and _h(hdrs, "vary") == "Origin"
+              and _h(hdrs, "access-control-expose-headers") == "X-Exposed-Data",
+              "aco=%r acac=%r vary=%r expose=%r" % (_h(hdrs, "access-control-allow-origin"),
+                                                    _h(hdrs, "access-control-allow-credentials"),
+                                                    _h(hdrs, "vary"), _h(hdrs, "access-control-expose-headers")))
+
+        # A preflight for a completely unregistered path still gets a full answer: CORS validates
+        # the origin's cross-origin intent, not whether the eventual real request has anywhere to
+        # land, matches how Flask-CORS/Express cors both behave
+        st2, hdrs2, _ = _cors_headers(host, port, "OPTIONS", "/no/such/route/at/all", headers={
+            "Origin": "https://allowed.example",
+            "Access-Control-Request-Method": "GET",
+        })
+        check("preflight answered even for a path with no real route",
+              st2 == 204 and _h(hdrs2, "access-control-allow-origin") == "https://allowed.example",
+              "status=%s aco=%r" % (st2, _h(hdrs2, "access-control-allow-origin")))
+
+    # Preflight omitting Access-Control-Request-Headers: the allow-headers response header must
+    # be omitted entirely, not sent empty
+    with term.progress("cors", "preflight without requested headers") as pr:
+        st, hdrs, _ = _cors_headers(host, port, "OPTIONS", "/health", headers={
+            "Origin": "https://allowed.example",
+            "Access-Control-Request-Method": "GET",
+        })
+        check("allow-headers omitted, not empty",
+              st == 204 and _h(hdrs, "access-control-allow-headers") is None,
+              "%r" % _h(hdrs, "access-control-allow-headers"))
+
+    # Preflight-shaped request from an origin NOT on the allowlist: must not be answered as CORS
+    # at all. It still falls through to the generic OPTIONS/Allow: fallback since /health has a
+    # real GET route, but it must carry zero CORS headers
+    with term.progress("cors", "preflight-shaped request, unmatched origin") as pr:
+        st, hdrs, _ = _cors_headers(host, port, "OPTIONS", "/health", headers={
+            "Origin": "https://evil.attacker.example",
+            "Access-Control-Request-Method": "GET",
+        })
+        check("falls through to generic Allow, no CORS headers",
+              st == 204 and _h(hdrs, "allow") == "GET"
+              and _h(hdrs, "access-control-allow-origin") is None
+              and _h(hdrs, "access-control-allow-methods") is None,
+              "status=%s allow=%r aco=%r" % (st, _h(hdrs, "allow"), _h(hdrs, "access-control-allow-origin")),
+              tag="CORS_ORIGIN_LEAK")
+
+    # Generic OPTIONS (CoreEngine::HandleGenericOptions): no Origin at all, just a bare capability
+    # probe against a path with several real methods and no explicit OPTIONS handler
+    with term.progress("cors", "generic OPTIONS, no CORS involved") as pr:
+        st, hdrs, body = _cors_headers(host, port, "OPTIONS", "/cors/multi")
+        check("Allow lists exactly the registered methods",
+              st == 204 and _h(hdrs, "allow") == "GET, POST, PUT" and body == b"",
+              "status=%s allow=%r body=%r" % (st, _h(hdrs, "allow"), body))
+        check("no CORS headers on a plain capability probe",
+              _h(hdrs, "access-control-allow-origin") is None,
+              "%r" % _h(hdrs, "access-control-allow-origin"))
+
+        # A real preflight on the same path uses the CORS-configured method list, not the route's
+        # own registered methods, the two mechanisms are deliberately independent
+        st2, hdrs2, _ = _cors_headers(host, port, "OPTIONS", "/cors/multi", headers={
+            "Origin": "https://allowed.example",
+            "Access-Control-Request-Method": "POST",
+        })
+        check("preflight on the same path uses the CORS config list, not the route's methods",
+              st2 == 204 and _h(hdrs2, "access-control-allow-methods") == "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+              "%r" % _h(hdrs2, "access-control-allow-methods"))
+
+    # OPTIONS on a path with no route under any method at all: plain 404 either way
+    with term.progress("cors", "OPTIONS on a truly nonexistent path") as pr:
+        st, hdrs, _ = _cors_headers(host, port, "OPTIONS", "/no/route/for/any/method")
+        check("plain 404, no Allow header", st == 404 and _h(hdrs, "allow") is None,
+              "status=%s allow=%r" % (st, _h(hdrs, "allow")))
+
+    # Oversized bogus Origin: must fail the set lookup cleanly, no crash, no partial match
+    with term.progress("cors", "oversized origin value") as pr:
+        big_origin = "https://" + ("x" * 2000) + ".example"
+        st, hdrs, body = _cors_headers(host, port, "GET", "/health", headers={"Origin": big_origin},
+                                       rtimeout=4.0)
+        check("large unmatched origin handled cleanly",
+              st == 200 and body == b"ok" and _h(hdrs, "access-control-allow-origin") is None,
+              "status=%s body_len=%d" % (st, len(body)))
+
+    if not common.health(host, port, 4.0):
+        findings.append(("SERVER_DEAD", "server unreachable after cors phase"))
+
+    nf = len(findings)
+    term.log("cors", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
+
+    ctx.phase("cors").record(findings, security=("CORS_ORIGIN_LEAK",), vectors=checks)
+
 def _find_route(metrics, pred):
     for r in metrics.get("routes", []):
         if pred(r):
@@ -1572,9 +1742,7 @@ def _route_exact(method, path):
 def _route_prefix(method, prefix):
     return lambda r: r.get("method") == method and (r.get("path") or "").startswith(prefix)
 
-# Every RouteMetrics field: requests, status1xx..5xx, bytesOut, plus the latency
-# histogram. status1xx is unreachable over HTTP (no response's FINAL status is 1xx),
-# so it is asserted to stay zero rather than driven
+# PHASE: metrics
 def phase_metrics(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
@@ -1655,7 +1823,7 @@ def phase_metrics(ctx):
     if not ctx.server.alive():
         p.failed("SERVER_DEAD", "unreachable after metrics phase")
 
-# Phase 6: CHAOS
+# PHASE: chaos
 def phase_chaos(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
@@ -1825,15 +1993,6 @@ def phase_chaos(ctx):
 
     ctx.phase("chaos").record(findings, vectors=stats.get("kills", 0) + stats.get("stops", 0))
 
-# Phase 7: KEEP-ALIVE SOAK
-#
-# Every other phase opens a fresh Connection: close socket per request, so WFX's
-# INBOUND keep-alive path - many sequential requests parsed off ONE persistent
-# connection, each reusing the same per-connection read/write buffers and parser
-# state - is barely exercised anywhere. This drives a long run of back-to-back
-# requests on a single socket and asserts every response is byte-exact, which is
-# what catches read/write buffer offsets that never reset, parser state that
-# carries across requests, and cross-request body/header bleed on reuse
 def _read_http_response(sock, buf):
     """Read exactly one CL-framed HTTP response off `sock`. Returns (status, body, leftover)."""
     while b"\r\n\r\n" not in buf:
@@ -1872,6 +2031,7 @@ def _read_http_response(sock, buf):
 
     return status, rest[:clen], rest[clen:]
 
+# PHASE: soak
 def phase_soak(ctx):
     cfg = ctx.cfg
     host, port = cfg.host, cfg.port
@@ -1951,6 +2111,7 @@ class BaseAudit(common.Suite):
         "features": phase_features,
         "forms":    phase_forms,
         "query":    phase_query,
+        "cors":     phase_cors,
         "metrics":  phase_metrics,
         "soak":     phase_soak,
         "chaos":    phase_chaos,

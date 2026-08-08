@@ -56,6 +56,7 @@ using EraseContextFn = void (*)(void* request, StringView key);
 // Response Control
 using SetStatusFn = void (*)(void* response, HttpStatus);
 using SetHeaderFn = void (*)(void* response, StringView key, StringView value);
+using SetPersistentHeaderFn = void (*)(void* response, StringView key, StringView value);
 using WriteBodyFn = void (*)(void* response, StringView data);
 using WriteFileFn = void (*)(void* response, StringView path, bool autoHandle404);
 using WriteStreamFn = void (*)(void* response, StreamGenerator, bool chunked);
@@ -92,6 +93,7 @@ struct HttpAPIExt1 {
     // Response Control
     SetStatusFn setStatus;
     SetHeaderFn setHeader;
+    SetPersistentHeaderFn setPersistentHeader;
     WriteBodyFn writeBody;
     WriteFileFn writeFile;
     WriteStreamFn writeStream;

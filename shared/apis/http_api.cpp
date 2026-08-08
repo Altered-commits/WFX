@@ -178,6 +178,12 @@ const HttpAPIExt1* GetHttpAPIExt1()
                 std::string_view{value.Data(), value.Size()}
             );
         },
+        [](void* backend, StringView key, StringView value) { // SetPersistentHeaderFn
+            ToRes(backend)->WritePersistentHeader(
+                std::string_view{key.Data(), key.Size()},
+                std::string_view{value.Data(), value.Size()}
+            );
+        },
         [](void* backend, StringView data) { // WriteBodyFn
             ToRes(backend)->WriteBodyData(std::string_view{data.Data(), data.Size()});
         },

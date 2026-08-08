@@ -207,6 +207,16 @@ real_ip_header               = ""      # Header to trust for the real client IP,
 real_ip_recursive            = false   # X-Forwarded-For-style chains only: walk past trusted hops to find the real client
 trusted_proxies              = []      # CIDR blocks allowed to set real_ip_header, e.g. ["173.245.48.0/20"]
 
+[CORS]
+enabled           = false   # Opt-in, off by default
+allowed_methods   = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+allowed_origins   = []      # Exact origins, e.g. ["https://example.com"]. "*" as the ONLY entry allows any
+                            # origin, but is rejected at startup if allow_credentials is also true
+allowed_headers   = []      # Empty reflects whatever the preflight asked for; set explicitly to lock it down
+exposed_headers   = []      # Response headers JS may read beyond the CORS-safelisted defaults
+allow_credentials = false   # true requires allowed_origins to not be "*"
+max_age           = 600     # Access-Control-Max-Age in seconds (browsers cap this regardless)
+
 [SSL]
 cert_path                   = "..."           # Path to the server certificate (PEM format)
 key_path                    = "..."           # Path to the private key corresponding to the certificate
@@ -225,21 +235,10 @@ client_session_cache_size   = 1024            # Size of client session cache (In
 min_proto_version           = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
 security_level              = 2               # SSL security level (0-5)
 
-[Windows]
-accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts
-connection_threads = "auto"  # IOCP worker thread count
-request_threads    = "all"   # Threads executing user handlers
-
 [Linux]
 worker_processes        = 2      # Max simultaneous worker connections
 worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
 backlog                 = 1024   # Max pending connections in OS listen queue
-
-[Linux.IoUring]
-accept_slots     = 64     # Max simultaneous connections being accepted
-queue_depth      = 4096   # Internal connection queue depth
-batch_size       = 64     # How many connections to process per iteration
-file_chunk_size  = 65536  # How big of a file chunk to send at once
 
 [Linux.Epoll]
 max_events       = 1024   # How many events should epoll handle at a time

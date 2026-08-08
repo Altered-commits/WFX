@@ -11,21 +11,21 @@ set -euo pipefail
 #   ./scripts/tidy.sh --files a.cpp b.hpp  -> lint only the given files
 #   ./scripts/tidy.sh --ci                 -> CI mode, see below
 #
-# Always uses THIS checkout's own './build', never '~/.wfx/src' (that's a symlink into a-
-# -checkout for './scripts/install.sh --local-debug'/'--local-release', or a separate real-
-# -clone for a plain end-user install; either way its own compile_commands.json can point-
-# -somewhere other than here). clang-tidy is invoked with '-p build' and looks up each-
-# -file's flags itself, so '--fix' always writes straight to this working tree.
+# Always uses THIS checkout's own './build', never '~/.wfx/src' (that's a symlink into a
+# checkout for './scripts/install.sh --local-debug'/'--local-release', or a separate real
+# clone for a plain end-user install; either way its own compile_commands.json can point
+# somewhere other than here). clang-tidy is invoked with '-p build' and looks up each
+# file's flags itself, so '--fix' always writes straight to this working tree.
 #
-# Locally: if './build' doesn't exist yet, this configures it (fast, no full build,-
-# -compile_commands.json is emitted at CMake configure time). Files that need real-
-# -OpenSSL headers (anything using recent APIs) won't fully resolve until something-
-# -actually builds it (e.g. running './scripts/install.sh --local-debug', the same-
-# -'./build'), so once it's been run once, tidy sees the real thing from then on.
+# Locally: if './build' doesn't exist yet, this configures it (fast, no full build,
+# compile_commands.json is emitted at CMake configure time). Files that need real
+# OpenSSL headers (anything using recent APIs) won't fully resolve until something
+# actually builds it (e.g. running './scripts/install.sh --local-debug', the same
+# './build'), so once it's been run once, tidy sees the real thing from then on.
 #
-# --ci: same './build', but produced by compile_check.yml's clang leg in the SAME-
-# -checkout this runs in (a full build, so OpenSSL is always real there). CI restores-
-# -that job's cache before calling this with --ci, so nothing gets rebuilt here either
+# --ci: same './build', but produced by compile_check.yml's clang leg in the SAME
+# checkout this runs in (a full build, so OpenSSL is always real there). CI restores
+# that job's cache before calling this with --ci, so nothing gets rebuilt here either
 # ---------------------------------------------------------------
 
 # ---------------------------------------------------------------
@@ -34,12 +34,12 @@ set -euo pipefail
 CLANG_TIDY="${CLANG_TIDY:-clang-tidy}"
 BUILD_DIR="build"
 
-# scripts/py/tidy_cache.py: skips re-running clang-tidy on a file whose preprocessed-
-# -content + resolved config + args are unchanged, replaying the exact prior-
-# -stdout/exit code instead. Zero effect on which checks run or what they find,-
-# -only on whether an unchanged file gets re-analyzed.
-# Disabled for --fix: a cache hit skips invoking real clang-tidy entirely, which-
-# -would skip the in-place edit too, so --fix must always run for real.
+# scripts/py/tidy_cache.py: skips re-running clang-tidy on a file whose preprocessed
+# content + resolved config + args are unchanged, replaying the exact prior
+# stdout/exit code instead. Zero effect on which checks run or what they find,
+# only on whether an unchanged file gets re-analyzed.
+# Disabled for --fix: a cache hit skips invoking real clang-tidy entirely, which
+# would skip the in-place edit too, so --fix must always run for real.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TIDY_CACHE_PY="$SCRIPT_DIR/py/tidy_cache.py"
 CTCACHE_ENABLE="${CTCACHE_ENABLE:-1}"
@@ -162,12 +162,12 @@ fi
 info "Reusing build : $BUILD_DIR"
 echo ""
 
-# CMake's own configure step only declares the OpenSSL dependency, it doesn't build it-
-# -(ExternalProject_Add builds happen at 'cmake --build' time), so a configure-only-
-# -$BUILD_DIR (i.e. nobody has run a full build here yet) leaves openssl_lts-install/-
-# -include empty, and clang-tidy silently falls back to whatever OpenSSL the system-
-# -happens to have (often older, missing newer APIs). Not fatal - only files that touch-
-# -those newer APIs are affected - so this is a warning, not a hard stop
+# CMake's own configure step only declares the OpenSSL dependency, it doesn't build it
+# (ExternalProject_Add builds happen at 'cmake --build' time), so a configure-only
+# $BUILD_DIR (i.e. nobody has run a full build here yet) leaves openssl_lts-install/
+# include empty, and clang-tidy silently falls back to whatever OpenSSL the system
+# happens to have (often older, missing newer APIs). Not fatal - only files that touch
+# those newer APIs are affected - so this is a warning, not a hard stop
 if [ "$CI" != "1" ] && [ ! -f "$BUILD_DIR/openssl_lts-install/include/openssl/core_names.h" ]; then
     warn "OpenSSL not fully built in $BUILD_DIR yet - files using recent OpenSSL APIs may show" \
         "false errors. Run './scripts/install.sh --local-debug' (or any full build) once to fix this."
@@ -252,22 +252,22 @@ if [ "$MODE" = "fix" ]; then
     TIDY_ARGS+=(--fix --fix-errors)
 fi
 
-# Each file is an independent clang-tidy invocation (own process, own AST, no-
-# -shared state), so running them one at a time wastes wall-clock time for no-
-# -reason. --fix stays sequential (JOBS=1): concurrent in-place '--fix' runs-
-# -could corrupt a header shared by multiple TUs.
+# Each file is an independent clang-tidy invocation (own process, own AST, no
+# shared state), so running them one at a time wastes wall-clock time for no
+# reason. --fix stays sequential (JOBS=1): concurrent in-place '--fix' runs
+# could corrupt a header shared by multiple TUs.
 NPROC=$(command -v nproc > /dev/null 2>&1 && nproc || echo 4)
 if [ "$MODE" = "fix" ]; then
     JOBS=1
 elif [ "$CI" = "1" ]; then
     # GitHub-hosted runners are small (commonly 4 vCPU) and shared/throttled.
-    # clang-analyzer checks are heavy enough per-process that matching nproc-
-    # -exactly causes memory/scheduler thrashing instead of speeding things up.
+    # clang-analyzer checks are heavy enough per-process that matching nproc
+    # exactly causes memory/scheduler thrashing instead of speeding things up.
     JOBS="${TIDY_JOBS:-$((NPROC > 3 ? 3 : NPROC))}"
 else
-    # Same reasoning applies locally: clang-analyzer is heavy enough per-file-
-    # -that matching nproc exactly tends to thrash rather than help. Cap it,-
-    # -override with TIDY_JOBS=<n> for something different.
+    # Same reasoning applies locally: clang-analyzer is heavy enough per-file
+    # that matching nproc exactly tends to thrash rather than help. Cap it,
+    # override with TIDY_JOBS=<n> for something different.
     JOBS="${TIDY_JOBS:-$((NPROC > 8 ? 8 : NPROC))}"
 fi
 info "Jobs          : $JOBS"
@@ -281,23 +281,23 @@ run_one() {
     local status=0
     local output
 
-    # 'clang-tidy' exits 0 even with findings unless WarningsAsErrors matched, so-
-    # -detect findings from output content, not just the exit code. '-p' looks up-
-    # -flags for '$file' itself from the compile database (headers fall back to-
-    # -the flags of a .cpp in the same directory automatically)
+    # 'clang-tidy' exits 0 even with findings unless WarningsAsErrors matched, so
+    # detect findings from output content, not just the exit code. '-p' looks up
+    # flags for '$file' itself from the compile database (headers fall back to
+    # the flags of a .cpp in the same directory automatically)
     if [ "$USE_CACHE" = "1" ]; then
         output=$(python3 "$TIDY_CACHE_PY" "$CLANG_TIDY" "${TIDY_ARGS[@]}" "$file" 2>&1) || status=$?
     else
         output=$("$CLANG_TIDY" "${TIDY_ARGS[@]}" "$file" 2>&1) || status=$?
     fi
 
-    # Clang's diagnostics engine prints its own "N warnings generated." tally per-
-    # -translation unit it processes internally, unrelated to clang-tidy's own findings-
-    # -and not suppressed by --quiet, strip it so only real findings show
+    # Clang's diagnostics engine prints its own "N warnings generated." tally per
+    # translation unit it processes internally, unrelated to clang-tidy's own findings
+    # and not suppressed by --quiet, strip it so only real findings show
     #
-    # Here-strings, not 'printf | grep': with pipefail, grep -q's early exit on a match-
-    # -can SIGPIPE a still-writing printf on large output, and pipefail then reports-
-    # -that non-zero death as the pipeline's status instead of grep's real match
+    # Here-strings, not 'printf | grep': with pipefail, grep -q's early exit on a match
+    # can SIGPIPE a still-writing printf on large output, and pipefail then reports
+    # that non-zero death as the pipeline's status instead of grep's real match
     output=$(grep -vE '^[0-9]+ warnings? generated\.$' <<< "$output" || true)
 
     printf '%s' "$output" > "$RESULT_DIR/$idx.out"
@@ -309,9 +309,9 @@ run_one() {
 RUNNING=0
 IDX=0
 for file in "${FILES[@]}"; do
-    # Printed as each file is handed to a worker, not when it finishes, so-
-    # -local runs still show live progress instead of going quiet until the-
-    # -whole batch completes.
+    # Printed as each file is handed to a worker, not when it finishes, so
+    # local runs still show live progress instead of going quiet until the
+    # whole batch completes.
     printf "[%d/%d] %s\n" "$((IDX + 1))" "$FILE_COUNT" "$file"
     run_one "$IDX" "$file" &
     RUNNING=$((RUNNING + 1))
@@ -327,8 +327,8 @@ echo ""
 FAILURES=0
 PROCESSED=0
 for file in "${FILES[@]}"; do
-    # Filename already printed once above at dispatch time; only show output here,-
-    # -in original file order, for whichever files actually had findings
+    # Filename already printed once above at dispatch time; only show output here,
+    # in original file order, for whichever files actually had findings
     if [ -s "$RESULT_DIR/$PROCESSED.out" ]; then
         cat "$RESULT_DIR/$PROCESSED.out"
         echo ""

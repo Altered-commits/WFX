@@ -38,6 +38,16 @@ public: // Status and Headers
         return *this;
     }
 
+    // Like Header(), but survives a later forced-error rebuild (AbortWithError, e.g. SendFile's
+    // auto-404). Must be called before any regular Header() call on the same response. For
+    // headers that must be on every response regardless of status, e.g. CORS headers set by
+    // middleware before the handler runs
+    Response& PersistentHeader(std::string_view key, std::string_view value)
+    {
+        Core::HttpApiExt1()->setPersistentHeader(backend_, ToSV(key), ToSV(value));
+        return *this;
+    }
+
 public: // Main flow
     // Char / View types
     Response& Write(std::string_view data)

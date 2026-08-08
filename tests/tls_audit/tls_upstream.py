@@ -147,7 +147,7 @@ def _hard_reset(sock):
 def serve_conn(raw_sock, ctx, name):
     # TLS handshake first: the moment of truth for the cert/protocol attacks. A WFX
     # client that correctly refuses a hostile cert fails HERE (we count it), so the
-    # The audit can assert refusal instead of insecure progress
+    # audit can assert refusal instead of insecure progress
     try:
         sock = ctx.wrap_socket(raw_sock, server_side=True)
     except (ssl.SSLError, OSError):

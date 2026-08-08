@@ -41,6 +41,8 @@ private: // Helper Functions
     void HandleMiddlewareLoading();
     RateLimitResult AllowRequest(Http::ClientCtx* ctx);
     void HandleClose(Http::ClientCtx* ctx);
+    bool HandleCors(Http::ClientCtx* ctx);
+    bool HandleGenericOptions(Http::ClientCtx* ctx);
 
 private:
     Config& config_ = GetConfig();

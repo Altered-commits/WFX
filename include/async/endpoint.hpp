@@ -512,7 +512,7 @@ private: // Storage
 // Constructed once at namespace scope before Run(). Registers the endpoint with the engine
 // via the deferred init vector and stores the assigned index for use in SendPayload calls
 //
-// Pass EndpointDesc directly. Leave onConnect = nullptr in the desc (Resolve fills it in from the-
+// Pass EndpointDesc directly. Leave onConnect = nullptr in the desc (Resolve fills it in from the
 // OnConnect template parameter so the compiler produces a zero-cost stateless erasing wrapper)
 //
 // Example with onConnect:

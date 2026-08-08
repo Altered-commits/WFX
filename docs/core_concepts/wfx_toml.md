@@ -178,6 +178,72 @@ trusted_proxies              = []      # Array of Strings (CIDR blocks)
 
 ---
 
+## `[CORS]`
+
+Cross-Origin Resource Sharing. This section is **optional**; CORS is off entirely when omitted or
+`enabled = false`.
+
+```toml
+[CORS]
+enabled           = false  # Boolean
+allowed_origins   = []     # Array of Strings
+allowed_methods   = "GET, POST, PUT, PATCH, DELETE, OPTIONS" # String
+allowed_headers   = []     # Array of Strings
+exposed_headers   = []     # Array of Strings
+allow_credentials = false  # Boolean
+max_age           = 600    # 32-bit Unsigned Integer (In seconds)
+```
+
+- `enabled`  
+  Turns CORS handling on or off. When `false`, none of the other settings in this section matter,
+  no CORS headers are ever written and no request is treated as a preflight.
+
+- `allowed_origins`  
+  Exact origins allowed to make cross-origin requests, e.g. `["https://example.com"]`. Matching is
+  exact string comparison, not a prefix, suffix, or subdomain match, `https://evil.example.com`
+  does **not** match an allowlisted `https://example.com`, and neither does `http://example.com`
+  (different scheme) or `https://example.com:8443` (different port). A single `"*"` entry allows
+  any origin. `"*"` cannot be combined with `allow_credentials = true`, WFX refuses to start if
+  you configure that combination, browsers refuse to honor it anyway.
+
+- `allowed_methods`  
+  The exact value sent back as `Access-Control-Allow-Methods` on a preflight response. This is a
+  static, comma-separated string, not derived from what routes you've actually registered, every
+  preflight gets this same list regardless of which path it's for.
+
+- `allowed_headers`  
+  Request headers a cross-origin caller is allowed to send. Left empty (the default), WFX reflects
+  whatever the preflight's own `Access-Control-Request-Headers` asked for, which works for most
+  setups without listing every custom header by hand. Set it explicitly to lock the response down
+  to a fixed list instead of trusting whatever the browser requested.
+
+- `exposed_headers`  
+  Response headers JavaScript is allowed to read beyond the small set browsers always allow
+  (`Cache-Control`, `Content-Language`, `Content-Length`, `Content-Type`, `Expires`,
+  `Last-Modified`, `Pragma`). Left empty (the default), `Access-Control-Expose-Headers` is omitted
+  entirely.
+
+- `allow_credentials`  
+  Sends `Access-Control-Allow-Credentials: true`, letting a cross-origin request include cookies
+  or an `Authorization` header and letting the browser expose the response back to the page.
+  Cannot be combined with a `"*"` entry in `allowed_origins`, see above.
+
+- `max_age`  
+  How long, in seconds, a browser is allowed to cache a preflight response before sending a new
+  one for the same origin/method/headers combination. Browsers cap this regardless of what's
+  sent: Chrome to 7200s, Firefox to 86400s, Safari to 300s, so setting it higher than a browser's
+  own cap has no effect on that browser.
+
+!!! note "Preflight is answered before your handler ever runs"
+    A real preflight (an `OPTIONS` request carrying `Access-Control-Request-Method`) is answered
+    entirely by the engine, before routing and before any middleware (it still goes through
+    connection/rate limiting first, same as every other request). Your route handlers, including
+    one registered with `WFX_OPTIONS` at the same path, never see it. See
+    [Routing](../api_reference/routing.md#cors-and-options) for the full behavior, including what
+    happens to bare `OPTIONS` requests that aren't a CORS preflight at all.
+
+---
+
 ## `[SSL]`
 
 TLS configuration. This section is **only used when WFX is running in HTTPS mode**.

@@ -5,10 +5,10 @@ Minimal cache wrapper around clang-tidy, invoked by scripts/tidy.sh.
 Usage:
     tidy_cache.py <real-clang-tidy-path> <clang-tidy-args...> <file>
 
-Behaviour is designed to be a drop-in replacement for calling clang-tidy-
--directly: stdout+stderr are combined and printed exactly as clang-tidy would-
--print them, and the process exits with clang-tidy's own exit code, whether-
--served from cache or freshly run.
+Behaviour is designed to be a drop-in replacement for calling clang-tidy
+directly: stdout+stderr are combined and printed exactly as clang-tidy would
+print them, and the process exits with clang-tidy's own exit code, whether
+served from cache or freshly run.
 
 Cache key = sha256 of:
   - the real clang-tidy binary's own `--version` string (so a different
@@ -20,12 +20,12 @@ Cache key = sha256 of:
     mtime/content, so an unrelated header edit still invalidates the cache)
   - the clang-tidy arguments themselves (checks, flags, etc.)
 
-If anything about computing that key fails for any reason, we just skip the-
--cache and run clang-tidy directly, so a bug here can only ever cost time
+If anything about computing that key fails for any reason, we just skip the
+cache and run clang-tidy directly, so a bug here can only ever cost time
 
-Cache dir: $CTCACHE_DIR (default: ~/.wfx/tidy_cache). Each cache entry-
--is a small file: first line is the exit code, the rest is the exact-
--stdout+stderr clang-tidy produced.
+Cache dir: $CTCACHE_DIR (default: ~/.wfx/tidy_cache). Each cache entry
+is a small file: first line is the exit code, the rest is the exact
+stdout+stderr clang-tidy produced.
 """
 
 import hashlib
@@ -105,9 +105,9 @@ def compute_digest(real_clang_tidy, tidy_args, build_dir, target_file):
     return h.hexdigest()
 
 def cache_path(digest):
-    # Lives under ~/.wfx (same root as the rest of WFX's user-owned state:-
-    # -bin/, daemons/, src/) so 'rm -rf ~/.wfx' erases everything, no stray-
-    # -dirs left behind anywhere else on disk.
+    # Lives under ~/.wfx (same root as the rest of WFX's user-owned state:
+    # bin/, daemons/, src/) so 'rm -rf ~/.wfx' erases everything, no stray
+    # dirs left behind anywhere else on disk.
     cache_dir = os.environ.get(
         "CTCACHE_DIR", os.path.join(os.path.expanduser("~"), ".wfx", "tidy_cache")
     )
@@ -140,9 +140,9 @@ def write_cache(path, exit_code, output_bytes):
         raise
 
 def run_real_clang_tidy(argv):
-    # stderr is merged into the same pipe as stdout (not captured separately then-
-    # -concatenated after the fact), so output stays in the order clang-tidy actually-
-    # -wrote it, matching what '2>&1' gives the non-cached path
+    # stderr is merged into the same pipe as stdout (not captured separately then
+    # concatenated after the fact), so output stays in the order clang-tidy actually
+    # wrote it, matching what '2>&1' gives the non-cached path
     proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     output = proc.stdout
     sys.stdout.buffer.write(output)

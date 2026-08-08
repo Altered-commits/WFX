@@ -390,6 +390,7 @@ def drive_staged(cfg, mock, blob, ep="good", keep=True):
     return drive(cfg, "/raw/%s" % sid, ep=ep)
 
 # Phases
+# PHASE: handshake
 def phase_handshake(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("handshake")
@@ -401,6 +402,7 @@ def phase_handshake(ctx):
     hs, hf, rq, _ = mock.stats("good")
     p.check("good listener completed handshakes", hs >= 1, "stats good=%r" % [hs, hf, rq])
 
+# PHASE: verify
 def phase_verify(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("verify")
@@ -426,6 +428,7 @@ def phase_verify(ctx):
         p.check(name + ": client bailed at TLS layer", hf >= 1,
               "handshakes=%d hs_fail=%d (want at least one failed handshake)" % (hs, hf), security=True)
 
+# PHASE: protocol
 def phase_protocol(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("protocol")
@@ -436,16 +439,7 @@ def phase_protocol(ctx):
     p.check("TLS 1.2 downgrade refused", is_err(r),
           "client accepted a TLS 1.2 downgrade (ep=%r)" % (r and r.get("ep")), security=True)
 
-# PHASE: inbound mTLS (client_ca_path), the opposite direction from every other phase in this
-# file - here WE are the client presenting a cert, and WFX's OWN listener is what does the
-# verifying. No mock involved: every vector here dials WFX directly on cfg.port
-#
-# This is why tls_send() defaults to the trusted client cert (CLIENT_CERT/CLIENT_KEY above) -
-# client_ca_path is on for the whole suite (see patch_ssl_paths), so every other phase's calls
-# would refuse at the handshake without it. Refusal is proven the same way phase_verify proves it
-# for the outbound side: the call itself returns nothing, because WFX drops the connection at the
-# TLS layer before any HTTP response exists (HandleClientHandshake -> Close, no alert-visible
-# response body to inspect, just a dead socket)
+# PHASE: mtls
 def phase_mtls(ctx):
     cfg = ctx.cfg
     p = ctx.phase("mtls")
@@ -503,6 +497,7 @@ def phase_mtls(ctx):
         p.check("intermediate-signed leaf WITH the intermediate accepted", _status_of(r) == 200,
               "status=%r" % _status_of(r))
 
+# PHASE: framing
 def phase_framing(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("framing")
@@ -538,6 +533,7 @@ def phase_framing(ctx):
     for name, blob in trunc:
         p.check("TLS eof: %s" % name, is_err(drive_staged(cfg, mock, blob, keep=False)))
 
+# PHASE: desync
 def phase_desync(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("desync")
@@ -552,6 +548,7 @@ def phase_desync(ctx):
     r = drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ngoodHTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nSMUGGLE", keep=True)
     p.check("smuggled body not delivered", (r is None) or (r.get("body") != "SMUGGLE"), "delivered smuggled bytes: %r" % r, security=True)
 
+# PHASE: inject
 def phase_inject(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("inject")
@@ -576,6 +573,7 @@ def phase_inject(ctx):
     p.check("clean path accepted",   is_ok(inject(cfg, "path", b"/ok"), 200, "hello"))
     p.check("clean header accepted", is_ok(inject(cfg, "header", b"X-Ok: fine"), 200, "hello"))
 
+# PHASE: resource
 def phase_resource(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("resource")
@@ -586,12 +584,7 @@ def phase_resource(ctx):
           (r is None) or (r.get("ep") != EP_SUCCESS) or (r.get("body") != "partial-body-then-brutal-reset"),
           "truncated body delivered as complete (ep=%r body=%r)" % (r and r.get("ep"), r and r.get("body")), security=True)
 
-# WFX's outbound client caches one TLS session per configured HttpEndpoint (see
-# http_openssl.cpp's NewClientSessionCallback / EndpointMetadata::cachedTlsSession) and
-# offers it back on the next connection to that same endpoint. A live TCP+TLS connection
-# just gets kept alive and reused by the connection pool though, so resumption only has
-# a chance to fire once the pooled connection actually dies and a new one has to be
-# opened - /truncate resets the connection, which is how we force that here
+# PHASE: resumption
 def phase_resumption(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("resumption")
@@ -619,24 +612,7 @@ def phase_resumption(ctx):
     p.check("session resumed at least once after reconnect", resumed >= 1,
           "stats good=%r (handshakes, hs_fail, requests, resumed)" % [hs, hf, rq, resumed])
 
-# PHASE: in-band TLS upgrade across the trust boundary
-#
-# UpgradeToTLS is a generic STARTTLS primitive, so it inherits that family's CVE
-# history. The two vectors here both need a REAL handshake, which is why they sit
-# in this suite rather than endpoint_audit (which covers the cert-free half:
-# downgrade-refusal and garbage-instead-of-handshake)
-#
-# The mock can append "OK 9999" as plaintext immediately after answering "S", before
-# wrapping the socket. That is CVE-2011-0411 (Postfix) / CVE-2026-41319 (MailKit):
-# an engine that reuses its read buffer across the upgrade hands attacker bytes to
-# the protocol as though the authenticated peer had sent them. In MailKit's case
-# it enabled a SASL downgrade to PLAIN
-#
-# Injection is toggled per run rather than left on, because with it on a handshake
-# failure is a legitimate secure outcome (the injected bytes may still be sitting
-# unread in the kernel buffer, where they land in front of the ServerHello and break
-# the handshake), and that outcome cannot be told apart from a broken upgrade unless
-# the clean path is measured separately
+# PHASE: upgrade
 def phase_upgrade(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("upgrade")
