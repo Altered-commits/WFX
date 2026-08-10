@@ -21,6 +21,7 @@
 //   #include "wfx/utils/hash.hpp"        : Fast non-cryptographic hashing (WyHash, FNV-1a, ...)
 //   #include "wfx/utils/encoding.hpp"    : Base64 / hex / URL encoding
 //   #include "wfx/utils/jwk.hpp"         : JWKS -> AsymKey by kid
+//   #include "wfx/utils/jwt.hpp"         : Compact JWT parsing, claim checks, signature verification
 //   #include "wfx/utils/env.hpp"         : Typed env var getters (GetEnvBool/GetEnvInt/GetEnvString)
 //   #include "wfx/endpoint/base.hpp"     : Raw outbound endpoint (Endpoint<TReq,TRes>)
 //   #include "wfx/endpoint/http.hpp"     : Outbound HTTP/1.1 client (HttpEndpoint)
@@ -38,6 +39,7 @@
 #include "wfx/utils/hash.hpp"
 #include "wfx/utils/encoding.hpp"
 #include "wfx/utils/jwk.hpp"
+#include "wfx/utils/jwt.hpp"
 #include "wfx/utils/env.hpp"
 #include "wfx/endpoint/http.hpp"
 #include "wfx/endpoint/smtp.hpp"

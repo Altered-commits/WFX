@@ -42,15 +42,16 @@ int BeginAwesomeness(int argc, char* argv[])
 
     // --- Command: build ---
     parser.AddCommand("build", "Pre-Build various parts of WFX",
-        [](const std::unordered_map<std::string, std::string>&,
+        [](const std::unordered_map<std::string, std::string>& options,
            const std::vector<std::string>& positionalArgs) -> int {
             if(positionalArgs.size() != 2)
                 GetLogger().Fatal(
                     "[WFX]: Build type is required. Usage: wfx build <project-folder-name> [templates|source]"
                 );
 
-            return CLI::BuildProject(positionalArgs[0], positionalArgs[1]);
+            return CLI::BuildProject(positionalArgs[0], positionalArgs[1], options.at("--env"));
         });
+    parser.AddOption("build", "--env", "Environment to build", false, "local", false);
 
     // --- Command: run ---
     parser.AddCommand("run", "Start WFX server",
@@ -75,6 +76,7 @@ int BeginAwesomeness(int argc, char* argv[])
             CLI::ServerConfig cfg;
             cfg.host = options.at("--host");
             cfg.port = port;
+            cfg.env = options.at("--env");
 
             // Set flags based on CLI options
             if(options.count("--pin-to-cpu") > 0)          cfg.SetFlag(CLI::ServerFlags::PIN_TO_CPU);
@@ -86,6 +88,7 @@ int BeginAwesomeness(int argc, char* argv[])
         });
     parser.AddOption("run", "--host",                "Host to bind",                false, "127.0.0.1", false);
     parser.AddOption("run", "--port",                "Port to bind",                false, "8080",      false);
+    parser.AddOption("run", "--env",                 "Environment to run",          false, "local",     false);
     parser.AddOption("run", "--pin-to-cpu",          "Pin worker to CPU core",      true,  "",          false);
     parser.AddOption("run", "--use-https",           "Use HTTPS connection",        true,  "",          false);
     parser.AddOption("run", "--https-port-override", "Override default HTTPS port", true,  "",          false);

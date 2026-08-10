@@ -8,7 +8,7 @@
 
 namespace WFX::CLI {
 
-int BuildProject(const std::string& project, const std::string& buildType);
+int BuildProject(const std::string& project, const std::string& buildType, const std::string& env);
 
 } // namespace WFX::CLI
 

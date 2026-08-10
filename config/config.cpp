@@ -113,7 +113,7 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Metrics", "latency", metricsConfig.latency);
     }
     catch(const toml::parse_error& err) {
-        logger.Fatal("[Config]: File -> 'wfx.toml', Error -> ", err.what());
+        logger.Fatal("[Config]: File -> '", path, "', Error -> ", err.what());
     }
 }
 

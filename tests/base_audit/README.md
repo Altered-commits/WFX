@@ -195,7 +195,7 @@ Exit code 2 if a traversal-shaped value gets mangled, 1 for other failures.
 ### CORS
 
 `CoreEngine::HandleCors` plus the generic `OPTIONS` `Allow:` fallback
-(`CoreEngine::HandleGenericOptions`), tested against `app/wfx.toml`'s real `[CORS]`
+(`CoreEngine::HandleGenericOptions`), tested against `app/config/wfx.local.toml`'s real `[CORS]`
 section: two allowed origins, credentials on, `allowed_headers` empty (exercises the
 reflect-the-request branch), `exposed_headers` set (exercises the static-list
 branch). `wildcardOrigin` and the `"*"` + credentials load-time rejection aren't

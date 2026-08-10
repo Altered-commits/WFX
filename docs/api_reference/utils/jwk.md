@@ -27,7 +27,7 @@ Only `"RSA"` and `"EC"` key types are supported, matching the two RSA/EC branche
 
 ### Example (verifying a Cloudflare Access token)
 
-Cloudflare Access exposes its signing keys at `/cdn-cgi/access/certs`. A JWT issued by Access carries a `kid` in its header identifying which of those keys signed it. This caches resolved `AsymKey`s per `kid`, `LoadJwk` only runs on a cache miss, and the JWKS body is only refetched over the network when the `kid` isn't in it either (a real rotation):
+Cloudflare Access exposes its signing keys at `/cdn-cgi/access/certs`. A JWT issued by Access carries a `kid` in its header identifying which of those keys signed it. This caches resolved `AsymKey`s per `kid`, `LoadJwk` only runs on a cache miss, and the JWKS body is only refetched over the network when the `kid` isn't in it either (a real rotation). See [JWT](jwt.md) for what `WFX::ParseJwt`/`JwtAudienceMatches`/`JwtTimeClaimsValid`/`VerifyJwtSignature` do, this example is where they plug in:
 
 ```cpp
 inline const auto CfAccess = WFX::HttpEndpoint{"myteam.cloudflareaccess.com:443"};
@@ -42,32 +42,14 @@ WFX_POST("/protected", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
         co_return;
     }
 
-    auto token = authHeader.substr(7);
-
-    // header.payload.signature
-    auto dot1 = token.find('.');
-    auto dot2 = token.find('.', dot1 == std::string_view::npos ? 0 : dot1 + 1);
-    if(dot1 == std::string_view::npos || dot2 == std::string_view::npos) {
-        res.Status(WFX::HttpStatus::BAD_REQUEST).SendText("malformed token");
+    auto [ps, parts] = WFX::ParseJwt(authHeader.substr(7));
+    if(ps != WFX::CryptoOk || !WFX::JwtAudienceMatches(parts.payload, Init::CloudflareAudienceTag) ||
+       !WFX::JwtTimeClaimsValid(parts.payload)) {
+        res.Status(WFX::HttpStatus::UNAUTHORIZED).SendText("invalid token");
         co_return;
     }
 
-    auto signingInput = token.substr(0, dot2);
-    auto [hdrOk, headerJson] = WFX::Base64Decode(token.substr(0, dot1));
-    auto [sigOk, sig] = WFX::Base64Decode(token.substr(dot2 + 1));
-
-    if(!hdrOk || !sigOk) {
-        res.Status(WFX::HttpStatus::BAD_REQUEST).SendText("malformed token");
-        co_return;
-    }
-
-    auto header = WFX::ParseJson({reinterpret_cast<char*>(headerJson.data()), headerJson.size()});
-    if(!header.IsValid()) {
-        res.Status(WFX::HttpStatus::BAD_REQUEST).SendText("malformed token header");
-        co_return;
-    }
-
-    auto kid = WFX::String(header.object.Get("kid").AsString());
+    auto kid = WFX::String(parts.kid);
     auto it = g_keyCache.find(kid); // cache hit: no LoadJwk call at all
 
     if(it == g_keyCache.end()) {
@@ -95,8 +77,7 @@ WFX_POST("/protected", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
         it = g_keyCache.emplace(kid, std::move(key)).first;
     }
 
-    auto sigView = std::string_view(reinterpret_cast<char*>(sig.data()), sig.size());
-    if(it->second.Verify(WFX::CryptoRs256, signingInput, sigView) != WFX::CryptoOk) {
+    if(WFX::VerifyJwtSignature(parts, it->second) != WFX::CryptoOk) {
         res.Status(WFX::HttpStatus::UNAUTHORIZED).SendText("invalid token");
         co_return;
     }

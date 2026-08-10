@@ -2,7 +2,7 @@
 
 Adversarial coverage of real-IP resolution (`WFX::Http::IpUtils::ResolveClientIp`) and
 the two limiters it feeds, `ConnectionLimiter` and `RequestRateLimiter`, wired through
-`CoreEngine::AllowRequest`. `app/wfx.toml` keeps `[IP]` permanently small (connection
+`CoreEngine::AllowRequest`. `app/config/wfx.local.toml` keeps `[IP]` permanently small (connection
 cap 3, burst 5, refill 2/s, tracked-identity cap 64 - `BitmapPool`'s real minimum,
 regardless of the configured value) instead of patching config mid-run, so every phase
 but `dualstack` runs against the one server the whole time. Every phase's closing

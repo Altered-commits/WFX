@@ -237,7 +237,7 @@ def patch_ssl_paths(cfg):
     Also turns inbound mTLS ON for the whole run (client_ca_path -> the mkcert root, bundled with
     the dedicated chain-test root when that vector is available), which is why tls_send() defaults
     to presenting a client cert - see CLIENT_CERT above."""
-    toml = os.path.join(cfg.app_dir, "wfx.toml")
+    toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
     with open(toml) as f:
         s = f.read()
     good, key = os.path.join(cfg.cert_dir, "good.pem"), os.path.join(cfg.cert_dir, "good-key.pem")

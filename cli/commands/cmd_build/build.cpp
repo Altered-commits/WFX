@@ -11,7 +11,7 @@ namespace WFX::CLI {
 
 using namespace WFX::Core; // For 'TemplateEngine', 'Config'
 
-int BuildProject(const std::string& project, const std::string& buildType)
+int BuildProject(const std::string& project, const std::string& buildType, const std::string& env)
 {
     // Used by pretty much everything so yeah
     auto& config = GetConfig();
@@ -20,7 +20,7 @@ int BuildProject(const std::string& project, const std::string& buildType)
     if(!FileSystem::DirectoryExists(project.c_str()))
         logger.Fatal("[WFX]: '", project, "' directory does not exist");
 
-    config.LoadCoreSettings(project + "/wfx.toml");
+    config.LoadCoreSettings(project + "/config/wfx." + env + ".toml");
     config.LoadFinalSettings(project);
 
     HandleBuildDirectory();

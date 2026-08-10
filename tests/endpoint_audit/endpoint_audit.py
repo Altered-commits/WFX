@@ -249,7 +249,7 @@ def patch_smtp_ssl_path(cfg):
     """Points outbound_ca_path at the SMTP audit's throwaway CA so the 'good' persona's STARTTLS
     cert is trusted. endpoint_audit's HTTP mock is plaintext, so this path is otherwise unused and
     patching it doesn't weaken or affect any existing HTTP phase."""
-    toml = os.path.join(cfg.app_dir, "wfx.toml")
+    toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
     with open(toml) as f:
         s = f.read()
     s = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % cfg.smtp_ca_path, s)
