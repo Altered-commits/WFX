@@ -13,7 +13,7 @@ This page describes the top-level layout of the WFX repository.
     CMake sub-logic files. Build logic is split into separate files here to keep the root `CMakeLists.txt` clean and readable.
 
 - `config/`  
-    Config loading using **toml++**. Parses `wfx.toml` into typed structs used across the engine.
+    Config loading using **toml++**. Parses a project's `wfx.<env>.toml` into typed structs used across the engine.
 
 - `engine/`  
     The core engine and template engine. This is the main orchestrator that ties the connection layer, routing, middleware, and user code together.

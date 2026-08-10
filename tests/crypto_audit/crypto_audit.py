@@ -8,7 +8,7 @@
 # checking WFX::Sha256/384/512, HmacSha256/384/512 (one-shot + streaming),
 # AeadEncrypt/AeadDecrypt (AES-256-GCM + ChaCha20-Poly1305), Pbkdf2/Hkdf/Argon2id,
 # RandomBytes, ConstantTimeEquals, the asymmetric sign/verify ABI, Base64/Hex/Url
-# encoding, and JWK loading
+# encoding, JWK loading, and compact JWT parsing/verification
 #
 # Where a Python stdlib oracle exists (hashlib, hmac, hashlib.pbkdf2_hmac, a
 # hand-rolled RFC 5869 HKDF-SHA256), results are checked byte-for-byte against
@@ -22,6 +22,7 @@
 #
 # Exit codes: 0 all pass, 1 any failure
 
+import base64
 import hashlib
 import hmac
 import json
@@ -447,6 +448,32 @@ def crypto_verify(pub, scheme_name, msg, sig):
     except InvalidSignature:
         return False
 
+# scheme key -> JOSE "alg" name (RFC 7518/8037). Only differs from the scheme key for
+# ed25519, JOSE calls it "EdDSA"
+JOSE_ALG = {
+    "rs256": "RS256", "rs384": "RS384", "rs512": "RS512",
+    "ps256": "PS256", "ps384": "PS384", "ps512": "PS512",
+    "es256": "ES256", "es384": "ES384",
+    "ed25519": "EdDSA",
+}
+
+def build_jwt(priv_key, scheme, payload, kid="test-1", alg_override=None):
+    """Builds a compact JWT signed with `cryptography`, in WFX's own wire format. Returns
+    (token, signing_input, signature) so tamper tests can recombine the pieces themselves.
+    'priv_key=None' produces an empty signature, for the alg=none attack vector."""
+    header = {"alg": alg_override if alg_override is not None else JOSE_ALG[scheme], "typ": "JWT", "kid": kid}
+    signing_input = b64url(json.dumps(header).encode()) + "." + b64url(json.dumps(payload).encode())
+    sig = crypto_sign(priv_key, scheme, signing_input.encode()) if priv_key is not None else b""
+    return signing_input + "." + b64url(sig), signing_input, sig
+
+def wfx_jwt_verify(cfg, token, key_pem=None, aud=None, rtimeout=30.0):
+    headers = {}
+    if key_pem is not None:
+        headers["X-Key"] = key_pem.hex()
+    if aud is not None:
+        headers["X-Aud"] = aud
+    return call(cfg, "POST", "/jwt/verify", headers, token, rtimeout=rtimeout)
+
 # Real, independently-maintained Ed25519 test vectors (Project Wycheproof,
 # testvectors_v1/ed25519_test.json) - a curated subset spanning valid signatures, RFC 8032 known
 # test vectors, and the edge cases "Taming the many EdDSAs" (eprint.iacr.org/2020/1244) showed most
@@ -761,6 +788,106 @@ def phase_jwk(ctx):
     p.check("JWKS with 50 decoys resolves correctly and quickly (%.1fs)" % elapsed,
           bool(r) and r.get("status") == ST_OK and elapsed < 10.0, "got %r after %.1fs" % (r, elapsed))
 
+# PHASE: jwt
+def phase_jwt(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("jwt")
+    now = int(time.time())
+
+    keys = {
+        "rsa": rsa.generate_private_key(public_exponent=65537, key_size=2048),
+        "ec_p256": ec.generate_private_key(ec.SECP256R1()),
+        "ec_p384": ec.generate_private_key(ec.SECP384R1()),
+        "ed25519": ed25519.Ed25519PrivateKey.generate(),
+    }
+    pems = {k: pub_pem(v) for k, v in keys.items()}
+
+    # vvv Valid token round trip, once per scheme vvv
+    for scheme, (kind, _, __) in SCHEMES.items():
+        priv, pub = keys[kind], pems[kind]
+        token, _, _ = build_jwt(priv, scheme, {"aud": "myapp", "exp": now + 3600, "nbf": now - 10, "iat": now})
+
+        r = wfx_jwt_verify(cfg, token, pub, "myapp")
+        ok = bool(r) and r.get("parseStatus") == ST_OK and r.get("verifyStatus") == ST_OK
+        p.check("%s valid token accepted" % scheme, ok, "got %r" % r)
+        if ok:
+            p.check("%s alg reported correctly" % scheme, r.get("alg") == JOSE_ALG[scheme], "got %r" % r)
+            p.check("%s aud matched" % scheme, r.get("audOk") is True, "got %r" % r)
+            p.check("%s time claims valid" % scheme, r.get("timeOk") is True, "got %r" % r)
+
+    # Only need one scheme/key pair for everything below, RS256 is as good as any
+    priv, pub = keys["rsa"], pems["rsa"]
+
+    # vvv Tamper detection, signature and payload vvv
+    token, signing_input, sig = build_jwt(priv, "rs256", {"aud": "myapp", "exp": now + 3600})
+
+    tampered_sig = bytearray(sig)
+    tampered_sig[-1] ^= 0x01
+    bad_sig_token = signing_input + "." + b64url(bytes(tampered_sig))
+    r = wfx_jwt_verify(cfg, bad_sig_token, pub, "myapp")
+    p.check("tampered signature rejected", bool(r) and r.get("verifyStatus") != ST_OK,
+          "got %r" % r, security=True)
+
+    header_b64, _, _ = signing_input.partition(".")
+    forged_payload = b64url(json.dumps({"aud": "myapp", "exp": now + 3600, "extra": "changed"}).encode())
+    forged_token = header_b64 + "." + forged_payload + "." + b64url(sig) # old signature, new payload
+    r = wfx_jwt_verify(cfg, forged_token, pub, "myapp")
+    p.check("tampered payload with old signature rejected", bool(r) and r.get("verifyStatus") != ST_OK,
+          "got %r" % r, security=True)
+
+    # vvv Alg confusion: "none" and "HS256" are both unrecognized, verification must refuse
+    # before ever touching the key, not just happen to fail some other way vvv
+    for hostile_alg in ("none", "HS256", "RS2560", ""):
+        no_sig = hostile_alg == "none" # a real alg=none attack also strips the signature segment
+        token, _, _ = build_jwt(None if no_sig else priv, "rs256", {"aud": "myapp", "exp": now + 3600},
+                               alg_override=hostile_alg)
+        r = wfx_jwt_verify(cfg, token, pub, "myapp")
+        p.check("alg=%r rejected as unsupported" % hostile_alg,
+              bool(r) and r.get("verifyStatus") == ST_UNSUPPORTED, "got %r" % r, security=True)
+
+    # vvv Claims vvv
+    expired, _, _ = build_jwt(priv, "rs256", {"aud": "myapp", "exp": now - 60})
+    r = wfx_jwt_verify(cfg, expired, pub, "myapp")
+    p.check("expired token: timeOk false", bool(r) and r.get("timeOk") is False, "got %r" % r)
+
+    not_yet, _, _ = build_jwt(priv, "rs256", {"aud": "myapp", "exp": now + 3600, "nbf": now + 60})
+    r = wfx_jwt_verify(cfg, not_yet, pub, "myapp")
+    p.check("not-yet-valid token: timeOk false", bool(r) and r.get("timeOk") is False, "got %r" % r)
+
+    no_exp, _, _ = build_jwt(priv, "rs256", {"aud": "myapp"})
+    r = wfx_jwt_verify(cfg, no_exp, pub, "myapp")
+    p.check("missing exp: timeOk false", bool(r) and r.get("timeOk") is False, "got %r" % r)
+
+    wrong_aud, _, _ = build_jwt(priv, "rs256", {"aud": "someone-else", "exp": now + 3600})
+    r = wfx_jwt_verify(cfg, wrong_aud, pub, "myapp")
+    p.check("wrong audience: audOk false", bool(r) and r.get("audOk") is False, "got %r" % r)
+
+    array_aud, _, _ = build_jwt(priv, "rs256", {"aud": ["other", "myapp"], "exp": now + 3600})
+    r = wfx_jwt_verify(cfg, array_aud, pub, "myapp")
+    p.check("array-form audience matches", bool(r) and r.get("audOk") is True, "got %r" % r)
+
+    # vvv Key confusion: validly-signed token, wrong key handed to the verifier vvv
+    other_rsa_pub = pub_pem(rsa.generate_private_key(public_exponent=65537, key_size=2048))
+    real_token, _, _ = build_jwt(priv, "rs256", {"aud": "myapp", "exp": now + 3600})
+    r = wfx_jwt_verify(cfg, real_token, other_rsa_pub, "myapp")
+    p.check("wrong key rejected", bool(r) and r.get("verifyStatus") != ST_OK, "got %r" % r, security=True)
+
+    # vvv Malformed token corpus: must survive and be rejected, never crash vvv
+    malformed = [
+        ("", "empty"),
+        ("..", "just dots"),
+        ("a.b", "only two segments"),
+        ("a.b.c.d", "four segments"),
+        ("not-base64!!!.not-base64!!!.not-base64!!!", "invalid base64url"),
+        (b64url(b"not json") + "." + b64url(b"{}") + ".sig", "header not JSON"),
+        (b64url(b"{}") + "." + b64url(b"not json") + ".sig", "payload not JSON"),
+    ]
+    for body, label in malformed:
+        r = wfx_jwt_verify(cfg, body, pub, "myapp")
+        p.check("malformed survives: %s" % label, r is not None and "parseStatus" in r, "got %r" % r)
+        if r is not None:
+            p.check("malformed rejected: %s" % label, r.get("parseStatus") != ST_OK, "got %r" % r)
+
 # PHASE: encoding
 def phase_encoding(ctx):
     cfg = ctx.cfg
@@ -820,7 +947,7 @@ def phase_encoding(ctx):
         p.check("base64 decode rejects invalid input: %r" % bad, bool(rd) and rd.get("ok") is False,
               "got %r" % rd)
 
-    # Sized to stay under send_buffer_max (~1.05MiB, see app/wfx.toml) after base64's ~4/3 expansion,
+    # Sized to stay under send_buffer_max (~1.05MiB, see app/config/wfx.local.toml) after base64's ~4/3 expansion,
     # this is a timing/robustness sanity check, not a send-buffer-limits test
     big = os.urandom(700 * 1024)
     start = time.time()
@@ -885,6 +1012,7 @@ class CryptoAudit(common.Suite):
         "asym-wycheproof":   phase_asym_wycheproof,
         "asym-hostile":      phase_asym_hostile,
         "jwk":               phase_jwk,
+        "jwt":               phase_jwt,
         "encoding":          phase_encoding,
     }
 

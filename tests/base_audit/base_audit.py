@@ -189,7 +189,7 @@ def _build_traversal_url():
         "etc/passwd", "etc/shadow", "etc/crontab", "etc/hosts",
         "etc/sudoers", "etc/group", "etc/os-release",
         "proc/self/environ", "proc/self/cmdline", "proc/self/maps", "proc/self/fd/0",
-        "app/wfx.toml", "app/src/main.cpp",
+        "app/config/wfx.local.toml", "app/src/main.cpp",
     ]
     vecs = []
     for t in targets:
@@ -277,7 +277,7 @@ def _build_traversal_hdr():
         "etc/passwd", "etc/shadow", "etc/crontab", "etc/hosts",
         "etc/sudoers", "etc/group", "etc/os-release",
         "proc/self/environ", "proc/self/cmdline", "proc/self/maps", "proc/self/fd/0",
-        "app/wfx.toml", "app/src/main.cpp",
+        "app/config/wfx.local.toml", "app/src/main.cpp",
     ]
     vecs = []
     for t in targets:

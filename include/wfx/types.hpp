@@ -38,6 +38,7 @@ using UUIDString = Shared::UUIDString;
 using SegmentVariant = Shared::SegmentVariant;
 using Any = Shared::Any;
 using JsonObject = Shared::JsonObject;
+using JsonWriter = Shared::JsonWriter;
 
 // -----------------------------------------------------------------------
 // JSON serializers

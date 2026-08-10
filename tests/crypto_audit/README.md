@@ -2,10 +2,10 @@
 
 Correctness testing for the `wfx/utils/crypto.hpp` ABI: hashing, HMAC, AEAD,
 key derivation, CSPRNG, constant-time comparison, asymmetric sign/verify, JWKS
-loading, and Base64/Hex/URL encoding. Boots the server, drives every crypto
-route, checks results against Python oracles where one exists (`hashlib`,
-`hmac`, PBKDF2, a hand-rolled RFC 5869 HKDF, the `cryptography` package for
-asymmetric schemes), stops the server.
+loading, compact JWT parsing/verification, and Base64/Hex/URL encoding. Boots
+the server, drives every crypto route, checks results against Python oracles
+where one exists (`hashlib`, `hmac`, PBKDF2, a hand-rolled RFC 5869 HKDF, the
+`cryptography` package for asymmetric schemes), stops the server.
 
 ---
 
@@ -32,6 +32,7 @@ python3 crypto_audit.py --phase hash
 python3 crypto_audit.py --phase aead
 python3 crypto_audit.py --phase asym-roundtrip
 python3 crypto_audit.py --phase jwk
+python3 crypto_audit.py --phase jwt
 
 # Different binary or port
 python3 crypto_audit.py --wfx /path/to/wfx --port 9090
@@ -48,7 +49,7 @@ python3 crypto_audit.py --ci
 |------|---------|
 | `0` | All phases passed |
 | `1` | Correctness failure |
-| `2` | **Security**: an AEAD forgery was accepted (tampered ciphertext, wrong AAD, cross-algorithm key/nonce), a tampered asymmetric signature or message verified, a key/scheme confusion was accepted, or a JWKS duplicate-kid lookup resolved to the wrong entry |
+| `2` | **Security**: an AEAD forgery was accepted (tampered ciphertext, wrong AAD, cross-algorithm key/nonce), a tampered asymmetric signature or message verified, a key/scheme confusion was accepted, a JWKS duplicate-kid lookup resolved to the wrong entry, or a tampered/wrong-key/alg-confused JWT verified |
 | `3` | Server never came up |
 
 ---
@@ -91,7 +92,7 @@ structural checks rather than byte-exact ones.
 
 Sends a 64 MiB + 1 byte plaintext and checks `WFX::AeadEncrypt` rejects it
 with `INVALID_ARG` (`CryptoAeadMaxSize`), without ever performing the
-encryption. `wfx.toml`'s `max_body_size` is raised specifically to let a body
+encryption. `app/config/wfx.local.toml`'s `max_body_size` is raised specifically to let a body
 this large reach the route at all.
 
 ### kdf
@@ -151,6 +152,19 @@ rejection, a malformed-shape corpus (non-array `keys`, missing fields, unknown
 crashing, a duplicate-`kid` JWKS resolving deterministically to the first
 entry (not whichever one an attacker managed to insert), and a 50-decoy JWKS
 that must still resolve the real key correctly and quickly.
+
+### jwt
+
+`wfx/utils/jwt.hpp`: a valid token round trip for every asymmetric scheme
+(parse, `alg`/`kid` reported correctly, audience and time claims both valid),
+tamper detection on both the signature and the payload (old signature paired
+with a changed payload), alg confusion (`none` with the signature segment
+stripped entirely, `HS256`, and garbage `alg` values, all of which must be
+refused as unsupported before the key is ever touched), expired/not-yet-valid/
+missing-`exp` tokens, audience mismatches in both the bare-string and array
+forms of `aud`, a validly-signed token checked against the wrong key, and a
+malformed-token corpus (wrong segment count, invalid base64url, valid base64
+but non-JSON header/payload) that must be rejected without crashing.
 
 ### encoding
 

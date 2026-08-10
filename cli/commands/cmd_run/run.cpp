@@ -42,7 +42,7 @@ int RunServer(const std::string& projectName, const ServerConfig& cfg)
         logger.Fatal("[WFX]: Failed to create '", crashLogsDir, "' directory for crash dumps");
 
     // -------------------- LOADING PHASE --------------------
-    config.LoadCoreSettings(projectName + "/wfx.toml");
+    config.LoadCoreSettings(projectName + "/config/wfx." + cfg.env + ".toml");
     config.LoadFinalSettings(projectName);
 
     EnvConfig envConfig;

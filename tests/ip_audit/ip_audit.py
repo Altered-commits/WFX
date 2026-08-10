@@ -7,7 +7,7 @@
 # Adversarial coverage of real-IP resolution (WFX::Http::IpUtils::ResolveClientIp,
 # http/limits/ip_utils.cpp) and the two limiters it feeds (ConnectionLimiter,
 # RequestRateLimiter, wired through CoreEngine::AllowRequest in engine/core_engine.cpp).
-# app/wfx.toml keeps [IP] permanently small (cap=3, burst=5, rate=2/s, tracked-identity
+# app/config/wfx.local.toml keeps [IP] permanently small (cap=3, burst=5, rate=2/s, tracked-identity
 # cap=64, BitmapPool's real minimum) instead of patching config mid-run, so every phase
 # but dualstack runs against the same server the whole time.
 #
@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import common
 from common import net, term
 
-# Config baked into app/wfx.toml's [IP] section, kept here so the numbers in this file
+# Config baked into app/config/wfx.local.toml's [IP] section, kept here so the numbers in this file
 # read the same as the ones a phase actually drives against
 CAP        = 3   # max_connections_per_ip
 BURST      = 5   # max_request_burst_per_ip
@@ -207,7 +207,7 @@ def _alive(host, port, rtimeout=4.0):
     return isinstance(_send_from(host, port, _ALIVE_PROBE, "GET", "/health"), int)
 
 # TOML patching, only used by phases that need a config variant other than
-# app/wfx.toml's permanent baseline
+# app/config/wfx.local.toml's permanent baseline
 def _patch_toml(path, pattern, replacement):
     with open(path) as f:
         original = f.read()
@@ -286,7 +286,7 @@ def phase_trust_boundary(ctx):
     p.secure("the identity actually billed was the first XFF, not the rotated ones",
              st_fresh == 429, "status=%r, expected 429 (10.10.5.1's bucket should be spent)" % st_fresh)
 
-    toml_path = os.path.join(cfg.app_dir, "wfx.toml")
+    toml_path = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
 
     # G6: recursive chain walking - walks right-to-left past trusted hops, stops at
     # the first untrusted one and uses that as the real client
@@ -806,7 +806,7 @@ def phase_multiworker(ctx):
     # effective cap for one identity is (configured cap) x (worker count), not the
     # configured cap alone. This demonstrates that directly instead of just asserting it
     workers = 4
-    toml_path = os.path.join(cfg.app_dir, "wfx.toml")
+    toml_path = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
     original = _patch_toml(toml_path, r'(?m)^(\s*worker_processes\s*=\s*)\d+', r'\g<1>%d' % workers)
     try:
         if not _restart(ctx):

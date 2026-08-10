@@ -12,6 +12,7 @@
 #include <wfx/utils/crypto.hpp>
 #include <wfx/utils/encoding.hpp>
 #include <wfx/utils/jwk.hpp>
+#include <wfx/utils/jwt.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -516,6 +517,47 @@ WFX_POST("/jwk/load", [](WFX::Request req, WFX::Response res) {
 
     auto [es, pub] = key.ExportPublic();
     WriteStatusHex(res, es, pub);
+})
+
+// vvv JWT vvv
+// Token travels as the raw POST body. X-Key (hex PEM public key) and X-Aud (expected
+// audience) are optional: an absent X-Key stops after parsing/claims so malformed-token
+// tests don't need a real key at all, an absent X-Aud skips the audience check entirely
+WFX_POST("/jwt/verify", [](WFX::Request req, WFX::Response res) {
+    auto [ps, parts] = WFX::ParseJwt(req.Body());
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("parseStatus", static_cast<std::uint64_t>(ps));
+
+    if(ps != WFX::CryptoOk) {
+        w.Write("audOk", false);
+        w.Write("timeOk", false);
+        w.Write("verifyStatus", static_cast<std::uint64_t>(WFX::CryptoInvalidArg));
+        return;
+    }
+
+    w.Write("alg", parts.alg);
+    w.Write("kid", parts.kid);
+
+    std::string_view expectedAud;
+    const bool checkAud = req.GetHeader("X-Aud", expectedAud);
+    w.Write("audOk", !checkAud || WFX::JwtAudienceMatches(parts.payload, expectedAud));
+    w.Write("timeOk", WFX::JwtTimeClaimsValid(parts.payload));
+
+    const WFX::String keyPem = HexHeader(req, "X-Key");
+    if(keyPem.empty()) {
+        w.Write("verifyStatus", static_cast<std::uint64_t>(WFX::CryptoInvalidArg));
+        return;
+    }
+
+    auto [ks, key] = WFX::AsymKey::Load(keyPem, false);
+    if(ks != WFX::CryptoOk) {
+        w.Write("verifyStatus", static_cast<std::uint64_t>(ks));
+        return;
+    }
+
+    w.Write("verifyStatus", static_cast<std::uint64_t>(WFX::VerifyJwtSignature(parts, key)));
 })
 
 // vvv Encoding vvv

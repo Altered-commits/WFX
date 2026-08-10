@@ -12,10 +12,10 @@ Understanding this structure will help you know where files live, what each dire
 
 ## Directory Overview
 
-`wfx new` itself only creates `public/`, `src/`, `templates/`, `.gitignore`, `CMakeLists.txt`, and
-`wfx.toml`. `build/` and `intermediate/` appear after your first `wfx build`/`wfx run`, and `logs/`
-appears after your first `wfx run`. This is the full layout you'll have once you've run the project
-at least once:
+`wfx new` itself only creates `public/`, `src/`, `templates/`, `config/`, `.gitignore`,
+`CMakeLists.txt`, and `config/wfx.local.toml`. `build/` and `intermediate/` appear after your first
+`wfx build`/`wfx run`, and `logs/` appears after your first `wfx run`. This is the full layout
+you'll have once you've run the project at least once:
 
 ```text
 <your_workspace>/
@@ -25,6 +25,9 @@ at least once:
 │  ├─ logs/           # appears after the first run
 │  │  ├─ crash_logs/
 │  │  └─ default_logs/
+│  │
+│  ├─ config/
+│  │  └─ wfx.local.toml
 │  │
 │  ├─ public/
 │  │  ├─ style.css
@@ -38,8 +41,7 @@ at least once:
 │  │  └─ index.html
 │  │
 │  ├─ .gitignore
-│  ├─ CMakeLists.txt
-│  └─ wfx.toml
+│  └─ CMakeLists.txt
 │
 └─ ...
 ```
@@ -129,9 +131,13 @@ You are free to modify `.gitignore` as needed to suit your workflow (for example
 
 ---
 
-### `wfx.toml`
+### `config/`
 
-The `wfx.toml` file is the main configuration file for the entire project. It defines settings for both your project and the WFX engine. This file is required for the project to function correctly and should be version-controlled.
+Holds one `wfx.<env>.toml` per environment, each defining settings for both your project and the
+WFX engine. `wfx run`/`wfx build` pick which one to load with `--env` (`config/wfx.local.toml` when
+it's omitted, which is why a fresh project already works with a bare `wfx run`). Every file here is
+required to be complete and standalone, and every one of them should be version-controlled. See
+[Engine Commands](engine_commands.md#environments---env) for how `--env` resolves to a path.
 
 ---
 
@@ -140,4 +146,4 @@ The `wfx.toml` file is the main configuration file for the entire project. It de
 Now that you have an overview of the project structure, you can start exploring how to work with WFX:
 
 - **Engine Commands**: Learn how `wfx` CLI works. See [Engine Commands](engine_commands.md) for details.  
-- **Configuration**: Understand and modify `wfx.toml` to customize project settings. See [WFX Settings](wfx_toml.md) for details.
+- **Configuration**: Understand and modify your `wfx.<env>.toml` files to customize project settings. See [WFX Settings](wfx_toml.md) for details.
