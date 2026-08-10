@@ -136,7 +136,7 @@ namespace Detail {
 inline constexpr std::uint64_t PackAlg5(std::string_view s) noexcept
 {
     std::uint64_t key = 0;
-    for(char c : s)
+    for(const char c : s)
         key = (key << 8) | static_cast<std::uint8_t>(c);
 
     return key;
