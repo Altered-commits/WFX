@@ -75,7 +75,6 @@ function(configure_compile target)
             -Wno-return-type-c-linkage
             $<$<CONFIG:Release>:
                 -O3
-                -march=native
                 -fvisibility=hidden
                 -fvisibility-inlines-hidden
                 -ffunction-sections
