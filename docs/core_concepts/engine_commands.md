@@ -45,7 +45,7 @@ Pre-build various parts of the project, such as templates or source code.
 **Usage:**
 
 ```bash
-wfx build <project_name> <target>
+wfx build <project_name> <target> [options]
 ```
 
 #### Compulsory Arguments
@@ -55,10 +55,17 @@ wfx build <project_name> <target>
 | `<project_name>`  | Name of the project folder to build                                 |
 | `<target>`        | Which part to build: `templates` or `source`                        |
 
+#### Optional Flags
+
+| Option  | Description                                             | Default | Requires value? |
+|---------|----------------------------------------------------------|---------|------------------|
+| `--env` | Which environment's config to build against (see below) | `local` | Yes              |
+
 **Example:**
 
 ```bash
 wfx build my-project source
+wfx build my-project source --env stage
 ```
 
 ---
@@ -75,14 +82,15 @@ wfx run <project_name> [options]
 
 #### Optional Flags
 
-| Option               | Description                       | Default   | Requires value? |
-|----------------------|-----------------------------------|-----------|-----------------|
-|--host	               | Host to bind	                   | 127.0.0.1 | Yes             |
-|--port	               | Port to bind	                   | 8080      | Yes             |
-|--pin-to-cpu          | Pin workers to CPU cores          |     –     | No              |
-|--use-https	       | Enable HTTPS connection	       |     –     | No              |
-|--https-port-override | Override default HTTPS port       |     –     | No              |
-|--detach              | Run server as a background daemon |     –     | No              |
+| Option               | Description                           | Default   | Requires value? |
+|----------------------|----------------------------------------|-----------|-----------------|
+|--host	               | Host to bind	                       | 127.0.0.1 | Yes             |
+|--port	               | Port to bind	                       | 8080      | Yes             |
+|--env                 | Environment to run (see below)        | local     | Yes             |
+|--pin-to-cpu          | Pin workers to CPU cores              |     –     | No              |
+|--use-https	       | Enable HTTPS connection	           |     –     | No              |
+|--https-port-override | Override default HTTPS port           |     –     | No              |
+|--detach              | Run server as a background daemon     |     –     | No              |
 
 #### Additional Information
 - **Default** specifies the value used by WFX when the option is not explicitly provided.
@@ -94,8 +102,35 @@ wfx run <project_name> [options]
 
 ```bash
 wfx run my-project --host 0.0.0.0 --port 3000 --use-https --https-port-override
+wfx run my-project --env stage
 ```
-This starts the server on all interfaces, port 3000 and HTTPS enabled.
+The first line starts the server on all interfaces, port 3000, HTTPS enabled. The second runs `my-project` against its `stage` environment.
+
+---
+
+## Environments (`--env`)
+
+`wfx run` and `wfx build` both load their configuration from `config/wfx.<env>.toml`, where `<env>`
+comes from `--env` (`local` when omitted). Each environment is a complete, standalone file with no
+base file and no inheritance between environments, so `config/wfx.stage.toml` needs every section a
+runnable config requires on its own.
+
+```text
+<your_project_name>/
+└─ config/
+   ├─ wfx.local.toml   # wfx run my-project
+   ├─ wfx.stage.toml   # wfx run my-project --env stage
+   └─ wfx.prod.toml    # wfx run my-project --env prod
+```
+
+`<env>` can be any name you like, `local`/`stage`/`prod` are just conventions, whatever matches an
+existing `config/wfx.<env>.toml` works.
+
+!!! note
+    `--env` and the `[ENV]` section inside a `wfx.toml` file answer different questions. `--env`
+    picks *which whole file* gets loaded. `[ENV] env_path`, once that file is loaded, points at a
+    `.env` file to load secrets from. See [Environment Variables](../api_reference/env.md) for that
+    part.
 
 ---
 

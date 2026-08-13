@@ -19,6 +19,7 @@ enum class ServerFlags : std::uint8_t {
 
 struct ServerConfig {
     std::string host = "127.0.0.1";
+    std::string env = "local"; // Selects config/wfx.<env>.toml
     std::uint16_t port = 8080;
     std::uint64_t flags = 0;
 

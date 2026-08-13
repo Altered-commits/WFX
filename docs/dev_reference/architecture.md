@@ -21,7 +21,7 @@ flowchart TD
     I --> G
 
     G[Validate project directory exists] --> K[Create default_logs and crash_logs dir if missing]
-    K --> N[Load wfx.toml and .env\nrequire owner uid and perms 600]
+    K --> N[Load config/wfx.{env}.toml and .env\nrequire owner uid and perms 600]
 
     N --> O[Install SIGINT and SIGTERM handlers\nroutes to HandleMasterSignal]
     O --> P[Install SIGCHLD handler\nwakes master from nanosleep, does nothing else]

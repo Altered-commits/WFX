@@ -26,6 +26,8 @@
 //                                std::basic_string<char, std::char_traits<char>, WFX::Allocator<char>>, etc.
 //   WFX::Vector<T>             : std::vector<T, WFX::Allocator<T>>
 //   WFX::String                : std::basic_string<..., WFX::Allocator<char>>
+//   WFX::UnorderedMap<K, V>    : std::unordered_map<K, V, ..., WFX::Allocator<std::pair<const K, V>>>
+//   WFX::UnorderedSet<T>       : std::unordered_set<T, ..., WFX::Allocator<T>>
 //
 // Examples:
 //   auto* p = WFX::New<MyType>(arg1, arg2);
@@ -48,6 +50,8 @@ using WFX::Shared::New;
 using WFX::Shared::NewArray;
 using WFX::Shared::Realloc;
 using WFX::Shared::String;
+using WFX::Shared::UnorderedMap;
+using WFX::Shared::UnorderedSet;
 using WFX::Shared::Vector;
 
 } // namespace WFX

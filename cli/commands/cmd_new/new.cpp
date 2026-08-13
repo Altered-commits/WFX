@@ -34,6 +34,7 @@ static void ScaffoldProject(const std::string& projectName)
     fs::create_directories(projBase / "src");
     fs::create_directories(projBase / "public");
     fs::create_directories(projBase / "templates");
+    fs::create_directories(projBase / "config");
 
     // 1.1 Build config
     CreateFile(projBase / "CMakeLists.txt", R"(cmake_minimum_required(VERSION 3.24)
@@ -74,7 +75,6 @@ function(configure_compile target)
             -Wno-return-type-c-linkage
             $<$<CONFIG:Release>:
                 -O3
-                -march=native
                 -fvisibility=hidden
                 -fvisibility-inlines-hidden
                 -ffunction-sections
@@ -172,8 +172,8 @@ intermediate/
 logs/
 )");
 
-    // 2. Create essential config
-    CreateFile(projBase / "wfx.toml", R"([Project]
+    // 2. Create essential config ('local' is the default env for `wfx run`/`wfx build`)
+    CreateFile(projBase / "config" / "wfx.local.toml", R"([Project]
 middleware_list = []    # Order of middleware registered by either User or Engine
 
 [Build]

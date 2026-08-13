@@ -1,6 +1,9 @@
 # WFX Settings
 
-This page defines all supported `wfx.toml` configuration options in WFX.
+This page defines all supported configuration options for a `wfx.<env>.toml` file, one of which
+lives at `config/wfx.<env>.toml` in your project for every environment you run or build against
+(`config/wfx.local.toml` by default). See [Engine Commands](engine_commands.md#environments---env)
+for how `--env` picks which file gets loaded.
 
 !!! note
     - All settings in this page are applied **per worker process**, not globally. For example, if `max_connections` is set to `2000` and WFX is running with `4` worker processes, the effective maximum connection capacity is `2000 × 4 = 8000` concurrent connections.
