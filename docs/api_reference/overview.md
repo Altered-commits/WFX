@@ -16,7 +16,7 @@ WFX is under active development.
 
 - **Not guaranteed at this stage**
 - Public APIs may change as the engine evolves
-- Breaking changes are expected until the first official stable release on the `main` branch
+- Breaking changes are expected until v1.0.0 is released
 
 ### ABI Stability
 
@@ -26,10 +26,10 @@ WFX is under active development.
 - **However:**
     - This has **not been exhaustively validated**
     - Edge cases (e.g. struct padding, alignment differences, compiler-specific behavior) may still exist
-    - No formal ABI compatibility guarantees are made yet
+    - No formal ABI compatibility guarantees are made until v1.0.0
 
 !!! note
-    The ABI layer is designed with long-term stability in mind, but should be treated as **experimental** until broader validation is complete.
+    The ABI layer is designed with long-term stability in mind, but should be treated as **experimental** until v1.0.0.
 
 ---
 

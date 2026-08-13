@@ -5,7 +5,7 @@ hide:
 ---
 
 <div class="wfx-hero">
-<div class="wfx-badge">v0.x - active development, Linux only</div>
+<div class="wfx-badge">v0.1.0 - active development, Linux only</div>
 <h1 class="wfx-title">WFX</h1>
 <p class="wfx-sub">An explicit, low-level C++ web engine for people who want control and performance without behavior hidden behind abstractions.</p>
 <div class="wfx-buttons">
@@ -13,9 +13,6 @@ hide:
 <a href="api_reference/overview/" class="md-button">API reference</a>
 </div>
 </div>
-
-!!! warning "Active development"
-    Documentation and APIs change frequently. Do not treat anything here as stable until stated otherwise. See [what's missing](#whats-missing) below before you commit to anything.
 
 <p class="wfx-section-label">What it includes</p>
 
@@ -100,7 +97,7 @@ hide:
 <li><strong>Linux only.</strong> No Windows or macOS support yet.</li>
 <li><strong>HTTP/1.1 only.</strong> The server and the outbound client both speak it, and nothing newer.</li>
 <li><strong>An engine, not a batteries-included framework.</strong> The lower-level pieces are here and the primitives to build on them are deliberate; the conveniences layered on top of them are largely not, so expect to write some of that yourself.</li>
-<li><strong>No stability guarantees.</strong> Both the API and ABI can still change before a first stable release.</li>
+<li><strong>No stability guarantees.</strong> Both the API and ABI can still change before v1.0.0 is released.</li>
 </ul>
 </div>
 

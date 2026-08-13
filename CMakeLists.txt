@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(wfx)
+project(wfx VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -120,6 +120,17 @@ target_include_directories(wfx PRIVATE
 include(cmake/ssl.cmake)
 
 # -----------------------------
+# Target CPU flag(s)
+#
+# Defaults to -march=native, correct whenever the build machine IS the run
+# machine (install.sh, --local-*). Override with -DWFX_TARGET_FLAGS=... to
+# cross-target a specific CPU instead (e.g. a release build made on a CI
+# runner for a different machine, such as -mcpu=neoverse-n1 for an AWS
+# Graviton box).
+# -----------------------------
+set(WFX_TARGET_FLAGS "-march=native" CACHE STRING "Architecture flag(s) passed to the compiler")
+
+# -----------------------------
 # Compiler options
 # -----------------------------
 target_compile_options(wfx PRIVATE
@@ -128,17 +139,17 @@ target_compile_options(wfx PRIVATE
 
     # Release (GCC)
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:
-        -O3 -march=native -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants
+        -O3 ${WFX_TARGET_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants
     >
 
     # Release (Clang / AppleClang)
     $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:
-        -O3 -march=native -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants
+        -O3 ${WFX_TARGET_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants
     >
 
     # Release (Intel oneAPI / icx)
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:IntelLLVM>>:
-        -O3 -march=native -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants -xHost
+        -O3 ${WFX_TARGET_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants -xHost
     >
 
     # Release (MSVC)
