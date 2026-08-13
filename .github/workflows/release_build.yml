@@ -1,0 +1,115 @@
+name: WFX Release
+
+# Triggered by pushing a version tag (e.g. v1.2.3). Builds the engine for
+# every supported CPU target and publishes the binaries + checksums as
+# assets on a GitHub Release matching the tag. Add a new CPU target by
+# adding one matrix entry below, nothing else needs to change. Releases
+# are only ever cut from main, see the guard job.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # Tags are refs, not branches. A tag can be pushed against any commit, so
+  # this checks the tagged commit is actually reachable from main before
+  # anything builds. Full history is needed for merge-base to work.
+  guard:
+    name: Verify tag is on main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Refuse tags that aren't on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor ${{ github.sha }} origin/main; then
+            echo "This tag's commit isn't on main, refusing to release."
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: guard
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      # Four targets: two Graviton generations (each -mcpu= tuned to the exact
+      # core, so codegen matches building natively on that chip) and two
+      # x86-64 psABI microarchitecture levels (v2: safe baseline, runs on
+      # effectively any 2009+ Intel/AMD box; v3: adds AVX2, matches most
+      # current-generation cloud Intel/AMD instances and is faster where it's
+      # supported). A binary built for a higher level SIGILLs on a CPU that
+      # doesn't support it, so v2 stays the safe fallback rather than
+      # assuming AVX2 everywhere.
+      matrix:
+        include:
+          # Graviton2 (t4g family)
+          - target: linux-arm64-neoverse-n1
+            runs-on: ubuntu-24.04-arm
+            target_flags: -mcpu=neoverse-n1
+          # Graviton3 (c7g/m7g family)
+          - target: linux-arm64-neoverse-v1
+            runs-on: ubuntu-24.04-arm
+            target_flags: -march=armv8.4-a -mcpu=neoverse-v1
+          # Generic x86-64 baseline
+          - target: linux-x86_64-v2
+            runs-on: ubuntu-24.04
+            target_flags: -march=x86-64-v2
+          # Modern x86-64 (AVX2)
+          - target: linux-x86_64-v3
+            runs-on: ubuntu-24.04
+            target_flags: -march=x86-64-v3
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential ninja-build
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWFX_ENABLE_ASAN=OFF \
+            -DWFX_TARGET_FLAGS="${{ matrix.target_flags }}"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Package
+        run: |
+          ASSET="wfx-${{ matrix.target }}"
+          mv wfx "$ASSET"
+          sha256sum "$ASSET" > "$ASSET.sha256"
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v7
+        with:
+          name: wfx-${{ matrix.target }}
+          path: |
+            wfx-${{ matrix.target }}
+            wfx-${{ matrix.target }}.sha256
+          retention-days: 1
+
+  # Runs once after every matrix leg finishes, so the release is created
+  # exactly once with all targets' assets already in hand.
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build outputs
+        uses: actions/download-artifact@v8
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: wfx-*/*
