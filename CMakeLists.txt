@@ -129,6 +129,10 @@ include(cmake/ssl.cmake)
 # Graviton box).
 # -----------------------------
 set(WFX_TARGET_FLAGS "-march=native" CACHE STRING "Architecture flag(s) passed to the compiler")
+# Split on whitespace into a proper CMake list so multi-flag values (e.g.
+# "-march=armv8.4-a -mcpu=neoverse-v1") become separate compiler arguments
+# instead of one quoted token that the compiler misparses.
+separate_arguments(WFX_TARGET_FLAGS)
 
 # -----------------------------
 # Compiler options
