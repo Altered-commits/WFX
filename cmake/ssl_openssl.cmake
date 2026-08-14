@@ -60,6 +60,21 @@ set(OPENSSL_INSTALL_DIR ${CMAKE_BINARY_DIR}/openssl_lts-install)
 # Prepare compiler flags for optimization
 set(OPENSSL_OPT_FLAGS "-O3 -DOPENSSL_SMALL_FOOTPRINT")
 
+# Static linking is for release binaries, which need to run standalone on a
+# box that doesn't have this custom OpenSSL build's .so files anywhere on its
+# linker path. Local/dev builds stay dynamic since nothing ships them off-box.
+option(WFX_STATIC_SSL "Statically link the custom-built OpenSSL into wfx" OFF)
+
+if(WFX_STATIC_SSL)
+    set(OPENSSL_SHARED_OPT "no-shared")
+    set(OPENSSL_LIB_TYPE STATIC)
+    set(OPENSSL_LIB_EXT ".a")
+else()
+    set(OPENSSL_SHARED_OPT "shared")
+    set(OPENSSL_LIB_TYPE SHARED)
+    set(OPENSSL_LIB_EXT ".so")
+endif()
+
 ExternalProject_Add(openssl_lts_build
     # Using 3.5.4 because it has LTS support until April 8, 2030
     URL "https://github.com/openssl/openssl/releases/download/openssl-3.5.4/openssl-3.5.4.tar.gz"
@@ -68,10 +83,10 @@ ExternalProject_Add(openssl_lts_build
 
     # Because Ninja is more stricter than make, because these files exist after we run the build
     # But Ninja aint gon care about all those stuff, IT NEEDS THEM
-    BUILD_BYPRODUCTS 
-        "${OPENSSL_INSTALL_DIR}/lib/libssl.so"
-        "${OPENSSL_INSTALL_DIR}/lib/libcrypto.so"
-    
+    BUILD_BYPRODUCTS
+        "${OPENSSL_INSTALL_DIR}/lib/libssl${OPENSSL_LIB_EXT}"
+        "${OPENSSL_INSTALL_DIR}/lib/libcrypto${OPENSSL_LIB_EXT}"
+
     # We use cmake -E env to pass optimization flags to OpenSSL's non-CMake build system.
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env "CFLAGS=${OPENSSL_OPT_FLAGS}"
         <SOURCE_DIR>/Configure
@@ -94,7 +109,7 @@ ExternalProject_Add(openssl_lts_build
             no-whirlpool no-sctp no-gost
 
             # Build and installation options
-            shared                         # Make shared libs (.so)
+            ${OPENSSL_SHARED_OPT}          # shared (.so) for dev builds, no-shared (.a only) for releases
             no-legacy                      # Remove old legacy APIs
             no-tests                       # Don't build the OpenSSL test suite
             --prefix=<INSTALL_DIR>
@@ -116,16 +131,16 @@ ExternalProject_Add(openssl_lts_build
 file(MAKE_DIRECTORY ${OPENSSL_INSTALL_DIR}/include)
 
 # Crypto
-add_library(OpenSSL::Crypto SHARED IMPORTED GLOBAL)
+add_library(OpenSSL::Crypto ${OPENSSL_LIB_TYPE} IMPORTED GLOBAL)
 set_target_properties(OpenSSL::Crypto PROPERTIES
-    IMPORTED_LOCATION "${OPENSSL_INSTALL_DIR}/lib/libcrypto.so"
+    IMPORTED_LOCATION "${OPENSSL_INSTALL_DIR}/lib/libcrypto${OPENSSL_LIB_EXT}"
     INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INSTALL_DIR}/include"
 )
 
 # SSL
-add_library(OpenSSL::SSL SHARED IMPORTED GLOBAL)
+add_library(OpenSSL::SSL ${OPENSSL_LIB_TYPE} IMPORTED GLOBAL)
 set_target_properties(OpenSSL::SSL PROPERTIES
-    IMPORTED_LOCATION "${OPENSSL_INSTALL_DIR}/lib/libssl.so"
+    IMPORTED_LOCATION "${OPENSSL_INSTALL_DIR}/lib/libssl${OPENSSL_LIB_EXT}"
     INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INSTALL_DIR}/include"
     INTERFACE_LINK_LIBRARIES OpenSSL::Crypto
 )
