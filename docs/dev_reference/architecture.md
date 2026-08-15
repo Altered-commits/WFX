@@ -21,14 +21,20 @@ flowchart TD
     I --> G
 
     G[Validate project directory exists] --> K[Create default_logs and crash_logs dir if missing]
-    K --> N[Load config/wfx.{env}.toml and .env\nrequire owner uid and perms 600]
+    K --> N[Load the selected config/wfx toml and .env\nrequire owner uid and perms 600]
 
     N --> O[Install SIGINT and SIGTERM handlers\nroutes to HandleMasterSignal]
     O --> P[Install SIGCHLD handler\nwakes master from nanosleep, does nothing else]
     P --> Q[GenerateSSLKey]
     Q --> R[MetricTracer Create\nallocate shared mmap for N workers]
 
-    R --> S[HandleBuildDirectory]
+    R --> PA{Prebuilt boot requested?}
+    PA -- Yes --> PB{build/user_entry.so exists?}
+    PB -- No --> PC([Fatal: prebuilt library missing])
+    PB -- Yes --> PD[LoadTemplatesFromCache\nrestore map from the shipped cache]
+    PD --> X
+
+    PA -- No --> S[HandleBuildDirectory]
     S --> T[PreCompileTemplates]
     T --> U{Compile succeeded\nAND has a dynamic template?}
     U -- No: either failed\nor purely static --> V[Compile source only\ntarget: user_entry]
@@ -277,6 +283,30 @@ flowchart TD
     ZC --> ZD([Return success with hasDynamic flag])
     ZB -- No --> ZD
 ```
+
+### Restoring templates without compiling
+
+`LoadTemplatesFromCache` is the `--use-prebuilt` counterpart to the pipeline above. The templates map
+is what `LoadDynamicTemplatesFromLib` and `GetTemplate` resolve against, so it still has to be
+populated even when nothing is being built.
+
+```mermaid
+flowchart TD
+    A([LoadTemplatesFromCache called in master]) --> B[Load template cache from disk]
+    B --> C{Cache loaded?}
+    C -- No --> D([Warn, register no templates, return])
+    C -- Yes --> E[Iterate cache entries]
+
+    E --> F{Entry payload valid\nAND path under template dir?}
+    F -- No --> G[Warn, skip entry]
+    G --> E
+    F -- Yes --> H[Pop type and size\nderive relative and output path]
+    H --> I[Add to templates map]
+    I --> E
+```
+
+The cache file is the only input, so the template directory is left untouched and can be absent
+entirely. Timestamps play no part on this path.
 
 ### Compilation loop
 

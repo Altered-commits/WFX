@@ -163,6 +163,11 @@ void FileMeta::Set(std::string file, FileMetadata meta)
     meta_[std::move(file)] = std::move(meta);
 }
 
+const FileMetaMap& FileMeta::Entries() const noexcept
+{
+    return meta_;
+}
+
 void FileMeta::Erase(const std::string& file)
 {
     meta_.erase(file);

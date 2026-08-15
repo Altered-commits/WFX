@@ -15,6 +15,7 @@ enum class ServerFlags : std::uint8_t {
     USE_HTTPS = 1u << 2,
     OVERRIDE_HTTPS_PORT = 1u << 3,
     USE_DAEMON = 1u << 4,
+    USE_PREBUILT = 1u << 5,
 };
 
 struct ServerConfig {
