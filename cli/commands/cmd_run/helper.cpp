@@ -337,17 +337,33 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         logger.Fatal("[WFX-Master]: Failed to initialize metric tracer region");
 
     // -------------------- TEMPLATE / USER CODE COMPILATION PHASE --------------------
-    HandleBuildDirectory();
+    // '--use-prebuilt': tree was built elsewhere and shipped as-is, so CMake is never invoked and
+    // no toolchain is needed here. A packaged build/ holds only the .so files, without
+    // CMakeCache.txt (it embeds the build machine's absolute paths), so 'cmake --build' on it
+    // would fail anyway.
+    const bool usePrebuilt = cfg.GetFlag(ServerFlags::USE_PREBUILT);
+    const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
+
+    if(usePrebuilt && !FileSystem::FileExists(dllDir.c_str()))
+        logger.Fatal("[WFX-Master]: '--use-prebuilt' given but '", dllDir, "' does not exist");
 
     auto& templateEngine = GetTemplateEngine();
-    auto [success, hasDynamic] = templateEngine.PreCompileTemplates();
 
-    // Compile only user source
-    if(!success || !hasDynamic)
-        HandleUserCxxCompilation(CxxCompilationOption::SOURCE_ONLY);
-    // Compile both source + templates
-    else
-        HandleUserCxxCompilation();
+    // Prebuilt trees restore the template map from the shipped cache, everything else walks
+    // templates/ and compiles whatever changed
+    if(usePrebuilt)
+        templateEngine.LoadTemplatesFromCache();
+    else {
+        HandleBuildDirectory();
+
+        // 'success' tells whether every template compiled cleanly, 'hasDynamic' whether any of
+        // them produced a C++ representation in intermediate/dynamic/. Both must hold to build
+        // user_templates as well, otherwise there is nothing to put in it and only user_entry
+        // gets built.
+        const auto [success, hasDynamic] = templateEngine.PreCompileTemplates();
+        HandleUserCxxCompilation(!success || !hasDynamic ? CxxCompilationOption::SOURCE_ONLY
+                                                         : CxxCompilationOption::ALL);
+    }
 
     // Load template library if it exists
     templateEngine.LoadDynamicTemplatesFromLib();
@@ -418,8 +434,6 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
         logger.OpenFile((logsDir + "master.log").c_str(), loggingConfig.maxFileSize, loggingConfig.maxRotations);
 
     // -------------------- WORKERS SPAWNING PHASE --------------------
-    const std::string dllDir = buildConfig.buildDir + "/user_entry.so";
-
     globalState.workerPids.resize(osConfig.workerProcesses, -1);
 
     for(int i = 0; i < osConfig.workerProcesses; i++) {

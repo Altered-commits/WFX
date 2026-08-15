@@ -91,12 +91,14 @@ wfx run <project_name> [options]
 |--use-https	       | Enable HTTPS connection	           |     –     | No              |
 |--https-port-override | Override default HTTPS port           |     –     | No              |
 |--detach              | Run server as a background daemon     |     –     | No              |
+|--use-prebuilt        | Boot an already-built project tree    |     –     | No              |
 
 #### Additional Information
 - **Default** specifies the value used by WFX when the option is not explicitly provided.
 - **Requires value?** indicates whether an option must be followed by a value (for example, `--port 3000`) or can be used as a standalone flag (for example, `--debug`).
 - `--use-https` by default uses port 443.
 - `--https-port-override` overrides the HTTPS port using the value provided via `--port`.
+- `--use-prebuilt` skips compilation entirely, see [Running a prebuilt project](#running-a-prebuilt-project---use-prebuilt).
 
 **Example:**
 
@@ -105,6 +107,43 @@ wfx run my-project --host 0.0.0.0 --port 3000 --use-https --https-port-override
 wfx run my-project --env stage
 ```
 The first line starts the server on all interfaces, port 3000, HTTPS enabled. The second runs `my-project` against its `stage` environment.
+
+---
+
+## Running a prebuilt project (`--use-prebuilt`)
+
+By default `wfx run` compiles your project on every start, so the machine running it needs CMake and
+a C++ compiler. `--use-prebuilt` says the tree was already built elsewhere (typically in CI) and
+shipped as-is, so CMake is never invoked and the target machine needs only the `wfx` binary.
+
+```bash
+wfx run my-project --env prod --use-prebuilt
+```
+
+Only four directories need to ship:
+
+```text
+<your_project_name>/
+├─ build/
+│  ├─ user_entry.so      # always
+│  └─ user_templates.so  # only with dynamic templates
+│
+├─ intermediate/         # compiled templates and the template cache
+├─ config/               # only the environment you run
+└─ public/               # only if you serve static assets
+```
+
+`src/` and `templates/` are not needed. Templates are restored from the cache in `intermediate/`.
+
+!!! warning "Ship only the `.so` files out of `build/`"
+    `CMakeCache.txt` and `CMakeFiles/` record absolute paths from the build machine. Leave them out.
+
+    Because `wfx run` skips CMake configuration whenever `build/` merely exists, a tree packaged like
+    the one above but started **without** `--use-prebuilt` fails immediately with
+    `Error: could not load cache`. If you see that on a deployment target, the flag is missing.
+
+If `user_entry.so` is absent, WFX refuses to start. A missing template cache only warns, since a
+project may legitimately have no templates.
 
 ---
 

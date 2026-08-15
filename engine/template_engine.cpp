@@ -238,6 +238,49 @@ TemplateCompilationResult TemplateEngine::PreCompileTemplates()
     return TemplateCompilationResult{true, hasDynamicElement};
 }
 
+void TemplateEngine::LoadTemplatesFromCache()
+{
+    auto& projectConfig = config_.projectConfig;
+
+    const std::string& inputDir = projectConfig.templateDir;
+    const std::string staticOutputDir = projectConfig.projectName + STATIC_FOLDER;
+
+    FileMeta fileMeta{projectConfig.projectName + TEMPLATE_CACHE_PATH};
+    if(fileMeta.Load() != FileMetaStatus::SUCCESS) {
+        logger_.Warn("[TemplateEngine]: Template cache missing or unreadable, no templates restored");
+        return;
+    }
+
+    // Each entry stores its type followed by its compiled size, as 'PreCompileTemplates' wrote it
+    constexpr std::size_t ENTRY_PAYLOAD_SIZE = sizeof(TemplateType) + sizeof(std::size_t);
+
+    const auto& entries = fileMeta.Entries();
+    templates_.reserve(entries.size());
+
+    for(const auto& [inPath, meta] : entries) {
+        if(meta.userData.size() < ENTRY_PAYLOAD_SIZE || !inPath.starts_with(inputDir)) {
+            logger_.Warn("[TemplateEngine]: Skipping corrupted template cache entry: ", inPath);
+            continue;
+        }
+
+        std::size_t offset{0};
+        const TemplateType cachedType = meta.Pop<TemplateType>(offset);
+        const std::size_t cachedSize = meta.Pop<std::size_t>(offset);
+
+        std::string_view relPath{inPath};
+        relPath.remove_prefix(inputDir.size());
+        relPath.remove_prefix(std::min(relPath.find_first_not_of("/\\"), relPath.size()));
+
+        std::string outPath;
+        outPath.reserve(staticOutputDir.size() + 1 + relPath.size());
+        outPath.append(staticOutputDir).append("/").append(relPath);
+
+        templates_.emplace(relPath, TemplateMeta{cachedType, cachedSize, std::move(outPath)});
+    }
+
+    logger_.Info("[TemplateEngine]: Restored ", templates_.size(), " template(s) from cache");
+}
+
 void TemplateEngine::LoadDynamicTemplatesFromLib()
 {
     // Load the user_templates.[dll/so/dylib] from <project>/build/ if it exists
