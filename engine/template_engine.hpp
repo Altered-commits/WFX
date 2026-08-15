@@ -42,7 +42,8 @@ using Tag = std::pair<std::string_view, std::string_view>;
 class TemplateEngine final {
 public:
     TemplateCompilationResult PreCompileTemplates(); // -|
-    void LoadDynamicTemplatesFromLib();              // -| > To be called in master process only
+    void LoadTemplatesFromCache();                   // -| > To be called in master process only
+    void LoadDynamicTemplatesFromLib();              // -|
     TemplateMeta* GetTemplate(std::string&& relPath);
 
 private: // Nested helper types for the parser

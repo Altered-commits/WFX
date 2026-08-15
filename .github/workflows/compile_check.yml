@@ -7,8 +7,8 @@ on:
 
 jobs:
   build:
-    name: Linux (${{ matrix.compiler }})
-    runs-on: ubuntu-latest
+    name: Linux ${{ matrix.arch }} (${{ matrix.compiler }})
+    runs-on: ${{ matrix.runs-on }}
     strategy:
       fail-fast: false
       matrix:
@@ -16,9 +16,18 @@ jobs:
           - compiler: gcc
             cc: gcc
             cxx: g++
+            arch: x86_64
+            runs-on: ubuntu-latest
           - compiler: clang
             cc: clang
             cxx: clang++
+            arch: x86_64
+            runs-on: ubuntu-latest
+          - compiler: gcc
+            cc: gcc
+            cxx: g++
+            arch: arm64
+            runs-on: ubuntu-24.04-arm
 
     steps:
     - name: Checkout repository
@@ -47,9 +56,9 @@ jobs:
       uses: actions/cache@v6
       with:
         path: build
-        key: build-${{ matrix.compiler }}-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
+        key: build-${{ matrix.arch }}-${{ matrix.compiler }}-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
         restore-keys: |
-          build-${{ matrix.compiler }}-asan-
+          build-${{ matrix.arch }}-${{ matrix.compiler }}-asan-
 
     - name: Configure
       run: |
@@ -65,7 +74,7 @@ jobs:
     # Hands the wfx binary to audit_check.yml so it never has to compile. Only the
     # binary, include/ and shared/ are tracked source already in its checkout.
     - name: Upload wfx binary for the audit stage
-      if: matrix.compiler == 'gcc'
+      if: matrix.compiler == 'gcc' && matrix.arch == 'x86_64'
       uses: actions/upload-artifact@v7
       with:
         name: wfx-binary

@@ -81,6 +81,8 @@ public: // Main functions
     FileMetadata* Get(const std::string& file, bool processHit = true);
     void Set(std::string file, FileMetadata meta);
 
+    const FileMetaMap& Entries() const noexcept;
+
     void Erase(const std::string& file);
     void Clear();
 

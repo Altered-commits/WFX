@@ -98,9 +98,9 @@ Used by the epoll connection handler when serving files. User code does not inte
 WFX::Core::TemplateEngine& GetTemplateEngine() noexcept;
 ```
 
-Returns the template engine instance. Template compilation (`PreCompileTemplates()` and `LoadDynamicTemplatesFromLib()`) happens in the master process before the fork. Workers inherit the compiled template state and call `GetTemplate()` at request time to serve pre-compiled output.
+Returns the template engine instance. Template setup (`PreCompileTemplates()` or, under `--use-prebuilt`, `LoadTemplatesFromCache()`, followed by `LoadDynamicTemplatesFromLib()`) happens in the master process before the fork. Workers inherit the resulting template state and call `GetTemplate()` at request time to serve pre-compiled output.
 
-Do not call the compilation functions from worker code. They are master-only.
+Do not call these setup functions from worker code. They are master-only.
 
 ---
 

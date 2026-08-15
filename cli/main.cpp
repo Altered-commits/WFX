@@ -83,6 +83,7 @@ int BeginAwesomeness(int argc, char* argv[])
             if(options.count("--use-https") > 0)           cfg.SetFlag(CLI::ServerFlags::USE_HTTPS);
             if(options.count("--https-port-override") > 0) cfg.SetFlag(CLI::ServerFlags::OVERRIDE_HTTPS_PORT);
             if(options.count("--detach") > 0)              cfg.SetFlag(CLI::ServerFlags::USE_DAEMON);
+            if(options.count("--use-prebuilt") > 0)        cfg.SetFlag(CLI::ServerFlags::USE_PREBUILT);
 
             return CLI::RunServer(positionalArgs[0], cfg);
         });
@@ -93,6 +94,7 @@ int BeginAwesomeness(int argc, char* argv[])
     parser.AddOption("run", "--use-https",           "Use HTTPS connection",        true,  "",          false);
     parser.AddOption("run", "--https-port-override", "Override default HTTPS port", true,  "",          false);
     parser.AddOption("run", "--detach",              "Run server as daemon",        true,  "",          false);
+    parser.AddOption("run", "--use-prebuilt",        "Boot an already-built tree",  true,  "",          false);
 
     // --- Command: control ---
     parser.AddCommand("control", "Manage running WFX servers",
