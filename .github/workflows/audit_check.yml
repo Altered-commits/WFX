@@ -40,9 +40,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build
-          key: build-gcc-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
+          key: build-x86_64-gcc-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: |
-            build-gcc-asan-
+            build-x86_64-gcc-asan-
 
       # Lays wfx out the way scripts/install.sh would: binary on PATH under
       # ~/.wfx/bin, headers under ~/.wfx/src, since the audit apps' CMakeLists.txt

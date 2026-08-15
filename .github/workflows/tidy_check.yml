@@ -33,9 +33,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build
-          key: build-clang-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
+          key: build-x86_64-clang-asan-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: |
-            build-clang-asan-
+            build-x86_64-clang-asan-
 
       # Same flags as compile_check.yml's clang leg, cache hit means no-op
       - name: Ensure compile database is up to date
