@@ -53,6 +53,11 @@ EP_SERIALIZE         = 11
 EP_HANDSHAKE_TIMEOUT = 13
 EP_REQ_TIMEOUT       = 14
 
+# EpDefault's connLimit in app/src/main.cpp, compiled in rather than passed on the
+# command line. Slots are allocated exactly, so this is the real ceiling on how
+# many requests can be in flight to that endpoint at once
+DEFAULT_CONN_LIMIT = 4
+
 # Transport, short names because they are on nearly every line below
 raw_send   = net.send
 _build     = net.request
@@ -1123,7 +1128,9 @@ def phase_resource(ctx):
     none_ok = all(not is_ok(r) for r in res)
     p.check("pool exhaustion resolves", all_resolved and none_ok, "results: %r" % res)
 
-    # Coalescing: 16 concurrent identical GETs must hit the backend ONCE
+    # Coalescing: 16 concurrent identical GETs must hit the backend ONCE. All 16
+    # also succeed on a 4-slot pool, since sharing one round trip means they need
+    # one slot between them rather than one each
     mock.coalesce_reset()
     res = _concurrent(lambda i: drive(cfg, "/coalesce", ep="coalesce"), 16)
     hits = mock.coalesce_count()
@@ -1131,11 +1138,15 @@ def phase_resource(ctx):
     p.check("coalesce: 16 waiters all ok", all_ok, "results: %r" % res)
     p.check("coalesce: backend hit once", hits == 1, "backend hits = %d (expected 1)" % hits)
 
-    # Control: without coalescing, all 16 reach the backend
+    # Control: without coalescing the same requests are not deduplicated, so each
+    # one reaches the backend on its own slot. Driven at the pool's exact size,
+    # because past that the surplus is refused rather than sent and the count
+    # would turn on how fast slots recycle
     mock.coalesce_reset()
-    _concurrent(lambda i: drive(cfg, "/coalesce", ep="default"), 16)
+    _concurrent(lambda i: drive(cfg, "/coalesce", ep="default"), DEFAULT_CONN_LIMIT)
     hits = mock.coalesce_count()
-    p.check("no-coalesce: 16 backend hits", hits == 16, "backend hits = %d (expected 16)" % hits)
+    p.check("no-coalesce: one backend hit each", hits == DEFAULT_CONN_LIMIT,
+            "backend hits = %d (expected %d)" % (hits, DEFAULT_CONN_LIMIT))
 
     # Clone integrity: every coalesced waiter gets its own full 1000-byte copy
     mock.coalesce_reset()

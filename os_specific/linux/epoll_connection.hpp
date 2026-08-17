@@ -44,7 +44,8 @@ struct EndpointEntry {
     EndpointPool pool;
     EndpointPool auxPool;
 
-    explicit EndpointEntry(std::uint32_t connLimit, std::uint32_t auxConnLimit) : pool(connLimit), auxPool(auxConnLimit)
+    explicit EndpointEntry(std::uint32_t connLimit, std::uint32_t auxConnLimit, bool exactSlots)
+        : pool(connLimit, exactSlots), auxPool(auxConnLimit, exactSlots)
     {}
 
     // BitmapPool is move-only, so EndpointEntry must be too

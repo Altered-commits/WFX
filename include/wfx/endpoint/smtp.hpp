@@ -905,6 +905,7 @@ public:
                   .reconnectBackoffBase = config.reconnectBackoffBaseSeconds,
                   .reconnectBackoffMax = config.reconnectBackoffMaxSeconds,
                   .tlsConfig = EpTlsInsecure, // STARTTLS is negotiated in-band by onConnect
+                  .exactSlots = true,
                   .prewarm = config.prewarm,
                   .maxConcurrentStreams = 0,
                   .alpnProtocols = {},

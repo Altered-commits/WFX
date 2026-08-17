@@ -16,7 +16,7 @@ namespace WFX::Http {
 
 class Router;
 class HttpMiddleware;
-class HttpConnectionHandler;
+struct HttpConnectionHandler;
 
 } // namespace WFX::Http
 

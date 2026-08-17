@@ -26,6 +26,7 @@
 //   #include "wfx/endpoint/base.hpp"     : Raw outbound endpoint (Endpoint<TReq,TRes>)
 //   #include "wfx/endpoint/http.hpp"     : Outbound HTTP/1.1 client (HttpEndpoint)
 //   #include "wfx/endpoint/smtp.hpp"     : Outbound SMTP client, STARTTLS submission (SmtpEndpoint)
+//   #include "wfx/endpoint/postgres.hpp" : Outbound PostgreSQL client (PostgresEndpoint)
 // -----------------------------------------------------------------------
 
 #include "wfx/http.hpp"
@@ -43,5 +44,6 @@
 #include "wfx/utils/env.hpp"
 #include "wfx/endpoint/http.hpp"
 #include "wfx/endpoint/smtp.hpp"
+#include "wfx/endpoint/postgres.hpp"
 
 #endif // WFX_INC_WFX_ALL_HPP

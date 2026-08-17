@@ -541,7 +541,7 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
         timerBase = last.meta.timerBase + last.pool.GetSlots() + last.auxPool.GetSlots();
     }
 
-    auto& entry = endpoints_.emplace_back(config.connLimit, config.auxConnLimit);
+    auto& entry = endpoints_.emplace_back(config.connLimit, config.auxConnLimit, config.exactSlots);
     auto& meta = entry.meta;
     auto& pool = entry.pool;
     auto& auxPool = entry.auxPool;
