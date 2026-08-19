@@ -27,47 +27,47 @@ namespace WFX::Postgres::Detail {
 // Type OIDs, from pg_type. Only types with a codec below and the array
 // element types are listed, anything else decodes as text.
 // -----------------------------------------------------------------------
-inline constexpr std::uint32_t OID_BOOL = 16;         // 1 byte, 0 or 1
-inline constexpr std::uint32_t OID_BYTEA = 17;        // raw bytes
-inline constexpr std::uint32_t OID_CHAR = 18;         // single byte, not text
-inline constexpr std::uint32_t OID_NAME = 19;         // 63 byte identifier
-inline constexpr std::uint32_t OID_INT8 = 20;         // signed 64 bit
-inline constexpr std::uint32_t OID_INT2 = 21;         // signed 16 bit
-inline constexpr std::uint32_t OID_INT4 = 23;         // signed 32 bit
-inline constexpr std::uint32_t OID_TEXT = 25;         // utf8 bytes
-inline constexpr std::uint32_t OID_OID = 26;          // unsigned 32 bit
-inline constexpr std::uint32_t OID_JSON = 114;        // text
-inline constexpr std::uint32_t OID_XML = 142;         // text
-inline constexpr std::uint32_t OID_FLOAT4 = 700;      // ieee754 single
-inline constexpr std::uint32_t OID_FLOAT8 = 701;      // ieee754 double
-inline constexpr std::uint32_t OID_BPCHAR = 1042;     // blank padded text
-inline constexpr std::uint32_t OID_VARCHAR = 1043;    // utf8 bytes
-inline constexpr std::uint32_t OID_DATE = 1082;       // int32 days from 2000-01-01
-inline constexpr std::uint32_t OID_TIME = 1083;       // int64 micros from midnight
-inline constexpr std::uint32_t OID_TIMESTAMP = 1114;  // int64 micros, no zone
-inline constexpr std::uint32_t OID_TIMESTAMPTZ = 1184;// int64 micros, utc
-inline constexpr std::uint32_t OID_INTERVAL = 1186;   // int64 micros, int32 days, int32 months
-inline constexpr std::uint32_t OID_TIMETZ = 1266;     // int64 micros, int32 zone offset
-inline constexpr std::uint32_t OID_NUMERIC = 1700;    // base 10000 digit array
-inline constexpr std::uint32_t OID_UUID = 2950;       // 16 raw bytes
-inline constexpr std::uint32_t OID_JSONB = 3802;      // version byte then text
+inline constexpr std::uint32_t OID_BOOL = 16;          // 1 byte, 0 or 1
+inline constexpr std::uint32_t OID_BYTEA = 17;         // raw bytes
+inline constexpr std::uint32_t OID_CHAR = 18;          // single byte, not text
+inline constexpr std::uint32_t OID_NAME = 19;          // 63 byte identifier
+inline constexpr std::uint32_t OID_INT8 = 20;          // signed 64 bit
+inline constexpr std::uint32_t OID_INT2 = 21;          // signed 16 bit
+inline constexpr std::uint32_t OID_INT4 = 23;          // signed 32 bit
+inline constexpr std::uint32_t OID_TEXT = 25;          // utf8 bytes
+inline constexpr std::uint32_t OID_OID = 26;           // unsigned 32 bit
+inline constexpr std::uint32_t OID_JSON = 114;         // text
+inline constexpr std::uint32_t OID_XML = 142;          // text
+inline constexpr std::uint32_t OID_FLOAT4 = 700;       // ieee754 single
+inline constexpr std::uint32_t OID_FLOAT8 = 701;       // ieee754 double
+inline constexpr std::uint32_t OID_BPCHAR = 1042;      // blank padded text
+inline constexpr std::uint32_t OID_VARCHAR = 1043;     // utf8 bytes
+inline constexpr std::uint32_t OID_DATE = 1082;        // int32 days from 2000-01-01
+inline constexpr std::uint32_t OID_TIME = 1083;        // int64 micros from midnight
+inline constexpr std::uint32_t OID_TIMESTAMP = 1114;   // int64 micros, no zone
+inline constexpr std::uint32_t OID_TIMESTAMPTZ = 1184; // int64 micros, utc
+inline constexpr std::uint32_t OID_INTERVAL = 1186;    // int64 micros, int32 days, int32 months
+inline constexpr std::uint32_t OID_TIMETZ = 1266;      // int64 micros, int32 zone offset
+inline constexpr std::uint32_t OID_NUMERIC = 1700;     // base 10000 digit array
+inline constexpr std::uint32_t OID_UUID = 2950;        // 16 raw bytes
+inline constexpr std::uint32_t OID_JSONB = 3802;       // version byte then text
 
-inline constexpr std::uint32_t OID_BOOL_ARRAY = 1000;       // bool[]
-inline constexpr std::uint32_t OID_BYTEA_ARRAY = 1001;      // bytea[]
-inline constexpr std::uint32_t OID_INT2_ARRAY = 1005;       // smallint[]
-inline constexpr std::uint32_t OID_INT4_ARRAY = 1007;       // integer[]
-inline constexpr std::uint32_t OID_TEXT_ARRAY = 1009;       // text[]
-inline constexpr std::uint32_t OID_VARCHAR_ARRAY = 1015;    // varchar[]
-inline constexpr std::uint32_t OID_INT8_ARRAY = 1016;       // bigint[]
-inline constexpr std::uint32_t OID_FLOAT4_ARRAY = 1021;     // real[]
-inline constexpr std::uint32_t OID_FLOAT8_ARRAY = 1022;     // double precision[]
-inline constexpr std::uint32_t OID_TIMESTAMP_ARRAY = 1115;  // timestamp[]
-inline constexpr std::uint32_t OID_TIMESTAMPTZ_ARRAY = 1185;// timestamptz[]
-inline constexpr std::uint32_t OID_NUMERIC_ARRAY = 1231;    // numeric[]
-inline constexpr std::uint32_t OID_UUID_ARRAY = 2951;       // uuid[]
-inline constexpr std::uint32_t OID_JSONB_ARRAY = 3807;      // jsonb[]
+inline constexpr std::uint32_t OID_BOOL_ARRAY = 1000;        // bool[]
+inline constexpr std::uint32_t OID_BYTEA_ARRAY = 1001;       // bytea[]
+inline constexpr std::uint32_t OID_INT2_ARRAY = 1005;        // smallint[]
+inline constexpr std::uint32_t OID_INT4_ARRAY = 1007;        // integer[]
+inline constexpr std::uint32_t OID_TEXT_ARRAY = 1009;        // text[]
+inline constexpr std::uint32_t OID_VARCHAR_ARRAY = 1015;     // varchar[]
+inline constexpr std::uint32_t OID_INT8_ARRAY = 1016;        // bigint[]
+inline constexpr std::uint32_t OID_FLOAT4_ARRAY = 1021;      // real[]
+inline constexpr std::uint32_t OID_FLOAT8_ARRAY = 1022;      // double precision[]
+inline constexpr std::uint32_t OID_TIMESTAMP_ARRAY = 1115;   // timestamp[]
+inline constexpr std::uint32_t OID_TIMESTAMPTZ_ARRAY = 1185; // timestamptz[]
+inline constexpr std::uint32_t OID_NUMERIC_ARRAY = 1231;     // numeric[]
+inline constexpr std::uint32_t OID_UUID_ARRAY = 2951;        // uuid[]
+inline constexpr std::uint32_t OID_JSONB_ARRAY = 3807;       // jsonb[]
 
-inline constexpr std::uint32_t OID_UNSPECIFIED = 0;         // let the server infer from context
+inline constexpr std::uint32_t OID_UNSPECIFIED = 0; // let the server infer from context
 
 // Format codes used by Bind and Describe
 inline constexpr std::int16_t FORMAT_TEXT = 0;
@@ -171,8 +171,7 @@ public: // Conversion
             return std::numeric_limits<double>::quiet_NaN();
 
         if(IsInf())
-            return IsNegative() ? -std::numeric_limits<double>::infinity()
-                                : std::numeric_limits<double>::infinity();
+            return IsNegative() ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity();
 
         double v = 0.0;
         for(std::int16_t i = 0; i < ndigits; ++i)
@@ -183,8 +182,7 @@ public: // Conversion
         const std::int32_t shift = static_cast<std::int32_t>(weight) - ndigits + 1;
 
         if(shift > 0)
-            v = shift <= NUMERIC_POW10K_MAX ? v * NUMERIC_POW10K[shift]
-                                            : std::numeric_limits<double>::infinity();
+            v = shift <= NUMERIC_POW10K_MAX ? v * NUMERIC_POW10K[shift] : std::numeric_limits<double>::infinity();
         else if(shift < 0)
             v = -shift <= NUMERIC_POW10K_MAX ? v / NUMERIC_POW10K[-shift] : 0.0;
 
@@ -230,7 +228,7 @@ template <typename T> inline bool CodecAccepts(std::uint32_t oid) noexcept
 
 // vvv Booleans vvv
 template <> struct PgCodec<bool> {
-    static constexpr std::uint32_t Oid = OID_BOOL;
+    static constexpr std::uint32_t OID = OID_BOOL;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -254,9 +252,7 @@ template <typename T>
     requires(std::is_integral_v<T> && !std::is_same_v<T, bool>)
 struct PgCodec<T> {
     // Postgres has no one byte integer, so char-sized values travel as int2
-    static constexpr std::uint32_t Oid = sizeof(T) <= 2   ? OID_INT2
-                                         : sizeof(T) <= 4 ? OID_INT4
-                                                          : OID_INT8;
+    static constexpr std::uint32_t OID = sizeof(T) <= 2 ? OID_INT2 : sizeof(T) <= 4 ? OID_INT4 : OID_INT8;
 
 public: // Wire
     // Narrower columns widen losslessly into a wider request, so each width
@@ -308,7 +304,7 @@ public: // Wire
 
 // vvv Floating point vvv
 template <> struct PgCodec<float> {
-    static constexpr std::uint32_t Oid = OID_FLOAT4;
+    static constexpr std::uint32_t OID = OID_FLOAT4;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -329,7 +325,7 @@ public: // Wire
 };
 
 template <> struct PgCodec<double> {
-    static constexpr std::uint32_t Oid = OID_FLOAT8;
+    static constexpr std::uint32_t OID = OID_FLOAT8;
 
 public: // Wire
     // float4 widens losslessly
@@ -357,7 +353,7 @@ public: // Wire
 // The view aims into the receive buffer and dies with it, so results borrow
 // rather than own
 template <> struct PgCodec<std::string_view> {
-    static constexpr std::uint32_t Oid = OID_TEXT;
+    static constexpr std::uint32_t OID = OID_TEXT;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -383,7 +379,7 @@ public: // Wire
 
 // vvv Bytea vvv
 template <> struct PgCodec<PgBytes> {
-    static constexpr std::uint32_t Oid = OID_BYTEA;
+    static constexpr std::uint32_t OID = OID_BYTEA;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -404,7 +400,7 @@ public: // Wire
 
 // vvv Uuid vvv
 template <> struct PgCodec<PgUuid> {
-    static constexpr std::uint32_t Oid = OID_UUID;
+    static constexpr std::uint32_t OID = OID_UUID;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -429,7 +425,7 @@ public: // Wire
 
 // vvv Temporal vvv
 template <> struct PgCodec<PgTimestamp> {
-    static constexpr std::uint32_t Oid = OID_TIMESTAMPTZ;
+    static constexpr std::uint32_t OID = OID_TIMESTAMPTZ;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -453,7 +449,7 @@ public: // Wire
 };
 
 template <> struct PgCodec<PgDate> {
-    static constexpr std::uint32_t Oid = OID_DATE;
+    static constexpr std::uint32_t OID = OID_DATE;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -477,7 +473,7 @@ public: // Wire
 };
 
 template <> struct PgCodec<PgTime> {
-    static constexpr std::uint32_t Oid = OID_TIME;
+    static constexpr std::uint32_t OID = OID_TIME;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -498,7 +494,7 @@ public: // Wire
 };
 
 template <> struct PgCodec<PgInterval> {
-    static constexpr std::uint32_t Oid = OID_INTERVAL;
+    static constexpr std::uint32_t OID = OID_INTERVAL;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept
@@ -531,7 +527,7 @@ public: // Wire
 // Decode only. Encoding would mean owning a bignum, so numeric parameters
 // bind as text and the server parses them.
 template <> struct PgCodec<PgNumeric> {
-    static constexpr std::uint32_t Oid = OID_NUMERIC;
+    static constexpr std::uint32_t OID = OID_NUMERIC;
 
 public: // Wire
     static bool Accepts(std::uint32_t oid) noexcept

@@ -441,8 +441,8 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* /*parseState*/, cons
                 // tag, which retires the stream instead. A prologue statement
                 // reports one too, and expectedReady is what tells them apart.
                 if(state->streamRows != 0 && state->expectedReady == 1)
-                    state->streamPhase = state->streamPhase == PgStreamPhase::CLOSE ? PgStreamPhase::DONE
-                                                                                    : PgStreamPhase::CLOSE;
+                    state->streamPhase =
+                        state->streamPhase == PgStreamPhase::CLOSE ? PgStreamPhase::DONE : PgStreamPhase::CLOSE;
                 break;
             }
 
@@ -481,8 +481,8 @@ inline Shared::ParseResult Parse(void* slotStateVoid, void* /*parseState*/, cons
                     // one closes the portal, and a failed close gives up. The
                     // chunk still goes out: its error is the only copy.
                     if(res.Failed())
-                        state->streamPhase = state->streamPhase == PgStreamPhase::CLOSE ? PgStreamPhase::DONE
-                                                                                        : PgStreamPhase::CLOSE;
+                        state->streamPhase =
+                            state->streamPhase == PgStreamPhase::CLOSE ? PgStreamPhase::DONE : PgStreamPhase::CLOSE;
 
                     if(state->streamPhase != PgStreamPhase::DONE) {
                         *consumed = pos;

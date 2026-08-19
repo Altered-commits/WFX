@@ -348,7 +348,6 @@ inline EpCoro PgOnConnect(SlotHandle h, void* slotStateVoid)
 
     while(!state->ready) {
         auto recv = co_await h.Receive(pending);
-        pending = 0;
 
         if(recv.status != EpSlotOk)
             co_return EpFatal;

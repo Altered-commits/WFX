@@ -175,8 +175,8 @@ struct PostgresConfig {
     std::uint32_t maxMessageBytes = 16u * 1024u * 1024u; // rejects an absurd length field
 
     // vvv Statement cache vvv
-    std::uint32_t statementCacheSize = 64;    // named statements per connection, 0 turns it off
-    std::uint16_t statementCacheMinUses = 2;  // executions before SQL earns a name
+    std::uint32_t statementCacheSize = 64;   // named statements per connection, 0 turns it off
+    std::uint16_t statementCacheMinUses = 2; // executions before SQL earns a name
 };
 
 namespace Postgres::Detail {
@@ -256,8 +256,8 @@ template <typename... Ts> inline PgRequest MakeRequest(std::string_view sql, con
 
     if constexpr(sizeof...(Ts) > 0) {
         // One array per instantiation, so its address outlives the request
-        static constexpr std::uint32_t kOids[] = {ParamOid<Ts>()...};
-        req.paramOids = kOids;
+        static constexpr std::uint32_t K_OIDS[] = {ParamOid<Ts>()...};
+        req.paramOids = K_OIDS;
     }
 
     req.encoded = EncodeParams(req, params...);
@@ -486,8 +486,7 @@ public: // Sessions
 private:
     Postgres::Detail::PgCacheControl cacheControl_;
     Postgres::Detail::PgOptions options_;
-    Async::Resolve<Postgres::Detail::PgRequest, PgResult, &Postgres::Detail::PgOnConnect,
-                   &Postgres::Detail::PgOnAbort>
+    Async::Resolve<Postgres::Detail::PgRequest, PgResult, &Postgres::Detail::PgOnConnect, &Postgres::Detail::PgOnAbort>
         ep_;
 };
 
