@@ -212,6 +212,101 @@ struct PgUuid {
 };
 
 // -----------------------------------------------------------------------
+// Array views
+//
+// Binary layout is ndim, a has-nulls flag and the element OID, then per
+// dimension a length and lower bound, then length-prefixed elements in
+// row-major order. Elements stay as views.
+// -----------------------------------------------------------------------
+inline constexpr std::int32_t MAX_ARRAY_DIMS = 6;
+
+struct PgArrayView {
+    const char* elements = nullptr; // first length-prefixed element
+    std::uint32_t bytes = 0;
+    std::int32_t ndim = 0;
+    std::uint32_t elementOid = 0;
+    std::int32_t dimLengths[MAX_ARRAY_DIMS]{};
+    std::int32_t lowerBounds[MAX_ARRAY_DIMS]{};
+
+public: // Shape
+    std::int32_t Count() const noexcept
+    {
+        if(ndim <= 0)
+            return 0;
+
+        std::int32_t n = 1;
+        for(std::int32_t i = 0; i < ndim; ++i)
+            n *= dimLengths[i];
+
+        return n;
+    }
+
+public: // Walking
+    // Steps one element starting from `cursor` (initialize it to .elements
+    // before the first call). Returns false once every element has been
+    // consumed or the data is truncated. isNull comes from the -1 length
+    // Postgres uses inside arrays too.
+    bool NextElement(const char*& cursor, std::string_view& out, bool& isNull) const noexcept
+    {
+        const char* end = elements + bytes;
+        if(end - cursor < 4)
+            return false;
+
+        const auto len = static_cast<std::int32_t>(LoadBe32(cursor));
+        cursor += 4;
+
+        if(len < 0) {
+            isNull = true;
+            out = {};
+            return true;
+        }
+
+        if(end - cursor < len)
+            return false;
+
+        isNull = false;
+        out = std::string_view{cursor, static_cast<std::size_t>(len)};
+        cursor += len;
+        return true;
+    }
+};
+
+inline bool DecodeArray(std::string_view f, PgArrayView& out) noexcept
+{
+    if(f.size() < 12)
+        return false;
+
+    out.ndim = static_cast<std::int32_t>(LoadBe32(f.data()));
+    out.elementOid = LoadBe32(f.data() + 8);
+
+    if(out.ndim < 0 || out.ndim > MAX_ARRAY_DIMS)
+        return false;
+
+    // An empty array carries no dimension headers
+    if(out.ndim == 0) {
+        out.elements = f.data() + 12;
+        out.bytes = 0;
+        return true;
+    }
+
+    const std::uint32_t headerBytes = 12 + static_cast<std::uint32_t>(out.ndim) * 8u;
+    if(f.size() < headerBytes)
+        return false;
+
+    for(std::int32_t i = 0; i < out.ndim; ++i) {
+        out.dimLengths[i] = static_cast<std::int32_t>(LoadBe32(f.data() + 12 + i * 8));
+        out.lowerBounds[i] = static_cast<std::int32_t>(LoadBe32(f.data() + 16 + i * 8));
+
+        if(out.dimLengths[i] < 0)
+            return false;
+    }
+
+    out.elements = f.data() + headerBytes;
+    out.bytes = static_cast<std::uint32_t>(f.size()) - headerBytes;
+    return true;
+}
+
+// -----------------------------------------------------------------------
 // PgCodec
 //
 // The primary template is left undefined, so binding or reading an
@@ -555,6 +650,44 @@ public: // Wire
     }
 };
 
+// vvv Arrays vvv
+// Decode only, and untyped: PgArrayView holds whatever elementOid the wire data
+// reports, so it accepts any of the *_ARRAY OIDs above rather than one fixed
+// element type. No OID member here, unlike every codec above: there is no
+// single OID an array binds as, since that depends on the element type.
+template <> struct PgCodec<PgArrayView> {
+public: // Wire
+    static bool Accepts(std::uint32_t oid) noexcept
+    {
+        switch(oid) {
+            case OID_BOOL_ARRAY:
+            case OID_BYTEA_ARRAY:
+            case OID_INT2_ARRAY:
+            case OID_INT4_ARRAY:
+            case OID_TEXT_ARRAY:
+            case OID_VARCHAR_ARRAY:
+            case OID_INT8_ARRAY:
+            case OID_FLOAT4_ARRAY:
+            case OID_FLOAT8_ARRAY:
+            case OID_TIMESTAMP_ARRAY:
+            case OID_TIMESTAMPTZ_ARRAY:
+            case OID_NUMERIC_ARRAY:
+            case OID_UUID_ARRAY:
+            case OID_JSONB_ARRAY:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static PgArrayView Decode(std::string_view f, std::uint32_t /*oid*/) noexcept
+    {
+        PgArrayView v{};
+        DecodeArray(f, v); // leaves v value-initialized (ndim == 0) on a malformed payload
+        return v;
+    }
+};
+
 // -----------------------------------------------------------------------
 // Text-format fallbacks, for columns whose OID has no binary codec and for
 // every column when binary is turned off
@@ -576,96 +709,6 @@ inline bool DecodeTextBool(std::string_view f) noexcept
 }
 
 // -----------------------------------------------------------------------
-// Array views
-//
-// Binary layout is ndim, a has-nulls flag and the element OID, then per
-// dimension a length and lower bound, then length-prefixed elements in
-// row-major order. Elements stay as views.
-// -----------------------------------------------------------------------
-inline constexpr std::int32_t MAX_ARRAY_DIMS = 6;
-
-struct PgArrayView {
-    const char* elements = nullptr; // first length-prefixed element
-    std::uint32_t bytes = 0;
-    std::int32_t ndim = 0;
-    std::uint32_t elementOid = 0;
-    std::int32_t dimLengths[MAX_ARRAY_DIMS]{};
-    std::int32_t lowerBounds[MAX_ARRAY_DIMS]{};
-
-    std::int32_t Count() const noexcept
-    {
-        if(ndim <= 0)
-            return 0;
-
-        std::int32_t n = 1;
-        for(std::int32_t i = 0; i < ndim; ++i)
-            n *= dimLengths[i];
-
-        return n;
-    }
-};
-
-// Steps one element. Returns false at the end or on a truncated element.
-// isNull comes from the -1 length Postgres uses inside arrays too.
-inline bool NextArrayElement(const char*& p, const char* end, std::string_view& out, bool& isNull) noexcept
-{
-    if(end - p < 4)
-        return false;
-
-    const auto len = static_cast<std::int32_t>(LoadBe32(p));
-    p += 4;
-
-    if(len < 0) {
-        isNull = true;
-        out = {};
-        return true;
-    }
-
-    if(end - p < len)
-        return false;
-
-    isNull = false;
-    out = std::string_view{p, static_cast<std::size_t>(len)};
-    p += len;
-    return true;
-}
-
-inline bool DecodeArray(std::string_view f, PgArrayView& out) noexcept
-{
-    if(f.size() < 12)
-        return false;
-
-    out.ndim = static_cast<std::int32_t>(LoadBe32(f.data()));
-    out.elementOid = LoadBe32(f.data() + 8);
-
-    if(out.ndim < 0 || out.ndim > MAX_ARRAY_DIMS)
-        return false;
-
-    // An empty array carries no dimension headers
-    if(out.ndim == 0) {
-        out.elements = f.data() + 12;
-        out.bytes = 0;
-        return true;
-    }
-
-    const std::uint32_t headerBytes = 12 + static_cast<std::uint32_t>(out.ndim) * 8u;
-    if(f.size() < headerBytes)
-        return false;
-
-    for(std::int32_t i = 0; i < out.ndim; ++i) {
-        out.dimLengths[i] = static_cast<std::int32_t>(LoadBe32(f.data() + 12 + i * 8));
-        out.lowerBounds[i] = static_cast<std::int32_t>(LoadBe32(f.data() + 16 + i * 8));
-
-        if(out.dimLengths[i] < 0)
-            return false;
-    }
-
-    out.elements = f.data() + headerBytes;
-    out.bytes = static_cast<std::uint32_t>(f.size()) - headerBytes;
-    return true;
-}
-
-// -----------------------------------------------------------------------
 // Parameter binding
 //
 // Binding PgNull writes SQL NULL, which is how a caller expresses one
@@ -684,7 +727,7 @@ template <typename T> inline constexpr std::uint32_t ParamOid() noexcept
     if constexpr(std::is_same_v<std::decay_t<T>, PgNull>)
         return OID_UNSPECIFIED;
     else
-        return PgParamCodec<T>::Oid;
+        return PgParamCodec<T>::OID;
 }
 
 template <typename T> inline void EncodeParam(PgWriter& w, const T& v) noexcept

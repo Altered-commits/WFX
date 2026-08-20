@@ -1,6 +1,6 @@
 # Testing
 
-WFX's test suite lives in `tests/` as five adversarial harnesses, called audits, rather than a
+WFX's test suite lives in `tests/` as six adversarial harnesses, called audits, rather than a
 conventional unit test suite. Most of what actually needs proving here (a worker surviving a
 SIGKILL mid-request, a malformed chunk size, a TLS client refusing a bad cert, a request whose
 body forces the read buffer to relocate mid-parse) only shows up under real process and wire-level
@@ -8,19 +8,20 @@ conditions, not inside a unit test.
 
 ---
 
-## The five audits
+## The six audits
 
 | Audit | Drives | Covers |
 |-------|--------|--------|
 | `base_audit` | WFX as an HTTP server | path traversal, CRLF/response-splitting, request smuggling, header/body abuse, every user-facing route, and 6 chaos scenarios that SIGKILL/SIGSTOP workers under load and verify recovery |
-| `endpoint_audit` | `WFX::HttpEndpoint` (outbound client) | framing, chunked/close-delimited bodies, connection pooling, coalescing, multiplexing, and lifecycle behavior, all against a hostile mock upstream it boots itself |
+| `endpoint_audit` | the raw `WFX::Endpoint<>` primitive (outbound) | connection pooling and reservation, multiplexing several requests onto one connection, chunked streaming via a portal-style fetch, and graceful cancellation (`onAbort`), all against a hostile mock upstream it boots itself |
+| `client_audit` | `WFX::HttpEndpoint`, `WFX::SmtpEndpoint` and `WFX::PostgresEndpoint` (outbound clients built on the primitive) | HTTP/1.1 framing, smuggling and desync defenses; the full SMTP `STARTTLS`/`AUTH` handshake and CR/LF/NUL injection defenses; and the Postgres `SSLRequest`/SCRAM handshake, extended-query wire protocol, statement cache and SQL-injection defenses, each protocol against its own hostile mock upstream the audit boots itself |
 | `tls_audit` | the outbound client's TLS path | cert refusal (untrusted, hostname mismatch, expired, protocol downgrade), proven twice per persona: as a call error and as a mock-observed failed handshake, plus the framing/desync corpus replayed over TLS |
 | `crypto_audit` | `wfx/utils/crypto.hpp` (hashing, HMAC, AEAD, KDFs, CSPRNG) | correctness against Python stdlib oracles (`hashlib`, `hmac`, `pbkdf2_hmac`, a hand-rolled RFC 5869 HKDF) where one exists, plus AEAD tamper/cross-algo rejection, a `WFX::HashStream` driven from inside a real `res.Stream()` callback, and a 64 MiB+1 body to exercise the AEAD size cap |
 | `ip_audit` | real-IP resolution (`WFX::Http::IpUtils::ResolveClientIp`) and the `ConnectionLimiter`/`RequestRateLimiter` pair it feeds | `X-Forwarded-For` recursive-trust walking, connection/rate-limit caps and eviction, dual-stack (`::ffff:`-mapped) loopback handling, and hostile `X-Forwarded-For` corpora |
 
-Each audit is a standalone Python script (`base_audit.py`, `endpoint_audit.py`, `tls_audit.py`,
-`crypto_audit.py`, `ip_audit.py`) with its own small WFX project under `app/` that exists purely to
-give the audit something to hit.
+Each audit is a standalone Python script (`base_audit.py`, `endpoint_audit.py`, `client_audit.py`,
+`tls_audit.py`, `crypto_audit.py`, `ip_audit.py`) with its own small WFX project under `app/` that
+exists purely to give the audit something to hit.
 
 Every audit is a `common.Suite` subclass (see below) that declares an ordered `phases` dict of
 `phase_<name>(ctx)` functions, selectable with `--phase <name>` or listed with `--list-phases`, so
@@ -35,7 +36,7 @@ adding or removing a phase never touches anything outside that one function and 
 
 ## Shared harness infrastructure (`tests/common/`)
 
-All five audits import this package for the boilerplate that doesn't decide what a test checks. It
+All six audits import this package for the boilerplate that doesn't decide what a test checks. It
 is a proper Python package, not a single script, split by concern:
 
 | Module | Provides |
@@ -58,8 +59,8 @@ sync with this page.
 ## Running them
 
 ```bash
-tests/run_audits.sh                  # all five, one after another
-tests/run_audits.sh --audit base     # just one: base, endpoint, tls, crypto, or ip
+tests/run_audits.sh                  # all six, one after another
+tests/run_audits.sh --audit base     # just one: base, endpoint, client, tls, crypto, or ip
 tests/run_audits.sh --ci             # forward --ci to whichever audits run
 tests/run_audits.sh --audit tls -- --phase verify --wfx-logs all
                                       # anything after -- is passed through as-is
@@ -91,7 +92,7 @@ and emits GitHub Actions `::group::`/`::error::` annotations for failing checks 
 the PR Checks UI, without changing any timeout or process behavior versus a local run.
 
 `.github/workflows/audit_check.yml` never builds `wfx` itself. `compile_check.yml` uploads the
-compiled binary as a 1-day-retention artifact; `audit_check.yml` downloads it and runs the five
+compiled binary as a 1-day-retention artifact; `audit_check.yml` downloads it and runs the six
 audits as parallel matrix jobs, each calling `tests/run_audits.sh --audit <name> --ci`. It's wired
 into `entry.yml` as the fourth linear stage, gated on `compile_check.yml` passing first (in
 parallel with `tidy_check.yml`, the fifth stage, both gated on the same compile step).
@@ -114,8 +115,8 @@ would report a false-positive "leak."
 - `tests/run_audits.sh`
     Single entry point for running one or all audits, locally or from CI.
 
-- `tests/base_audit/`, `tests/endpoint_audit/`, `tests/tls_audit/`, `tests/crypto_audit/`, `tests/ip_audit/`
-    One audit each: the harness script, its own `README.md`, its `app/` test project, and (for `endpoint_audit`/`tls_audit`) one or more mock upstream scripts (`http_upstream.py` / `smtp_upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
+- `tests/base_audit/`, `tests/endpoint_audit/`, `tests/client_audit/`, `tests/tls_audit/`, `tests/crypto_audit/`, `tests/ip_audit/`
+    One audit each: the harness script, its own `README.md`, its `app/` test project, and (for `endpoint_audit`/`client_audit`/`tls_audit`) one or more mock upstream scripts (`http_upstream.py` / `smtp_upstream.py` / `postgres_upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
 
 - `.github/workflows/audit_check.yml`
-    Downloads the `wfx` binary artifact from `compile_check.yml` and runs the five audits as a parallel CI matrix.
+    Downloads the `wfx` binary artifact from `compile_check.yml` and runs the six audits as a parallel CI matrix.

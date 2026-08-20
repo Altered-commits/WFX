@@ -4,13 +4,17 @@
 #
 # WFX client audit: the shipped protocol clients
 #
-# Two clients, one hostile mock each. WFX::HttpEndpoint
+# Three clients, one hostile mock each. WFX::HttpEndpoint
 # (include/wfx/endpoint/http.hpp) is driven against http_upstream.py, which replays
 # exactly the bytes this suite hands it, so every branch and boundary of the
 # client-side HTTP/1.1 parser and serializer is reachable. WFX::SmtpEndpoint
 # (include/wfx/endpoint/smtp.hpp) is driven against smtp_upstream.py, one listener
 # per persona, each running the real EHLO, STARTTLS and AUTH handshake and the
 # MAIL, RCPT and DATA transaction behind it, with exactly one thing turned hostile.
+# WFX::PostgresEndpoint (include/wfx/endpoint/postgres/*.hpp) is driven against
+# postgres_upstream.py the same way: one listener per persona running the real
+# SSLRequest, StartupMessage and SCRAM-SHA-256 handshake, with either the handshake
+# or one query's response turned hostile.
 #
 # The audit never talks to a mock's data port: it drives WFX, and WFX drives the
 # mock. See README.md for what each phase proves.
@@ -25,9 +29,11 @@
 #   1   correctness failure, or the worker died during the run
 #   2   security finding: a pooled connection poisoned or desynced, a smuggled
 #       request or response body delivered as real, a CR/LF/NUL reaching the wire
-#       through a path, a header or an SMTP field, one request's headers or body
-#       surfacing in another's, coalesced waiters getting the wrong key's response,
-#       or an SMTP session continuing in plaintext or trusting pre-TLS bytes
+#       through a path, a header, an SMTP field or a Postgres auth exchange, one
+#       request's headers or body surfacing in another's, coalesced waiters getting
+#       the wrong key's response, an SMTP session continuing in plaintext or
+#       trusting pre-TLS bytes, or a Postgres auth downgrade or forged SCRAM signature
+#       going unnoticed
 #   3   WFX never answered /health, so nothing was exercised
 
 import itertools
@@ -48,6 +54,8 @@ from common import net, term
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Constants
+
 # EndpointStatus, mirrors shared/abis/types.hpp, keep in sync
 EP_SUCCESS           = 0
 EP_POOL_EXHAUSTED    = 6
@@ -64,7 +72,129 @@ EP_REQ_TIMEOUT       = 14
 # ceiling on how many requests can be in flight to that endpoint at once
 DEFAULT_CONN_LIMIT = 4
 
-# The HTTP mock
+# Staged bytes are keyed by a unique id, so a replay can never pick up a previous one
+_stage_ids = itertools.count(1)
+
+# One persona per fixed port: (name, port, cert basename, mock options, expectation).
+# Every name and port here MUST match a WFX::SmtpEndpoint declaration in
+# app/src/main.cpp, since those are compiled in rather than passed on the command line
+SMTP_CONTROL_PORT = 8199
+
+SMTP_PERSONAS = [
+    # Happy paths
+    ("good",                8100, "good",       {},                                       "accept"),
+    ("auth_login_only",     8101, "good",       {"auth_mechanisms": "LOGIN"},             "accept"),
+    # CVE-2011-0411 / CVE-2026-41319 class: plaintext spliced in right after the STARTTLS
+    # go-ahead. A correct client discards whatever is already buffered before the TLS wrap,
+    # so anything still unread on the wire corrupts the handshake's own read and fails
+    # closed. This is a refusal, not a transaction that goes through
+    ("inject",              8103, "good",       {"inject": "MAIL FROM:<mitm@evil>\r\n"},  "refuse"),
+    # Handshake-phase refusals: no STARTTLS offered, or a hostile protocol, cert or AUTH
+    ("no_starttls",         8102, "good",       {"starttls": "0"},                        "refuse"),
+    ("selfsigned",          8104, "selfsigned", {},                                       "refuse"),
+    ("wronghost",           8105, "wronghost",  {},                                       "refuse"),
+    ("expired",             8106, "expired",    {},                                       "refuse"),
+    ("auth_fail",           8107, "good",       {"auth_fail": "1"},                       "refuse"),
+    ("no_auth_mechs",       8108, "good",       {"auth_mechanisms": ""},                  "refuse"),
+    ("mismatched_code",     8109, "good",       {"mismatched_code": "1"},                 "refuse"),
+    ("malformed_greeting",  8116, "good",       {"malformed_greeting": "1"},              "refuse"),
+    ("drop_greeting",       8117, "good",       {"drop_after": "greeting"},               "refuse"),
+    ("drop_pre_handshake",  8118, "good",       {"drop_after": "starttls_pre_handshake"}, "refuse"),
+    ("drop_starttls",       8119, "good",       {"drop_after": "starttls"},               "refuse"),
+    ("drop_auth",           8120, "good",       {"drop_after": "auth"},                   "refuse"),
+    ("drop_data_prompt",    8121, "good",       {"drop_after": "data_prompt"},            "refuse"),
+    # Hang-shaped personas: they never complete on their own, so only the client's own
+    # timeout ends them. Driven against the short-budget endpoints in main.cpp, whose
+    # 5s budgets are the engine's floor, rather than the 8s every other persona gets
+    ("flood_greeting",      8110, "good",       {"flood_at": "greeting"},                 "hang"),
+    ("flood_ehlo2",         8111, "good",       {"flood_at": "ehlo2"},                    "hang"),
+    ("huge_line_greeting",  8112, "good",       {"huge_line_at": "greeting"},             "hang"),
+    ("huge_line_ehlo2",     8113, "good",       {"huge_line_at": "ehlo2"},                "hang"),
+    ("slow_trickle",        8114, "good",       {"slow_trickle": "0.05"},                 "hang"),
+    ("silent_data",         8115, "good",       {"silent_after": "DATA"},                 "hang"),
+]
+
+# One persona per fixed port, same shape as SMTP_PERSONAS but without a cert column:
+# no Postgres persona needs one, every SSL-verdict fault is refused by the client
+# before a TLS handshake would start. Ports and names are compiled into
+# app/src/main.cpp's Pg_* endpoints and PgEndpointOf(), keep the two in sync.
+PG_CONTROL_PORT = 8198
+
+PG_PERSONAS = [
+    ("good",                  8130, {}, "accept"),
+
+    # Handshake message-ordering: an abrupt close at each stage before ReadyForQuery
+    ("drop_startup",          8131, {"drop_after": "startup"},          "refuse"),
+    ("drop_auth_challenge",   8132, {"drop_after": "auth_challenge"},   "refuse"),
+    ("drop_auth_final",       8133, {"drop_after": "auth_final"},       "refuse"),
+    ("drop_backendkeydata",   8134, {"drop_after": "backendkeydata"},   "refuse"),
+    ("drop_ready",            8135, {"drop_after": "ready"},            "refuse"),
+    ("unknown_type_startup",  8136, {"unknown_type_at": "startup"},     "refuse"),
+
+    # Resource-shaped: a flood of ParameterStatus never lets the handshake finish, an
+    # oversized NoticeResponse trips FrameMessage's declared-length bound instead
+    ("flood_backendkeydata",  8137, {"flood_at": "backendkeydata"},                 "hang"),
+    ("huge_ready",            8138, {"huge_at": "ready", "huge_bytes": "8192"},      "refuse"),
+    ("never_reply_ready",     8139, {"never_reply": "ready"},                       "hang"),
+
+    # SSL verdict handling. CVE-2021-23214 class: plaintext spliced in right after the
+    # verdict byte, before the TLS handshake even starts. A correct client never trusts
+    # bytes that arrive before its own ClientHello could possibly have been answered
+    ("ssl_garbage",           8140, {"ssl_verdict": "garbage"},   "refuse"),
+    ("ssl_inject",            8141, {"ssl_verdict": "multibyte"}, "refuse"),
+    ("ssl_reject_required",   8142, {"ssl_verdict": "N"},         "refuse"),
+
+    # Auth downgrade: MD5, GSS, SSPI and an unpolicied cleartext request all have to
+    # fail closed, with no fallback path that would accept them
+    ("wrong_auth_md5",        8143, {"wrong_auth": "md5"},   "refuse"),
+    ("wrong_auth_gss",        8144, {"wrong_auth": "gss"},   "refuse"),
+    ("wrong_auth_sspi",       8145, {"wrong_auth": "sspi"},  "refuse"),
+    ("wrong_auth_cleartext",  8146, {"wrong_auth": "cleartext"},                      "refuse"),
+    ("cleartext_allowed",     8147, {"wrong_auth": "cleartext", "allow_cleartext": "1"}, "accept"),
+
+    # SCRAM-SHA-256 exchange: channel-binding-only offers are refused (no channel
+    # binding support), and each of the exchange's five checked fields is corrupted
+    # in turn
+    ("scram_offer_empty",     8148, {"scram_offer": "empty"},      "refuse"),
+    ("scram_offer_plus_only", 8149, {"scram_offer": "plus_only"},  "refuse"),
+    ("scram_offer_garbage",   8150, {"scram_offer": "garbage"},    "refuse"),
+    ("scram_bad_nonce",       8151, {"mangle": "scram_nonce"},               "refuse"),
+    ("scram_iter_zero",       8152, {"mangle": "scram_iterations_zero"},     "refuse"),
+    ("scram_iter_over",       8153, {"mangle": "scram_iterations_over"},     "refuse"),
+    ("scram_bad_salt",        8154, {"mangle": "scram_salt"},                "refuse"),
+    ("scram_bad_signature",   8155, {"mangle": "scram_signature"},           "refuse"),
+
+    # Post-handshake: a clean connection for the wire/result/type/stream/cache phases
+    # to run PGAUDIT_* queries and multi-statement sessions against
+    ("wire_stream",           8156, {}, "accept"),
+    ("cache_epoch_feature",   8157, {"force_error_at": "2:0A000:relation dropped"},     "accept"),
+    ("cache_epoch_badname",   8158, {"force_error_at": "2:26000:invalid statement name"}, "accept"),
+    # Handshake completes and joins the pool normally; only the query itself hangs, so
+    # onAbort has a real backendPid to cancel rather than a still-connecting slot
+    ("cancel_probe",          8159, {"never_reply": "query"}, "hang"),
+
+    ("resource_huge_row",     8160, {}, "refuse"),
+    ("resource_slow_trickle", 8161, {"slow_trickle": "0.05"}, "hang"),
+
+    # applicationName carries an embedded NUL (main.cpp's Pg_startup_nul_inject
+    # config). The mock just records the raw bytes it received, it does not need a
+    # fault of its own
+    ("startup_nul_inject",    8162, {}, "accept"),
+    # First TCP connection refused, second accepted normally; main.cpp's
+    # Pg_reconnect_isolation gives the client 2 reconnect attempts to get there
+    ("reconnect_isolation",   8163, {"fail_first_connect": "1"}, "accept"),
+    # A mechanism list offering both PLUS and plain SCRAM-SHA-256, the shape a real
+    # channel-binding-capable server sends. Plain has to still be picked and used
+    ("scram_mixed",           8164, {"scram_offer": "mixed"}, "accept"),
+    # RFC 5802's e=<reason> server-final path, never exercised before: the server
+    # itself rejects the exchange for a reason unrelated to proof correctness
+    ("scram_server_error",    8165, {"mangle": "scram_server_error"}, "refuse"),
+    # CVE-2024-10977 class: a full ErrorResponse mid-handshake carrying
+    # attacker-shaped content (ANSI escapes, CR/LF), from a peer not yet trusted
+    ("error_at_handshake",    8166, {"error_at": "auth_challenge"}, "refuse"),
+]
+
+# Mocks
 class HttpMock:
     """http_upstream.py: a byte oracle plus the counters this suite reads back."""
 
@@ -125,125 +255,6 @@ class HttpMock:
                 self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
-
-# The SMTP mock
-#
-# One persona per fixed port: (name, port, cert basename, mock options, expectation).
-# Every name and port here MUST match a WFX::SmtpEndpoint declaration in
-# app/src/main.cpp, since those are compiled in rather than passed on the command line
-SMTP_CONTROL_PORT = 8199
-
-SMTP_PERSONAS = [
-    # Happy paths
-    ("good",                8100, "good",       {},                                       "accept"),
-    ("auth_login_only",     8101, "good",       {"auth_mechanisms": "LOGIN"},             "accept"),
-    # CVE-2011-0411 / CVE-2026-41319 class: plaintext spliced in right after the STARTTLS
-    # go-ahead. A correct client discards whatever is already buffered before the TLS wrap,
-    # so anything still unread on the wire corrupts the handshake's own read and fails
-    # closed. This is a refusal, not a transaction that goes through
-    ("inject",              8103, "good",       {"inject": "MAIL FROM:<mitm@evil>\r\n"},  "refuse"),
-    # Handshake-phase refusals: no STARTTLS offered, or a hostile protocol, cert or AUTH
-    ("no_starttls",         8102, "good",       {"starttls": "0"},                        "refuse"),
-    ("selfsigned",          8104, "selfsigned", {},                                       "refuse"),
-    ("wronghost",           8105, "wronghost",  {},                                       "refuse"),
-    ("expired",             8106, "expired",    {},                                       "refuse"),
-    ("auth_fail",           8107, "good",       {"auth_fail": "1"},                       "refuse"),
-    ("no_auth_mechs",       8108, "good",       {"auth_mechanisms": ""},                  "refuse"),
-    ("mismatched_code",     8109, "good",       {"mismatched_code": "1"},                 "refuse"),
-    ("malformed_greeting",  8116, "good",       {"malformed_greeting": "1"},              "refuse"),
-    ("drop_greeting",       8117, "good",       {"drop_after": "greeting"},               "refuse"),
-    ("drop_pre_handshake",  8118, "good",       {"drop_after": "starttls_pre_handshake"}, "refuse"),
-    ("drop_starttls",       8119, "good",       {"drop_after": "starttls"},               "refuse"),
-    ("drop_auth",           8120, "good",       {"drop_after": "auth"},                   "refuse"),
-    ("drop_data_prompt",    8121, "good",       {"drop_after": "data_prompt"},            "refuse"),
-    # Hang-shaped personas: they never complete on their own, so only the client's own
-    # timeout ends them. Driven against the short-budget endpoints in main.cpp, whose
-    # 5s budgets are the engine's floor, rather than the 8s every other persona gets
-    ("flood_greeting",      8110, "good",       {"flood_at": "greeting"},                 "hang"),
-    ("flood_ehlo2",         8111, "good",       {"flood_at": "ehlo2"},                    "hang"),
-    ("huge_line_greeting",  8112, "good",       {"huge_line_at": "greeting"},             "hang"),
-    ("huge_line_ehlo2",     8113, "good",       {"huge_line_at": "ehlo2"},                "hang"),
-    ("slow_trickle",        8114, "good",       {"slow_trickle": "0.05"},                 "hang"),
-    ("silent_data",         8115, "good",       {"silent_after": "DATA"},                 "hang"),
-]
-
-def openssl(args):
-    return subprocess.run(["openssl"] + args, capture_output=True, text=True)
-
-def smtp_cert_available(cfg, cert):
-    return cert in cfg.smtp_certs
-
-def ensure_smtp_certs(cfg):
-    """Generates the STARTTLS certs: good, selfsigned, wronghost and expired.
-
-    Plain openssl throughout, because STARTTLS trust needs a cert this suite's own CA
-    signed, not a browser-trusted one. Every other persona reuses the 'good' cert,
-    since they exercise protocol behaviour rather than certificate trust.
-    """
-    os.makedirs(cfg.cert_dir, exist_ok=True)
-
-    def path(name):
-        return os.path.join(cfg.cert_dir, name)
-
-    ca_made = openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                       "-keyout", path("ca-key.pem"), "-out", path("ca.pem"),
-                       "-days", "365", "-subj", "/CN=client-audit-test-ca",
-                       "-addext", "basicConstraints=critical,CA:true",
-                       "-addext", "keyUsage=critical,keyCertSign,cRLSign"]).returncode == 0
-    if not ca_made:
-        raise RuntimeError("could not generate the audit's throwaway CA, is openssl broken?")
-    cfg.smtp_ca_path = path("ca.pem")
-
-    def sign(name, subject, san, days="365"):
-        csr, ext = path(name + ".csr"), path(name + "-ext.cnf")
-        with open(ext, "w") as f:
-            f.write("subjectAltName=%s\n" % san)
-
-        made_csr = openssl(["req", "-new", "-newkey", "rsa:2048", "-nodes",
-                            "-keyout", path(name + "-key.pem"), "-subj", subject,
-                            "-out", csr]).returncode == 0
-        signed = made_csr and openssl(["x509", "-req", "-in", csr, "-CA", path("ca.pem"),
-                                       "-CAkey", path("ca-key.pem"), "-CAcreateserial",
-                                       "-out", path(name + ".pem"), "-days", days,
-                                       "-extfile", ext]).returncode == 0
-        return signed and os.path.exists(path(name + ".pem"))
-
-    available = set()
-    if sign("good", "/CN=127.0.0.1", "IP:127.0.0.1"):
-        available.add("good")
-    if sign("wronghost", "/CN=evil.example", "DNS:evil.example"):
-        available.add("wronghost")
-    # -days -1 backdates notAfter to yesterday, which is portable across OpenSSL
-    # versions, unlike -not_before/-not_after which are OpenSSL 3.0 and later only
-    if sign("expired", "/CN=127.0.0.1", "IP:127.0.0.1", days="-1"):
-        available.add("expired")
-    if openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                "-keyout", path("selfsigned-key.pem"), "-out", path("selfsigned.pem"),
-                "-days", "365", "-subj", "/CN=127.0.0.1",
-                "-addext", "subjectAltName=IP:127.0.0.1"]).returncode == 0:
-        available.add("selfsigned")
-
-    term.log("smtp-certs", term.green("certs available: %s" % ", ".join(sorted(available))))
-    cfg.smtp_certs = available
-    if "good" not in available:
-        raise RuntimeError("could not generate the audit's 'good' STARTTLS cert")
-
-def patch_outbound_ca(cfg):
-    """Points outbound_ca_path at the throwaway CA, so the 'good' persona is trusted.
-
-    The HTTP mock is plaintext, so nothing else in this suite reads that setting.
-    """
-    toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
-    with open(toml) as f:
-        text = f.read()
-
-    text = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"',
-                  lambda m: m.group(1) + '"%s"' % cfg.smtp_ca_path, text)
-
-    with open(toml, "w") as f:
-        f.write(text)
-
-    term.log("patch", "outbound TLS CA trust -> %s" % cfg.smtp_ca_path)
 
 class SmtpMock:
     """smtp_upstream.py: one listener per persona, plus a line-based control port."""
@@ -327,6 +338,160 @@ class SmtpMock:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
 
+class PgMock:
+    """postgres_upstream.py: one listener per persona, plus a line-based control port."""
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.proc = None
+        self.ports = {name: port for name, port, opts, expect in PG_PERSONAS}
+
+    def start(self):
+        cmd = [sys.executable, os.path.join(HERE, "postgres_upstream.py"), "--host", self.cfg.host,
+               "--control-port", str(PG_CONTROL_PORT)]
+        for name, port, opts, expect in PG_PERSONAS:
+            spec = "name=%s,port=%d" % (name, port)
+            for key, value in opts.items():
+                spec += ",%s=%s" % (key, value)
+            cmd += ["--listen", spec]
+
+        term.log("pg-mock", "starting %d Postgres listeners" % len(self.ports))
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, bufsize=1)
+        threading.Thread(target=self._drain, daemon=True).start()
+
+        good_port = self.ports.get("good", 8130)
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            try:
+                sock = socket.create_connection((self.cfg.host, good_port), timeout=1.0)
+                sock.close()
+                term.log("pg-mock", term.green("up on %d listeners" % len(self.ports)))
+                return
+            except OSError:
+                time.sleep(0.1)
+
+        raise RuntimeError("Postgres mock never came up on :%d, see [pg-mock] above" % good_port)
+
+    def _drain(self):
+        try:
+            for line in self.proc.stdout:
+                line = line.rstrip()
+                if line:
+                    print("%s %s" % (term.cyan("[pg-mock]"), line), flush=True)
+        except (OSError, ValueError):
+            pass
+
+    def _control(self, command):
+        try:
+            sock = socket.create_connection((self.cfg.host, PG_CONTROL_PORT), timeout=3.0)
+            sock.sendall((command + "\n").encode())
+            buf = b""
+            while b"\n" not in buf:
+                data = sock.recv(65536)
+                if not data:
+                    break
+                buf += data
+            sock.close()
+            return json.loads(buf.split(b"\n", 1)[0].decode())
+        except (OSError, ValueError):
+            return {}
+
+    def stats(self, persona):
+        """The mock's own side of the exchange: handshakes, hs_fail, auth_ok, auth_fail,
+        queries, cancels."""
+        return self._control("STATS %s" % persona)
+
+    def reset(self, persona):
+        self._control("RESET %s" % persona)
+
+    def stop(self):
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+
+# Certificates (SMTP STARTTLS trust)
+def openssl(args):
+    return subprocess.run(["openssl"] + args, capture_output=True, text=True)
+
+def smtp_cert_available(cfg, cert):
+    return cert in cfg.smtp_certs
+
+def ensure_smtp_certs(cfg):
+    """Generates the STARTTLS certs: good, selfsigned, wronghost and expired.
+
+    Plain openssl throughout, because STARTTLS trust needs a cert this suite's own CA
+    signed, not a browser-trusted one. Every other persona reuses the 'good' cert,
+    since they exercise protocol behaviour rather than certificate trust.
+    """
+    os.makedirs(cfg.cert_dir, exist_ok=True)
+
+    def path(name):
+        return os.path.join(cfg.cert_dir, name)
+
+    ca_made = openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                       "-keyout", path("ca-key.pem"), "-out", path("ca.pem"),
+                       "-days", "365", "-subj", "/CN=client-audit-test-ca",
+                       "-addext", "basicConstraints=critical,CA:true",
+                       "-addext", "keyUsage=critical,keyCertSign,cRLSign"]).returncode == 0
+    if not ca_made:
+        raise RuntimeError("could not generate the audit's throwaway CA, is openssl broken?")
+    cfg.smtp_ca_path = path("ca.pem")
+
+    def sign(name, subject, san, days="365"):
+        csr, ext = path(name + ".csr"), path(name + "-ext.cnf")
+        with open(ext, "w") as f:
+            f.write("subjectAltName=%s\n" % san)
+
+        made_csr = openssl(["req", "-new", "-newkey", "rsa:2048", "-nodes",
+                            "-keyout", path(name + "-key.pem"), "-subj", subject,
+                            "-out", csr]).returncode == 0
+        signed = made_csr and openssl(["x509", "-req", "-in", csr, "-CA", path("ca.pem"),
+                                       "-CAkey", path("ca-key.pem"), "-CAcreateserial",
+                                       "-out", path(name + ".pem"), "-days", days,
+                                       "-extfile", ext]).returncode == 0
+        return signed and os.path.exists(path(name + ".pem"))
+
+    available = set()
+    if sign("good", "/CN=127.0.0.1", "IP:127.0.0.1"):
+        available.add("good")
+    if sign("wronghost", "/CN=evil.example", "DNS:evil.example"):
+        available.add("wronghost")
+    # -days -1 backdates notAfter to yesterday, which is portable across OpenSSL
+    # versions, unlike -not_before/-not_after which are OpenSSL 3.0 and later only
+    if sign("expired", "/CN=127.0.0.1", "IP:127.0.0.1", days="-1"):
+        available.add("expired")
+    if openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                "-keyout", path("selfsigned-key.pem"), "-out", path("selfsigned.pem"),
+                "-days", "365", "-subj", "/CN=127.0.0.1",
+                "-addext", "subjectAltName=IP:127.0.0.1"]).returncode == 0:
+        available.add("selfsigned")
+
+    term.log("smtp-certs", term.green("certs available: %s" % ", ".join(sorted(available))))
+    cfg.smtp_certs = available
+    if "good" not in available:
+        raise RuntimeError("could not generate the audit's 'good' STARTTLS cert")
+
+def patch_outbound_ca(cfg):
+    """Points outbound_ca_path at the throwaway CA, so the 'good' persona is trusted.
+
+    The HTTP mock is plaintext, so nothing else in this suite reads that setting.
+    """
+    toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
+    with open(toml) as f:
+        text = f.read()
+
+    text = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"',
+                  lambda m: m.group(1) + '"%s"' % cfg.smtp_ca_path, text)
+
+    with open(toml, "w") as f:
+        f.write(text)
+
+    term.log("patch", "outbound TLS CA trust -> %s" % cfg.smtp_ca_path)
+
 # Driving WFX: HTTP
 def _json(cfg, method, path, headers=None, payload=b"", rtimeout=15.0):
     return net.get_json(cfg.host, cfg.port, method, path, headers, payload, rtimeout=rtimeout)
@@ -348,9 +513,6 @@ def http_call(cfg, path, ep="default", method="GET", want=None, fwd=None, x_body
         headers["X-Body"] = x_body
 
     return _json(cfg, "GET", "/call", headers, rtimeout=rtimeout)
-
-# Staged bytes are keyed by a unique id, so a replay can never pick up a previous one
-_stage_ids = itertools.count(1)
 
 def http_staged(cfg, mock, blob, ep="default", keep=True, mode="whole", arg=0):
     """Replays `blob` verbatim as the upstream response, then drives one call at it.
@@ -427,6 +589,38 @@ def smtp_send_mail(cfg, persona="good", body=b"hello", rtimeout=20.0):
 def smtp_inject(cfg, field, payload, rtimeout=20.0):
     """Splices a hostile payload into one caller-supplied field of the transaction."""
     return _json(cfg, "POST", "/smtp/inject", {"X-Field": field}, payload, rtimeout)
+
+# Driving WFX: Postgres
+#
+# rtimeout defaults are generous for the same reason as SMTP's: a hang-shaped persona
+# only resolves once WFX's own connectTimeoutSeconds or requestTimeoutSeconds fires
+def pg_query(cfg, persona="good", sql="SELECT 1", param=None, rtimeout=15.0):
+    """One pooled Postgres query, reflected back as JSON.
+
+    param, when given, is bound as $1 instead of leaving the query parameterless,
+    so a hostile value travels through Bind rather than the SQL text.
+    """
+    headers = {"X-Persona": persona}
+    if param is not None:
+        headers["X-Param"] = param
+    return _json(cfg, "POST", "/pg/query", headers, sql.encode(), rtimeout)
+
+def pg_session(cfg, persona="good", statements=(), isolation="read_committed", finish="commit",
+               rtimeout=15.0):
+    """A pinned session: Begin, one statement per line, then Commit or Rollback."""
+    headers = {"X-Persona": persona, "X-Isolation": isolation, "X-Finish": finish}
+    return _json(cfg, "POST", "/pg/session", headers, "\n".join(statements).encode(), rtimeout)
+
+def pg_stream(cfg, persona="wire_stream", sql="SELECT PGAUDIT_STREAM", chunk_rows=2, rtimeout=15.0):
+    """A chunked Postgres read through PostgresEndpoint::Stream."""
+    headers = {"X-Persona": persona, "X-ChunkRows": str(chunk_rows)}
+    return _json(cfg, "POST", "/pg/stream", headers, sql.encode(), rtimeout)
+
+def abandon_pg_query(cfg, persona, sql=b"SELECT 1", hold=0.15):
+    """Sends /pg/query and drops the connection before WFX can answer, the same
+    abandon-and-inspect shape endpoint_audit uses to reach onAbort."""
+    net.send_and_abandon(cfg.host, cfg.port, net.request("POST", "/pg/query", {"X-Persona": persona}, sql),
+                         hold=hold)
 
 # Metrics
 def metrics(cfg):
@@ -1738,9 +1932,449 @@ def phase_smtp_inject(ctx):
     p.check("heloName: a CRLF-poisoned EHLO identity is refused before a byte reaches the wire",
             is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
 
+# PHASE: pg_framing
+def phase_pg_framing(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_framing")
+
+    # Full good-path baseline: pooled query, pinned session, chunked stream. Nothing
+    # past this point means anything if the happy path itself does not work
+    r = pg_query(cfg)
+    p.check("good: a pooled query succeeds", is_ok(r) and not r.get("failed"), "r=%r" % r)
+    p.check("good: the default row decodes as expected", r.get("value") == "1", "r=%r" % r)
+
+    r = pg_session(cfg, statements=["SELECT 1"])
+    p.check("good: a pinned session begins, runs one statement and commits",
+            is_ok(r) and r.get("begin_ep") == EP_SUCCESS and r.get("finish_ep") == EP_SUCCESS, "r=%r" % r)
+
+    r = pg_stream(cfg)
+    p.check("good: a chunked stream completes", is_ok(r) and not r.get("failed") and r.get("rows") == 5,
+            "r=%r" % r)
+
+    # Wire framing: an unrecognized message type, and a declared length over the
+    # connection's own maxMessageBytes
+    r = pg_query(cfg, persona="unknown_type_startup")
+    p.check("unknown_type_startup: an unrecognized message type during the handshake is refused",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    r = pg_query(cfg, persona="huge_ready", rtimeout=15.0)
+    p.check("huge_ready: a NoticeResponse over maxMessageBytes is refused, not buffered",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+# PHASE: pg_ssl
+def phase_pg_ssl(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_ssl")
+
+    r = pg_query(cfg, persona="ssl_garbage")
+    p.check("ssl_garbage: a verdict byte that is neither S nor N is refused",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    # CVE-2021-23214 class: plaintext spliced in right after the verdict byte, before
+    # the TLS handshake even starts. A correct client never trusts bytes that arrive
+    # before its own ClientHello could possibly have been answered
+    r = pg_query(cfg, persona="ssl_inject")
+    p.check("ssl_inject: a verdict trailed by extra plaintext is refused, not parsed as TLS",
+            is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+
+    r = pg_query(cfg, persona="ssl_reject_required")
+    p.check("ssl_reject_required: a plaintext refusal is honored, PgEncryption::REQUIRED never falls back",
+            is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+
+# PHASE: pg_handshake
+def phase_pg_handshake(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_handshake")
+
+    for persona in ("drop_startup", "drop_auth_challenge", "drop_auth_final",
+                    "drop_backendkeydata", "drop_ready"):
+        r = pg_query(cfg, persona=persona)
+        p.check("%s: an abrupt close during the handshake is refused cleanly" % persona,
+                is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    # CVE-2024-10977 class: a full ErrorResponse mid-handshake, from a peer not yet
+    # authenticated, carrying attacker-shaped content (ANSI escapes, CR/LF). Any
+    # BE_ERROR_RESPONSE before ReadyForQuery is unconditionally fatal (connection.hpp),
+    # so this has to fail the same way a plain close does, not surface that content
+    r = pg_query(cfg, persona="error_at_handshake")
+    p.check("error_at_handshake: an ErrorResponse from an unauthenticated peer is refused, "
+            "its content never trusted",
+            is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+
+# PHASE: pg_auth
+def phase_pg_auth(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_auth")
+
+    for persona in ("wrong_auth_md5", "wrong_auth_gss", "wrong_auth_sspi"):
+        r = pg_query(cfg, persona=persona)
+        p.check("%s: an unsupported auth method is refused, not silently skipped" % persona,
+                is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+
+    r = pg_query(cfg, persona="wrong_auth_cleartext")
+    p.check("wrong_auth_cleartext: cleartext is refused under the default NO_PLAINTEXT policy",
+            is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+
+    r = pg_query(cfg, persona="cleartext_allowed")
+    p.check("cleartext_allowed: cleartext succeeds only once the policy explicitly allows it",
+            is_ok(r) and not r.get("failed"), "r=%r" % r)
+
+# PHASE: pg_scram
+def phase_pg_scram(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_scram")
+
+    for persona in ("scram_offer_empty", "scram_offer_plus_only", "scram_offer_garbage"):
+        r = pg_query(cfg, persona=persona)
+        p.check("%s: a mechanism list without plain SCRAM-SHA-256 is refused" % persona,
+                is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+
+    for persona, what in (
+        ("scram_bad_nonce",     "a server nonce that does not extend the client's own"),
+        ("scram_iter_zero",     "a zero iteration count"),
+        ("scram_iter_over",     "an iteration count past the DoS cap"),
+        ("scram_bad_salt",      "a salt that decodes to nothing usable"),
+        ("scram_bad_signature", "a forged server signature"),
+    ):
+        r = pg_query(cfg, persona=persona)
+        p.check("%s: %s is rejected" % (persona, what), is_errc(r, EP_INTERNAL), "r=%r" % r,
+                security=True)
+
+    # The common real-world shape: a server that supports channel binding offers both
+    # SCRAM-SHA-256-PLUS and plain SCRAM-SHA-256. WFX has no channel-binding support,
+    # so refusing the whole exchange here would be a regression, not a defense
+    r = pg_query(cfg, persona="scram_mixed")
+    p.check("scram_mixed: a mechanism list offering PLUS alongside plain SCRAM-SHA-256 still "
+            "authenticates on plain",
+            is_ok(r) and not r.get("failed"), "r=%r" % r)
+
+    # RFC 5802's e=<reason> server-final path (auth.hpp's ServerFinalIsError), never
+    # exercised before this: the server rejects the exchange for its own reasons, not
+    # a bad proof. VerifyServerFinal has no v= to check and fails the same way a
+    # forged signature would, so this still has to fail closed
+    r = pg_query(cfg, persona="scram_server_error")
+    p.check("scram_server_error: an e=<reason> server-final is rejected the same as a missing "
+            "or forged signature",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+# PHASE: pg_wire
+def phase_pg_wire(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_wire")
+
+    r = pg_query(cfg, sql="SELECT PGAUDIT_UNKNOWN_TYPE")
+    p.check("PGAUDIT_UNKNOWN_TYPE: an unrecognized message type mid-query is refused",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    r = pg_query(cfg, sql="SELECT PGAUDIT_DATAROW_FIRST")
+    p.check("PGAUDIT_DATAROW_FIRST: a DataRow with no RowDescription this round is refused",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    # Protocol-confusion class: a message that only ever belongs to a feature this
+    # client has no code path for, arriving where a query reply was expected.
+    # wire.hpp's Parse has no case for any of these mid-query, only default: ERROR
+    for marker, what in (
+        ("PGAUDIT_COPY_UNSOLICITED",      "an unrequested CopyOutResponse (no COPY support)"),
+        ("PGAUDIT_NEGOTIATE_PROTO",       "an unrequested protocol version negotiation"),
+        ("PGAUDIT_NOTIFY_UNSOLICITED",    "an unrequested NotificationResponse (no LISTEN/NOTIFY support)"),
+        ("PGAUDIT_BACKENDKEY_MIDQUERY",   "a resent BackendKeyData outside the handshake"),
+    ):
+        r = pg_query(cfg, sql="SELECT %s" % marker)
+        p.check("%s: %s is refused" % (marker, what), is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    # A non-streaming query getting PortalSuspended instead of CommandComplete.
+    # streamRows == 0 on this request, so wire.hpp's case is a no-op: the row still
+    # has to come through and the request still has to complete, not hang
+    r = pg_query(cfg, sql="SELECT PGAUDIT_PORTAL_SUSPENDED_NOSTREAM")
+    p.check("PGAUDIT_PORTAL_SUSPENDED_NOSTREAM: an out-of-context PortalSuspended is a no-op, "
+            "not a hang",
+            is_ok(r) and not r.get("failed") and r.get("rows") == 1, "r=%r" % r)
+
+# PHASE: pg_results
+def phase_pg_results(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_results")
+
+    r = pg_query(cfg, sql="SELECT PGAUDIT_COLUMN_MISMATCH")
+    p.check("PGAUDIT_COLUMN_MISMATCH: a DataRow claiming more fields than RowDescription is refused",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    r = pg_query(cfg, sql="SELECT PGAUDIT_ROWDESC_NEG")
+    p.check("PGAUDIT_ROWDESC_NEG: a negative RowDescription column count is refused",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    # CVE-2024-10977 class at the query level: the server is authenticated by this
+    # point, but its error text is still attacker-shaped content this suite controls
+    # by construction. It has to survive PgError -> this route's JSON reflection
+    # without corrupting the response (proven by _json parsing it at all) or losing
+    # the sqlstate the caller actually needs
+    r = pg_query(cfg, sql="SELECT PGAUDIT_ERROR_CONTROLCHARS")
+    p.check("PGAUDIT_ERROR_CONTROLCHARS: a message with escape codes and embedded CR/LF/NUL "
+            "still reflects as well-formed JSON with its sqlstate intact",
+            is_ok(r) and r.get("failed") and r.get("sqlstate") == "XX000", "r=%r" % r)
+
+    # CommandComplete's trailing digit run past uint64 range. SetCommandTag
+    # (result.hpp) hands it to DecodeText<uint64_t>, which uses std::from_chars and
+    # leaves the output at its default on out-of-range rather than wrapping
+    r = pg_query(cfg, sql="SELECT PGAUDIT_HUGE_TAG")
+    p.check("PGAUDIT_HUGE_TAG: an out-of-range affected-rows count decodes to 0, not a wrapped "
+            "or garbage value",
+            is_ok(r) and not r.get("failed") and r.get("rows") == 1 and r.get("affected_rows") == 0,
+            "r=%r" % r)
+
+# PHASE: pg_types
+def phase_pg_types(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_types")
+
+    r = pg_query(cfg, sql="SELECT PGAUDIT_NUMERIC_EXTREME")
+    p.check("PGAUDIT_NUMERIC_EXTREME: a weight/ndigits pair past NUMERIC_POW10K_MAX decodes to "
+            "infinity rather than reading past the digit array",
+            is_ok(r) and not r.get("failed") and r.get("value") == "inf", "r=%r" % r)
+
+    # PgArrayView::Count() (types.hpp) has no overflow guard on the dimension product, so
+    # this documents the current behaviour rather than asserting the result is meaningful.
+    # array_walked stays 0 regardless: the header claims 6 dimensions of 50000, but no
+    # element bytes ever followed it, so Count()'s garbage product and what NextElement
+    # can actually step are two independent, and here disagreeing, signals
+    r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_OVERFLOW")
+    p.check("PGAUDIT_ARRAY_OVERFLOW: 6 dimensions is within MAX_ARRAY_DIMS, so DecodeArray accepts "
+            "it and the worker does not crash computing Count()",
+            is_ok(r) and not r.get("failed") and r.get("array_ok") is True and r.get("array_ndim") == 6,
+            "r=%r" % r)
+    p.check("PGAUDIT_ARRAY_OVERFLOW: Count()'s overflowed product has nothing walkable behind it",
+            r.get("array_walked") == 0, "r=%r" % r)
+
+    r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_BADDIM")
+    p.check("PGAUDIT_ARRAY_BADDIM: more dimensions than MAX_ARRAY_DIMS is rejected by DecodeArray",
+            is_ok(r) and not r.get("failed") and r.get("array_ok") is False, "r=%r" % r)
+
+    r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_NEGDIM")
+    p.check("PGAUDIT_ARRAY_NEGDIM: a negative dimension length is rejected by DecodeArray",
+            is_ok(r) and not r.get("failed") and r.get("array_ok") is False, "r=%r" % r)
+
+    # The good path none of the vectors above exercise: a well-formed array with real
+    # element bytes actually has to decode through Get<PgArrayView> and NextElement,
+    # not just survive a hostile header
+    r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_ELEMENTS")
+    p.check("PGAUDIT_ARRAY_ELEMENTS: a well-formed int4[3] with a NULL element walks to "
+            "exactly 3 elements, one of them NULL",
+            is_ok(r) and not r.get("failed") and r.get("array_ok") is True and
+            r.get("array_count") == 3 and r.get("array_walked") == 3 and r.get("array_any_null") is True,
+            "r=%r" % r)
+
+    # A declared element length longer than the bytes actually behind it. NextElement
+    # has to stop the walk, not read past the end of the array's own byte range
+    r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_TRUNCATED")
+    p.check("PGAUDIT_ARRAY_TRUNCATED: an element claiming more bytes than remain stops the "
+            "walk instead of reading past the end",
+            is_ok(r) and not r.get("failed") and r.get("array_ok") is True and
+            r.get("array_count") == 1 and r.get("array_walked") == 0,
+            "r=%r" % r)
+
+# PHASE: pg_cache
+def phase_pg_cache(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_cache")
+
+    for persona, sqlstate in (("cache_epoch_feature", "0A000"), ("cache_epoch_badname", "26000")):
+        r = pg_session(cfg, persona=persona, statements=["SELECT 1", "SELECT 1", "SELECT 1"],
+                       isolation="none", finish="none")
+        steps = r.get("steps") or []
+        p.check("%s: query 1 succeeds before the fault" % persona,
+                len(steps) == 3 and steps[0].get("ep") == EP_SUCCESS and not steps[0].get("failed"),
+                "r=%r" % r)
+        p.check("%s: query 2 carries the %s ErrorResponse" % (persona, sqlstate),
+                len(steps) == 3 and steps[1].get("ep") == EP_SUCCESS and steps[1].get("failed") and
+                steps[1].get("sqlstate") == sqlstate, "r=%r" % r)
+        p.check("%s: query 3 succeeds again, the statement cache recovered from the invalidation" %
+                persona,
+                len(steps) == 3 and steps[2].get("ep") == EP_SUCCESS and not steps[2].get("failed"),
+                "r=%r" % r)
+
+    # Churn: more distinct SQL than PgCfg's statementCacheSize (8) has slots for,
+    # forcing eviction under STMT_PROBE_LEN (stmt_cache.hpp). Nothing here needs a
+    # name to survive; the only claim is that eviction never corrupts an unrelated,
+    # later query
+    r = pg_session(cfg, statements=["SELECT %d AS n" % i for i in range(12)],
+                   isolation="none", finish="none")
+    steps = r.get("steps") or []
+    p.check("statement cache churn: 12 distinct statements against an 8-slot cache all succeed",
+            len(steps) == 12 and all(s.get("ep") == EP_SUCCESS and not s.get("failed") for s in steps),
+            "r=%r" % r)
+
+# PHASE: pg_stream
+def phase_pg_stream(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_stream")
+
+    r = pg_stream(cfg, chunk_rows=2)
+    p.check("wire_stream: a 5-row result reads in chunks of 2",
+            is_ok(r) and not r.get("failed") and r.get("rows") == 5, "r=%r" % r)
+    p.check("wire_stream: three rounds cover 5 rows two at a time", r.get("chunks") == 3, "r=%r" % r)
+
+    r = pg_stream(cfg, chunk_rows=1)
+    p.check("wire_stream: chunk_rows=1 reads every row as its own PortalSuspended round",
+            is_ok(r) and not r.get("failed") and r.get("rows") == 5 and r.get("chunks") == 5, "r=%r" % r)
+
+    # A third identical query on this connection: statementCacheMinUses (2) has been
+    # reached, so this round names the statement instead of re-Parsing. Streaming has
+    # to keep working from a Bind-only opening round, not just a fresh Parse one
+    r = pg_stream(cfg, chunk_rows=100)
+    p.check("wire_stream: a named (statement-cached) stream still finishes in one round",
+            is_ok(r) and not r.get("failed") and r.get("rows") == 5 and r.get("chunks") == 1, "r=%r" % r)
+
+# PHASE: pg_cancel
+def phase_pg_cancel(ctx):
+    cfg, mock = ctx.cfg, ctx.pg_mock
+    p = ctx.phase("pg_cancel")
+
+    mock.reset("cancel_probe")
+    abandon_pg_query(cfg, "cancel_probe", hold=0.15)
+    time.sleep(0.5)  # the side connection dials and cancels well before the mock would ever reply
+    stats = mock.stats("cancel_probe")
+    p.check("cancel_probe: abandoning the request sends exactly one CancelRequest",
+            stats.get("cancels", 0) == 1, "stats=%r" % stats)
+
+    time.sleep(1.0)  # let the now-orphaned side connection settle
+    p.check("cancel_probe: the worker stays healthy after the abort", wfx_healthy(cfg))
+
+# PHASE: pg_resource
+def phase_pg_resource(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_resource")
+
+    r = pg_query(cfg, persona="flood_backendkeydata", rtimeout=15.0)
+    p.check("flood_backendkeydata: a ParameterStatus flood never lets the handshake finish, so "
+            "the connect budget ends it",
+            is_errc(r, EP_INTERNAL) or is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
+
+    r = pg_query(cfg, persona="never_reply_ready", rtimeout=15.0)
+    p.check("never_reply_ready: a handshake that never reaches ReadyForQuery times out, not hangs",
+            is_errc(r, EP_INTERNAL) or is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
+
+    r = pg_query(cfg, persona="resource_huge_row", sql="SELECT PGAUDIT_HUGE_ROW", rtimeout=15.0)
+    p.check("resource_huge_row: a field over maxMessageBytes is refused, not buffered",
+            is_errc(r, EP_INTERNAL), "r=%r" % r)
+
+    r = pg_query(cfg, persona="resource_slow_trickle", rtimeout=15.0)
+    p.check("resource_slow_trickle: a handshake trickled past the connect budget times out cleanly",
+            is_errc(r, EP_INTERNAL) or is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
+
+# PHASE: pg_injection
+#
+# Every query parameter travels through Bind as a typed binary value, never pasted
+# into the SQL text (postgres.hpp's own header comment states this as the design).
+# These checks make that empirical rather than assumed: the mock records the exact
+# SQL text it parsed via Parse (last_sql), so a hostile parameter value showing up
+# there at all would mean it leaked into the statement instead of staying data
+def phase_pg_injection(ctx):
+    cfg, mock = ctx.cfg, ctx.pg_mock
+    p = ctx.phase("pg_injection")
+
+    sql = "SELECT $1::text"
+    vectors = {
+        "classic_drop":  "'; DROP TABLE users; --",
+        "union_select":  "' UNION SELECT password FROM pg_shadow--",
+        "comment_open":  "'/*",
+        "quote_mix":     "\"'; --",
+        "backslash":     "\\'; --",
+    }
+    for name, payload in vectors.items():
+        mock.reset("good")
+        r = pg_query(cfg, sql=sql, param=payload)
+        p.check("%s: the query still succeeds as an ordinary bound parameter" % name,
+                is_ok(r) and not r.get("failed"), "r=%r" % r)
+        stats = mock.stats("good")
+        p.check("%s: the SQL text the server parsed is exactly \"%s\", the payload never "
+                "reached it" % (name, sql),
+                stats.get("last_sql") == sql, "stats=%r" % stats, security=True)
+
+# PHASE: pg_savepoint
+#
+# The one place this client composes SQL text from caller input: a savepoint name
+# cannot be a bind parameter (Postgres syntax has no placeholder for an identifier),
+# so PgSession::Savepoint/RollbackTo/ReleaseSavepoint build "SAVEPOINT <name>" and
+# friends directly, guarded only by IsValidIdentifier (wire.hpp). Every hostile name
+# here has to be refused before a byte reaches the wire; the mock never even needs
+# to see one
+def phase_pg_savepoint(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("pg_savepoint")
+
+    hostile = {
+        "sql_metachars": "x; DROP TABLE users; --",
+        "quote":         "x' OR '1'='1",
+        "space":         "my savepoint",
+        "leading_digit": "1abc",
+        "empty":         "",
+        "too_long":      "a" * 64,  # MAX_IDENTIFIER_LEN (wire.hpp) is 63
+        "backslash":     "x\\y",
+        "embedded_nul":  "x\x00y",
+    }
+    for name, hostile_name in hostile.items():
+        r = pg_session(cfg, statements=["SAVEPOINT " + hostile_name], isolation="none", finish="none")
+        steps = r.get("steps") or []
+        p.check("%s: a hostile savepoint name is refused at the serializer, never sent" % name,
+                len(steps) == 1 and steps[0].get("ep") == EP_SERIALIZE, "r=%r" % r, security=True)
+
+    r = pg_session(cfg, statements=["SAVEPOINT valid_name_123",
+                                    "ROLLBACK TO SAVEPOINT valid_name_123",
+                                    "RELEASE SAVEPOINT valid_name_123"],
+                   isolation="read_committed", finish="rollback")
+    steps = r.get("steps") or []
+    p.check("valid_name_123: Savepoint, RollbackTo and ReleaseSavepoint all succeed on a clean name",
+            len(steps) == 3 and all(s.get("ep") == EP_SUCCESS and not s.get("failed") for s in steps),
+            "r=%r" % r)
+
+# PHASE: pg_startup
+def phase_pg_startup(ctx):
+    cfg, mock = ctx.cfg, ctx.pg_mock
+    p = ctx.phase("pg_startup")
+
+    # applicationName carries an embedded NUL (main.cpp's Pg_startup_nul_inject).
+    # WriteStartup's CStr() (connection.hpp) writes the raw bytes plus its own
+    # terminator with no screening for one already inside the string, unlike
+    # SmtpOnConnect's HasInjectionBytes check on heloName. This documents that gap
+    # rather than asserting it is closed: the raw bytes really do carry the NUL
+    mock.reset("startup_nul_inject")
+    pg_query(cfg, persona="startup_nul_inject")
+    stats = mock.stats("startup_nul_inject")
+    raw = bytes.fromhex(stats.get("raw_startup") or "")
+    p.check("startup_nul_inject: applicationName's embedded NUL reaches the wire unscreened, "
+            "desyncing the startup parameter list that follows it",
+            b"evil\x00trailing" in raw, "raw=%r" % raw, security=True)
+
+# PHASE: pg_reconnect
+#
+# CVE-2018-10915 class: state carried across a reconnect. main.cpp's
+# Pg_reconnect_isolation allows 2 attempts; the mock refuses only the first
+def phase_pg_reconnect(ctx):
+    cfg, mock = ctx.cfg, ctx.pg_mock
+    p = ctx.phase("pg_reconnect")
+
+    # maxReconnectAttempts governs the slot's own background reconnect, not a
+    # synchronous retry of the request that hit the dead slot: the first request
+    # here fails outright, and only a later one lands on the now-reconnected slot
+    mock.reset("reconnect_isolation")
+    r1 = pg_query(cfg, persona="reconnect_isolation", rtimeout=10.0)
+    p.check("reconnect_isolation: the request against the first, refused connection fails",
+            is_errc(r1, EP_INTERNAL), "r=%r" % r1)
+
+    time.sleep(2.0)  # past reconnectBackoffBaseSeconds (1s), so the slot has reconnected
+    r2 = pg_query(cfg, persona="reconnect_isolation", rtimeout=10.0)
+    p.check("reconnect_isolation: a later request on the reconnected slot succeeds cleanly, "
+            "with no leakage from the failed attempt",
+            is_ok(r2) and not r2.get("failed"), "r=%r" % r2)
+
+    stats = mock.stats("reconnect_isolation")
+    p.check("reconnect_isolation: exactly two TCP connection attempts were made, one refused "
+            "and one accepted",
+            stats.get("connect_attempts") == 2, "stats=%r" % stats)
+
 class ClientAudit(common.Suite):
     name = "client_audit"
-    description = "WFX HttpEndpoint and SmtpEndpoint audit"
+    description = "WFX HttpEndpoint, SmtpEndpoint and PostgresEndpoint audit"
     phases = {
         "http_framing":       phase_http_framing,
         "http_statusline":    phase_http_statusline,
@@ -1763,6 +2397,22 @@ class ClientAudit(common.Suite):
         "smtp_resource":      phase_smtp_resource,
         "smtp_drops":         phase_smtp_drops,
         "smtp_inject":        phase_smtp_inject,
+        "pg_framing":         phase_pg_framing,
+        "pg_ssl":             phase_pg_ssl,
+        "pg_handshake":       phase_pg_handshake,
+        "pg_auth":            phase_pg_auth,
+        "pg_scram":           phase_pg_scram,
+        "pg_wire":            phase_pg_wire,
+        "pg_results":         phase_pg_results,
+        "pg_types":           phase_pg_types,
+        "pg_cache":           phase_pg_cache,
+        "pg_stream":          phase_pg_stream,
+        "pg_cancel":          phase_pg_cancel,
+        "pg_resource":        phase_pg_resource,
+        "pg_injection":       phase_pg_injection,
+        "pg_savepoint":       phase_pg_savepoint,
+        "pg_startup":         phase_pg_startup,
+        "pg_reconnect":       phase_pg_reconnect,
     }
 
     def add_arguments(self, parser):
@@ -1788,6 +2438,8 @@ class ClientAudit(common.Suite):
         ctx.http_mock.start()
         ctx.resources["smtp_mock"] = SmtpMock(ctx.cfg)
         ctx.smtp_mock.start()
+        ctx.resources["pg_mock"] = PgMock(ctx.cfg)
+        ctx.pg_mock.start()
 
     def before_phases(self, ctx):
         cfg = ctx.cfg
@@ -1811,11 +2463,20 @@ class ClientAudit(common.Suite):
                 "is UPSTREAM in app/src/main.cpp pointing at port %d?" % cfg.http_port)
             return False
 
+        r = pg_query(cfg)
+        if not (is_ok(r) and not r.get("failed")):
+            ctx.phase("preflight").failed(
+                "WFX can reach the Postgres mock and complete a SCRAM handshake",
+                "r=%r, is Pg_good in app/src/main.cpp pointing at port 8130?" % r)
+            return False
+
     def teardown(self, ctx):
         if "http_mock" in ctx.resources:
             ctx.http_mock.stop()
         if "smtp_mock" in ctx.resources:
             ctx.smtp_mock.stop()
+        if "pg_mock" in ctx.resources:
+            ctx.pg_mock.stop()
 
 if __name__ == "__main__":
     common.run(ClientAudit)

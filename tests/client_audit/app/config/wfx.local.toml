@@ -7,7 +7,10 @@ preferred_config    = "Debug"          # Active build configuration (must match 
 preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure the build directory
 
 [Network]
-send_buffer_max              = 16384   # Max total send buffer size per connection (in bytes)
+send_buffer_max              = 131072  # AUDIT: 128KB, not the 16KB default. /metrics serializes
+                                        # one object per registered endpoint (63 across HTTP, SMTP
+                                        # and Postgres), which silently truncated past 16KB
+
 send_buffer_incr             = 4096    # Buffer growth step (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)

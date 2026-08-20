@@ -59,6 +59,7 @@ nav:
       - Overview: api_reference/endpoint/overview.md
       - HTTP: api_reference/endpoint/http.md
       - SMTP: api_reference/endpoint/smtp.md
+      - Postgres: api_reference/endpoint/postgres.md
     - Utils:
       - Crypto & Hash: api_reference/utils/crypto.md
       - Encoding: api_reference/utils/encoding.md
