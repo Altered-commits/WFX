@@ -5,6 +5,7 @@
 
 #include "config/config.hpp"
 #include "http/common/http_error_msgs.hpp"
+#include "http/response/http_response.hpp"
 #include "http/ssl/http_ssl_factory.hpp"
 #include "shared/apis/http_api.hpp"
 #include "shared/utils/memory.hpp"
@@ -302,9 +303,10 @@ EpollConnectionHandler::~EpollConnectionHandler()
         }
     }
 
-    // Free all client slot read/write buffers
+    // Free all client slot allocations (rwBuffer + any still-live requestInfo/responseInfo, e.g.
+    // a keep-alive connection that was still open when the server was asked to stop)
     for(std::uint32_t i = 0; i < connections_.GetSlots(); i++)
-        connections_.GetPtr(i)->rwBuffer.ResetBuffer();
+        connections_.GetPtr(i)->Reset();
 
     if(listenFd_ > 0) {
         close(listenFd_);
@@ -631,25 +633,10 @@ void EpollConnectionHandler::Write(ClientCtx* ctx, std::string_view msg)
         if(!writeMeta || writeMeta->writtenLength >= writeMeta->dataLength)
             goto __CleanupOrRearm;
 
-        while(writeMeta->writtenLength < writeMeta->dataLength) {
-            const char* buf = ctx->rwBuffer.GetWriteData() + writeMeta->writtenLength;
-            const std::size_t remaining = writeMeta->dataLength - writeMeta->writtenLength;
-
-            const ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, buf, remaining);
-
-            if(n > 0)
-                writeMeta->writtenLength += n;
-
-            // Partial progress, wait for event loop to notify when we can send more data
-            else if(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                EnterState(ctx, EventType::EVENT_SEND);
-                return;
-            }
-
-            // Connection closed / Fatal error
-            else
-                goto __CloseConnection;
-        }
+        // PENDING: EnterState already done, DrainWriteBuffer arms EVENT_SEND. FAILED: Close
+        // already done. Either way there's nothing left for this call to do.
+        if(DrainWriteBuffer(ctx) != FlushStatus::COMPLETED)
+            return;
     }
 
 __CleanupOrRearm:
@@ -665,10 +652,8 @@ __CleanupOrRearm:
         return;
     }
 
-    if(ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE) {
-    __CloseConnection:
+    if(ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE)
         Close(ctx);
-    }
     else {
         ctx->Clear();
         ResumeReceive(ctx);
@@ -708,6 +693,40 @@ void EpollConnectionHandler::Stream(ClientCtx* ctx, StreamGenerator generator, b
     ctx->isStreamOperation = 1;
     ctx->streamChunked = streamChunked;
     Write(ctx, {});
+}
+
+FlushStatus EpollConnectionHandler::FlushChunk(ClientCtx* ctx, bool isFinal, AsyncData onDone)
+{
+    WFX_TRACE();
+
+    HttpResponse* res = ctx->responseInfo;
+    if(!res || res->GetBodyKind() != BodyKind::AWAIT_STREAM) {
+        Close(ctx);
+        return FlushStatus::FAILED;
+    }
+
+    if(!isFinal && !res->HasPendingFlushData())
+        return FlushStatus::COMPLETED;
+
+    if(!res->PrepareFlushChunk(isFinal)) {
+        Close(ctx);
+        return FlushStatus::FAILED;
+    }
+
+    ctx->awaitFlushFinal = isFinal ? 1 : 0;
+
+    const FlushStatus status = DrainWriteBuffer(ctx);
+
+    if(status == FlushStatus::PENDING) {
+        ctx->isAwaitFlush = 1;
+        ctx->asyncData = onDone;
+        return status;
+    }
+
+    if(status == FlushStatus::COMPLETED && !CompleteFlushRound(ctx))
+        return FlushStatus::FAILED;
+
+    return status;
 }
 
 void EpollConnectionHandler::Close(ClientCtx* ctx, bool forceClose)
@@ -2428,6 +2447,70 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
         Close(ctx);
 }
 
+FlushStatus EpollConnectionHandler::DrainWriteBuffer(ClientCtx* ctx)
+{
+    WFX_TRACE();
+
+    // Shared by Write's Case 2 and FlushChunk/ResumeFlushChunk. Callers decide what EVENT_SEND
+    // should resume into (isAwaitFlush or not) before calling this, and what to do once it returns.
+    auto& rwBuffer = ctx->rwBuffer;
+    auto* writeMeta = rwBuffer.GetWriteMeta();
+    const char* base = rwBuffer.GetWriteData();
+
+    while(writeMeta->writtenLength < writeMeta->dataLength) {
+        const ssize_t n = WrapWrite(ctx->socket, ctx->sslConn, base + writeMeta->writtenLength,
+                                    writeMeta->dataLength - writeMeta->writtenLength);
+
+        if(n > 0)
+            writeMeta->writtenLength += static_cast<std::uint32_t>(n);
+        else if(n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            EnterState(ctx, EventType::EVENT_SEND);
+            return FlushStatus::PENDING;
+        }
+        else {
+            Close(ctx);
+            return FlushStatus::FAILED;
+        }
+    }
+
+    return FlushStatus::COMPLETED;
+}
+
+bool EpollConnectionHandler::CompleteFlushRound(ClientCtx* ctx)
+{
+    WFX_TRACE();
+
+    // Does not decide close vs keep-alive, HandleResponse does that later
+    const bool isFinal = ctx->awaitFlushFinal;
+    ctx->awaitFlushFinal = 0;
+
+    if(!ctx->responseInfo->FinishFlushRound(isFinal)) {
+        Close(ctx);
+        return false;
+    }
+
+    return true;
+}
+
+void EpollConnectionHandler::ResumeFlushChunk(ClientCtx* ctx)
+{
+    WFX_TRACE();
+
+    const FlushStatus status = DrainWriteBuffer(ctx);
+    if(status == FlushStatus::PENDING)
+        return;
+
+    if(status == FlushStatus::FAILED)
+        return; // Close(ctx) already ran inside DrainWriteBuffer
+
+    ctx->isAwaitFlush = 0;
+
+    if(!CompleteFlushRound(ctx))
+        return; // CompleteFlushRound already closed ctx on failure
+
+    HandleClientAsyncCallback(ctx, {nullptr, 0, {.unused = 0}, AsyncStatus::COMPLETED}, false);
+}
+
 void EpollConnectionHandler::AsyncCallbackImpl(void* ctxPtr, AsyncData& async, AsyncResult res, bool destroy)
 {
     WFX_TRACE();
@@ -2799,7 +2882,10 @@ void EpollConnectionHandler::HandleClientWriteReady(ClientCtx* ctx)
     switch(ctx->eventType) {
         // Client response write
         case EventType::EVENT_SEND:
-            Write(ctx, {});
+            if(ctx->isAwaitFlush)
+                ResumeFlushChunk(ctx);
+            else
+                Write(ctx, {});
             break;
 
         // Client file transfer

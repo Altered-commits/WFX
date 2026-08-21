@@ -199,6 +199,13 @@ const HttpAPIExt1* GetHttpAPIExt1()
         [](void* backend) { // CommitFn
             ToRes(backend)->Commit();
         },
+        [](void* backend) { // FlushStartFn
+            ToRes(backend)->WriteFlushStart();
+        },
+        [](void* clientCtx, bool isFinal, AsyncData onComplete) { // FlushChunkFn
+            return GlobalEndpointDataExt1.connHandler->FlushChunk(static_cast<Http::ClientCtx*>(clientCtx), isFinal,
+                                                                  onComplete);
+        },
 
         // vvv Data API vvv
         [](void* data) { // SetGlobalPtrData

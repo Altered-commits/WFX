@@ -91,6 +91,7 @@ public: // Client operations
     void Write(ClientCtx* ctx, std::string_view buffer = {}) override;
     void WriteFile(ClientCtx* ctx, std::string path) override;
     void Stream(ClientCtx* ctx, StreamGenerator generator, bool streamChunked = true) override;
+    FlushStatus FlushChunk(ClientCtx* ctx, bool isFinal, AsyncData onDone) override;
     void Close(ClientCtx* ctx, bool forceClose = false) override;
     void RefreshExpiry(ClientCtx* ctx, std::uint16_t timeoutSeconds) override;
     bool RefreshAsyncTimer(ClientCtx* ctx, std::uint32_t delayMs, AsyncData asyncData) override;
@@ -156,6 +157,9 @@ private: // I/O
     bool EnsureFileReady(ClientCtx* ctx, const std::string& path);
     void SendFile(ClientCtx* ctx);
     void ResumeStream(ClientCtx* ctx);
+    void ResumeFlushChunk(ClientCtx* ctx);
+    FlushStatus DrainWriteBuffer(ClientCtx* ctx);
+    bool CompleteFlushRound(ClientCtx* ctx);
 
 private: // Write paths (private, public Write is client-only)
     void Write(EndpointCtx* ctx);

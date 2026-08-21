@@ -87,6 +87,43 @@ def send_dripped(host, port, payload, chunk_size=1, delay=0.0, rtimeout=5.0, cti
     finally:
         _close(sock)
 
+def recv_dripped(host, port, payload, chunk_size=8192, delay=0.003, rtimeout=30.0, ctimeout=5.0,
+                 rmax=64 << 20):
+    """Writes payload in one shot, then reads the reply in small pieces with a delay between each.
+
+    For streaming-response suites: a normal recv() drains everything the kernel already buffered
+    in one call, which never actually exercises server-side backpressure. Slowing the reads forces
+    the server's non-blocking socket writes into real EAGAIN instead.
+    """
+    sock = None
+    try:
+        sock = socket.create_connection((host, port), timeout=ctimeout)
+    except OSError:
+        return None
+
+    try:
+        sock.sendall(payload)
+        sock.settimeout(rtimeout)
+
+        chunks, total = [], 0
+        while total < rmax:
+            try:
+                data = sock.recv(chunk_size)
+            except (socket.timeout, OSError):
+                break
+            if not data:
+                break
+            chunks.append(data)
+            total += len(data)
+            if delay:
+                time.sleep(delay)
+
+        return b"".join(chunks)
+    except OSError:
+        return None
+    finally:
+        _close(sock)
+
 def send_and_abandon(host, port, payload, ctimeout=5.0, hold=0.0):
     """Connects, writes the payload, then vanishes without ever reading a reply.
 

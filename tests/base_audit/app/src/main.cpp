@@ -105,6 +105,87 @@ WFX_GET("/stream", [](WFX::Request, WFX::Response res) {
     });
 })
 
+// Awaitable outbound chunk flush: FlushStart()/co_await Flush()/co_await FlushEnd(). Unlike
+// /stream (a synchronous generator the engine drives after the handler returns), these run
+// mid-coroutine, so a handler can co_await an upstream fetch between rounds. No real upstream
+// here, but the framing is identical either way, that's the whole point of the primitive.
+
+// One Write() then FlushEnd() directly, no separate Flush() call: exercises the path where the
+// final round's body and the chunk terminator both go out in the same PrepareFlushChunk(true) call
+WFX_GET("/flush/single", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    res.Status(200);
+    res.FlushStart();
+    res.Write("single-round-payload");
+    co_await res.FlushEnd();
+    co_return;
+})
+
+// FlushEnd() with nothing ever written: an immediate zero-body chunked response
+WFX_GET("/flush/zero", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    res.Status(200);
+    res.FlushStart();
+    co_await res.FlushEnd();
+    co_return;
+})
+
+// 200 rounds of "<index>\n", each its own Flush(), then a FlushEnd() with no data of its own
+// (empty final chunk after real ones): exercises repeated gap-reserve/backfill across many rounds
+WFX_GET("/flush/multi", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    res.Status(200);
+    res.FlushStart();
+
+    for(int i = 0; i < 200; i++) {
+        res.Write(i);
+        res.Write("\n");
+        co_await res.Flush();
+    }
+
+    co_await res.FlushEnd();
+    co_return;
+})
+
+// 4000 rounds x 2048 bytes (~8 MiB), each round a repeating letter tied to its index: large enough
+// that a slow reader forces real EAGAIN/backpressure through DrainWriteBuffer/ResumeFlushChunk,
+// not just the synchronous fast path every other Flush test above stays on
+WFX_GET("/flush/heavy", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    res.Status(200);
+    res.FlushStart();
+
+    char block[2048];
+    for(int i = 0; i < 4000; i++) {
+        std::memset(block, 'A' + (i % 26), sizeof(block));
+        res.Write(std::string_view{block, sizeof(block)});
+        co_await res.Flush();
+    }
+
+    co_await res.FlushEnd();
+    co_return;
+})
+
+// Deliberately forgets FlushEnd(): regression coverage for the Commit() path that used to leave
+// an unbackfilled chunk-header gap (10 raw zero bytes) on the wire when a handler returns without
+// finalizing. Must now still produce a validly chunk-terminated (if truncated) response
+WFX_GET("/flush/no-end", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    res.Status(200);
+    res.FlushStart();
+    res.Write("first");
+    co_await res.Flush();
+    res.Write("second");
+    co_await res.Flush();
+    co_return;
+})
+
+WFX_GET("/violate/flush-after-body", [](WFX::Request, WFX::Response res) {
+    res.Status(200).Write("body-first");
+    res.FlushStart();
+})
+
+WFX_GET("/violate/flush-twice", [](WFX::Request, WFX::Response res) {
+    res.Status(200);
+    res.FlushStart();
+    res.FlushStart();
+})
+
 WFX_GET("/download", [](WFX::Request req, WFX::Response res) {
     std::string_view f;
     if(!req.GetHeader("X-File", f)) {

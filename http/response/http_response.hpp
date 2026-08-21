@@ -22,9 +22,10 @@ enum class ResponsePhase : std::uint8_t {
 
 enum class BodyKind : std::uint8_t {
     NONE = 0,
-    BUFFERED = 1, // body written directly to rwBuffer
-    STREAM = 2,   // StreamGenerator, body not in rwBuffer
-    FILE = 3,     // file path written to rwBuffer as header data, body not in rwBuffer
+    BUFFERED = 1,     // body written directly to rwBuffer
+    GEN_STREAM = 2,   // StreamGenerator, body not in rwBuffer
+    AWAIT_STREAM = 3, // Flush()/FlushEnd() driven, body sent incrementally during the handler coroutine
+    FILE = 4,         // file path written to rwBuffer as header data, body not in rwBuffer
 };
 
 class HttpResponse {
@@ -44,6 +45,9 @@ public: // Phase-enforced write API
     void WriteStream(Shared::StreamGenerator gen, bool chunked);
     void WriteTemplate(std::string&& path, Shared::JsonObject&& ctx); // Impl at end of file
     void Commit();
+    void WriteFlushStart();
+    bool PrepareFlushChunk(bool isFinal);
+    bool FinishFlushRound(bool isFinal);
 
 public: // Sugar syntax essentially
     void SendText(std::string_view data);
@@ -55,9 +59,17 @@ public: // Queries used by CoreEngine / Serializer
     {
         return phase_ == ResponsePhase::COMMITTED;
     }
-    bool IsStream() const
+    bool IsGenStream() const
     {
-        return bodyKind_ == BodyKind::STREAM;
+        return bodyKind_ == BodyKind::GEN_STREAM;
+    }
+    bool IsAwaitStream() const
+    {
+        return bodyKind_ == BodyKind::AWAIT_STREAM;
+    }
+    bool HasPendingFlushData() const noexcept
+    {
+        return rwBuffer_->GetWriteMeta()->dataLength > bodyStartOffset_;
     }
     bool IsFile() const
     {
@@ -110,12 +122,18 @@ private:
     // The response is destroyed and replaced with a 500 naming the violation.
     void AbortContractViolation(const char* what);
     bool RejectIfCommitted(const char* caller);
+    bool ReserveNextFlushGap();
 
 private:
-    inline void Append(const char* data, std::uint32_t len)
+    inline bool Append(const char* data, std::uint32_t len)
     {
         // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage): rwBuffer_ always set by CoreEngine first
-        rwBuffer_->AppendWriteData(data, len, networkConfig_.sendBufferIncSize, networkConfig_.maxSendBufferSize);
+        return rwBuffer_->AppendWriteData(data, len, networkConfig_.sendBufferIncSize,
+                                          networkConfig_.maxSendBufferSize);
+    }
+    void MarkAwaitStreamDone() noexcept
+    {
+        phase_ = ResponsePhase::COMMITTED;
     }
 
 private:

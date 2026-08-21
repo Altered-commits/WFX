@@ -517,6 +517,13 @@ open wraps itself in its own `BEGIN`/`COMMIT` automatically. Calling
 with `Begin()` runs the stream inside that transaction instead, and leaves it
 open when the stream ends, only closing the portal it opened for itself.
 
+!!! tip "Streaming a Postgres export straight to the client"
+    `stream.Next()` pulls rows off the wire, but the example above just discards them, `Write(...)`
+    still buffers the whole formatted response in memory. Pair it with
+    [`Response::FlushStart()`/`Flush()`/`FlushEnd()`](../request_and_response.md#response) to push
+    each batch to the client the moment it's formatted instead, so peak memory tracks one batch on
+    both ends of the pipe, not the whole result set.
+
 ---
 
 ## Statement cache

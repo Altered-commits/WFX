@@ -51,6 +51,12 @@ enum class SlotStatus : std::uint8_t {
     INVALID_STATE // Not valid for this slot right now (e.g. upgrading an already-secure one)
 };
 
+// Result of a single Response::Flush()/FlushEnd() call. COMPLETED is returned synchronously when
+// the buffered body bytes went out without hitting EAGAIN (no coroutine suspend needed). PENDING
+// is returned synchronously when EAGAIN was hit; the caller suspends and asyncData fires later
+// with COMPLETED or FAILED once the socket drains. FAILED means the connection is being closed.
+enum class FlushStatus : std::uint8_t { COMPLETED, PENDING, FAILED };
+
 struct AsyncResult {
     void* data;
     std::uint32_t dataLen;
@@ -59,6 +65,7 @@ struct AsyncResult {
         ConnectResult connectResult;   // Set by Promise<ConnectResult> on final_suspend
         EndpointStatus endpointStatus; // Set by ReleaseEndpoint and HandleEndpointReceive on client failure
         SlotStatus slotStatus;         // Set by SlotSend/SlotReceive/SlotUpgradeTls on failure
+        FlushStatus flushStatus;       // Set by the async completion of Response::Flush()/FlushEnd()
         std::uint8_t unused;           // Filler when none of the above apply (e.g. endpoint success)
     };
     AsyncStatus status;

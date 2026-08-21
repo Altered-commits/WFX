@@ -62,6 +62,8 @@ using WriteFileFn = void (*)(void* response, StringView path, bool autoHandle404
 using WriteStreamFn = void (*)(void* response, StreamGenerator, bool chunked);
 using WriteTemplateFn = void (*)(void* response, StringView path, JsonObject* ctx);
 using CommitFn = void (*)(void* response);
+using FlushStartFn = void (*)(void* response);
+using FlushChunkFn = FlushStatus (*)(void* clientCtx, bool isFinal, AsyncData onComplete);
 
 // Data API
 using SetGlobalPtrDataFn = void (*)(void*);
@@ -99,6 +101,8 @@ struct HttpAPIExt1 {
     WriteStreamFn writeStream;
     WriteTemplateFn writeTemplate;
     CommitFn commit;
+    FlushStartFn flushStart;
+    FlushChunkFn flushChunk;
 
     // Data API
     SetGlobalPtrDataFn setGlobalPtrData;

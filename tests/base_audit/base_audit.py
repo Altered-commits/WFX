@@ -56,6 +56,30 @@ def raw_send_dripped(host, port, payload, chunk_size=1, delay=0.0, rtimeout=5.0,
                            rtimeout=rtimeout, ctimeout=ctimeout, rmax=rmax)
     return ("CONN_ERR", b"") if raw is None else (net.status(raw), raw)
 
+# Reads the reply in small pieces, so the server's non-blocking socket writes actually hit EAGAIN
+# instead of draining into the kernel buffer in one call: exercises Flush()'s backpressure path
+def raw_recv_dripped(host, port, payload, chunk_size=8192, delay=0.003, rtimeout=30.0, rmax=64 << 20,
+                     ctimeout=5.0):
+    raw = net.recv_dripped(host, port, payload, chunk_size=chunk_size, delay=delay,
+                           rtimeout=rtimeout, ctimeout=ctimeout, rmax=rmax)
+    return ("CONN_ERR", b"") if raw is None else (net.status(raw), raw)
+
+# Counts actual chunk-size header lines in a raw (still chunk-framed) body, stopping at the
+# terminator. net.dechunk() only returns the decoded bytes, this proves the framing itself: how
+# many real chunks were on the wire, not just whether they decode to the right content
+def count_chunks(raw_body):
+    n, i = 0, 0
+    while i < len(raw_body):
+        j = raw_body.find(b"\r\n", i)
+        if j < 0:
+            break
+        size = int(raw_body[i:j].split(b";")[0].strip(), 16)
+        if size == 0:
+            break
+        n += 1
+        i = j + 2 + size + 2
+    return n
+
 def _build(method, path, headers=None, body=b"", close=True):
     lines = ["%s %s HTTP/1.1" % (method, path), "Host: x"]
     if close:
@@ -569,7 +593,8 @@ METHOD_FORMS = [
     b"GET /health HTTP/1.0\r\nHost: x\r\nConnection: keep-alive\r\n\r\n",
 ]
 
-VIOLATE_ROUTES = ["/violate/204body", "/violate/conn", "/violate/recommit"]
+VIOLATE_ROUTES = ["/violate/204body", "/violate/conn", "/violate/recommit",
+                  "/violate/flush-after-body", "/violate/flush-twice"]
 LIGHT_PATHS    = ["/health", "/text", "/api/v1/status", "/chain"]
 
 # Route correctness specification
@@ -1194,6 +1219,67 @@ def phase_features(ctx):
                                   % (st, len(sbody), len(expected))))
             else:
                 pr.ok()
+
+        # /flush/*: awaitable outbound chunk flush, FlushStart()/co_await Flush()/co_await
+        # FlushEnd(). Unlike /stream (a generator the engine drives after the handler returns),
+        # these send real bytes mid-coroutine, so both wire framing and content need checking.
+        with term.progress("features", "flush:single") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/flush/single"), rtimeout=8.0)
+            rbody = body_of(raw) if raw else b""
+            ok = st == 200 and count_chunks(rbody) == 1 and net.dechunk(rbody) == b"single-round-payload"
+            (pr.ok() if ok else pr.bad())
+            if not ok:
+                findings.append(("FLUSH_SINGLE_FAIL", "/flush/single: status=%s chunks=%d body=%r"
+                                 % (st, count_chunks(rbody), net.dechunk(rbody))))
+
+        with term.progress("features", "flush:zero") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/flush/zero"), rtimeout=8.0)
+            rbody = body_of(raw) if raw else b""
+            ok = st == 200 and rbody == b"0\r\n\r\n" and net.dechunk(rbody) == b""
+            (pr.ok() if ok else pr.bad())
+            if not ok:
+                findings.append(("FLUSH_ZERO_FAIL", "/flush/zero: status=%s raw_body=%r (expected exactly "
+                                 "b'0\\r\\n\\r\\n', a single terminator and nothing else)" % (st, rbody)))
+
+        with term.progress("features", "flush:multi") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/flush/multi"), rtimeout=8.0, rmax=1 << 20)
+            rbody = body_of(raw) if raw else b""
+            expected = ("".join("%d\n" % i for i in range(200))).encode()
+            nchunks = count_chunks(rbody)
+            ok = st == 200 and nchunks == 200 and net.dechunk(rbody) == expected
+            (pr.ok() if ok else pr.bad())
+            if not ok:
+                findings.append(("FLUSH_MULTI_FAIL", "/flush/multi: status=%s chunks=%d (expected 200) "
+                                 "body_ok=%s" % (st, nchunks, net.dechunk(rbody) == expected)))
+
+        # Regression coverage: a handler that returns without calling FlushEnd() used to leave an
+        # unbackfilled chunk-header gap (10 raw zero bytes) on the wire, corrupting the framing
+        # (curl: "Illegal or missing hexadecimal sequence in chunked-encoding"). Must now still be
+        # a validly terminated, if truncated, response, and the connection must survive it.
+        with term.progress("features", "flush:no-end") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/flush/no-end"), rtimeout=8.0)
+            rbody = body_of(raw) if raw else b""
+            ok = st == 200 and net.dechunk(rbody) == b"firstsecond"
+            healthy = common.health(host, port, 4.0)
+            (pr.ok() if (ok and healthy) else pr.bad())
+            if not ok:
+                findings.append(("FLUSH_NOEND_FAIL", "/flush/no-end: status=%s body=%r (expected "
+                                 "b'firstsecond', a valid truncated response)" % (st, net.dechunk(rbody))))
+            if not healthy:
+                findings.append(("SERVER_DEAD", "server unreachable after /flush/no-end"))
+
+        # 4000 rounds x 2048 bytes (~8 MiB) read back in small dripped pieces: forces the server's
+        # non-blocking writes into real EAGAIN, exercising DrainWriteBuffer/ResumeFlushChunk's
+        # suspend-and-resume path, not just the synchronous fast path every check above stays on
+        with term.progress("features", "flush:heavy(backpressure)") as pr:
+            st, raw = raw_recv_dripped(host, port, _build("GET", "/flush/heavy"), rtimeout=30.0)
+            rbody = body_of(raw) if raw else b""
+            expected = b"".join(bytes([ord('A') + (r % 26)]) * 2048 for r in range(4000))
+            ok = st == 200 and net.dechunk(rbody) == expected
+            (pr.ok() if ok else pr.bad())
+            if not ok:
+                findings.append(("FLUSH_HEAVY_FAIL", "/flush/heavy: status=%s len=%d (expected 200, "
+                                 "%d bytes)" % (st, len(net.dechunk(rbody)), len(expected))))
 
         if not common.health(host, port, 4.0):
             findings.append(("SERVER_DEAD", "server unreachable after features phase"))
