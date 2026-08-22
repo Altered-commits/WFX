@@ -3,6 +3,10 @@
 
 #include "utils/diagnostics/logger.hpp"
 
+#ifdef WFX_ASAN_BUILD
+#include <sanitizer/lsan_interface.h>
+#endif
+
 namespace WFX::Utils {
 
 // Heap allocated intentionally as logger must outlive all other globals
@@ -12,6 +16,14 @@ Logger& GetLogger() noexcept
 {
     // NOLINTNEXTLINE(bugprone-unhandled-exception-at-new) - function is noexcept, bad_alloc terminating is intended
     static Logger* GlobalLogger = new Logger();
+
+#ifdef WFX_ASAN_BUILD
+    // Tell LeakSanitizer this one specific allocation is intentional instead of
+    // disabling leak detection process-wide for it. Piggybacks on GlobalLogger's
+    // own static-init guard above, so this only ever runs once.
+    [[maybe_unused]] static const bool LSAN_IGNORED = (__lsan_ignore_object(GlobalLogger), true);
+#endif
+
     return *GlobalLogger;
 }
 

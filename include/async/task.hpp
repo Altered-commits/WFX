@@ -69,7 +69,7 @@ public:
         if constexpr(std::is_void_v<T>)
             handle.destroy();
         else {
-            T value = handle.promise().value;
+            T value = std::move(handle.promise().value.Get());
             handle.destroy();
             return value;
         }
@@ -84,16 +84,9 @@ inline Task<void> Promise<void>::get_return_object()
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
-inline Task<Shared::MiddlewareAction> Promise<Shared::MiddlewareAction>::get_return_object()
+template <typename T> inline Task<T> Promise<T>::get_return_object()
 {
-    return Task<Shared::MiddlewareAction>{
-        std::coroutine_handle<Promise<Shared::MiddlewareAction>>::from_promise(*this)};
-}
-
-// NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
-inline Task<Shared::ConnectResult> Promise<Shared::ConnectResult>::get_return_object()
-{
-    return Task<Shared::ConnectResult>{std::coroutine_handle<Promise<Shared::ConnectResult>>::from_promise(*this)};
+    return Task<T>{std::coroutine_handle<Promise<T>>::from_promise(*this)};
 }
 
 } // namespace WFX::Async

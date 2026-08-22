@@ -51,6 +51,12 @@ enum class SlotStatus : std::uint8_t {
     INVALID_STATE // Not valid for this slot right now (e.g. upgrading an already-secure one)
 };
 
+// Result of a single Response::Flush()/FlushEnd() call. COMPLETED is returned synchronously when
+// the buffered body bytes went out without hitting EAGAIN (no coroutine suspend needed). PENDING
+// is returned synchronously when EAGAIN was hit; the caller suspends and asyncData fires later
+// with COMPLETED or FAILED once the socket drains. FAILED means the connection is being closed.
+enum class FlushStatus : std::uint8_t { COMPLETED, PENDING, FAILED };
+
 struct AsyncResult {
     void* data;
     std::uint32_t dataLen;
@@ -59,6 +65,7 @@ struct AsyncResult {
         ConnectResult connectResult;   // Set by Promise<ConnectResult> on final_suspend
         EndpointStatus endpointStatus; // Set by ReleaseEndpoint and HandleEndpointReceive on client failure
         SlotStatus slotStatus;         // Set by SlotSend/SlotReceive/SlotUpgradeTls on failure
+        FlushStatus flushStatus;       // Set by the async completion of Response::Flush()/FlushEnd()
         std::uint8_t unused;           // Filler when none of the above apply (e.g. endpoint success)
     };
     AsyncStatus status;
@@ -298,8 +305,8 @@ static_assert(sizeof(EndpointDesc) == 152, "'EndpointDesc' must be exactly 152 b
 static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be standard layout");
 
 struct EndpointConfig {
-    std::uint32_t connLimit;             // Max simultaneous connections (next 64 aligned) in the slot pool
-    std::uint32_t auxConnLimit;          // Max simultaneous side connections (next 64 aligned); 0 = disabled
+    std::uint32_t connLimit;             // Max simultaneous connections in the slot pool (see exactSlots)
+    std::uint32_t auxConnLimit;          // Max simultaneous side connections; 0 = disabled (see exactSlots)
     std::uint32_t dnsRefreshSeconds;     // 0 = respect actual DNS TTL, N = override with N seconds
     std::uint16_t connectTimeoutSeconds; // TCP+TLS+onConnect must complete within this window
     std::uint16_t requestTimeoutSeconds; // Send+receive cycle must complete within this window
@@ -308,6 +315,7 @@ struct EndpointConfig {
     std::uint16_t reconnectBackoffBase;  // Initial backoff seconds
     std::uint16_t reconnectBackoffMax;   // Backoff cap seconds
     EndpointTLSConfig tlsConfig;         // TLS mode for this endpoint
+    bool exactSlots;                     // Allocate connLimit/auxConnLimit exactly, else round up to 64
     std::uint32_t prewarm;               // Slots to connect eagerly on first epoll loop iteration
     std::uint32_t maxConcurrentStreams;  // Cap on requests sharing one slot; 0/1 = exclusive slot
     StringView alpnProtocols;            // Wire-encoded ALPN list; empty = offer http/1.1 only

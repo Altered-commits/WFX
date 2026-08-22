@@ -7,21 +7,43 @@ These are not unit tests. They exist to find framing bugs, desync, memory corrup
 connection-pool contamination, so they send malformed bytes on purpose and read WFX's own logs and
 sanitizer output to tell "the test failed" apart from "the worker died".
 
+## The suites
+
+| Suite | Subject | Mocks |
+|-------|---------|-------|
+| `base_audit` | WFX as an inbound **server**: routing, forms, templates, CORS, worker chaos | none |
+| `endpoint_audit` | The raw `WFX::Endpoint<>` **primitive**: pooling, handshake, multiplexing, pinning, streaming, push, abort | two hand-rolled protocols |
+| `client_audit` | The shipped **protocol clients**, `HttpEndpoint` and `SmtpEndpoint` | hostile HTTP and SMTP |
+| `tls_audit` | **TLS trust**, both directions: outbound cert verification and inbound mTLS | hostile TLS, one listener per persona |
+| `crypto_audit` | The **crypto surface**: hashing, HMAC, AEAD, KDFs, asymmetric keys, JWK, JWT, encoding | none |
+| `ip_audit` | **Client-identity** handling: real-IP extraction, trusted proxies, per-identity limits | none |
+| `interop_audit` | Real-upstream **interoperability** for the same protocol clients: Postgres, SMTP, HTTP | real Docker Postgres/smtp4dev, and a real WFX server as the HTTP upstream |
+
+`endpoint_audit` and `client_audit` are two layers of the same stack: the
+primitive and the protocols built on it. A vector belongs in whichever suite owns
+the layer that would have to change to fix it.
+
+`interop_audit` is not adversarial like the rest of this page: it sends nothing malformed and has
+no security exit code. `client_audit` proves the same three clients survive a hostile server;
+`interop_audit` proves they actually work against a real one. See its own README for setup, it
+needs Docker and runs as its own CI matrix job, but is kept out of the default no-flag local
+sequence below since not every dev machine has Docker running; reach it with `--audit interop`.
+
 ## Running
 
 ```bash
-./run_audits.sh                                  # all suites, in order
-./run_audits.sh --audit endpoint                 # one suite
-./run_audits.sh --audit endpoint --phase push    # one phase, needs --audit
-./run_audits.sh --audit endpoint --list-phases   # what phases exist
-./run_audits.sh --audit tls -- --wfx-logs all    # anything after -- goes to the suite
+./run_audits.sh                                       # all suites, in order
+./run_audits.sh --audit endpoint                      # one suite
+./run_audits.sh --audit endpoint --phase solo_push    # one phase, needs --audit
+./run_audits.sh --audit endpoint --list-phases        # what phases exist
+./run_audits.sh --audit tls -- --wfx-logs all         # anything after -- goes to the suite
 ```
 
 `run_audits.sh` does **not** build WFX. Build first:
 
 ```bash
 ./scripts/install.sh --local-debug   # ASan + UBSan, what you want while fixing a bug
-./scripts/install.sh --local         # optimised
+./scripts/install.sh --local-release # optimised
 ```
 
 Run the debug build unless you have a reason not to. Sanitizer reports are wired into the run
@@ -56,7 +78,7 @@ tests/
   run_audits.sh       single entry point
   <name>_audit/
     <name>_audit.py   the suite
-    <protocol>_upstream.py  mock backend, if it needs one
+    <thing>_upstream.py    mock backend, one file per protocol it has to speak
     app/              the WFX app under test (C++)
     README.md         what this suite covers and why
 ```

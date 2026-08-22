@@ -59,6 +59,7 @@ nav:
       - Overview: api_reference/endpoint/overview.md
       - HTTP: api_reference/endpoint/http.md
       - SMTP: api_reference/endpoint/smtp.md
+      - Postgres: api_reference/endpoint/postgres.md
     - Utils:
       - Crypto & Hash: api_reference/utils/crypto.md
       - Encoding: api_reference/utils/encoding.md
@@ -66,6 +67,7 @@ nav:
       - JWT: api_reference/utils/jwt.md
   - Developer Reference:
     - Overview: dev_reference/overview.md
+    - Development Setup: dev_reference/dev_setup.md
     - Architecture: dev_reference/architecture.md
     - Codebase Architecture: dev_reference/codebase_architecture.md
     - Globals & Singletons: dev_reference/globals_and_singletons.md

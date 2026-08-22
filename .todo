@@ -1,14 +1,11 @@
 # To implement (no specific order):
 1. Hot-Reload
-2. DB support
-3. HTTP 2 & 3 support
-4. Inbound streaming (request body processed in chunks as it arrives, instead of buffered whole)
-5. HEAD auto-fallback to GET + wire-level body suppression: a HEAD to a GET-only route should return GET's headers with no body, not 404
-6. onAbort-equivalent for request timeout
-7. WKS (no design work done beyond a rough CLI sketch): separate repo, k8s-like control plane for orchestrating WFX across EC2 nodes
+2. HTTP 2 & 3 support
+3. Inbound streaming (request body processed in chunks as it arrives, instead of buffered whole)
+4. HEAD auto-fallback to GET + wire-level body suppression: a HEAD to a GET-only route should return GET's headers with no body, not 404
+5. onAbort-equivalent for request timeout
 
 # To Fix:
-1. Add write budget per connection (backend: epoll/io_uring/iocp/kqueue), so one connection can't
-   hoard writing
+1. Add write budget per connection (backend: epoll/io_uring/iocp/kqueue), so one connection can't hoard writing
 2. When server reaches connection limit, drop random connections instead of the current policy
 3. Template engine caching logic still needs a real pass

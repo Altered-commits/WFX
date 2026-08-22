@@ -29,6 +29,12 @@ static constexpr const char* CL_PLACEHOLDER = "0000000000"; // 10 digits
 static constexpr const char* CL_ZERO = "Content-Length: 0\r\n";
 static constexpr std::uint32_t CL_ZERO_LEN = 19;
 
+// Bytes reserved before each flush round's body for its "%X\r\n" size header (8 hex digits +
+// \r\n), backfilled right-aligned into the gap once the round's body length is known.
+static constexpr std::size_t CHUNK_HDR_RESERVE = 10;
+static constexpr const char* CHUNK_TERMINATOR = "0\r\n\r\n";
+static constexpr std::uint32_t CHUNK_TERMINATOR_LEN = 5;
+
 // Fixed offset of the status code: "HTTP/1.1 "/"HTTP/1.0 " are both 9 bytes
 // reason-phrase left empty, RFC 7230 3.1.2
 static constexpr std::size_t STATUS_CODE_OFFSET = 9;
@@ -49,6 +55,15 @@ static void FormatFixed10(std::uint32_t value, char out[CL_FIELD_WIDTH])
     for(int i = CL_FIELD_WIDTH - 1; i >= 0; --i) {
         out[i] = static_cast<char>('0' + (value % 10));
         value /= 10;
+    }
+}
+
+static void FormatFixedHex8(std::uint32_t value, char out[8])
+{
+    static constexpr char HEX_DIGITS[] = "0123456789ABCDEF";
+    for(int i = 7; i >= 0; --i) {
+        out[i] = HEX_DIGITS[value & 0xF];
+        value >>= 4;
     }
 }
 
@@ -83,7 +98,7 @@ static bool StatusForbidsBody(HttpStatus s)
 // vvv Engine-facing vvv
 void HttpResponse::Reset()
 {
-    if(bodyKind_ == BodyKind::STREAM) {
+    if(bodyKind_ == BodyKind::GEN_STREAM) {
         if(stream_.ctx && stream_.destroy)
             stream_.destroy(stream_.ctx);
 
@@ -106,7 +121,7 @@ void HttpResponse::Reset()
 // vvv Public Error API vvv
 void HttpResponse::AbortWithError(HttpStatus status, std::string_view message)
 {
-    if(bodyKind_ == BodyKind::STREAM) {
+    if(bodyKind_ == BodyKind::GEN_STREAM) {
         if(stream_.ctx && stream_.destroy)
             stream_.destroy(stream_.ctx);
 
@@ -407,14 +422,112 @@ void HttpResponse::WriteStream(StreamGenerator gen, bool chunked)
         stream_.destroy(stream_.ctx);
 
     stream_ = gen;
-    bodyKind_ = BodyKind::STREAM;
+    bodyKind_ = BodyKind::GEN_STREAM;
     phase_ = ResponsePhase::COMMITTED;
+}
+
+void HttpResponse::WriteFlushStart()
+{
+    if(RejectIfCommitted("WriteFlushStart"))
+        return;
+
+    if(bodyKind_ != BodyKind::NONE) {
+        AbortContractViolation("WriteFlushStart() called after the body kind was already set");
+        return;
+    }
+
+    if(StatusForbidsBody(status_)) {
+        AbortContractViolation("await-stream body set on a status that forbids one [1xx, 204, 304]");
+        return;
+    }
+
+    EnsureHeadersOpen();
+
+    Append("Transfer-Encoding: chunked\r\n", 28);
+    Append("\r\n", 2);
+
+    bodyKind_ = BodyKind::AWAIT_STREAM;
+    phase_ = ResponsePhase::BODY;
+
+    ReserveNextFlushGap();
+}
+
+bool HttpResponse::ReserveNextFlushGap()
+{
+    static constexpr char RESERVED[CHUNK_HDR_RESERVE] = {};
+    if(!Append(RESERVED, CHUNK_HDR_RESERVE))
+        return false;
+
+    bodyStartOffset_ = rwBuffer_->GetWriteMeta()->dataLength;
+    return true;
+}
+
+bool HttpResponse::PrepareFlushChunk(bool isFinal)
+{
+    auto* writeMeta = rwBuffer_->GetWriteMeta();
+    char* base = rwBuffer_->GetWriteData();
+    if(!writeMeta || !base)
+        return false;
+
+    const auto bodyLen = static_cast<std::uint32_t>(writeMeta->dataLength - bodyStartOffset_);
+
+    // A zero-size chunk always means "end of body" in HTTP/1.1 chunked encoding, there's no such
+    // thing as a real zero-size chunk mid-stream. The caller only reaches here with bodyLen == 0
+    // when isFinal (a non-final round with nothing pending never calls this at all), so this is
+    // always the true end: drop the reserved gap and send just the terminator, not a fake empty
+    // chunk followed by a real one.
+    if(bodyLen == 0) {
+        writeMeta->dataLength -= CHUNK_HDR_RESERVE;
+        return Append(CHUNK_TERMINATOR, CHUNK_TERMINATOR_LEN);
+    }
+
+    // Backfill this round's reserved gap with a fixed width, zero padded hex chunk size header.
+    // Fixed width means the body bytes never need to move regardless of what precedes the gap
+    // (headers, on the very first round, or nothing on later ones).
+    char hdr[CHUNK_HDR_RESERVE];
+    FormatFixedHex8(bodyLen, hdr);
+    hdr[8] = '\r';
+    hdr[9] = '\n';
+    std::memcpy(base + bodyStartOffset_ - CHUNK_HDR_RESERVE, hdr, CHUNK_HDR_RESERVE);
+
+    if(!Append("\r\n", 2))
+        return false;
+
+    if(isFinal && !Append(CHUNK_TERMINATOR, CHUNK_TERMINATOR_LEN))
+        return false;
+
+    return true;
+}
+
+bool HttpResponse::FinishFlushRound(bool isFinal)
+{
+    rwBuffer_->ClearWriteBuffer();
+
+    if(isFinal) {
+        MarkAwaitStreamDone();
+        return true;
+    }
+
+    return ReserveNextFlushGap();
 }
 
 void HttpResponse::Commit()
 {
     if(RejectIfCommitted("Commit"))
         return;
+
+    // Handler returned without calling FlushEnd(). Real body bytes may already be on the wire, so
+    // this can't rewrite to a 500 like every other contract violation does. Drop the next round's
+    // unbackfilled gap and terminate the chunked body so the client doesn't hang or choke on it.
+    if(bodyKind_ == BodyKind::AWAIT_STREAM) {
+        GetLogger().Error("[HttpResponse]: response contract violation: handler returned without calling FlushEnd()");
+
+        rwBuffer_->GetWriteMeta()->dataLength -= CHUNK_HDR_RESERVE;
+        Append(CHUNK_TERMINATOR, CHUNK_TERMINATOR_LEN);
+
+        phase_ = ResponsePhase::COMMITTED;
+        return;
+    }
 
     // No body written, zero-body response (e.g. 204, HEAD, error with no body)
     if(phase_ < ResponsePhase::BODY) {

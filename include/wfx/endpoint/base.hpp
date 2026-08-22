@@ -19,6 +19,7 @@
 //   WFX::EndpointDesc                       : describe the protocol (serialize / parse / ...)
 //   WFX::EndpointConfig                     : connection pool settings
 //   WFX::EndpointTLS                        : TLS mode type alias
+//   WFX::EndpointStatus                     : type behind the EpOk / EpXxx constants
 //
 //   SendPayload result codes (from co_await ep.SendPayload(req).first):
 //     WFX::EpOk                  success, output is valid
@@ -326,6 +327,11 @@ using EndpointDesc = Shared::EndpointDesc;
 //   .prewarm                slots to connect eagerly on startup
 // -----------------------------------------------------------------------
 using EndpointConfig = Shared::EndpointConfig;
+
+// -----------------------------------------------------------------------
+// Type behind the EpOk / EpXxx constants below
+// -----------------------------------------------------------------------
+using EndpointStatus = Shared::EndpointStatus;
 
 // -----------------------------------------------------------------------
 // TLS mode (set in EndpointConfig::tlsConfig)

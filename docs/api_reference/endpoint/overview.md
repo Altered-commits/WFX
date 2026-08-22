@@ -91,7 +91,8 @@ raw pointer past that point.
 ### Status codes
 
 `status` (the first element of the pair) tells you what happened. Always check it
-before touching `out`, a non-`EpOk` status means `out` is empty.
+before touching `out`, a non-`EpOk` status means `out` is empty. The type behind these
+constants is `WFX::EndpointStatus`, if you need to name it explicitly instead of relying on `auto`.
 
 | Status | Meaning |
 |--------|---------|
@@ -952,6 +953,13 @@ like an ordinary `SendPayload` that completes on the first `Next()`.
 
 Streaming composes with pinning, `ReservedSlot` has its own `Stream()` that
 runs on the reserved connection.
+
+!!! tip "Getting the chunks out to the client without buffering them"
+    `res.Write(...)` on its own still buffers the formatted response in memory as the loop runs.
+    Pair `Stream()`/`Next()` with
+    [`Response::FlushStart()`/`Flush()`/`FlushEnd()`](../request_and_response.md#response) to push
+    each chunk to the client as soon as it's written, so peak memory stays bounded on both sides of
+    the pipe, not just the upstream side.
 
 ---
 

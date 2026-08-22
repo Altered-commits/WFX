@@ -758,6 +758,7 @@ inline EndpointConfig BuildEndpointConfig(const HttpEndpointConfig& cfg) noexcep
         .reconnectBackoffBase = cfg.reconnectBackoffBaseSeconds,
         .reconnectBackoffMax = cfg.reconnectBackoffMaxSeconds,
         .tlsConfig = cfg.tlsConfig,
+        .exactSlots = true,
         .prewarm = cfg.prewarm,
         .maxConcurrentStreams = 0,
         .alpnProtocols = {},

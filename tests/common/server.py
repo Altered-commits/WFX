@@ -132,27 +132,33 @@ class Server:
         if not self._started:
             return
 
-        term.log("server", "stopping ...")
-        subprocess.run([self.cfg.wfx, "control", "stop", self.app], cwd=self.cwd,
-                       capture_output=True, text=True)
+        term.log("server", "stopping %s ..." % self.app)
+        result = subprocess.run([self.cfg.wfx, "control", "stop", self.app], cwd=self.cwd,
+                                capture_output=True, text=True)
 
         if not confirm_exit:
+            if result.returncode == 0:
+                term.log("server", term.green("%s stopped" % self.app))
+            else:
+                term.log("server", term.yellow("%s: 'control stop' exited %d: %s"
+                                               % (self.app, result.returncode,
+                                                  (result.stderr or result.stdout).strip())))
             return
 
         # Suites that kill workers can't trust `control stop` alone, so confirm the master is gone
         master = self.pid()
         if not master:
-            term.log("server", term.green("stopped"))
+            term.log("server", term.green("%s stopped" % self.app))
             return
 
         deadline = time.time() + 10.0
         while time.time() < deadline:
             if not pid_alive(master):
-                term.log("server", term.green("stopped (PID %d exited)" % master))
+                term.log("server", term.green("%s stopped (PID %d exited)" % (self.app, master)))
                 return
             time.sleep(0.25)
 
-        term.log("server", term.yellow("PID %d still alive, sending SIGKILL" % master))
+        term.log("server", term.yellow("%s: PID %d still alive, sending SIGKILL" % (self.app, master)))
         try:
             os.kill(master, signal.SIGKILL)
         except OSError:

@@ -232,7 +232,9 @@ struct ClientCtx : public ConnectionTag {
             std::uint16_t streamChunked : 1;
             std::uint16_t ipAcquired : 1; // set once connInfo holds the resolved IP and ConnectionLimiter counted it
             std::uint16_t rateLimiterAcquired : 1; // set once RequestRateLimiter has counted this connection too
-            std::uint16_t reserved : 4;
+            std::uint16_t isAwaitFlush : 1;    // mid FlushChunk() write, EVENT_SEND resumes into it instead of Write()
+            std::uint16_t awaitFlushFinal : 1; // the in-flight FlushChunk() is the terminating one
+            std::uint16_t reserved : 2;
         };
         std::uint16_t flags = 0;
     }; // 2 bytes
@@ -338,6 +340,7 @@ struct HttpConnectionHandler {
     virtual void Write(ClientCtx* ctx, std::string_view buffer = {}) = 0;
     virtual void WriteFile(ClientCtx* ctx, std::string path) = 0;
     virtual void Stream(ClientCtx* ctx, Shared::StreamGenerator generator, bool streamChunked = true) = 0;
+    virtual Shared::FlushStatus FlushChunk(ClientCtx* ctx, bool isFinal, Shared::AsyncData onDone) = 0;
     virtual void Close(ClientCtx* ctx, bool forceClose = false) = 0;
     virtual void RefreshExpiry(ClientCtx* ctx, std::uint16_t timeoutSeconds) = 0;
     virtual bool RefreshAsyncTimer(ClientCtx* ctx, std::uint32_t delayMs, Shared::AsyncData asyncData) = 0;
