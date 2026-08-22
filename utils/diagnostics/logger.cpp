@@ -21,7 +21,7 @@ Logger& GetLogger() noexcept
     // Tell LeakSanitizer this one specific allocation is intentional instead of
     // disabling leak detection process-wide for it. Piggybacks on GlobalLogger's
     // own static-init guard above, so this only ever runs once.
-    [[maybe_unused]] static const bool lsanIgnored = (__lsan_ignore_object(GlobalLogger), true);
+    [[maybe_unused]] static const bool LSAN_IGNORED = (__lsan_ignore_object(GlobalLogger), true);
 #endif
 
     return *GlobalLogger;

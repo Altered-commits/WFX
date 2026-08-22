@@ -131,6 +131,7 @@ public:
                                .status = AsyncStatus::INTERNAL_FAILURE};
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     Task<T> get_return_object();
 };
 

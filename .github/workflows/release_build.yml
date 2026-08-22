@@ -1,10 +1,11 @@
 name: WFX Release
 
 # Triggered by pushing a version tag (e.g. v1.2.3). Builds the engine for
-# every supported CPU target and publishes the binaries + checksums as
-# assets on a GitHub Release matching the tag. Add a new CPU target by
-# adding one matrix entry below, nothing else needs to change. Releases
-# are only ever cut from main, see the guard job.
+# every supported CPU target, packages include/ and shared/ once (identical
+# for every target, no compiled code in either), and publishes all of it as
+# assets on a GitHub Release matching the tag. Add a new CPU target by adding
+# one matrix entry below, nothing else needs to change. Releases are only
+# ever cut from main, see the guard job.
 on:
   push:
     tags: ['v*']
@@ -98,11 +99,41 @@ jobs:
             wfx-${{ matrix.target }}.sha256
           retention-days: 1
 
-  # Runs once after every matrix leg finishes, so the release is created
-  # exactly once with all targets' assets already in hand.
+  # include/ and shared/ are plain headers, identical for every target, so this
+  # packages them once instead of duplicating the same archive four times over
+  # in the build matrix above. This is what a prebuilt-binary user needs
+  # alongside the binary itself to build their own project against WFX
+  # without cloning the repo: extracting it into the same directory the
+  # binary's PATH wrapper expects (~/.wfx/src, see scripts/install.sh) drops
+  # in include/ and shared/ directly, no wrapper folder to strip.
+  headers:
+    name: Package headers
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Package
+        run: |
+          ASSET="wfx-headers"
+          tar -czf "$ASSET.tar.gz" include shared
+          sha256sum "$ASSET.tar.gz" > "$ASSET.tar.gz.sha256"
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v7
+        with:
+          name: wfx-headers
+          path: |
+            wfx-headers.tar.gz
+            wfx-headers.tar.gz.sha256
+          retention-days: 1
+
+  # Runs once after every matrix leg and the headers job finish, so the
+  # release is created exactly once with everything already in hand.
   publish:
     name: Publish release
-    needs: build
+    needs: [build, headers]
     runs-on: ubuntu-latest
     steps:
       - name: Download all build outputs
