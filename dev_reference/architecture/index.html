@@ -1,0 +1,2715 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../dev_setup/">
+      
+      
+        <link rel="next" href="../codebase_architecture/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Architecture - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../css/index.css">
+    
+      <link rel="stylesheet" href="../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api_reference/overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  Developer Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/json/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Json
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_13" id="__nav_4_13_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Endpoint
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/smtp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SMTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Postgres
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Utils
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/crypto/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crypto & Hash
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/encoding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/jwk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/jwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWT
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#startup-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Startup flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#request-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Request flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parsing-and-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parsing and routing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#executing-the-route" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Executing the route
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sending-the-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sending the response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#template-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Template Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#template-compilation-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template compilation pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#restoring-templates-without-compiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restoring templates without compiling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compilation-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compilation loop
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Compilation loop">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reading-each-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading each frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#processing-one-chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Processing one chunk
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transpilation-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transpilation loop
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Transpilation loop">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#building-the-ir-generateirfromtemplate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building the IR: GenerateIRFromTemplate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tag-dispatch-processtagir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tag dispatch: ProcessTagIR
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#generating-the-output-generatecxxfromir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating the output: GenerateCxxFromIR
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key points
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codebase_architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codebase Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../globals_and_singletons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Globals & Singletons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../abi_layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ABI Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build_macros/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metrics_and_observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics & Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#startup-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Startup flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#request-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Request flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parsing-and-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parsing and routing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#executing-the-route" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Executing the route
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sending-the-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sending the response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#template-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Template Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#template-compilation-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template compilation pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#restoring-templates-without-compiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restoring templates without compiling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compilation-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compilation loop
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Compilation loop">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reading-each-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading each frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#processing-one-chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Processing one chunk
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transpilation-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transpilation loop
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Transpilation loop">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#building-the-ir-generateirfromtemplate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building the IR: GenerateIRFromTemplate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tag-dispatch-processtagir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tag dispatch: ProcessTagIR
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#generating-the-output-generatecxxfromir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating the output: GenerateCxxFromIR
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key points
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="architecture">Architecture</h1>
+<p>This page describes how WFX initializes and runs at a high level. It does not cover internal implementation details.</p>
+<hr />
+<h2 id="startup-flow">Startup flow</h2>
+<pre class="mermaid"><code>flowchart TD
+    A([wfx run project]) --&gt; B[SetMinLevel INFO]
+    B --&gt; C[CheckAlreadyRunning]
+
+    C --&gt; D{PID file result}
+    D -- Not found --&gt; G
+    D -- IO error --&gt; E([Fatal: cannot read PID file])
+    D -- Corrupted --&gt; F[Delete corrupted PID file]
+    F --&gt; G
+    D -- OK and alive --&gt; H([Fatal: already running])
+    D -- OK but dead --&gt; I[Delete stale PID file]
+    I --&gt; G
+
+    G[Validate project directory exists] --&gt; K[Create default_logs and crash_logs dir if missing]
+    K --&gt; N[Load the selected config/wfx toml and .env\nrequire owner uid and perms 600]
+
+    N --&gt; O[Install SIGINT and SIGTERM handlers\nroutes to HandleMasterSignal]
+    O --&gt; P[Install SIGCHLD handler\nwakes master from nanosleep, does nothing else]
+    P --&gt; Q[GenerateSSLKey]
+    Q --&gt; R[MetricTracer Create\nallocate shared mmap for N workers]
+
+    R --&gt; PA{Prebuilt boot requested?}
+    PA -- Yes --&gt; PB{build/user_entry.so exists?}
+    PB -- No --&gt; PC([Fatal: prebuilt library missing])
+    PB -- Yes --&gt; PD[LoadTemplatesFromCache\nrestore map from the shipped cache]
+    PD --&gt; X
+
+    PA -- No --&gt; S[HandleBuildDirectory]
+    S --&gt; T[PreCompileTemplates]
+    T --&gt; U{Compile succeeded\nAND has a dynamic template?}
+    U -- No: either failed\nor purely static --&gt; V[Compile source only\ntarget: user_entry]
+    U -- Yes --&gt; W[Compile source and templates\nboth cmake targets]
+    V --&gt; X[LoadDynamicTemplatesFromLib]
+    W --&gt; X
+
+    X --&gt; Y{Daemon mode flag set?}
+    Y -- Yes --&gt; Z[fork]
+    Z --&gt; ZA[Parent logs daemon pid\nexits immediately]
+    Z --&gt; ZB[Child calls setsid\nbecomes session leader]
+    ZB --&gt; ZC[Redirect stdin stdout stderr\nto dev/null]
+    ZC --&gt; ZD
+    Y -- No --&gt; ZD[Write PID file via DaemonRegistry]
+
+    ZD --&gt; ZH[Apply configured logger settings\nmin level, stdout, colors, timestamps]
+    ZH --&gt; ZI[Open master.log if file logging enabled]
+
+    ZI --&gt; ZK[workerPids resize to N slots\nSpawnWorker 0 to N-1]
+
+    subgraph SW[SpawnWorker per slot]
+        direction TB
+        S1[fork]
+        S1 --&gt; S2{pid == 0?\nchild}
+        S2 -- Yes --&gt; S3[setpgid\nfirst worker becomes group leader\nrest join group]
+        S3 --&gt; S4[MetricTracer InitWorker slot]
+        S4 --&gt; S5[CrashTracer SetWorkerName\nCrashTracer Install]
+        S5 --&gt; S6[Open worker-N.log if file logging enabled]
+        S6 --&gt; S7[Init BufferPool and FileCache]
+        S7 --&gt; S9[Install SIGTERM handler\nSIGINT SIGPIPE SIGHUP ignored]
+        S9 --&gt; S10[PinWorkerToCPU if flag set]
+        S10 --&gt; S8[Construct CoreEngine:\ncreate connection backend init API tables\ndlopen user .so invoke RegisterMasterAPI\nload middleware]
+        S8 --&gt; S11([engine.Listen\nenter event loop, blocks here])
+        S2 -- No: master --&gt; S12[setpgid on child\nstore pid in workerPids slot\nupdate slot self.pid and startedAt]
+    end
+
+    ZK --&gt; SW
+    ZK --&gt; ML
+
+    subgraph ML[Master wait loop]
+        direction TB
+        M1[nanosleep masterPollInterval\nwakes early on any signal, incl. SIGCHLD]
+        M1 --&gt; M2[ReapDeadWorkers\nwaitpid WNOHANG loop\nincrement crashes\ncompute backoff\nmark SLOT_PENDING or SLOT_DEAD]
+        M2 --&gt; M3[RevivePendingWorkers\ncheck nextRetryAt per slot\nSpawnWorker if window expired\nincrement restarts and backoffAttempts]
+        M3 --&gt; M4[PollWorkerMetrics\nopen /proc/pid/status per live slot\nparse VmRSS and VmSize\nwrite rssBytes and vmBytes into slot]
+        M4 --&gt; M1
+    end
+
+    ML --&gt; SD{shouldStop set?}
+    SD -- Yes --&gt; SF[Log: waiting for workers to shutdown]
+
+    SF --&gt; SG[All workers together: poll waitpid WNOHANG every 100ms\nup to workerShutdownTimeout, shared across every worker]
+    SG --&gt; SH{All exited in time?}
+    SH -- No --&gt; SI[SIGKILL whatever's left\nwaitpid to reap each zombie]
+    SH -- Yes --&gt; SJ
+    SI --&gt; SJ[MetricTracer Destroy\nmunmap shared region]
+    SJ --&gt; SK[DaemonRegistry Delete PID file]
+    SK --&gt; SL([Exit 0])</code></pre>
+<p><code>shouldStop</code> only ever flips to true because <code>HandleMasterSignal</code> ran. That
+handler fires asynchronously the instant <code>SIGINT</code>/<code>SIGTERM</code> arrives, and does
+two things at once: it sets <code>shouldStop</code>, and it immediately broadcasts
+<code>SIGTERM</code> to the entire worker process group. That broadcast, not any step in
+the diagram above, is what actually asks workers to stop, the wait loop below
+it only polls for them to have exited.</p>
+<p>The wait loop polls every worker in the same <code>workerShutdownTimeout</code> window
+at once, not one worker's full timeout after another. A worker that ignores
+<code>SIGTERM</code>, or one that was spawned by a revival right before the signal
+arrived and so never received it, still gets caught by this same shared
+deadline, SIGKILLed, and reaped before the master proceeds. No worker
+outlives its master. This also keeps the master's own worst-case shutdown
+time bounded by <code>workerShutdownTimeout</code> regardless of worker count, which
+matters because <code>wfx control stop</code> gives up and force-kills the master
+itself if it waits past that same budget, see <a href="../../core_concepts/engine_commands/#wfx-control">Engine Commands</a>.</p>
+<hr />
+<h2 id="request-flow">Request flow</h2>
+<h3 id="parsing-and-routing">Parsing and routing</h3>
+<pre class="mermaid"><code>flowchart TD
+    A([onReceive fires]) --&gt; B[HandleRequest\nallocate the per-connection response object\non first use, reused across requests after]
+
+    B --&gt; C{HttpParser::Parse result}
+
+    C -- Incomplete headers --&gt; D[Mark connection alive\nRefresh header timeout\nResume receive]
+    C -- Incomplete body --&gt; E[Mark connection alive\nRefresh body timeout\nResume receive]
+    C -- Expect 100 --&gt; F[Mark connection alive\nRefresh body timeout\nWrite 100 Continue]
+    C -- Expect 417 --&gt; G[Mark connection close\nWrite 417 Expectation Failed]
+    C -- Parse error --&gt; H[Mark connection close\nWrite 400 Bad Request]
+    C -- Streaming body or unsupported --&gt; I[Mark connection close\nWrite 501 Not Implemented]
+
+    C -- Success --&gt; J[Increment request counter\nreset per-request async tracking\nstamp routeStartUs if latency metrics are on]
+    J --&gt; J1[Parse Connection header]
+    J1 --&gt; J2{Header combination valid?}
+    J2 -- No --&gt; J3[Mark connection close\nWrite 400 Bad Request]
+
+    J2 -- Yes --&gt; J4[Decide keep-alive vs close:\nHTTP/1.0 defaults to close\nHTTP/1.1 defaults to keep-alive\nan explicit header overrides either]
+    J4 --&gt; J5{Write buffer ready?}
+    J5 -- Init failed --&gt; J6[Mark connection close\nWrite 500 Internal Server Error]
+    J5 -- OK --&gt; J7[Reset response object\nwire in write buffer HTTP version close flag]
+
+    J7 --&gt; J8{AllowRequest:\nresolve client IP once per connection\nConnectionLimiter, then RequestRateLimiter}
+    J8 -- Over connection limit --&gt; J9[Set 503 Service Unavailable]
+    J9 --&gt; Finish
+    J8 -- Over rate limit --&gt; J10[Set 429 Too Many Requests]
+    J10 --&gt; Finish
+    J8 -- Allowed --&gt; J11[HandleCors:\nmatched-origin requests get CORS headers\npersisted here, survive a later 404 or handler error]
+    J11 --&gt; J12{Preflight fully answered here?}
+    J12 -- Yes --&gt; J13[204 No Content, already committed]
+    J13 --&gt; Finish
+    J12 -- No --&gt; K{Path starts with /public/?}
+
+    K -- Yes --&gt; L[Resolve file under the public dir\nqueue it as the response\nskip routing and middleware]
+    K -- No --&gt; M[Match route in trie]
+
+    M -- No match --&gt; M1{HandleGenericOptions:\nOPTIONS on a path with other\nmethods registered?}
+    M1 -- Yes --&gt; M2[204 No Content with Allow header]
+    M2 --&gt; Finish
+    M1 -- No --&gt; N[Set 404 response]
+
+    L --&gt; Finish[[FinishRequest, see: Sending the response]]
+    N --&gt; Finish
+
+    M -- Match --&gt; P[[HandleSuccess, see: Executing the route]]</code></pre>
+<p>A header combination like <code>close</code> and <code>keep-alive</code> together is invalid and
+takes the same 400 path as any other malformed header. Unlike everything
+else in this diagram, <code>J3</code> and <code>J6</code> (an RFC-violating <code>Connection</code> header,
+and write-buffer init failure) write straight to the connection and <code>return</code>
+immediately, the same as <code>H</code> and <code>I</code> above them, they never reach
+<code>FinishRequest</code>, there is no response object to commit yet at that point.</p>
+<p>Connection/rate-limit acceptance and CORS are per-request, not per-connection
+setup, they run again on every request on a kept-alive connection. The
+client's resolved IP and its rate-limit slot are each acquired at most once
+per connection (<code>ipAcquired</code>/<code>rateLimiterAcquired</code> bits on the connection),
+and both are released together when the connection closes, whether or not it
+ever got past this point.</p>
+<h3 id="executing-the-route">Executing the route</h3>
+<pre class="mermaid"><code>flowchart TD
+    P([HandleSuccess]) --&gt; P1{Resuming after this request's\nasync route handler already finished?}
+    P1 -- Yes --&gt; Finish[[FinishRequest, see: Sending the response]]
+    P1 -- No: still at middleware stage --&gt; Q[ExecuteMiddleware\nglobal stack first\nthen per-route stack]
+
+    Q --&gt; R{Middleware result}
+    R -- Broke the chain: already sent a response --&gt; Finish
+    R -- Failed synchronously --&gt; R1[Mark connection close\nSet 500 response]
+    R1 --&gt; Finish
+    R -- Suspended: async middleware --&gt; R2[[FinishRequest, return now\nresumes later via OnCoroutineComplete]]
+    R -- All passed --&gt; S[Mark stage as past-middleware]
+
+    S --&gt; S1{Route handler kind}
+    S1 -- Sync --&gt; W[Execute handler directly]
+    W --&gt; Finish
+
+    S1 -- Async --&gt; X[Set connection context for the ABI boundary\ninvoke the async handler, clear the context pointer]
+    X --&gt; X1[[FinishRequest, return either way\nhandler may already have completed\nsynchronously by this point, or not]]
+
+    U([OnCoroutineComplete fires]) --&gt; U1{Async result status}
+    U1 -- IO failure --&gt; U2[Mark connection close\nSet 500 response]
+    U2 --&gt; Direct[[HandleResponse directly, see: Sending the response]]
+    U1 -- Completed AND still at middleware stage --&gt; U3[Store the resulting middleware action]
+    U3 --&gt; P
+    U1 -- Completed AND past middleware stage --&gt; Direct</code></pre>
+<p><code>OnCoroutineComplete</code>'s two exits are worth noticing: one goes back into
+<code>HandleSuccess</code> (an async middleware resuming), the other skips straight to
+<code>HandleResponse</code>, not through <code>FinishRequest</code> again, since <code>FinishRequest</code>
+already ran once, synchronously, right when the handler was first dispatched.</p>
+<p><code>W</code>/<code>X</code> above are a black box from this diagram's point of view: a route
+handler is free to make its own outbound calls in there (Postgres, HTTP,
+SMTP, over <code>WFX::Endpoint&lt;&gt;</code>), each with its own connect/TLS/handshake/pool
+lifecycle and its own per-endpoint metrics (completions, bytes in/out,
+reconnects, TLS/connect failures, slots in use), none of which is this
+diagram's concern. See <a href="../../api_reference/endpoint/overview/">Endpoint Overview</a>
+for that lifecycle.</p>
+<h3 id="sending-the-response">Sending the response</h3>
+<pre class="mermaid"><code>flowchart TD
+    FR[FinishRequest:\nreset parse state to idle\nrefresh idle timeout] --&gt; AC[HandleResponse]
+
+    AC --&gt; AC1{Response already committed?}
+    AC1 -- No --&gt; AC2[Commit response]
+    AC1 -- Yes --&gt; AC3
+    AC2 --&gt; AC3[RecordRouteMetrics:\nper-route request count, full 1xx-5xx status histogram,\nbytesOut, and latency since routeStartUs if metrics.latency is on]
+
+    AC3 --&gt; AD{Response type}
+
+    AD -- File --&gt; AE[Hand off to backend\nfile send primitive]
+    AD -- Stream --&gt; AF[Hand off to backend\nstreaming generator]
+    AD -- Already-serialized buffer --&gt; AG[Hand off to backend\nwrite the buffer as-is]
+
+    AE --&gt; AH{Connection state}
+    AF --&gt; AH
+    AG --&gt; AH
+
+    AH -- Keep-alive --&gt; AI[Clear per-request context\nResume receive]
+    AH -- Close --&gt; AJ([Backend closes and releases connection])</code></pre>
+<p>Every path in the two diagrams above that reaches <code>FinishRequest</code> lands at
+the top of this one. The one exception is <code>OnCoroutineComplete</code> calling
+<code>HandleResponse</code> directly, which just enters this diagram one node lower,
+skipping <code>FinishRequest</code> for the reason noted above.</p>
+<hr />
+<h2 id="template-flow">Template Flow</h2>
+<h3 id="template-compilation-pipeline">Template compilation pipeline</h3>
+<pre class="mermaid"><code>flowchart TD
+    A([PreCompileTemplates called in master]) --&gt; B[Load template cache from disk]
+    B --&gt; C{Cache result}
+    C -- Corrupted or missing --&gt; D[Clear cache\nmark for resave]
+    C -- Loaded --&gt; E[Ensure output dirs exist]
+    D --&gt; E
+
+    E --&gt; F[Walk template directory recursively]
+    F --&gt; G{File is .html or .htm?}
+    G -- No --&gt; F
+    G -- Yes --&gt; H[Compute relative path and output path]
+
+    H --&gt; I[Get disk file stats]
+    I --&gt; J{Cache entry matches\nmodified time?}
+    J -- Yes --&gt; K[Load from cache\nadd to templates map]
+    K --&gt; F
+    J -- No --&gt; L[Mark for cache update]
+
+    L --&gt; M{Output subdirectory\nready?}
+    M -- Failed to create --&gt; M1[Log error, skip this file\nnot counted as a compile error]
+    M1 --&gt; F
+    M -- Yes --&gt; N{Open input file}
+    N -- Failed --&gt; N1[Increment error count]
+    N1 --&gt; F
+    N -- OK but empty --&gt; N2[Skip file silently]
+    N2 --&gt; F
+    N -- OK --&gt; O{Starts with partial tag?}
+    O -- Yes --&gt; P[Skip file]
+    P --&gt; F
+    O -- No --&gt; Q{Open output file}
+    Q -- Failed --&gt; S
+    Q -- OK --&gt; Q1[Invoke CompileTemplate]
+
+    Q1 --&gt; R{Compile result}
+    R -- Failure --&gt; S[Increment error count]
+    S --&gt; F
+    R -- Static --&gt; T[Add to templates map as STATIC]
+    T --&gt; U[Update cache entry]
+    U --&gt; F
+    R -- Dynamic --&gt; V[Generate C identifier from path\ncompute .cpp output path]
+    V --&gt; W[Invoke GenerateCxxFromTemplate]
+    W --&gt; X{Success?}
+    X -- No --&gt; S
+    X -- Yes --&gt; Y[Add to templates map as DYNAMIC]
+    Y --&gt; U
+
+    F --&gt; Z{Any errors?}
+    Z -- Yes --&gt; ZA([Return failure])
+    Z -- No --&gt; ZB{Cache needs resave?}
+    ZB -- Yes --&gt; ZC[Save cache to disk]
+    ZC --&gt; ZD([Return success with hasDynamic flag])
+    ZB -- No --&gt; ZD</code></pre>
+<h3 id="restoring-templates-without-compiling">Restoring templates without compiling</h3>
+<p><code>LoadTemplatesFromCache</code> is the <code>--use-prebuilt</code> counterpart to the pipeline above. The templates map
+is what <code>LoadDynamicTemplatesFromLib</code> and <code>GetTemplate</code> resolve against, so it still has to be
+populated even when nothing is being built.</p>
+<pre class="mermaid"><code>flowchart TD
+    A([LoadTemplatesFromCache called in master]) --&gt; B[Load template cache from disk]
+    B --&gt; C{Cache loaded?}
+    C -- No --&gt; D([Warn, register no templates, return])
+    C -- Yes --&gt; E[Iterate cache entries]
+
+    E --&gt; F{Entry payload valid\nAND path under template dir?}
+    F -- No --&gt; G[Warn, skip entry]
+    G --&gt; E
+    F -- Yes --&gt; H[Pop type and size\nderive relative and output path]
+    H --&gt; I[Add to templates map]
+    I --&gt; E</code></pre>
+<p>The cache file is the only input, so the template directory is left untouched and can be absent
+entirely. Timestamps play no part on this path.</p>
+<h3 id="compilation-loop">Compilation loop</h3>
+<h4 id="reading-each-frame">Reading each frame</h4>
+<pre class="mermaid"><code>flowchart TD
+    A([CompileTemplate called]) --&gt; B[Init CompilationContext\npush main file onto frame stack]
+
+    B --&gt; C{Frame stack empty?}
+    C -- Yes --&gt; D([Return STATIC or DYNAMIC\nbased on foundDynamicTag])
+
+    C -- No --&gt; C1{Buffer left over from before\nan include or extends jump?}
+    C1 -- Yes --&gt; G1[Resume from frame.readOffset\nin the already-loaded buffer]
+    C1 -- No --&gt; E[Read next chunk from top frame]
+
+    E --&gt; F{Read result}
+    F -- Error --&gt; GFAIL([Return FAILURE])
+
+    F -- EOF --&gt; H[Flush carry if any\nFlush write buffer to disk\nPop current frame]
+    H --&gt; I{Popped frame had\nan extends tag pending?}
+    I -- Yes --&gt; J[Push parent file onto stack\nclear currentExtendsName]
+    J --&gt; C
+    I -- No --&gt; C
+
+    F -- Data --&gt; G2[On this frame's first chunk only:\nskip a leading partial-tag marker]
+
+    G1 --&gt; Chunk[[Process this chunk, see below]]
+    G2 --&gt; Chunk</code></pre>
+<h4 id="processing-one-chunk">Processing one chunk</h4>
+<pre class="mermaid"><code>flowchart TD
+    L{Pending carry?}
+
+    L -- Yes --&gt; M{Carry is single brace\nnext char is not percent?}
+    M -- Yes --&gt; N[Write brace as literal\nclear carry]
+    N --&gt; O[Main chunk loop]
+    M -- No --&gt; P{Carry ends with percent\nnext char is closing brace?}
+    P -- Yes --&gt; Q[Append closing brace\ncomplete tag from carry]
+    Q --&gt; ProcessTag
+    P -- No --&gt; R[Find tag terminator in current chunk\nappend to carry]
+    R --&gt; ProcessTag
+
+    L -- No --&gt; O
+
+    O --&gt; S{Tag start found?}
+    S -- No --&gt; T[Write remaining as literal\ncheck for trailing brace\nset carry if needed]
+    T --&gt; Back[[Back to reading each frame, see above]]
+
+    S -- Yes --&gt; U[Write literal before tag]
+    U --&gt; V{Tag terminator in same chunk?}
+    V -- No --&gt; W[Assign remainder to carry]
+    W --&gt; Back
+    V -- Yes --&gt; X[Extract tag view]
+    X --&gt; ProcessTag
+
+    ProcessTag --&gt; Y{Tag result}
+    Y -- FAILURE --&gt; Fail([Return FAILURE])
+    Y -- SUCCESS --&gt; Z[Clear carry\nadvance read offset]
+    Z --&gt; O
+    Y -- CONTROL_TO_ANOTHER_FILE --&gt; AA[Push included or extends file\nleave read offset as-is for later]
+    AA --&gt; Back
+    Y -- PASSTHROUGH_DYNAMIC --&gt; AB[Set foundDynamicTag true\nwrite tag as-is to output]
+    AB --&gt; O</code></pre>
+<p><code>Pending Carry</code> is reached from either path in the diagram above: resuming a buffer left
+over from an include or extends jump, or a freshly read chunk (after skipping
+a leading partial-tag marker on a frame's very first chunk).</p>
+<h3 id="transpilation-loop">Transpilation loop</h3>
+<p>This stage works on a single flat, already-fully-resolved HTML file. Unlike the
+compilation loop above, there is no frame stack here, <code>{% include %}</code>,
+<code>{% extends %}</code>, and <code>{% block %}</code> are already fully resolved by the earlier
+static compile pass, this stage only ever sees <code>var</code>, <code>if</code>, <code>elif</code>, <code>else</code>,
+<code>endif</code>, <code>for</code>, and <code>endfor</code>.</p>
+<p><code>GenerateCxxFromTemplate</code> is a thin wrapper around two functions: <code>GenerateIRFromTemplate</code> builds an intermediate representation from the template, then <code>GenerateCxxFromIR</code> turns that IR into a generated <code>.cpp</code> file.</p>
+<pre class="mermaid"><code>flowchart TD
+    A([GenerateCxxFromTemplate]) --&gt; B[Open file, init context]
+    B --&gt; C[GenerateIRFromTemplate]
+    C --&gt; D{Succeeded?}
+    D -- No --&gt; DFAIL([Return false])
+    D -- Yes --&gt; E[GenerateCxxFromIR]
+    E --&gt; EEND([Return its result])</code></pre>
+<h4 id="building-the-ir-generateirfromtemplate">Building the IR: GenerateIRFromTemplate</h4>
+<p>Reads the file in chunks, same carry-over idea as the compilation loop for a
+tag split across a chunk boundary, but with no <code>MAX_TAG_LENGTH</code> cap here (that
+only exists in the earlier static pass), and no file stack, since there is
+nothing left to include or extend. Tag dispatch itself is broken out below.</p>
+<pre class="mermaid"><code>flowchart TD
+    F1[Read next chunk] --&gt; F2{Read result}
+    F2 -- Error --&gt; GFAIL1([Fail: read error])
+    F2 -- EOF --&gt; F3{Carry left over?}
+    F3 -- Yes --&gt; GFAIL2([Fail: incomplete tag at EOF])
+    F3 -- No --&gt; F4[Exit the read loop]
+
+    F2 -- Data --&gt; G{Carry pending?}
+    G -- Yes --&gt; H{Carry is lone brace,\nnext char not percent?}
+    H -- Yes --&gt; I[Literal brace, clear carry]
+    I --&gt; O
+    H -- No --&gt; J{Carry ends with percent,\nnext char is brace?}
+    J -- Yes --&gt; K[Tag complete from carry]
+    K --&gt; Dispatch[[ProcessTagIR, see table below]]
+    J -- No --&gt; L[Look for tag terminator here,\nnot found is a hard failure]
+    L --&gt; Dispatch
+
+    G -- No --&gt; O[Main read loop]
+    O --&gt; M{Tag start found?}
+    M -- No --&gt; N[Accumulate as pending literal]
+    N --&gt; F1
+    M -- Yes --&gt; P[FinalizeLiteral:\nflush pending literal into one IR entry]
+    P --&gt; Q{Tag terminator in same chunk?}
+    Q -- No --&gt; R[Remainder becomes carry]
+    R --&gt; F1
+    Q -- Yes --&gt; S[Extract tag view]
+    S --&gt; Dispatch
+
+    Dispatch --&gt; U{Tag result}
+    U -- FAILURE --&gt; GFAIL3([Fail])
+    U -- SUCCESS --&gt; V[Clear carry, advance offset]
+    V --&gt; O
+
+    F4 --&gt; W[FinalizeLiteral once more\nfor a trailing literal]
+    W --&gt; X{Patch stack empty?}
+    X -- No --&gt; XFAIL([Fail: unmatched if or for])
+    X -- Yes --&gt; Y{Separate scan:\nevery op patched?}
+    Y -- No --&gt; YFAIL([Fail: internal error,\nunpatched jump target])
+    Y -- Yes --&gt; DOK([IR complete])</code></pre>
+<h4 id="tag-dispatch-processtagir">Tag dispatch: ProcessTagIR</h4>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>var</code></td>
+<td><code>ParseExpr</code>, pool the RPN bytecode, emit <code>VAR</code> (payload is the expr index, never needs patching)</td>
+</tr>
+<tr>
+<td><code>if</code></td>
+<td><code>ParseExpr</code>, push a new patch frame holding just this <code>IF</code>'s own index, emit <code>IF</code></td>
+</tr>
+<tr>
+<td><code>elif</code></td>
+<td>Requires a non-empty stack and frame. Emit <code>JUMP</code>, patch only the <code>IF</code>/<code>ELIF</code> entries currently in the frame to jump here (queued <code>JUMP</code>s are left alone, they wait for <code>endif</code>). <code>ParseExpr</code>, emit <code>ELIF</code>, push its index too</td>
+</tr>
+<tr>
+<td><code>else</code></td>
+<td>Same guard and patch rule as <code>elif</code>. Emit <code>JUMP</code>, then a bare <code>ELSE</code> marker with no payload</td>
+</tr>
+<tr>
+<td><code>endif</code></td>
+<td>Requires a non-empty stack. Patch <code>IF</code>/<code>ELIF</code> entries' condition target and <code>JUMP</code> entries' plain target, both to this end state. Pop the frame, emit <code>ENDIF</code></td>
+</tr>
+<tr>
+<td><code>for</code></td>
+<td>Hand-parsed as <code>identifier in &lt;expr&gt;</code>. Push a new patch frame holding only this <code>FOR</code>'s own index, emit <code>FOR</code></td>
+</tr>
+<tr>
+<td><code>endfor</code></td>
+<td>Requires a non-empty stack. A <code>FOR</code>'s frame only ever holds its own single index. Patch that jump target to this end state, pop the frame, emit <code>ENDFOR</code> carrying a copy of the now-patched value</td>
+</tr>
+<tr>
+<td>anything else</td>
+<td><code>include</code>/<code>extends</code>/<code>block</code> never reach this stage at all, so this is always an unknown tag, fails</td>
+</tr>
+</tbody>
+</table>
+<h4 id="generating-the-output-generatecxxfromir">Generating the output: GenerateCxxFromIR</h4>
+<p>The generated <code>GetState(state, ctx)</code> method is a <code>while(true)</code> wrapped around
+a <code>switch(state)</code>. Only <code>LITERAL</code>, <code>VAR</code>, and the trailing default case
+actually <code>return</code>, every other op sets <code>state</code> and <code>continue</code>s (or, for
+<code>ELSE</code>/<code>ENDIF</code>, is a genuinely empty case relying on plain C++ fallthrough),
+so several IR states can be walked through inside one call without ever
+returning to the caller.</p>
+<pre class="mermaid"><code>flowchart TD
+    AA[Open output file, write header,\ngenerator type, GetStateCount] --&gt; AB[Begin GetState:\nwhile true around switch on state]
+    AB --&gt; AC{Per IR op}
+
+    AC -- LITERAL --&gt; AD[return FileChunk]
+    AC -- VAR --&gt; AE[return VariableChunk\nfrom GenerateCxxFromRPN]
+    AC -- IF / ELIF --&gt; AF[False: jump to false-target, continue\nTrue: fall through]
+    AC -- ELSE / ENDIF --&gt; AG[Empty case, plain fallthrough]
+    AC -- JUMP --&gt; AH[Unconditional: jump to target, continue]
+    AC -- FOR --&gt; AI[Empty/invalid: jump past matching ENDFOR\nOtherwise: set loop var to first item,\nstash resume state, fall through]
+    AC -- ENDFOR --&gt; AJ[Re-evaluate the iterable fresh each time\nMore items: advance, jump to right after FOR\nDone: erase loop var, fall through]
+    AC -- unrecognized, defensive --&gt; AK[Log error, return false]
+
+    AD --&gt; AL[Next op] --&gt; AC
+    AE --&gt; AL
+    AF --&gt; AL
+    AG --&gt; AL
+    AH --&gt; AL
+    AI --&gt; AL
+    AJ --&gt; AL
+
+    AC --&gt; AM[Final case: return, close out\nswitch, while, method, and type]
+    AM --&gt; AN[Write extern C factory function]
+    AN --&gt; AO([Flush, return success])</code></pre>
+<p>The footer and factory-function writes are the only two writes in this
+function that aren't error-checked, everything before them returns <code>false</code> on
+a write failure.</p>
+<hr />
+<h2 id="key-points">Key points</h2>
+<ul>
+<li>The master process never handles requests. It only initializes shared state and spawns workers.</li>
+<li>Each worker is fully independent. A crash in one worker does not affect others.</li>
+<li>User code runs inside a loaded shared library. It communicates with the engine through ABI-stable function pointer structs.</li>
+<li>All memory for connections and buffers comes from a per-worker pool, not the system allocator.</li>
+<li>Metrics are written to a shared region. Any worker can aggregate across all slots at any time.</li>
+<li>Per-worker subsystems (buffer pool, file cache, crash tracer) are initialized after spawn and are never shared.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Altered-commits
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

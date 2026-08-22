@@ -1,0 +1,3694 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../../env/">
+      
+      
+        <link rel="next" href="../http/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Overview - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../css/index.css">
+    
+      <link rel="stylesheet" href="../../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#endpoint" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Overview
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../dev_reference/overview/" class="md-tabs__link">
+          
+  
+  
+  Developer Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../json/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Json
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_13" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_13" id="__nav_4_13_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_13_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Endpoint
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-an-endpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring an endpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sending-a-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sending a request
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sending a request">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#status-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connection-pool-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection pool &amp; lifecycle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connection pool &amp; lifecycle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pool-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reconnects-and-backoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reconnects and backoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prewarm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prewarm
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dns-resolution-refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DNS resolution &amp; refresh
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tls-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coalescing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coalescing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpointdesc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EndpointDesc
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EndpointDesc">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-wire-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The wire format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connection-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-request-state-and-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-request state and output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-protocol-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional protocol features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#putting-it-together" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Putting it together
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#onconnect-handshakes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        onConnect handshakes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="onConnect handshakes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-band-tls-upgrades" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-band TLS upgrades
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#onabort-cancellation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        onAbort cancellation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="onAbort cancellation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#abortslothandle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AbortSlotHandle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opening-a-side-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening a side connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pinning-a-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pinning a connection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streaming-large-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming large responses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-initiated-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-initiated messages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multiplexing-advanced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiplexing (advanced)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-protocol-agnostic-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing protocol-agnostic code
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../smtp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SMTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Postgres
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Utils
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/crypto/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crypto & Hash
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/encoding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/jwk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/jwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWT
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/dev_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/codebase_architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codebase Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/globals_and_singletons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Globals & Singletons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/abi_layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ABI Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/build_macros/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/metrics_and_observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics & Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-an-endpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring an endpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sending-a-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sending a request
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sending a request">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#status-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connection-pool-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection pool &amp; lifecycle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connection pool &amp; lifecycle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pool-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pool settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reconnects-and-backoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reconnects and backoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prewarm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prewarm
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dns-resolution-refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DNS resolution &amp; refresh
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tls-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coalescing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coalescing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpointdesc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EndpointDesc
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EndpointDesc">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-wire-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The wire format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connection-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-request-state-and-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-request state and output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-protocol-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional protocol features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#putting-it-together" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Putting it together
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#onconnect-handshakes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        onConnect handshakes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="onConnect handshakes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-band-tls-upgrades" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-band TLS upgrades
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#onabort-cancellation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        onAbort cancellation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="onAbort cancellation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#abortslothandle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AbortSlotHandle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opening-a-side-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening a side connection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pinning-a-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pinning a connection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streaming-large-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming large responses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-initiated-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-initiated messages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multiplexing-advanced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiplexing (advanced)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-protocol-agnostic-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing protocol-agnostic code
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="endpoint">Endpoint</h1>
+<p>Endpoints are WFX's way of talking to <strong>other servers</strong> from inside a route handler:
+a REST API, a database, a cache, anything reachable over TCP. An endpoint owns a
+pooled set of outbound connections to one host, and route handlers borrow a
+connection from that pool with <code>co_await</code>, exactly the same way they <code>co_await</code>
+anything else in WFX's async system.</p>
+<p>There are two layers:</p>
+<ul>
+<li><strong><code>WFX::Endpoint&lt;TReq, TRes&gt;</code></strong>, documented on this page, is the raw, protocol-agnostic
+  primitive. It owns the connection pool, DNS resolution, reconnects, TLS, timeouts,
+  coalescing, and graceful cancellation. You provide the wire format for one protocol (how to
+  serialize a request and parse a response), and everything else is handled for you.</li>
+<li><strong><a href="../http/"><code>WFX::HttpEndpoint</code></a></strong> is a ready-to-use HTTP/1.1 client built on top of this
+  primitive. If you're calling an HTTP upstream, use that page instead, it covers the same
+  ground as this page but pre-wired for HTTP.</li>
+</ul>
+<p>Everything on this page applies to <strong>any</strong> protocol built on <code>Endpoint&lt;&gt;</code>, current or future
+(Redis, Postgres, a custom binary protocol, <code>HttpEndpoint</code> itself). A protocol-specific doc
+page only needs to describe its own wire format and request/response shape; the pool,
+lifecycle, DNS, TLS, coalescing, and cancellation behavior described here is shared by all of them.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>All endpoint functionality lives inside the <code>WFX::</code> namespace. To build a protocol
+client on the raw primitive, include:
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;wfx/endpoint/base.hpp&gt;</span>
+</code></pre></div></p>
+</div>
+<hr />
+<h2 id="declaring-an-endpoint">Declaring an endpoint</h2>
+<p>An endpoint is declared once, at namespace scope, before <code>Run()</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Api</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Endpoint</span><span class="o">&lt;</span><span class="n">ApiReq</span><span class="p">,</span><span class="w"> </span><span class="n">ApiRes</span><span class="o">&gt;</span><span class="p">{</span>
+<span class="w">    </span><span class="s">"api.example.com:80"</span><span class="p">,</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointDesc</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">serialize</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Serialize</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">parse</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Parse</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointConfig</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">connLimit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">requestTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>This single declaration represents <strong>one upstream host</strong> and <strong>one connection pool</strong>
+for that host. Every route handler that talks to that host through <code>Api</code> shares
+the same pool.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>Declare endpoints as <code>inline const auto</code> at namespace scope, the same way you
+declare routes. Registration happens once, before the server starts accepting
+connections. DNS resolution for the host also happens at that point, so if the
+hostname cannot be resolved, the server refuses to start rather than fail later
+at request time.</p>
+<p>Each worker process keeps its own copy of the pool. <code>connLimit</code> and every other
+pool setting is a <strong>per-worker</strong> limit, not a total shared across all workers.</p>
+</div>
+<p>The host string must be in <code>"hostname:port"</code> form, with no scheme prefix. A scheme
+prefix (<code>"https://..."</code>) or a missing port is a fatal startup error, not a runtime one.</p>
+<p>TLS is chosen automatically based on the port unless you override it, see
+<a href="#tls-mode">TLS mode</a> below.</p>
+<hr />
+<h2 id="sending-a-request">Sending a request</h2>
+<p>Every send goes through <code>co_await</code> and returns a pair: a status code, and an RAII
+handle to the response.</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GET</span><span class="p">(</span><span class="s">"/proxy"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Coro</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">out</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">Api</span><span class="p">.</span><span class="n">SendPayload</span><span class="p">({</span><span class="s">"/users"</span><span class="p">});</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="mi">502</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"upstream error"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">out</span><span class="o">-&gt;</span><span class="n">status</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="n">out</span><span class="o">-&gt;</span><span class="n">body</span><span class="p">);</span>
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">});</span>
+</code></pre></div>
+<p><code>out</code> is a <code>WFX::EndpointOutput&lt;T&gt;</code>. Access the underlying response with <code>*out</code>,
+<code>out-&gt;</code>, or <code>out.get()</code>. It stays valid for as long as the variable is in scope,
+and frees the response automatically when it goes out of scope. Do not store the
+raw pointer past that point.</p>
+<h3 id="status-codes">Status codes</h3>
+<p><code>status</code> (the first element of the pair) tells you what happened. Always check it
+before touching <code>out</code>, a non-<code>EpOk</code> status means <code>out</code> is empty. The type behind these
+constants is <code>WFX::EndpointStatus</code>, if you need to name it explicitly instead of relying on <code>auto</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WFX::EpOk</code></td>
+<td>Success, <code>out</code> is valid</td>
+</tr>
+<tr>
+<td><code>WFX::EpPoolExhausted</code></td>
+<td>All connections to this host are busy, try again later</td>
+</tr>
+<tr>
+<td><code>WFX::EpSocketFailure</code></td>
+<td>Local socket creation or configuration failed, before ever reaching <code>connect()</code></td>
+</tr>
+<tr>
+<td><code>WFX::EpConnectFailure</code></td>
+<td><code>connect()</code> itself failed</td>
+</tr>
+<tr>
+<td><code>WFX::EpSslFailure</code></td>
+<td>TLS handshake failed</td>
+</tr>
+<tr>
+<td><code>WFX::EpHandshakeTimeout</code></td>
+<td>TCP connect, TLS handshake, or <code>onConnect</code> took too long</td>
+</tr>
+<tr>
+<td><code>WFX::EpRequestTimeout</code></td>
+<td>No response within <code>requestTimeoutSeconds</code></td>
+</tr>
+<tr>
+<td><code>WFX::EpSerializeError</code></td>
+<td>Your <code>serialize()</code> returned an error</td>
+</tr>
+<tr>
+<td><code>WFX::EpBufferError</code></td>
+<td>Internal buffer setup failed</td>
+</tr>
+<tr>
+<td><code>WFX::EpInsufficientBuffer</code></td>
+<td>Request too large even after the engine grew the buffer</td>
+</tr>
+<tr>
+<td><code>WFX::EpInvalidKey</code></td>
+<td>Endpoint index out of range (an engine bug, not a caller mistake)</td>
+</tr>
+<tr>
+<td><code>WFX::EpEpollError</code></td>
+<td>Re-arming epoll on a reused connection failed</td>
+</tr>
+<tr>
+<td><code>WFX::EpInternalError</code></td>
+<td>Unclassified engine failure</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition important">
+<p class="admonition-title">What you can actually expect back</p>
+<p>Not every value above arrives the same way. Two of them are only ever
+produced through a specific path, worth knowing so you don't write handling
+logic assuming a value can appear where it can't:</p>
+<ul>
+<li><code>WFX::EpOk</code>, the happy path.</li>
+<li><code>WFX::EpPoolExhausted</code>, <code>WFX::EpSocketFailure</code>, <code>WFX::EpConnectFailure</code>,
+  <code>WFX::EpSslFailure</code>, <code>WFX::EpBufferError</code>, <code>WFX::EpInsufficientBuffer</code>,
+  <code>WFX::EpSerializeError</code>, <code>WFX::EpEpollError</code>, returned immediately,
+  without suspending, when the request could not even be started.</li>
+<li><code>WFX::EpHandshakeTimeout</code>, <code>WFX::EpRequestTimeout</code>, and
+  <code>WFX::EpInternalError</code>, returned after suspending, once the connection
+  was already being established or already in flight. A timeout while
+  still connecting or handshaking reports as <code>EpHandshakeTimeout</code>, a
+  timeout once a request was already sent reports as <code>EpRequestTimeout</code>,
+  and every other mid-flight failure (a reset, a parse error, a reconnect
+  budget running out, a coalesce primary dying) reports as
+  <code>EpInternalError</code>.</li>
+<li><code>WFX::EpInvalidKey</code> exists for completeness but signals an engine
+  registration bug, not something a caller can trigger.</li>
+</ul>
+<p>Write your <code>if(status != WFX::EpOk)</code> fallback to treat any status you
+don't explicitly handle the same way, rather than enumerating every value
+and hoping the list stays exhaustive.</p>
+</div>
+<hr />
+<h2 id="connection-pool-lifecycle">Connection pool &amp; lifecycle</h2>
+<p>Every endpoint owns a fixed-size pool of connection slots, sized from <code>connLimit</code>
+(rounded up, see the note under <a href="#pool-settings">Pool settings</a>). A slot moves
+through roughly this lifecycle:</p>
+<ol>
+<li><strong>Closed</strong> -&gt; no socket, nothing allocated.</li>
+<li><strong>Connecting</strong> -&gt; TCP connect (and TLS handshake, if applicable) in progress.</li>
+<li><strong><code>onConnect</code></strong> -&gt; only if the protocol defines one; a handshake coroutine runs before the slot is usable, see <a href="#onconnect-handshakes">below</a>.</li>
+<li><strong>In the pool, idle</strong> -&gt; connected and healthy, waiting to be leased for a request.</li>
+<li><strong>Leased</strong> -&gt; actively serving one caller's request.</li>
+<li>Back to <strong>idle</strong> on a keep-alive-friendly completion, or <strong>closed</strong> if the protocol asked to close, the peer closed, or something failed.</li>
+</ol>
+<h3 id="pool-settings">Pool settings</h3>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">EndpointConfig</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">connLimit</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">auxConnLimit</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">dnsRefreshSeconds</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">connectTimeoutSeconds</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">requestTimeoutSeconds</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">idleTimeoutSeconds</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">maxReconnectAttempts</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">reconnectBackoffBase</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">reconnectBackoffMax</span><span class="p">;</span>
+<span class="w">    </span><span class="n">EndpointTLSConfig</span><span class="w"> </span><span class="n">tlsConfig</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">prewarm</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">maxConcurrentStreams</span><span class="p">;</span><span class="w"> </span><span class="c1">// multiplexing, see below. 0/1 = exclusive slot</span>
+<span class="w">    </span><span class="n">StringView</span><span class="w"> </span><span class="n">alpnProtocols</span><span class="p">;</span><span class="w">           </span><span class="c1">// wire-encoded ALPN list, empty defaults to offering http/1.1 only</span>
+<span class="p">};</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connLimit</code></td>
+<td>Max simultaneous connections to this host, per worker (rounded up, see below)</td>
+</tr>
+<tr>
+<td><code>auxConnLimit</code></td>
+<td>Max simultaneous side connections for graceful cancellation, per worker (rounded up, see below); <code>0</code> disables it, see <a href="#onabort-cancellation"><code>onAbort</code> cancellation</a></td>
+</tr>
+<tr>
+<td><code>dnsRefreshSeconds</code></td>
+<td><code>0</code> to follow the DNS record's own TTL, or a ceiling in seconds</td>
+</tr>
+<tr>
+<td><code>connectTimeoutSeconds</code></td>
+<td>Budget for TCP connect + TLS handshake + <code>onConnect</code> combined</td>
+</tr>
+<tr>
+<td><code>requestTimeoutSeconds</code></td>
+<td>Budget for one send + receive cycle once a request starts</td>
+</tr>
+<tr>
+<td><code>idleTimeoutSeconds</code></td>
+<td>Idle pooled connections close after this many seconds of inactivity</td>
+</tr>
+<tr>
+<td><code>maxReconnectAttempts</code></td>
+<td>How many times a background connection retries before being ejected</td>
+</tr>
+<tr>
+<td><code>reconnectBackoffBase</code> / <code>reconnectBackoffMax</code></td>
+<td>Backoff range (seconds) between reconnect attempts</td>
+</tr>
+<tr>
+<td><code>tlsConfig</code></td>
+<td>TLS mode, see <a href="#tls-mode">below</a></td>
+</tr>
+<tr>
+<td><code>prewarm</code></td>
+<td>Connections to open eagerly on startup</td>
+</tr>
+<tr>
+<td><code>maxConcurrentStreams</code></td>
+<td>Cap on requests sharing one slot, see <a href="#multiplexing-advanced">Multiplexing</a></td>
+</tr>
+<tr>
+<td><code>alpnProtocols</code></td>
+<td>ALPN protocols to offer during the TLS handshake; empty defaults to offering <code>http/1.1</code> only</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<ul>
+<li>These are validated at startup and the server refuses to start if any are
+  invalid: <code>connLimit</code> must be greater than zero, <code>prewarm</code> cannot exceed
+  <code>connLimit</code>, <code>reconnectBackoffBase</code> cannot exceed <code>reconnectBackoffMax</code>, and
+  every timeout must be at least as long as the engine's internal timer tick
+  (5 seconds). A shorter value would silently fire later than configured, so
+  WFX rejects it outright instead of lying to you.</li>
+<li>The effective <code>connLimit</code> and <code>auxConnLimit</code> are each the next multiple of 64
+  at or above the value you set, because both pools are bitmaps sized in whole
+  64-bit words. A value of 1 to 64 gives 64 slots, 65 to 128 gives 128, and so
+  on. This rounded capacity is the real ceiling on simultaneous connections, and
+  the point at which further requests are refused with <code>poolExhausted</code> (or, for
+  <code>auxConnLimit</code>, the point at which <code>OpenSideConnection()</code> starts failing).
+  <code>auxConnLimit = 0</code> is the one exception: it stays disabled, no pool allocated.</li>
+</ul>
+</div>
+<h3 id="reconnects-and-backoff">Reconnects and backoff</h3>
+<p>If a connection fails while nothing is waiting on it (a prewarmed or idle slot
+losing its socket, for example), WFX retries it in the background with
+exponential backoff plus jitter (<code>base * 2^attempt</code>, capped at
+<code>reconnectBackoffMax</code>, then randomized so a whole pool doesn't reconnect in
+lockstep). Once <code>maxReconnectAttempts</code> is exhausted, the slot is permanently
+ejected and freed.</p>
+<p>If a caller is actively waiting on that connection when it fails, WFX does not
+make it wait through a backoff delay. The failure is reported immediately
+through the status code, so your route handler can decide whether to retry.</p>
+<h3 id="prewarm">Prewarm</h3>
+<p>Setting <code>prewarm</code> opens that many connections eagerly before the server starts
+accepting traffic, instead of waiting for the first request to pay the connect
+cost. Prewarm failures go through the same reconnect funnel as any other
+background connection.</p>
+<hr />
+<h2 id="dns-resolution-refresh">DNS resolution &amp; refresh</h2>
+<p>The host is resolved once, synchronously, when the endpoint is registered.
+Resolution failure at that point is fatal, the server will not start with an
+endpoint pointed at a host it cannot resolve.</p>
+<p>Each time a new physical connection is opened, WFX picks the next address from
+the resolved set in round-robin order.</p>
+<p>Addresses are periodically re-resolved in the background so a changing DNS
+record (a failover, a load balancer swap) is eventually picked up without
+restarting the server:</p>
+<ul>
+<li>With <code>dnsRefreshSeconds = 0</code> (the default), the refresh interval follows the
+  DNS record's own TTL.</li>
+<li>With <code>dnsRefreshSeconds</code> set to a positive value, that value acts as a
+  ceiling: WFX refreshes at most that often, but never waits <em>longer</em> than the
+  record's real TTL if the TTL is shorter.</li>
+<li>The interval is always clamped between 5 seconds and 1 hour, and a small
+  amount of jitter is added so many endpoints don't all refresh at the exact
+  same instant.</li>
+<li>A literal IP address (no real DNS involved) is refreshed at the 1-hour
+  ceiling, which is effectively a no-op since the address can never change.</li>
+</ul>
+<p>If a refresh fails, WFX keeps using the last known-good addresses and retries
+the resolution shortly after.</p>
+<p>Each refresh resolves on a background thread and reports its result back to
+the event loop through the engine's internal notification mechanism. A refresh
+whose result is still waiting because the event loop hasn't drained it yet
+counts against a small shared queue across all endpoints.</p>
+<div class="admonition danger">
+<p class="admonition-title">Danger</p>
+<p>If notifying the event loop about a completed refresh keeps failing,
+results pile up undrained and the shared queue can fill. Since a
+notification that can't reach the event loop means WFX has effectively
+lost the ability to ever tell it about new addresses, WFX treats a full
+queue as fatal for that worker rather than silently resolving DNS into a
+queue nothing is ever going to read. The worker exits and goes through the
+same restart path as any other worker crash, this is a last-resort guard
+against a broken event notification path, not something a healthy server
+will ever hit under normal DNS refresh traffic.</p>
+</div>
+<hr />
+<h2 id="tls-mode">TLS mode</h2>
+<p><code>tlsConfig</code> decides whether a connection uses TLS:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX</span><span class="o">::</span><span class="n">EpTlsAuto</span><span class="w">     </span><span class="c1">// TLS on for well-known secure ports, off otherwise</span>
+<span class="n">WFX</span><span class="o">::</span><span class="n">EpTlsRequire</span><span class="w">  </span><span class="c1">// Always use TLS, regardless of port</span>
+<span class="n">WFX</span><span class="o">::</span><span class="n">EpTlsInsecure</span><span class="w"> </span><span class="c1">// Always plaintext, even on a normally secure port</span>
+</code></pre></div>
+<p><code>EpTlsAuto</code> is the default and checks the port against a fixed list:</p>
+<table>
+<thead>
+<tr>
+<th>Port</th>
+<th>Protocol</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>443</code></td>
+<td>HTTPS</td>
+</tr>
+<tr>
+<td><code>465</code></td>
+<td>SMTPS</td>
+</tr>
+<tr>
+<td><code>563</code></td>
+<td>NNTPS</td>
+</tr>
+<tr>
+<td><code>636</code></td>
+<td>LDAPS</td>
+</tr>
+<tr>
+<td><code>989</code></td>
+<td>FTPS (data)</td>
+</tr>
+<tr>
+<td><code>990</code></td>
+<td>FTPS (implicit)</td>
+</tr>
+<tr>
+<td><code>992</code></td>
+<td>Telnet over TLS</td>
+</tr>
+<tr>
+<td><code>993</code></td>
+<td>IMAPS</td>
+</tr>
+<tr>
+<td><code>995</code></td>
+<td>POP3S</td>
+</tr>
+<tr>
+<td><code>5061</code></td>
+<td>SIPS</td>
+</tr>
+<tr>
+<td><code>5223</code></td>
+<td>XMPP over TLS</td>
+</tr>
+<tr>
+<td><code>5349</code></td>
+<td>STUNS / TURNS</td>
+</tr>
+<tr>
+<td><code>5671</code></td>
+<td>AMQPS</td>
+</tr>
+<tr>
+<td><code>5684</code></td>
+<td>CoAPS</td>
+</tr>
+<tr>
+<td><code>6380</code></td>
+<td>Redis TLS</td>
+</tr>
+<tr>
+<td><code>6514</code></td>
+<td>Syslog over TLS</td>
+</tr>
+<tr>
+<td><code>6697</code></td>
+<td>IRC over TLS</td>
+</tr>
+<tr>
+<td><code>8443</code></td>
+<td>HTTPS (alt)</td>
+</tr>
+<tr>
+<td><code>8883</code></td>
+<td>MQTTS</td>
+</tr>
+<tr>
+<td><code>9093</code></td>
+<td>Kafka TLS</td>
+</tr>
+</tbody>
+</table>
+<p>For any port outside that list, be explicit with <code>EpTlsRequire</code> or
+<code>EpTlsInsecure</code> rather than relying on the heuristic.</p>
+<hr />
+<h2 id="coalescing">Coalescing</h2>
+<p>Picture 200 requests hitting your server at once, all asking for the same
+popular resource on a slow upstream. Without coalescing, that's 200 separate
+outbound connections (or 200 callers queued up waiting for a spot in a pool of
+<code>connLimit</code> connections) all asking the upstream for the exact same thing.
+Coalescing collapses that into <strong>one</strong> in-flight backend call: the first
+request goes out for real, the other 199 are parked as waiters, and when the
+real call finishes, every waiter gets its own copy of the result. From the
+upstream's point of view, only one request ever happened.</p>
+<p>Wiring it up takes two pieces on <code>EndpointDesc</code>:</p>
+<ol>
+<li><strong><code>coalesceKey</code></strong>, a function that turns a request into a <code>std::uint64_t</code> key. Two requests with the same key are treated as duplicates of each other. Returning <code>0</code> means "never coalesce this particular request" (useful for anything with side effects, like a <code>POST</code>).</li>
+<li><strong><code>cloneOutput</code></strong>, a function that deep-copies a <code>TRes</code>. This is <strong>required</strong> as soon as <code>coalesceKey</code> is set: every waiter needs its own independently-owned response object, not a shared pointer to the primary caller's.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// Requests that hash to the same key are treated as duplicates of one another</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">CoalesceByPath</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">reqVoid</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="n">ApiReq</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">reqVoid</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Shared</span><span class="o">::</span><span class="n">Hasher</span><span class="o">::</span><span class="n">Fnv1a</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">path</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">path</span><span class="p">.</span><span class="n">size</span><span class="p">());</span>
+<span class="p">}</span>
+
+<span class="c1">// Every waiter needs its own copy, ApiRes must be copyable</span>
+<span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="nf">CloneApiRes</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="cm">/*slotState*/</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">srcOutput</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">src</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="n">ApiRes</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">srcOutput</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">New</span><span class="o">&lt;</span><span class="n">ApiRes</span><span class="o">&gt;</span><span class="p">(</span><span class="n">src</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Api</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Endpoint</span><span class="o">&lt;</span><span class="n">ApiReq</span><span class="p">,</span><span class="w"> </span><span class="n">ApiRes</span><span class="o">&gt;</span><span class="p">{</span>
+<span class="w">    </span><span class="s">"api.example.com:80"</span><span class="p">,</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointDesc</span><span class="p">{</span>
+<span class="w">        </span><span class="p">.</span><span class="n">serialize</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="n">Serialize</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">parse</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="n">Parse</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">createOutput</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="p">[](</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">New</span><span class="o">&lt;</span><span class="n">ApiRes</span><span class="o">&gt;</span><span class="p">();</span><span class="w"> </span><span class="p">},</span>
+<span class="w">        </span><span class="p">.</span><span class="n">destroyOutput</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[](</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Delete</span><span class="p">(</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">ApiRes</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">p</span><span class="p">));</span><span class="w"> </span><span class="p">},</span>
+<span class="w">        </span><span class="p">.</span><span class="n">coalesceKey</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">CoalesceByPath</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">cloneOutput</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">CloneApiRes</span><span class="p">,</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointConfig</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">connLimit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">requestTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>With this in place: the first caller asking for <code>/products/42</code> computes a key,
+finds nothing in flight for it, and sends the request as normal. While that's
+pending, more callers asking for the same path compute the same key, find a
+match, and are parked as waiters instead of opening connections of their own.
+Once the real response arrives, WFX calls <code>CloneApiRes</code> once per waiter (each
+getting its own <code>EndpointOutput&lt;ApiRes&gt;</code>, freed independently through
+<code>destroyOutput</code> when that caller's variable goes out of scope), then delivers
+the original response to the caller who actually triggered the call.</p>
+<p>Left <code>nullptr</code> (the default), coalescing never engages, every request opens or
+reuses its own connection as usual.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Coalescing only applies to requests that arrive while an identical request
+is already in flight. It does not cache completed responses, the next
+request for the same key after the in-flight one finishes triggers a brand
+new backend call.</p>
+</div>
+<hr />
+<h2 id="endpointdesc"><code>EndpointDesc</code></h2>
+<p><code>EndpointDesc</code> is where you describe your protocol to the engine: how to turn
+a <code>TReq</code> into bytes, how to turn bytes back into a <code>TRes</code>, and a handful of
+optional hooks for anything that needs to happen around a connection's
+lifetime. Every field is a plain function pointer (or lambda that decays to
+one), there's no interface to inherit from.</p>
+<p>Two fields are required. Everything else is nullable, and only worth setting
+if your protocol actually needs it, HTTP needs different hooks than Redis, so
+most endpoints will leave most of this section untouched.</p>
+<h3 id="the-wire-format">The wire format</h3>
+<p>These two are the only required fields, an endpoint can't do anything without
+them:</p>
+<ul>
+<li><strong><code>serialize(slotState, &amp;req, buf, bufLen, &amp;written)</code></strong>: write the wire
+  encoding of <code>req</code> into <code>buf</code>, and set <code>*written</code> to how many bytes you wrote.
+  Return <code>WFX::EpSerOk</code> on success, <code>WFX::EpSerBufferTooSmall</code> if <code>buf</code> was too
+  small (the engine grows the buffer and calls you again), or <code>WFX::EpSerError</code>
+  on an unrecoverable failure.</li>
+<li><strong><code>parse(slotState, parseState, buf, len, &amp;consumed, outObj, isEof)</code></strong>: read
+  bytes as they arrive off the wire and fill in <code>outObj</code> (a <code>TRes*</code>). Set
+  <code>*consumed</code> to how many bytes you actually read, the engine keeps whatever's
+  left for your next call.</li>
+</ul>
+<p>The return value tells the engine what to do next:</p>
+<table>
+<thead>
+<tr>
+<th>Return</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WFX::EpParseIncomplete</code></td>
+<td>Need more bytes, call again when they arrive</td>
+</tr>
+<tr>
+<td><code>WFX::EpParseDone</code></td>
+<td><code>outObj</code> is complete, the slot returns to the pool</td>
+</tr>
+<tr>
+<td><code>WFX::EpParseClose</code></td>
+<td><code>outObj</code> is complete, close the connection after delivering it</td>
+</tr>
+<tr>
+<td><code>WFX::EpParseChunk</code></td>
+<td>One chunk is ready, more arrive unprompted, see <a href="#streaming-large-responses">Streaming</a></td>
+</tr>
+<tr>
+<td><code>WFX::EpParseChunkFetch</code></td>
+<td>One chunk is ready, the engine re-serializes to ask for the next</td>
+</tr>
+<tr>
+<td><code>WFX::EpParseError</code></td>
+<td>Unrecoverable framing failure, the slot is closed</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition danger">
+<p class="admonition-title">Danger</p>
+<p>When <code>isEof</code> is <code>true</code>, the peer has closed the connection and no more
+bytes are coming. You must not return <code>WFX::EpParseIncomplete</code> in that
+case, return <code>WFX::EpParseClose</code> or <code>WFX::EpParseError</code> instead. This is
+how <a href="../http/"><code>HttpEndpoint</code></a> supports HTTP/1.0-style bodies that end when
+the connection closes rather than by a length.</p>
+</div>
+<h3 id="connection-lifecycle">Connection lifecycle</h3>
+<p>These run once per <strong>physical connection</strong>, not once per request. Use them
+for anything that should survive across several keep-alive requests on the
+same socket, a connection-level auth token, request counters, whatever your
+protocol needs to remember between calls:</p>
+<ul>
+<li><strong><code>createSlotState(userCtx)</code></strong> / <strong><code>destroySlotState(slotState)</code></strong>: allocate
+  and free whatever state one connection needs to carry around. Called once
+  when a slot first connects, and once when it's finally torn down, not on
+  every request. <code>slotState</code> is the same pointer every other callback receives
+  as its first argument.</li>
+<li><strong><code>userCtx</code></strong>: an opaque pointer forwarded straight through to
+  <code>createSlotState</code> as its argument, unchanged. Use it to hand the same
+  connection factory a shared piece of config (an API key, a shared client
+  object) without needing a global.</li>
+<li><strong><code>onConnect</code></strong>: set automatically from the <code>OnConnect</code> template argument on
+  <code>Endpoint&lt;&gt;</code>, see <a href="#onconnect-handshakes">onConnect handshakes</a> below. Runs
+  once per connection, right after the TCP/TLS handshake and before the slot
+  is allowed to serve any request.</li>
+<li><strong><code>onAbort</code></strong>: set automatically from the <code>OnAbort</code> template argument on
+  <code>Endpoint&lt;&gt;</code>, see <a href="#onabort-cancellation"><code>onAbort</code> cancellation</a>
+  below. Runs once per request, if the client disconnects before the backend
+  replied.</li>
+<li>
+<p><strong><code>onDisconnect(slotState, reason)</code></strong>: fires once, right before
+  <code>destroySlotState</code>, whenever a slot is torn down for any reason. <code>slotState</code>
+  is still valid when this runs, <code>reason</code> tells you why:</p>
+<table>
+<thead>
+<tr>
+<th>Reason</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WFX::EpIdleTimeout</code></td>
+<td>The slot sat idle in the pool for <code>idleTimeoutSeconds</code> with nothing to do</td>
+</tr>
+<tr>
+<td><code>WFX::EpHandshakeTimeoutReason</code></td>
+<td>The slot was closed while still connecting or handshaking, past <code>connectTimeoutSeconds</code></td>
+</tr>
+<tr>
+<td><code>WFX::EpDisconnectError</code></td>
+<td>Anything else: the peer closed the connection, a socket or protocol error, a forced close, exhausted reconnect attempts</td>
+</tr>
+</tbody>
+</table>
+<p>Use this for connection-scoped cleanup or logging, closing a file handle
+<code>createSlotState</code> opened, decrementing a metric, whatever your protocol's
+<code>slotState</code> is holding onto that needs to be released or reported before
+it's freed.</p>
+</li>
+</ul>
+<h3 id="per-request-state-and-output">Per-request state and output</h3>
+<p>These run once per request, not once per connection:</p>
+<ul>
+<li><strong><code>createParseState(slotState)</code></strong> / <strong><code>destroyParseState(parseState)</code></strong>:
+  scratch space <code>parse()</code> needs while assembling one response, a partial
+  header, a byte counter, anything that shouldn't leak into the next request
+  on the same connection. Created before the first byte of a response is
+  parsed and destroyed once <code>parse()</code> finishes.</li>
+<li><strong><code>resetParseState(parseState)</code></strong>: if your parse state can be cheaply reset
+  in place, provide this and the engine reuses the same <code>parseState</code> across
+  keep-alive requests instead of paying a destroy-then-recreate every time.
+  Optional, purely a performance knob.</li>
+<li><strong><code>createOutput(slotState)</code></strong> / <strong><code>destroyOutput(outputPtr)</code></strong>: allocate and
+  free the <code>TRes</code> your route handler ends up with. <code>createOutput</code> runs before
+  <code>parse()</code> is ever called, <code>destroyOutput</code> runs when the caller's
+  <code>EndpointOutput&lt;T&gt;</code> goes out of scope, freeing the response.</li>
+</ul>
+<h3 id="optional-protocol-features">Optional protocol features</h3>
+<p>These callbacks unlock specific behavior. Each is documented in full, with a
+worked example, in its own section:</p>
+<ul>
+<li><strong><code>coalesceKey(&amp;req)</code></strong> / <strong><code>cloneOutput(slotState, srcOutput)</code></strong>: collapse
+  duplicate in-flight requests into one backend call, see
+  <a href="#coalescing">Coalescing</a>.</li>
+<li><strong><code>hasCapacity(slotState)</code></strong> / <strong><code>takeStreamOutput(slotState, key)</code></strong>: run
+  several requests concurrently over one connection, see
+  <a href="#multiplexing-advanced">Multiplexing (advanced)</a>.</li>
+<li><strong><code>onPush(slotState, buf, len, &amp;consumed)</code></strong>: handle messages the server
+  sends on its own, with no request outstanding, see
+  <a href="#server-initiated-messages">Server-initiated messages</a>.</li>
+</ul>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>WFX validates all of this at startup, before the server accepts a single
+connection: a create/destroy pair must both be set or both left null, and
+<code>cloneOutput</code> must be set whenever <code>coalesceKey</code> is (same rule for
+<code>hasCapacity</code> and <code>takeStreamOutput</code>). A protocol that gets this wrong
+fails to start rather than crashing later on the first request that
+exercises the missing half.</p>
+</div>
+<h3 id="putting-it-together">Putting it together</h3>
+<p>A small key-value protocol that uses most of the callbacks above: one
+<code>AUTH &lt;token&gt;</code> line sent once per connection, then simple <code>GET &lt;key&gt;\n</code>
+requests over the same socket, replies coming back as one line each.</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">KvSlotState</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">requestsServed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="c1">// just to demonstrate connection-scoped state</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">KvParseState</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">String</span><span class="w"> </span><span class="n">pending</span><span class="p">;</span><span class="w"> </span><span class="c1">// bytes seen so far for the response currently in progress</span>
+<span class="p">};</span>
+
+<span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="nf">CreateSlotState</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="cm">/*userCtx*/</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">New</span><span class="o">&lt;</span><span class="n">KvSlotState</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">DestroySlotState</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">slotState</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">Delete</span><span class="p">(</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">KvSlotState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">slotState</span><span class="p">));</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">OnDisconnect</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">slotState</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">DisconnectReason</span><span class="w"> </span><span class="n">reason</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">KvSlotState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">slotState</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">reason</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpDisconnectError</span><span class="p">)</span>
+<span class="w">        </span><span class="n">WFX</span><span class="o">::</span><span class="n">LogWarn</span><span class="p">(</span><span class="s">"kv connection dropped after "</span><span class="p">,</span><span class="w"> </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">requestsServed</span><span class="p">,</span><span class="w"> </span><span class="s">" requests"</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="nf">CreateParseState</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="cm">/*slotState*/</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">New</span><span class="o">&lt;</span><span class="n">KvParseState</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">DestroyParseState</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">parseState</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">Delete</span><span class="p">(</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">KvParseState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">parseState</span><span class="p">));</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">ResetParseState</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">parseState</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">KvParseState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">parseState</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">pending</span><span class="p">.</span><span class="n">clear</span><span class="p">();</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="nf">CreateOutput</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="cm">/*slotState*/</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">New</span><span class="o">&lt;</span><span class="n">KvRes</span><span class="o">&gt;</span><span class="p">();</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">DestroyOutput</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">outputPtr</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">Delete</span><span class="p">(</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">KvRes</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">outputPtr</span><span class="p">));</span>
+<span class="p">}</span>
+
+<span class="n">SerializeResult</span><span class="w"> </span><span class="nf">Serialize</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">slotStateVoid</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">reqVoid</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">bufLen</span><span class="p">,</span>
+<span class="w">                          </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">*</span><span class="w"> </span><span class="n">written</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="o">*</span><span class="w"> </span><span class="cm">/*streamKey, unused, no multiplexing*/</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">KvSlotState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">slotStateVoid</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">req</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="n">KvReq</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">reqVoid</span><span class="p">);</span>
+
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">snprintf</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">bufLen</span><span class="p">,</span><span class="w"> </span><span class="s">"GET %s</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">key</span><span class="p">.</span><span class="n">c_str</span><span class="p">());</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">n</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">bufLen</span><span class="p">)</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">SerializeResult</span><span class="o">::</span><span class="n">BUFFER_TOO_SMALL</span><span class="p">;</span>
+
+<span class="w">    </span><span class="o">*</span><span class="n">written</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">n</span><span class="p">);</span>
+<span class="w">    </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">requestsServed</span><span class="o">++</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">SerializeResult</span><span class="o">::</span><span class="n">OK</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">ParseResult</span><span class="w"> </span><span class="nf">Parse</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="cm">/*slotState*/</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">parseStateVoid</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">len</span><span class="p">,</span>
+<span class="w">                  </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">*</span><span class="w"> </span><span class="n">consumed</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">outObjVoid</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">isEof</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="o">*</span><span class="w"> </span><span class="cm">/*completedKey, unused*/</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">parseState</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">KvParseState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">parseStateVoid</span><span class="p">);</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">KvRes</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">outObjVoid</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">parseState</span><span class="o">-&gt;</span><span class="n">pending</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+<span class="w">    </span><span class="o">*</span><span class="n">consumed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">len</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">pos</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parseState</span><span class="o">-&gt;</span><span class="n">pending</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="sc">'\n'</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">pos</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">String</span><span class="o">::</span><span class="n">npos</span><span class="p">)</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">isEof</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">ParseResult</span><span class="o">::</span><span class="n">ERROR</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">ParseResult</span><span class="o">::</span><span class="n">INCOMPLETE</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">out</span><span class="o">-&gt;</span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parseState</span><span class="o">-&gt;</span><span class="n">pending</span><span class="p">.</span><span class="n">substr</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">pos</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpParseDone</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Kv</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Endpoint</span><span class="o">&lt;</span><span class="n">KvReq</span><span class="p">,</span><span class="w"> </span><span class="n">KvRes</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">Authenticate</span><span class="o">&gt;</span><span class="p">{</span><span class="w"> </span><span class="c1">// Authenticate: see onConnect handshakes</span>
+<span class="w">    </span><span class="s">"kv.internal:7000"</span><span class="p">,</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointDesc</span><span class="p">{</span>
+<span class="w">        </span><span class="p">.</span><span class="n">serialize</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="n">Serialize</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">parse</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="n">Parse</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">onDisconnect</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">OnDisconnect</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">createSlotState</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">CreateSlotState</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">destroySlotState</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">DestroySlotState</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">createParseState</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">CreateParseState</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">destroyParseState</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DestroyParseState</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">resetParseState</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">ResetParseState</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">createOutput</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">CreateOutput</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">destroyOutput</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="n">DestroyOutput</span><span class="p">,</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointConfig</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">connLimit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">requestTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>Walking through what actually happens the first time a route handler does
+<code>co_await Kv.SendPayload({.key = "session:42"})</code>, assuming the pool is
+completely cold:</p>
+<ol>
+<li>No idle slot exists, so WFX opens a new TCP connection and calls
+   <code>CreateSlotState</code>, its return value becomes <code>slotState</code> for every other
+   callback on this connection from here on.</li>
+<li><code>Authenticate</code> (the <code>onConnect</code> coroutine) runs once, sends the <code>AUTH</code> line,
+   waits for the reply. If it returns <code>WFX::EpReady</code>, the slot enters the pool.</li>
+<li><code>CreateOutput</code> allocates the <code>KvRes</code> your route handler will eventually get.</li>
+<li><code>CreateParseState</code> allocates a fresh <code>KvParseState</code>.</li>
+<li><code>Serialize</code> writes <code>GET session:42\n</code> into the send buffer.</li>
+<li>As bytes come back, <code>Parse</code> is called repeatedly, appending to
+   <code>parseState-&gt;pending</code>, until it finds a <code>\n</code> and fills <code>out-&gt;value</code>,
+   returning <code>WFX::EpParseDone</code>.</li>
+<li>Your route handler resumes, <code>out</code> is the populated <code>KvRes</code>.</li>
+</ol>
+<p>If a second request comes in on the same keep-alive connection: <code>slotState</code>
+is reused as-is (still remembers <code>requestsServed</code>), <code>ResetParseState</code> clears
+<code>pending</code> instead of a fresh <code>CreateParseState</code>/<code>DestroyParseState</code> pair, and
+<code>CreateOutput</code> allocates a new <code>KvRes</code> for this request. Eventually, if the
+connection sits idle long enough, WFX closes it, <code>OnDisconnect</code> fires with
+<code>WFX::EpIdleTimeout</code>, and <code>DestroySlotState</code> frees <code>slotState</code> for good.</p>
+<hr />
+<h2 id="onconnect-handshakes"><code>onConnect</code> handshakes</h2>
+<p>Some protocols need a handshake before a connection is usable: TLS client
+certs, a Redis <code>AUTH</code>, an SMTP <code>EHLO</code>. Pass a coroutine as the third template
+argument to <code>Endpoint&lt;&gt;</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX</span><span class="o">::</span><span class="n">EpCoro</span><span class="w"> </span><span class="nf">Authenticate</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">SlotHandle</span><span class="w"> </span><span class="n">h</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="cm">/*state*/</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">kAuth</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"*2</span><span class="se">\r\n</span><span class="s">$4</span><span class="se">\r\n</span><span class="s">AUTH</span><span class="se">\r\n</span><span class="s">$8</span><span class="se">\r\n</span><span class="s">password</span><span class="se">\r\n</span><span class="s">"</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="k">co_await</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">Send</span><span class="p">(</span><span class="n">kAuth</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">kAuth</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpSlotOk</span><span class="p">)</span>
+<span class="w">        </span><span class="k">co_return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpFatal</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">recv</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">Receive</span><span class="p">();</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">recv</span><span class="p">.</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpSlotOk</span><span class="p">)</span>
+<span class="w">        </span><span class="k">co_return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpFatal</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">co_return</span><span class="w"> </span><span class="p">(</span><span class="n">recv</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">recv</span><span class="p">.</span><span class="n">buf</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">'+'</span><span class="p">)</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpReady</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpFatal</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Redis</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Endpoint</span><span class="o">&lt;</span><span class="n">RedisGet</span><span class="p">,</span><span class="w"> </span><span class="n">RedisVal</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">Authenticate</span><span class="o">&gt;</span><span class="p">{</span>
+<span class="w">    </span><span class="s">"redis.internal:6379"</span><span class="p">,</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointDesc</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">serialize</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...,</span><span class="w"> </span><span class="p">.</span><span class="n">parse</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointConfig</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">connLimit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">requestTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><code>onConnect</code> runs once per <strong>physical connection</strong>, not once per request, right
+after the TCP (and TLS, if applicable) handshake finishes and before the slot
+is allowed to serve any request. <code>WFX::SlotHandle</code> gives you <code>co_await h.Send(...)</code>
+and <code>co_await h.Receive()</code> to drive the handshake yourself, plus
+<code>h.NegotiatedProtocol()</code> to read back the ALPN protocol chosen during the TLS
+handshake (empty if the connection isn't TLS, or the handshake hasn't finished).</p>
+<p>Every slot operation reports the same <code>WFX::SlotStatus</code>, and anything other
+than <code>WFX::EpSlotOk</code> is fatal for the slot:</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WFX::EpSlotOk</code></td>
+<td>Operation succeeded</td>
+</tr>
+<tr>
+<td><code>WFX::EpSlotBufferError</code></td>
+<td>Slot buffer couldn't be allocated or grown</td>
+</tr>
+<tr>
+<td><code>WFX::EpSlotEpollError</code></td>
+<td>Re-arming the slot with epoll failed</td>
+</tr>
+<tr>
+<td><code>WFX::EpSlotIoError</code></td>
+<td>Socket read/write failed</td>
+</tr>
+<tr>
+<td><code>WFX::EpSlotTlsError</code></td>
+<td>TLS wrap or handshake failed</td>
+</tr>
+<tr>
+<td><code>WFX::EpSlotInvalidState</code></td>
+<td>Not valid for this slot right now</td>
+</tr>
+</tbody>
+</table>
+<h3 id="in-band-tls-upgrades">In-band TLS upgrades</h3>
+<p>Protocols that negotiate encryption over an already-open plaintext connection
+(Postgres <code>SSLRequest</code>, SMTP <code>STARTTLS</code>) call <code>co_await h.UpgradeToTLS()</code> from
+inside <code>onConnect</code>, after probing with <code>Send</code>/<code>Receive</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="p">(</span><span class="k">co_await</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">Send</span><span class="p">(</span><span class="n">kSslRequest</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">kSslRequest</span><span class="p">))</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpSlotOk</span><span class="p">)</span>
+<span class="w">    </span><span class="k">co_return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpFatal</span><span class="p">;</span>
+
+<span class="k">auto</span><span class="w"> </span><span class="n">probe</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">Receive</span><span class="p">();</span>
+<span class="k">if</span><span class="p">(</span><span class="n">probe</span><span class="p">.</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpSlotOk</span><span class="p">)</span>
+<span class="w">    </span><span class="k">co_return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpFatal</span><span class="p">;</span>
+
+<span class="c1">// Server agreed, wrap the connection before sending anything sensitive</span>
+<span class="k">if</span><span class="p">(</span><span class="n">probe</span><span class="p">.</span><span class="n">len</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">probe</span><span class="p">.</span><span class="n">buf</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="sc">'S'</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">UpgradeToTLS</span><span class="p">()</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpSlotOk</span><span class="p">)</span>
+<span class="w">    </span><span class="k">co_return</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpFatal</span><span class="p">;</span>
+</code></pre></div>
+<p>The endpoint must be configured <code>WFX::EpTlsInsecure</code>, otherwise the engine
+already wrapped the connection at connect time and the upgrade is refused with
+<code>WFX::EpSlotInvalidState</code>. Bytes buffered before the upgrade are discarded, so
+plaintext an attacker appended after the server's go-ahead can never be read
+back as though the authenticated peer had sent it.</p>
+<p>Outbound TLS is independent of whether your own server serves HTTPS; the
+client-side TLS context is created on demand.</p>
+<p>Return one of:</p>
+<ul>
+<li><code>WFX::EpReady</code>: handshake succeeded, the slot enters the pool</li>
+<li><code>WFX::EpRetry</code>: transient failure, the engine reconnects with backoff (subject to the same fail-fast-if-a-caller-is-waiting rule described <a href="#reconnects-and-backoff">above</a>)</li>
+<li><code>WFX::EpFatal</code>: permanent failure, the slot is discarded</li>
+</ul>
+<p>The whole budget for connect + TLS + <code>onConnect</code> combined is
+<code>connectTimeoutSeconds</code>. If it isn't done in time, the attempt is treated as a
+connect failure.</p>
+<hr />
+<h2 id="onabort-cancellation"><code>onAbort</code> cancellation</h2>
+<p>A client can disconnect while your endpoint is still waiting on a backend
+reply. By default WFX handles that the blunt way: force-close the backend
+connection. For a lot of protocols that's fine, dropping the TCP connection
+<em>is</em> the cancellation. It's wrong for anything where cancelling a running
+operation means telling the backend to stop, not severing the pipe:
+Postgres's <code>CancelRequest</code>, MySQL's <code>COM_PROCESS_KILL</code>, MongoDB's <code>killOp</code>.
+All three need a <strong>second, separate connection</strong> to deliver the cancellation,
+and none of them want the original connection torn down. It's healthy,
+authenticated, and mid-query, throwing it away means paying a full
+reconnect for no reason.</p>
+<p>Pass a coroutine as the fourth template argument to <code>Endpoint&lt;&gt;</code> to opt in.
+The Postgres example below is illustrative, <code>Connect</code> is the <code>onConnect</code>
+handshake you'd write yourself (see <a href="#onconnect-handshakes">onConnect handshakes</a>),
+the same way <code>Db</code> in <a href="#pinning-a-connection">Pinning a connection</a> is an
+endpoint you'd have written with a real <code>EndpointDesc</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Postgres</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Endpoint</span><span class="o">&lt;</span><span class="n">PgReq</span><span class="p">,</span><span class="w"> </span><span class="n">PgRes</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">Connect</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">CancelQuery</span><span class="o">&gt;</span><span class="p">{</span>
+<span class="w">    </span><span class="s">"postgres.internal:5432"</span><span class="p">,</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointDesc</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">serialize</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...,</span><span class="w"> </span><span class="p">.</span><span class="n">parse</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointConfig</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">connLimit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">auxConnLimit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">requestTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">30</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>When a client goes away mid-request, <code>onAbort</code> runs once on the slot that was
+serving it. The slot itself is left completely alone: whatever response the
+backend eventually sends still gets parsed normally and the slot returns to
+the pool exactly as if the client were still there, just with nobody left to
+hand the result to. Your protocol needs no special cleanup for this case.</p>
+<div class="admonition important">
+<p class="admonition-title">When <code>onAbort</code> does <em>not</em> fire</p>
+<p>Three cases fall back to the old force-close behavior instead, all for the
+same reason: there is either nothing worth protecting yet, or nothing
+left that can safely run a graceful cancel.</p>
+<ul>
+<li><strong>Still connecting.</strong> If the client disconnects while <code>onConnect</code> is
+  still running for that same connection, WFX force-closes it instead of
+  firing <code>onAbort</code>. No request has reached the backend yet at that point,
+  there's nothing to cancel, and <code>onConnect</code>'s own coroutine may still be
+  suspended waiting on that same connection, running <code>onAbort</code>
+  concurrently would corrupt it.</li>
+<li><strong>Already streaming.</strong> Once your protocol has delivered a request's
+  first chunk through <a href="#streaming-large-responses"><code>Stream()</code></a>
+  (<code>isStreaming</code> becomes true at that point), a later disconnect force-closes
+  the slot as before. <code>onAbort</code> is defined for a single in-flight
+  request, not a response partway through delivery. A disconnect that
+  lands <em>before</em> the first chunk still triggers <code>onAbort</code> normally, only
+  a stream already in progress is exempt.</li>
+<li><strong>The request times out on its own budget instead.</strong> <code>onAbort</code> only
+  ever fires from a client disconnecting. A request that instead runs out
+  <code>requestTimeoutSeconds</code> with the client still connected and waiting
+  force-closes directly, the same blunt way every timeout has always
+  worked, no hook runs, and the client gets <code>WFX::EpRequestTimeout</code>. A
+  slow query your own timeout gives up on is torn down harder than one a
+  client walked away from, not something this page is going to pretend
+  around.</li>
+</ul>
+<p>None of these are something you need to guard against, WFX picks the
+right behavior automatically. They're worth knowing so you don't expect
+<code>onAbort</code> to run somewhere it structurally can't.</p>
+<p>The two triggers can still race each other on the <em>same</em> request (client
+disconnects, and the backend also never replies): whichever happens first
+wins outright, and the other side is a no-op. Client-disconnects-first
+means <code>onAbort</code> runs, and if the backend still never replies,
+<code>requestTimeoutSeconds</code> force-closes the slot afterward same as any other
+request, without running <code>onAbort</code> a second time. Timeout-first means the
+client is notified before it has even disconnected, so by the time WFX
+notices it's gone the slot is already detached and <code>onAbort</code>'s trigger is
+never reached. Either ordering is safe.</p>
+</div>
+<h3 id="abortslothandle"><code>AbortSlotHandle</code></h3>
+<p><code>onAbort</code> receives <code>WFX::AbortSlotHandle</code>, not the <code>WFX::SlotHandle</code> that
+<code>onConnect</code> gets. It only has two members:</p>
+<div class="highlight"><pre><span></span><code><span class="k">co_await</span><span class="w"> </span><span class="n">handle</span><span class="p">.</span><span class="n">OpenSideConnection</span><span class="p">()</span><span class="w"> </span><span class="c1">// -&gt; {WFX::SlotStatus, WFX::SlotHandle}</span>
+<span class="n">handle</span><span class="p">.</span><span class="n">NegotiatedProtocol</span><span class="p">()</span><span class="w">          </span><span class="c1">// same as SlotHandle's, read-only</span>
+</code></pre></div>
+<p>There is no <code>Send</code>/<code>Receive</code>/<code>UpgradeToTLS</code> on it, deliberately. The slot
+<code>onAbort</code> was fired for is still mid-request, a real response is still owed
+to the backend's own state machine, and driving it directly would corrupt
+that in-flight parse out from under the engine. If your cancel mechanism
+needs to talk to the backend at all, it does so over a <strong>different</strong>
+connection, which is exactly what <code>OpenSideConnection()</code> gives you.</p>
+<h3 id="opening-a-side-connection">Opening a side connection</h3>
+<p><code>OpenSideConnection()</code> dials a brand-new, throwaway connection to the same
+host, using the same TLS config as the endpoint itself. It returns the same
+kind of pair every send does, a status and a handle, except the handle here
+is a full <code>SlotHandle</code>, the throwaway connection is yours to drive however
+your protocol needs:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX</span><span class="o">::</span><span class="n">EpAbortCoro</span><span class="w"> </span><span class="nf">CancelQuery</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">AbortSlotHandle</span><span class="w"> </span><span class="n">h</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">state</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">pg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">PgSlotState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">state</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">side</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">OpenSideConnection</span><span class="p">();</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpSlotOk</span><span class="p">)</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span><span class="w"> </span><span class="c1">// no capacity, or the dial itself failed, nothing to send the cancel on</span>
+
+<span class="w">    </span><span class="kt">char</span><span class="w"> </span><span class="n">msg</span><span class="p">[</span><span class="mi">16</span><span class="p">];</span>
+<span class="w">    </span><span class="n">EncodeCancelRequest</span><span class="p">(</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">pg</span><span class="o">-&gt;</span><span class="n">backendPid</span><span class="p">,</span><span class="w"> </span><span class="n">pg</span><span class="o">-&gt;</span><span class="n">secretKey</span><span class="p">);</span>
+<span class="w">    </span><span class="k">co_await</span><span class="w"> </span><span class="n">side</span><span class="p">.</span><span class="n">Send</span><span class="p">(</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">msg</span><span class="p">));</span>
+<span class="w">    </span><span class="n">side</span><span class="p">.</span><span class="n">Close</span><span class="p">();</span>
+
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>A side connection gets no implicit handshake or authentication. Postgres's
+cancel needs neither, it's a bare, unauthenticated packet the server
+matches by backend PID and secret key. A protocol whose cancel mechanism
+<em>does</em> need one (MySQL's <code>COM_PROCESS_KILL</code> expects a normal greeting and
+auth exchange first) hand-rolls it inline with the side handle's own
+<code>Send</code>/<code>Receive</code>/<code>UpgradeToTLS</code>, the same way <code>onConnect</code> hand-rolls its
+handshake.</p>
+</div>
+<p><code>side.Close()</code> releases the throwaway connection as soon as you're done with
+it. If you don't call it, either because the coroutine forgot or because it
+never got the chance, <code>connectTimeoutSeconds</code> (the same setting your regular
+connects use) is the safety net: the connection is torn down once that
+budget elapses, and its capacity becomes available again. Nothing leaks
+either way.</p>
+<hr />
+<h2 id="pinning-a-connection">Pinning a connection</h2>
+<p>Normally every <code>SendPayload</code> takes whatever slot the pool hands it, and two
+consecutive calls may land on different connections. That breaks any protocol
+where state lives <em>on the connection</em>: a SQL transaction, a <code>SET</code> that has to
+apply to later queries, a <code>LISTEN</code> subscription.</p>
+<p><code>Reserve()</code> pins one connection to you until you let it go. The SQL below is
+illustrative, <code>Db</code> is an endpoint you would have written yourself with
+<code>EndpointDesc</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_POST</span><span class="p">(</span><span class="s">"/transfer"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Coro</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">slot</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Db</span><span class="p">.</span><span class="n">Reserve</span><span class="p">();</span>
+
+<span class="w">    </span><span class="c1">// pool exhausted</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="n">slot</span><span class="p">.</span><span class="n">IsValid</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="mi">503</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"no connection available"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">co_await</span><span class="w"> </span><span class="n">slot</span><span class="p">.</span><span class="n">SendPayload</span><span class="p">({</span><span class="s">"BEGIN"</span><span class="p">});</span>
+<span class="w">    </span><span class="k">co_await</span><span class="w"> </span><span class="n">slot</span><span class="p">.</span><span class="n">SendPayload</span><span class="p">({</span><span class="s">"UPDATE accounts SET balance = balance - 100 WHERE id = 1"</span><span class="p">});</span>
+<span class="w">    </span><span class="k">co_await</span><span class="w"> </span><span class="n">slot</span><span class="p">.</span><span class="n">SendPayload</span><span class="p">({</span><span class="s">"UPDATE accounts SET balance = balance + 100 WHERE id = 2"</span><span class="p">});</span>
+<span class="w">    </span><span class="k">co_await</span><span class="w"> </span><span class="n">slot</span><span class="p">.</span><span class="n">SendPayload</span><span class="p">({</span><span class="s">"COMMIT"</span><span class="p">});</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">"ok"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">});</span>
+</code></pre></div>
+<p>Every <code>SendPayload</code> through <code>slot</code> runs on the same physical connection, in
+order. <code>ReservedSlot</code> is move-only and releases on destruction, so an early
+<code>co_return</code> or a thrown exception can't leak the pin. Call <code>.Release()</code> if you
+want it back sooner.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Always check <code>IsValid()</code>. A reservation takes a slot out of the pool for
+its whole lifetime, so <code>Reserve()</code> returns an empty handle rather than
+waiting when every connection is busy. Holding reservations longer than
+<code>connLimit</code> allows will starve the pool.</p>
+</div>
+<p>Two things the engine guarantees for you:</p>
+<ul>
+<li><strong>Coalescing never merges pinned sends.</strong> Two transactions running identical
+  SQL must not share one execution, since each may observe different
+  uncommitted state.</li>
+<li><strong>Reserve is unavailable on multiplexed endpoints</strong> (<code>hasCapacity</code> set), which
+  already share one connection between callers by design.</li>
+</ul>
+<hr />
+<h2 id="streaming-large-responses">Streaming large responses</h2>
+<p><code>SendPayload</code> materializes the whole response before handing it to you, which
+is wrong for a result set that doesn't fit in memory. <code>Stream()</code> delivers it a
+chunk at a time instead, reusing one output object so peak memory tracks a
+single chunk rather than the total:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GET</span><span class="p">(</span><span class="s">"/export"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Coro</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Db</span><span class="p">.</span><span class="n">Stream</span><span class="p">({</span><span class="s">"SELECT * FROM huge_table"</span><span class="p">});</span>
+
+<span class="w">    </span><span class="k">while</span><span class="p">(</span><span class="nb">true</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">chunk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">stream</span><span class="p">.</span><span class="n">Next</span><span class="p">();</span>
+
+<span class="w">        </span><span class="k">if</span><span class="p">(</span><span class="n">chunk</span><span class="p">.</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">chunk</span><span class="p">.</span><span class="n">done</span><span class="p">)</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span>
+
+<span class="w">        </span><span class="c1">// chunk.data is valid only until the next Next()</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">chunk</span><span class="p">.</span><span class="n">data</span><span class="o">-&gt;</span><span class="n">rows</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">Commit</span><span class="p">();</span>
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">});</span>
+</code></pre></div>
+<p>Hold the <code>StreamHandle</code> across the whole loop: it owns the request, which
+cursor and paging protocols need handed back on every <code>Next()</code> to build their
+continuation.</p>
+<div class="admonition danger">
+<p class="admonition-title">Danger</p>
+<p><code>chunk.data</code> points at an object the engine reuses for the next chunk.
+Copy anything you need to keep before calling <code>Next()</code> again. This reuse
+is exactly what bounds memory, a 10-row result and a 10-million-row result
+have the same peak.</p>
+</div>
+<p>Your protocol opts in from <code>parse</code> by returning a chunk result instead of
+<code>EpParseDone</code>:</p>
+<ul>
+<li><strong><code>WFX::EpParseChunk</code></strong> for protocols that keep sending unprompted (MySQL
+  rows, HTTP chunked transfer).</li>
+<li><strong><code>WFX::EpParseChunkFetch</code></strong> for protocols where the client must ask for each
+  batch (Postgres portals, Cassandra paging). The engine re-serializes the
+  request to fetch the next chunk.</li>
+</ul>
+<p>Either way, reset <code>outObj</code> between chunks rather than accumulating into it,
+that reset is what keeps memory flat. Without a chunk result, <code>Stream()</code> behaves
+like an ordinary <code>SendPayload</code> that completes on the first <code>Next()</code>.</p>
+<p>Streaming composes with pinning, <code>ReservedSlot</code> has its own <code>Stream()</code> that
+runs on the reserved connection.</p>
+<div class="admonition tip">
+<p class="admonition-title">Getting the chunks out to the client without buffering them</p>
+<p><code>res.Write(...)</code> on its own still buffers the formatted response in memory as the loop runs.
+Pair <code>Stream()</code>/<code>Next()</code> with
+<a href="../../request_and_response/#response"><code>Response::FlushStart()</code>/<code>Flush()</code>/<code>FlushEnd()</code></a> to push
+each chunk to the client as soon as it's written, so peak memory stays bounded on both sides of
+the pipe, not just the upstream side.</p>
+</div>
+<hr />
+<h2 id="server-initiated-messages">Server-initiated messages</h2>
+<p>Some protocols let the server talk first: Postgres <code>NOTIFY</code>, Redis pub/sub,
+MQTT deliveries. By default, bytes arriving on an idle pooled connection are
+treated as a misbehaving backend and the connection is closed. Setting
+<code>onPush</code> tells the engine those bytes are expected:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">bool</span><span class="w"> </span><span class="nf">OnPush</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">slotStateVoid</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">len</span><span class="p">,</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">*</span><span class="w"> </span><span class="n">consumed</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">view</span><span class="p">{</span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">};</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">nl</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">view</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="sc">'\n'</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">nl</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="o">::</span><span class="n">npos</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="o">*</span><span class="n">consumed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">        </span><span class="c1">// partial message, wait for more bytes</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">Deliver</span><span class="p">(</span><span class="n">view</span><span class="p">.</span><span class="n">substr</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">nl</span><span class="p">));</span>
+<span class="w">    </span><span class="o">*</span><span class="n">consumed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">nl</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w">              </span><span class="c1">// false closes the slot</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>It's a plain synchronous callback, not a coroutine, because nothing is waiting
+on it, there's no caller suspended for a message the server sent on its own.</p>
+<p>Three rules the engine holds to:</p>
+<ul>
+<li><strong>Set <code>*consumed = 0</code></strong> when you have a partial message. The engine parks and
+  waits for more bytes rather than spinning, and the slot stays usable.</li>
+<li><strong>Return <code>false</code></strong> if the bytes are undecodable. The engine closes that slot;
+  the endpoint recovers and later requests work normally.</li>
+<li><strong>Bytes arriving while a request is in flight go to <code>parse</code>, never <code>onPush</code>.</strong>
+  Only a genuinely idle slot delivers pushes, which is what stops a push from
+  desyncing a response mid-parse.</li>
+</ul>
+<p>A pushing connection is usually one you also want pinned, so it stays
+subscribed, see <a href="#pinning-a-connection">Pinning a connection</a>.</p>
+<hr />
+<h2 id="multiplexing-advanced">Multiplexing (advanced)</h2>
+<p>By default, one slot serves exactly one request at a time; the next request
+waits for a free slot or opens a new connection. Some protocols (HTTP/2-style
+framing over a single TCP connection, for example) can multiplex several
+concurrent requests onto one connection instead, tagging each request and
+response with an ID so replies can come back in any order and still be
+matched to the right caller.</p>
+<p>To support that, <code>serialize()</code> assigns every outgoing request a <code>streamKey</code>
+(instead of leaving it at <code>0</code>, which means "this protocol doesn't multiplex"),
+and three <code>EndpointDesc</code> callbacks work together to track requests sharing one
+connection:</p>
+<ul>
+<li><strong><code>hasCapacity(slotState)</code></strong>: does this slot have room to take on one more request right now?</li>
+<li><strong><code>takeStreamOutput(slotState, key)</code></strong>: hand over a finished stream's response, or <code>nullptr</code> if it isn't done yet.</li>
+<li><strong><code>EndpointConfig::maxConcurrentStreams</code></strong>: how many requests are allowed to share one slot (<code>0</code> or <code>1</code> keeps a slot exclusive, the default).</li>
+</ul>
+<p>Unlike the single-request-per-slot path, the engine never <em>calls</em>
+<code>createOutput</code> for a multiplexed request. The protocol owns each in-flight
+response internally (however it wants to store it, keyed by <code>streamKey</code>) and
+only hands ownership to the engine once <code>takeStreamOutput</code> returns it.
+<code>destroyOutput</code> is still used, to free a response once the caller's
+<code>EndpointOutput&lt;T&gt;</code> goes out of scope, or to clean up a response that finished
+but was abandoned (its caller disconnected first).</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p><code>createOutput</code> still has to be <strong>set</strong>, even though it's never called on
+this path. Startup validation checks <code>createOutput</code>/<code>destroyOutput</code> as a
+pair regardless of whether <code>hasCapacity</code> is set, so a multiplexed protocol
+that only sets <code>destroyOutput</code> fails to start. A stub that just returns
+<code>nullptr</code> is all it needs.</p>
+</div>
+<p>A sketch of a simple request/response protocol that multiplexes by tagging
+every frame with a 32-bit request ID:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">PendingReply</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">id</span><span class="p">;</span>
+<span class="w">    </span><span class="n">MyRes</span><span class="o">*</span><span class="w"> </span><span class="n">res</span><span class="p">;</span><span class="w"> </span><span class="c1">// owned until takeStreamOutput hands it off</span>
+<span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">MySlotState</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">nextId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">PendingReply</span><span class="o">&gt;</span><span class="w"> </span><span class="n">finished</span><span class="p">;</span><span class="w"> </span><span class="c1">// replies fully parsed, waiting to be claimed</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">inFlight</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">         </span><span class="c1">// requests sent but not yet finished</span>
+<span class="p">};</span>
+
+<span class="n">SerializeResult</span><span class="w"> </span><span class="nf">Serialize</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">slotStateVoid</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">bufLen</span><span class="p">,</span>
+<span class="w">                          </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">*</span><span class="w"> </span><span class="n">written</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="o">*</span><span class="w"> </span><span class="n">streamKey</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">MySlotState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">slotStateVoid</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">nextId</span><span class="o">++</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// ... write a frame containing 'id' and the serialized request into buf ...</span>
+
+<span class="w">    </span><span class="o">*</span><span class="n">streamKey</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">id</span><span class="p">;</span><span class="w">   </span><span class="c1">// tags this request so the matching reply can be found later</span>
+<span class="w">    </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">inFlight</span><span class="o">++</span><span class="p">;</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">SerializeResult</span><span class="o">::</span><span class="n">OK</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="n">ParseResult</span><span class="w"> </span><span class="nf">Parse</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">slotStateVoid</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">parseState</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">buf</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">len</span><span class="p">,</span>
+<span class="w">                  </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">*</span><span class="w"> </span><span class="n">consumed</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="cm">/*outObj, unused here*/</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">isEof</span><span class="p">,</span>
+<span class="w">                  </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="o">*</span><span class="w"> </span><span class="n">completedKey</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">MySlotState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">slotStateVoid</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// ... read one complete frame off buf, extract its request id and payload ...</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cm">/* parsed from the frame */</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">res</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">New</span><span class="o">&lt;</span><span class="n">MyRes</span><span class="o">&gt;</span><span class="p">(</span><span class="cm">/* ... fill from the frame's payload ... */</span><span class="p">);</span>
+
+<span class="w">    </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">finished</span><span class="p">.</span><span class="n">push_back</span><span class="p">({</span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">res</span><span class="p">});</span>
+<span class="w">    </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">inFlight</span><span class="o">--</span><span class="p">;</span>
+<span class="w">    </span><span class="o">*</span><span class="n">completedKey</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">id</span><span class="p">;</span><span class="w"> </span><span class="c1">// tells the engine this particular stream just finished</span>
+
+<span class="w">    </span><span class="c1">// The connection itself stays open for other in-flight streams, so this</span>
+<span class="w">    </span><span class="c1">// frame being done does not mean there is nothing left to read</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">ParseResult</span><span class="o">::</span><span class="n">INCOMPLETE</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">bool</span><span class="w"> </span><span class="nf">HasCapacity</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">slotStateVoid</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">MySlotState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">slotStateVoid</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">inFlight</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">32</span><span class="p">;</span><span class="w"> </span><span class="c1">// matches EndpointConfig::maxConcurrentStreams below</span>
+<span class="p">}</span>
+
+<span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="nf">TakeStreamOutput</span><span class="p">(</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">slotStateVoid</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">key</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">MySlotState</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">slotStateVoid</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="k">auto</span><span class="w"> </span><span class="n">it</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">finished</span><span class="p">.</span><span class="n">begin</span><span class="p">();</span><span class="w"> </span><span class="n">it</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">finished</span><span class="p">.</span><span class="n">end</span><span class="p">();</span><span class="w"> </span><span class="o">++</span><span class="n">it</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="p">(</span><span class="n">it</span><span class="o">-&gt;</span><span class="n">id</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">key</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">res</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">it</span><span class="o">-&gt;</span><span class="n">res</span><span class="p">;</span>
+<span class="w">            </span><span class="n">state</span><span class="o">-&gt;</span><span class="n">finished</span><span class="p">.</span><span class="n">erase</span><span class="p">(</span><span class="n">it</span><span class="p">);</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">res</span><span class="p">;</span><span class="w"> </span><span class="c1">// ownership transfers to the caller</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">nullptr</span><span class="p">;</span><span class="w"> </span><span class="c1">// not finished yet</span>
+<span class="p">}</span>
+
+<span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Api</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Endpoint</span><span class="o">&lt;</span><span class="n">MyReq</span><span class="p">,</span><span class="w"> </span><span class="n">MyRes</span><span class="o">&gt;</span><span class="p">{</span>
+<span class="w">    </span><span class="s">"api.example.com:443"</span><span class="p">,</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointDesc</span><span class="p">{</span>
+<span class="w">        </span><span class="p">.</span><span class="n">serialize</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="n">Serialize</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">parse</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="n">Parse</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">createOutput</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="p">[](</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">nullptr</span><span class="p">;</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="c1">// never called here, just satisfies the pairing check</span>
+<span class="w">        </span><span class="p">.</span><span class="n">destroyOutput</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="p">[](</span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Delete</span><span class="p">(</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">MyRes</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">p</span><span class="p">));</span><span class="w"> </span><span class="p">},</span>
+<span class="w">        </span><span class="p">.</span><span class="n">hasCapacity</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="n">HasCapacity</span><span class="p">,</span>
+<span class="w">        </span><span class="p">.</span><span class="n">takeStreamOutput</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TakeStreamOutput</span><span class="p">,</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">EndpointConfig</span><span class="p">{</span><span class="w"> </span><span class="p">.</span><span class="n">connLimit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">maxConcurrentStreams</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">32</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>This is only useful if you're implementing a protocol that actually supports
+request multiplexing. <a href="../http/"><code>HttpEndpoint</code></a> does not use it, since HTTP/1.1
+has no concept of concurrent requests on one connection.</p>
+<hr />
+<h2 id="writing-protocol-agnostic-code">Writing protocol-agnostic code</h2>
+<p><code>Endpoint&lt;&gt;</code>, <code>EndpointOutput&lt;T&gt;</code>, <code>SlotHandle</code>, and the rest of this primitive
+have nothing HTTP-specific about them, they live in <code>WFX::Async</code> under the hood
+and are re-exported through <code>WFX::</code> so a protocol client for Redis, Postgres,
+or anything else reads the same way an HTTP one does. See <a href="../http/"><code>HttpEndpoint</code></a>
+for a complete, worked example of a protocol built on top of this primitive.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Altered-commits
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

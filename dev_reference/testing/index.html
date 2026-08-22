@@ -1,0 +1,2145 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../metrics_and_observability/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Testing - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../css/index.css">
+    
+      <link rel="stylesheet" href="../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#testing" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Testing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api_reference/overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  Developer Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/json/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Json
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_13" id="__nav_4_13_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Endpoint
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/smtp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SMTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Postgres
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Utils
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/crypto/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crypto & Hash
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/encoding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/jwk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/jwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWT
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codebase_architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codebase Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../globals_and_singletons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Globals & Singletons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../abi_layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ABI Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build_macros/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metrics_and_observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics & Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-seven-audits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The seven audits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shared-harness-infrastructure-testscommon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared harness infrastructure (tests/common/)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running them
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-things-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where things live
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-seven-audits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The seven audits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shared-harness-infrastructure-testscommon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared harness infrastructure (tests/common/)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running them
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-things-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where things live
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="testing">Testing</h1>
+<p>WFX's test suite lives in <code>tests/</code> as seven harnesses, called audits, rather than a conventional
+unit test suite. Most of what actually needs proving here (a worker surviving a SIGKILL
+mid-request, a malformed chunk size, a TLS client refusing a bad cert, a request whose body forces
+the read buffer to relocate mid-parse) only shows up under real process and wire-level conditions,
+not inside a unit test.</p>
+<p>Six of the seven are adversarial: they send malformed or hostile input on purpose. The seventh,
+<code>interop_audit</code>, is not: it proves the shipped clients work against real, spec-compliant servers
+rather than surviving hostile ones, and has no security exit code.</p>
+<hr />
+<h2 id="the-seven-audits">The seven audits</h2>
+<table>
+<thead>
+<tr>
+<th>Audit</th>
+<th>Drives</th>
+<th>Covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base_audit</code></td>
+<td>WFX as an HTTP server</td>
+<td>path traversal, CRLF/response-splitting, request smuggling, header/body abuse, every user-facing route, and 6 chaos scenarios that SIGKILL/SIGSTOP workers under load and verify recovery</td>
+</tr>
+<tr>
+<td><code>endpoint_audit</code></td>
+<td>the raw <code>WFX::Endpoint&lt;&gt;</code> primitive (outbound)</td>
+<td>connection pooling and reservation, multiplexing several requests onto one connection, chunked streaming via a portal-style fetch, and graceful cancellation (<code>onAbort</code>), all against a hostile mock upstream it boots itself</td>
+</tr>
+<tr>
+<td><code>client_audit</code></td>
+<td><code>WFX::HttpEndpoint</code>, <code>WFX::SmtpEndpoint</code> and <code>WFX::PostgresEndpoint</code> (outbound clients built on the primitive)</td>
+<td>HTTP/1.1 framing, smuggling and desync defenses; the full SMTP <code>STARTTLS</code>/<code>AUTH</code> handshake and CR/LF/NUL injection defenses; and the Postgres <code>SSLRequest</code>/SCRAM handshake, extended-query wire protocol, statement cache and SQL-injection defenses, each protocol against its own hostile mock upstream the audit boots itself</td>
+</tr>
+<tr>
+<td><code>tls_audit</code></td>
+<td>the outbound client's TLS path</td>
+<td>cert refusal (untrusted, hostname mismatch, expired, protocol downgrade), proven twice per persona: as a call error and as a mock-observed failed handshake, plus the framing/desync corpus replayed over TLS</td>
+</tr>
+<tr>
+<td><code>crypto_audit</code></td>
+<td><code>wfx/utils/crypto.hpp</code> (hashing, HMAC, AEAD, KDFs, CSPRNG)</td>
+<td>correctness against Python stdlib oracles (<code>hashlib</code>, <code>hmac</code>, <code>pbkdf2_hmac</code>, a hand-rolled RFC 5869 HKDF) where one exists, plus AEAD tamper/cross-algo rejection, a <code>WFX::HashStream</code> driven from inside a real <code>res.Stream()</code> callback, and a 64 MiB+1 body to exercise the AEAD size cap</td>
+</tr>
+<tr>
+<td><code>ip_audit</code></td>
+<td>real-IP resolution (<code>WFX::Http::IpUtils::ResolveClientIp</code>) and the <code>ConnectionLimiter</code>/<code>RequestRateLimiter</code> pair it feeds</td>
+<td><code>X-Forwarded-For</code> recursive-trust walking, connection/rate-limit caps and eviction, dual-stack (<code>::ffff:</code>-mapped) loopback handling, and hostile <code>X-Forwarded-For</code> corpora</td>
+</tr>
+<tr>
+<td><code>interop_audit</code></td>
+<td><code>WFX::PostgresEndpoint</code>, <code>WFX::SmtpEndpoint</code> and <code>WFX::HttpEndpoint</code> against real, spec-compliant upstreams</td>
+<td>real Postgres and two <code>smtp4dev</code> instances in Docker (one PLAIN, one LOGIN-only), and a second real WFX server (<code>upstream/</code>) as the HTTP leg</td>
+</tr>
+</tbody>
+</table>
+<p>Each audit is a standalone Python script (<code>base_audit.py</code>, <code>endpoint_audit.py</code>, <code>client_audit.py</code>,
+<code>tls_audit.py</code>, <code>crypto_audit.py</code>, <code>ip_audit.py</code>, <code>interop_audit.py</code>) with its own small WFX
+project under <code>app/</code> that exists purely to give the audit something to hit.</p>
+<p><code>interop_audit</code> is the odd one out: <code>client_audit</code> proves the same three clients survive a hostile
+server, <code>interop_audit</code> proves they actually work against a real one, and it needs Docker (a real
+Postgres container, two <code>smtp4dev</code> instances) to do it. See <code>tests/interop_audit/README.md</code> for
+what each phase drives and its <code>docker-compose.yml</code> setup.</p>
+<p>Every audit is a <code>common.Suite</code> subclass (see below) that declares an ordered <code>phases</code> dict of
+<code>phase_&lt;name&gt;(ctx)</code> functions, selectable with <code>--phase &lt;name&gt;</code> or listed with <code>--list-phases</code>, so
+adding or removing a phase never touches anything outside that one function and its registration.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>These are read-only, non-network-touching from this repository's own tooling perspective:
+they compile and run the actual <code>wfx</code> binary and a project under it. There's no mocked-out
+version of WFX being tested here, the audits drive the real engine.</p>
+</div>
+<hr />
+<h2 id="shared-harness-infrastructure-testscommon">Shared harness infrastructure (<code>tests/common/</code>)</h2>
+<p>All seven audits import this package for the boilerplate that doesn't decide what a test checks. It
+is a proper Python package, not a single script, split by concern:</p>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Provides</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>common/suite.py</code></td>
+<td><code>Suite</code>, the base class every audit subclasses; <code>Config</code>/<code>Context</code>/<code>Heartbeat</code>; the <code>run(suite_cls)</code> entry point; argument parsing, phase dispatch, worker-death detection, and the overall lifecycle</td>
+</tr>
+<tr>
+<td><code>common/report.py</code></td>
+<td><code>Check</code>/<code>Phase</code>/<code>Report</code> - the bucketed pass/fail bookkeeping and the end-of-run summary table; the shared exit codes (see below)</td>
+</tr>
+<tr>
+<td><code>common/server.py</code></td>
+<td><code>Server</code>, the WFX process under test: boot, health polling, revival detection, teardown</td>
+</tr>
+<tr>
+<td><code>common/net.py</code></td>
+<td>Hand-rolled raw HTTP over plain TCP or TLS (<code>send</code>, <code>request</code>, <code>status</code>, <code>body</code>, <code>headers</code>, <code>dechunk</code>, ...) - deliberately not a real HTTP client, since these suites send malformed framing and forged headers on purpose, which a real client would normalize or reject</td>
+</tr>
+<tr>
+<td><code>common/logs.py</code></td>
+<td><code>LogFollower</code> (tails the running WFX project's worker/master/crash logs live) and <code>scan_crash_reports</code> (folds any on-disk ASan/UBSan report into a failing check)</td>
+</tr>
+<tr>
+<td><code>common/term.py</code></td>
+<td>Colored terminal output, progress ticks, and GitHub Actions <code>::group::</code>/<code>::error::</code>/<code>::warning::</code> commands under <code>--ci</code></td>
+</tr>
+</tbody>
+</table>
+<p>A suite file itself contains only phase functions and a small <code>Suite</code> subclass declaring <code>name</code>,
+<code>description</code>, and <code>phases</code>; see <code>tests/README.md</code> for the full "writing a suite" guide, hook list,
+and style rules (name a check by the behavior it proves, use <code>p.secure(...)</code> only for actual
+vulnerabilities, and so on) - that material isn't duplicated here since it would just drift out of
+sync with this page.</p>
+<hr />
+<h2 id="running-them">Running them</h2>
+<div class="highlight"><pre><span></span><code>tests/run_audits.sh<span class="w">                  </span><span class="c1"># the six non-interop audits, one after another</span>
+tests/run_audits.sh<span class="w"> </span>--audit<span class="w"> </span>base<span class="w">     </span><span class="c1"># just one: base, endpoint, client, tls, crypto, ip, or interop</span>
+tests/run_audits.sh<span class="w"> </span>--ci<span class="w">             </span><span class="c1"># forward --ci to whichever audits run</span>
+tests/run_audits.sh<span class="w"> </span>--audit<span class="w"> </span>tls<span class="w"> </span>--<span class="w"> </span>--phase<span class="w"> </span>verify<span class="w"> </span>--wfx-logs<span class="w"> </span>all
+<span class="w">                                      </span><span class="c1"># anything after -- is passed through as-is</span>
+</code></pre></div>
+<p><code>interop_audit</code> needs Docker, so it is left out of the plain no-flag run (not every dev machine
+has Docker running) and only reachable with <code>--audit interop</code>.</p>
+<p><code>run_audits.sh</code> never builds <code>wfx</code>. It expects a binary already on <code>PATH</code>, or at the repo root
+where a normal build leaves one, the same way you'd build before running any single audit by hand.</p>
+<hr />
+<h2 id="exit-codes">Exit codes</h2>
+<p>Identical across every suite (defined once in <code>common/report.py</code>), so CI can key on them without
+caring which audit produced the result:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>everything passed</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>a non-security check failed, or the worker was dead at the end</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>a <strong>security</strong> finding: a vector whose failure is a vulnerability</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>WFX never answered <code>/health</code>, so nothing was exercised</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="ci">CI</h2>
+<p>Every audit shares one <code>--ci</code> flag (parsed by <code>Suite</code>'s common arguments): it disables ANSI colors
+and emits GitHub Actions <code>::group::</code>/<code>::error::</code> annotations for failing checks so they surface in
+the PR Checks UI, without changing any timeout or process behavior versus a local run.</p>
+<p><code>.github/workflows/audit_check.yml</code> never builds <code>wfx</code> itself. <code>compile_check.yml</code> uploads the
+compiled binary as a 1-day-retention artifact; <code>audit_check.yml</code> downloads it and runs all seven
+audits, including <code>interop</code>, as parallel matrix jobs, each calling <code>tests/run_audits.sh --audit
+&lt;name&gt; --ci</code>. Docker and the <code>docker compose</code> plugin come preinstalled on the GitHub-hosted
+runner, nothing extra to set up for the <code>interop</code> job. It's wired into <code>entry.yml</code> as the fourth
+linear stage, gated on <code>compile_check.yml</code> passing first (in parallel with <code>tidy_check.yml</code>, the
+fifth stage, both gated on the same compile step).</p>
+<p>That downloaded binary is always built with <code>-DWFX_ENABLE_ASAN=ON</code> (see
+<a href="../build_macros/">Build Macros</a>) - it's CI-internal only, never distributed, so there's no downside
+to it always being instrumented. The actual <code>ASAN_OPTIONS</code>/<code>UBSAN_OPTIONS</code> the <code>wfx</code> process under
+test runs with come from <code>tests/common/logs.py</code>'s <code>launch_env()</code>, not from CI: every audit, local or
+CI, launches <code>wfx</code> through it, and it sets <code>halt_on_error=1</code> on both plus a <code>log_path</code> pointing
+sanitizer reports at <code>crash_logs</code> (see <em>Diagnosing a failure</em> in <code>tests/README.md</code>). <code>audit_check.yml</code>
+also sets job-level <code>ASAN_OPTIONS</code>/<code>UBSAN_OPTIONS</code>, but <code>launch_env()</code> overwrites them for the <code>wfx</code>
+subprocess either way, so the job-level values only matter if something else in the job reads them.</p>
+<p>Leak detection runs for real, everywhere: nothing suppresses it process-wide. The one intentional,
+permanent allocation in the engine, <code>GetLogger()</code>'s heap-allocated singleton (see
+<a href="../globals_and_singletons/">Globals &amp; Singletons</a>), tells LeakSanitizer directly that it isn't a
+leak via <code>__lsan_ignore_object</code>, instead of the test suite disabling leak detection to work around
+it.</p>
+<hr />
+<h2 id="where-things-live">Where things live</h2>
+<ul>
+<li>
+<p><code>tests/common/</code>
+    The shared package described above: <code>suite.py</code>, <code>report.py</code>, <code>server.py</code>, <code>net.py</code>, <code>logs.py</code>, <code>term.py</code>.</p>
+</li>
+<li>
+<p><code>tests/run_audits.sh</code>
+    Single entry point for running one or all audits, locally or from CI.</p>
+</li>
+<li>
+<p><code>tests/base_audit/</code>, <code>tests/endpoint_audit/</code>, <code>tests/client_audit/</code>, <code>tests/tls_audit/</code>, <code>tests/crypto_audit/</code>, <code>tests/ip_audit/</code>
+    One audit each: the harness script, its own <code>README.md</code>, its <code>app/</code> test project, and (for <code>endpoint_audit</code>/<code>client_audit</code>/<code>tls_audit</code>) one or more mock upstream scripts (<code>http_upstream.py</code> / <code>smtp_upstream.py</code> / <code>postgres_upstream.py</code> / <code>tls_upstream.py</code>) where the audit needs a hostile server on the other end.</p>
+</li>
+<li>
+<p><code>tests/interop_audit/</code>
+    The harness script, its own <code>README.md</code>, <code>docker-compose.yml</code> for the real Postgres/<code>smtp4dev</code> containers, <code>app/</code> (the client under test) and <code>upstream/</code> (a second real WFX server, the HTTP leg).</p>
+</li>
+<li>
+<p><code>.github/workflows/audit_check.yml</code>
+    Downloads the <code>wfx</code> binary artifact from <code>compile_check.yml</code> and runs all seven audits as a parallel CI matrix.</p>
+</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Altered-commits
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

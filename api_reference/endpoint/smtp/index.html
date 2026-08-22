@@ -1,0 +1,2431 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../http/">
+      
+      
+        <link rel="next" href="../postgres/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>SMTP - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../css/index.css">
+    
+      <link rel="stylesheet" href="../../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#smtp-endpoint" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              SMTP
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../dev_reference/overview/" class="md-tabs__link">
+          
+  
+  
+  Developer Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../json/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Json
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_13" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_13" id="__nav_4_13_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_13_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Endpoint
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SMTP
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SMTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-sending" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring &amp; sending
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sendmail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendMail
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smtptransaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SmtpTransaction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SmtpTransaction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#begin-and-isvalid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Begin() and IsValid()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mailfromaddr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MailFrom(addr)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rcpttoaddr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RcptTo(addr)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#datastart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DataStart()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#databodyfromaddr-fromname-toaddr-toname-subject-body-replyto" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DataBody(fromAddr, fromName, toAddr, toName, subject, body, replyTo = {})
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reset()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quit()
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coalescing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coalescing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smtpresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SmtpResponse
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tuning-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning &amp; limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Postgres
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Utils
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/crypto/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crypto & Hash
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/encoding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/jwk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/jwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWT
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/dev_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/codebase_architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codebase Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/globals_and_singletons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Globals & Singletons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/abi_layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ABI Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/build_macros/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/metrics_and_observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics & Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-sending" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring &amp; sending
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sendmail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SendMail
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smtptransaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SmtpTransaction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SmtpTransaction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#begin-and-isvalid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Begin() and IsValid()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mailfromaddr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MailFrom(addr)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rcpttoaddr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RcptTo(addr)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#datastart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DataStart()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#databodyfromaddr-fromname-toaddr-toname-subject-body-replyto" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DataBody(fromAddr, fromName, toAddr, toName, subject, body, replyTo = {})
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reset()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#quit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quit()
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coalescing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coalescing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smtpresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SmtpResponse
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tuning-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning &amp; limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="smtp-endpoint">SMTP Endpoint</h1>
+<p><code>WFX::SmtpEndpoint</code> is a ready-to-use SMTP submission client, built on top of
+the raw <a href="../overview/"><code>WFX::Endpoint&lt;&gt;</code> primitive</a>. One instance represents
+one upstream relay and its connection pool.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>This page only covers what's specific to SMTP. The connection pool, DNS
+resolution and refresh, reconnect/backoff behavior, and prewarm all work
+exactly as described on the <a href="../overview/">Endpoint overview</a>,
+<code>SmtpEndpoint</code> just wires them up for you with an SMTP-shaped handshake
+and transaction.</p>
+<p>To use it, include:
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;wfx/endpoint/smtp.hpp&gt;</span>
+</code></pre></div></p>
+</div>
+<p>Speaks STARTTLS submission on port 587 (RFC 3207): <code>EHLO</code> -&gt; <code>STARTTLS</code> -&gt;
+<code>EHLO</code> again over the encrypted channel -&gt; <code>AUTH PLAIN</code> or <code>AUTH LOGIN</code>,
+whichever the server advertises post-TLS. Implicit TLS (port 465) is out of
+scope. CRAM-MD5 and other legacy AUTH mechanisms are deliberately not
+implemented, they exist only to protect credentials on an unencrypted line,
+and this client never sends credentials on one.</p>
+<hr />
+<h2 id="declaring-sending">Declaring &amp; sending</h2>
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Relay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">SmtpEndpoint</span><span class="p">{</span><span class="s">"smtp.example.com:587"</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">SmtpEndpointConfig</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">username</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">GetEnvString</span><span class="p">(</span><span class="s">"SMTP_USERNAME"</span><span class="p">),</span>
+<span class="w">    </span><span class="p">.</span><span class="n">password</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">GetEnvString</span><span class="p">(</span><span class="s">"SMTP_PASSWORD"</span><span class="p">),</span>
+<span class="w">    </span><span class="p">.</span><span class="n">heloName</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"mail.example.com"</span><span class="p">,</span>
+<span class="p">}};</span>
+
+<span class="n">WFX_POST</span><span class="p">(</span><span class="s">"/contact"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Coro</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">tx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Relay</span><span class="p">.</span><span class="n">Begin</span><span class="p">();</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="n">tx</span><span class="p">.</span><span class="n">IsValid</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">SERVICE_UNAVAILABLE</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"busy"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">s1</span><span class="p">,</span><span class="w"> </span><span class="n">r1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">MailFrom</span><span class="p">(</span><span class="s">"noreply@example.com"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">s1</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">!</span><span class="n">r1</span><span class="o">-&gt;</span><span class="n">Success</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">BAD_GATEWAY</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"mail failed"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">s2</span><span class="p">,</span><span class="w"> </span><span class="n">r2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">RcptTo</span><span class="p">(</span><span class="s">"contact@example.com"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">s2</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">!</span><span class="n">r2</span><span class="o">-&gt;</span><span class="n">Success</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">BAD_GATEWAY</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"mail failed"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">s3</span><span class="p">,</span><span class="w"> </span><span class="n">r3</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">DataStart</span><span class="p">();</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">s3</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">!</span><span class="n">r3</span><span class="o">-&gt;</span><span class="n">Continue</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">BAD_GATEWAY</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"mail failed"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">s4</span><span class="p">,</span><span class="w"> </span><span class="n">r4</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">DataBody</span><span class="p">(</span><span class="s">"noreply@example.com"</span><span class="p">,</span><span class="w"> </span><span class="s">"Example"</span><span class="p">,</span><span class="w"> </span><span class="s">"contact@example.com"</span><span class="p">,</span>
+<span class="w">                                         </span><span class="s">"Contact Form"</span><span class="p">,</span><span class="w"> </span><span class="s">"New enquiry"</span><span class="p">,</span><span class="w"> </span><span class="s">"message body"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">s4</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">!</span><span class="n">r4</span><span class="o">-&gt;</span><span class="n">Success</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">BAD_GATEWAY</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"mail failed"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">"sent"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">});</span>
+</code></pre></div>
+<p>Declaration rules (namespace scope, <code>"host:port"</code> format, no scheme prefix,
+eager DNS resolution at startup) are the same as the raw primitive, see
+<a href="../overview/#declaring-an-endpoint">Declaring an endpoint</a> for the full
+details.</p>
+<p>Unlike <code>HttpEndpoint</code>, one call doesn't stand alone: a mail transaction is
+several commands (<code>MAIL FROM</code>, <code>RCPT TO</code>, <code>DATA</code>) that must run on the same
+connection, so <code>SmtpEndpoint</code> hands you a <a href="../overview/#pinning-a-connection">pinned connection</a>
+(<code>SmtpTransaction</code>) instead of a single request/response pair.</p>
+<p>You have two ways to drive that exchange:</p>
+<ul>
+<li><strong><a href="#sendmail"><code>SendMail</code></a></strong>: one call that runs the whole thing for you.
+  Right for almost every case: a contact form, a signup confirmation, any
+  place you just want to know whether the email went out.</li>
+<li><strong><a href="#smtptransaction"><code>SmtpTransaction</code></a></strong>, step by step: for when you need
+  to react differently depending on which command failed (for example,
+  showing "that recipient doesn't exist" instead of a generic error), or when
+  you want to send to several recipients on one connection by calling
+  <code>RcptTo</code> more than once before <code>DataStart</code>.</li>
+</ul>
+<hr />
+<h2 id="sendmail"><code>SendMail</code></h2>
+<p>The one-call version. It opens a transaction, runs <code>MAIL FROM</code>, <code>RCPT TO</code>,
+<code>DATA</code>, and the message body through it, and stops at the first thing that
+goes wrong.</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_POST</span><span class="p">(</span><span class="s">"/contact"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Coro</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">SmtpSendOutcome</span><span class="w"> </span><span class="n">outcome</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">co_await</span><span class="w"> </span><span class="n">Relay</span><span class="p">.</span><span class="n">SendMail</span><span class="p">(</span>
+<span class="w">        </span><span class="s">"noreply@example.com"</span><span class="p">,</span><span class="w">  </span><span class="c1">// fromAddr:  envelope + From: header</span>
+<span class="w">        </span><span class="s">"Example"</span><span class="p">,</span><span class="w">               </span><span class="c1">// fromName:  display name on From:</span>
+<span class="w">        </span><span class="s">"contact@example.com"</span><span class="p">,</span><span class="w">   </span><span class="c1">// toAddr:    envelope + To: header</span>
+<span class="w">        </span><span class="s">"Contact Form"</span><span class="p">,</span><span class="w">          </span><span class="c1">// toName:    display name on To:</span>
+<span class="w">        </span><span class="s">"New enquiry"</span><span class="p">,</span><span class="w">           </span><span class="c1">// subject</span>
+<span class="w">        </span><span class="s">"message body"</span><span class="p">,</span><span class="w">          </span><span class="c1">// body</span>
+<span class="w">        </span><span class="n">outcome</span>
+<span class="w">    </span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="n">outcome</span><span class="p">.</span><span class="n">Success</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">BAD_GATEWAY</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"mail failed"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">"sent"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">});</span>
+</code></pre></div>
+<p><strong><code>SmtpSendOutcome</code></strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">SmtpSendOutcome</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Shared</span><span class="o">::</span><span class="n">EndpointStatus</span><span class="w"> </span><span class="n">status</span><span class="p">;</span><span class="w"> </span><span class="c1">// EpOk once DATA actually goes through</span>
+<span class="w">    </span><span class="n">EndpointOutput</span><span class="o">&lt;</span><span class="n">SmtpResponse</span><span class="o">&gt;</span><span class="w"> </span><span class="n">response</span><span class="p">;</span><span class="w"> </span><span class="c1">// the last reply that came back, if any</span>
+
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">Success</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// status == EpOk &amp;&amp; response &amp;&amp; response-&gt;Success()</span>
+<span class="p">};</span>
+</code></pre></div>
+<ul>
+<li><strong><code>status</code></strong> tells you whether a real SMTP conversation even happened. It's
+  <code>WFX::EpOk</code> once the message is fully sent. Anything else means the
+  problem was below the SMTP layer entirely: the connection pool was full
+  (<code>WFX::EpPoolExhausted</code>), the relay refused the TCP/TLS connection, or a
+  command timed out. A real reply from the server was never received in any
+  of those cases.</li>
+<li><strong><code>response</code></strong> stays empty (<code>bool(outcome.response) == false</code>) exactly when
+  that happens. Once a real SMTP reply exists, <code>response</code> holds it: <code>code</code>
+  and <code>text</code>, the same shape <code>SmtpTransaction</code>'s own methods return, see
+  <a href="#smtpresponse"><code>SmtpResponse</code></a> below.</li>
+<li><strong><code>Success()</code></strong> is the one thing most callers need: true only if the whole
+  four-step exchange completed and the server accepted it.</li>
+</ul>
+<p>If you need to know exactly which step failed (bad sender vs. bad recipient
+vs. the message itself getting rejected), <code>SendMail</code> won't tell you that on
+its own. Drop down to <a href="#smtptransaction"><code>SmtpTransaction</code></a> and run the
+steps yourself, checking each response as it comes back.</p>
+<hr />
+<h2 id="smtptransaction"><code>SmtpTransaction</code></h2>
+<p>SMTP isn't one request/response, it's a small conversation, and the server
+keeps track of that conversation's state (who the mail is from, who it's
+going to, whether it's currently in the middle of receiving a message body)
+tied to the one TCP connection it's happening on. That's the whole reason
+<code>SmtpTransaction</code> exists: it's a handle to one pinned connection, and every
+method on it sends the next command in that same conversation.</p>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">tx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Relay</span><span class="p">.</span><span class="n">Begin</span><span class="p">();</span>
+<span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="n">tx</span><span class="p">.</span><span class="n">IsValid</span><span class="p">())</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* pool exhausted, every pooled connection is busy */</span><span class="w"> </span><span class="p">}</span>
+
+<span class="n">tx</span><span class="p">.</span><span class="n">MailFrom</span><span class="p">(</span><span class="n">addr</span><span class="p">);</span>
+<span class="n">tx</span><span class="p">.</span><span class="n">RcptTo</span><span class="p">(</span><span class="n">addr</span><span class="p">);</span>
+<span class="n">tx</span><span class="p">.</span><span class="n">DataStart</span><span class="p">();</span>
+<span class="n">tx</span><span class="p">.</span><span class="n">DataBody</span><span class="p">(</span><span class="n">fromAddr</span><span class="p">,</span><span class="w"> </span><span class="n">fromName</span><span class="p">,</span><span class="w"> </span><span class="n">toAddr</span><span class="p">,</span><span class="w"> </span><span class="n">toName</span><span class="p">,</span><span class="w"> </span><span class="n">subject</span><span class="p">,</span><span class="w"> </span><span class="n">body</span><span class="p">,</span><span class="w"> </span><span class="n">replyTo</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{});</span>
+<span class="n">tx</span><span class="p">.</span><span class="n">Reset</span><span class="p">();</span>
+<span class="n">tx</span><span class="p">.</span><span class="n">Quit</span><span class="p">();</span>
+</code></pre></div>
+<p>Every method returns the same <code>{status, out}</code> pair described in
+<a href="../overview/#sending-a-request">Sending a request</a>, where <code>out</code> is a
+<code>WFX::EndpointOutput&lt;SmtpResponse&gt;</code>. Check <code>status</code> first (it covers
+transport-level failures like a timeout, where <code>out</code> never gets filled in at
+all), then check the response itself, see <a href="#smtpresponse"><code>SmtpResponse</code></a>
+below for what <code>Success()</code> and <code>Continue()</code> mean.</p>
+<h3 id="begin-and-isvalid"><code>Begin()</code> and <code>IsValid()</code></h3>
+<p><code>Begin()</code> reserves one connection from the pool for you, exactly like
+<a href="../overview/#pinning-a-connection"><code>Reserve()</code></a> on the raw primitive. You get
+it back wrapped in an <code>SmtpTransaction</code>. Every command you send through that
+<code>tx</code> runs on that same connection, which is what lets the server follow along
+with one mail transaction instead of seeing unrelated commands from different
+connections.</p>
+<p>Always check <code>IsValid()</code> before calling anything else on <code>tx</code>. It comes back
+false when every connection in the pool is already busy (bounded by
+<code>connLimit</code>, see <a href="#tuning-limits">Tuning &amp; limits</a> below), there simply
+wasn't a free connection to hand you.</p>
+<h3 id="mailfromaddr"><code>MailFrom(addr)</code></h3>
+<p>Sends <code>MAIL FROM:&lt;addr&gt;</code>, the first command of any transaction. This is the
+<em>envelope</em> sender, the address the receiving server uses for bounces and
+delivery decisions. It's a separate thing from the human-readable <code>From:</code>
+header you'll set later in <code>DataBody</code>, they're usually the same address but
+don't have to be. A success reply is <code>250</code>.</p>
+<h3 id="rcpttoaddr"><code>RcptTo(addr)</code></h3>
+<p>Sends <code>RCPT TO:&lt;addr&gt;</code>, the envelope recipient. Real SMTP lets you call this
+more than once before <code>DataStart</code> to send the same message to several
+recipients on one connection, <code>SmtpTransaction</code> doesn't stop you from doing
+that either. A success reply is <code>250</code>; a common rejection is <code>550</code> (no such
+user, or the relay won't deliver to that address).</p>
+<h3 id="datastart"><code>DataStart()</code></h3>
+<p>Sends <code>DATA</code>, announcing that the message content is about to follow. The
+server's reply here is not a normal <code>2xx</code>, it's <code>354</code> ("start mail input, end
+with a line containing just a dot"), which is exactly why <code>SmtpResponse</code> has
+a separate <code>Continue()</code> check instead of reusing <code>Success()</code> for this one
+step.</p>
+<h3 id="databodyfromaddr-fromname-toaddr-toname-subject-body-replyto"><code>DataBody(fromAddr, fromName, toAddr, toName, subject, body, replyTo = {})</code></h3>
+<p>Sends the actual message: headers, then a blank line, then the body, then the
+terminator. It builds all of this for you from the arguments:</p>
+<ul>
+<li><strong><code>fromAddr</code> / <code>fromName</code></strong> become the <code>From:</code> header, e.g.
+  <code>From: Example &lt;noreply@example.com&gt;</code>. <code>fromName</code> can be empty, in which
+  case <code>From:</code> is just the bare address.</li>
+<li><strong><code>toAddr</code> / <code>toName</code></strong> become <code>To:</code> the same way.</li>
+<li><strong><code>subject</code></strong> becomes the <code>Subject:</code> header, unmodified.</li>
+<li><strong><code>body</code></strong> is the message text. It gets dot-stuffed automatically (RFC 5321
+  4.5.2: a body line starting with <code>.</code> is escaped to <code>..</code>, so a line in your
+  message that happens to start with a period can never be mistaken for the
+  terminator that ends the <code>DATA</code> block).</li>
+<li><strong><code>replyTo</code></strong> is optional. If you pass one, a <code>Reply-To:</code> header is added.</li>
+</ul>
+<p><code>Date</code>, <code>Message-ID</code>, and <code>MIME-Version</code>/<code>Content-Type</code> headers are added on
+top of that automatically, you don't provide them. A success reply is <code>250</code>.</p>
+<h3 id="reset"><code>Reset()</code></h3>
+<p>Sends <code>RSET</code>, which clears whatever <code>MAIL FROM</code>/<code>RCPT TO</code>/<code>DATA</code> state has
+built up so far, without closing the connection. Use it when you want to
+start a second, unrelated transaction on the same already-authenticated
+connection instead of paying for a new connection and a new handshake, for
+example after a recipient gets rejected and you want to try a different one
+from scratch.</p>
+<h3 id="quit"><code>Quit()</code></h3>
+<p>Sends <code>QUIT</code>, telling the server you are completely finished with this
+connection. The server typically closes its end after replying <code>221</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Quit() is not cleanup, it ends the connection</p>
+<p>You do not need to call <code>Quit()</code> when you're done with a <code>tx</code>. Letting it
+go out of scope already returns the connection to the pool for reuse
+(<code>ReservedSlot</code>'s destructor does this, see
+<a href="../overview/#pinning-a-connection">Pinning a connection</a>), and that
+happens purely on WFX's side, no bytes get sent to the server for it.
+<code>Quit()</code> is the opposite: it actively tells the <em>server</em> to close the TCP
+connection. Only call it if you deliberately want this specific
+connection gone instead of sitting in the pool for the next <code>Begin()</code> to
+reuse.</p>
+</div>
+<hr />
+<h2 id="coalescing">Coalescing</h2>
+<p><code>SmtpEndpoint</code> does not wire up <a href="../overview/#coalescing">coalescing</a>:
+<code>coalesceKey</code>/<code>cloneOutput</code> are left null in its <code>EndpointDesc</code>. <code>MAIL FROM</code>
+/ <code>RCPT TO</code> / <code>DATA</code> are side-effecting, sending an email, so deduping two
+concurrent calls into one backend transaction would silently drop a real
+message rather than save a redundant one. It also wouldn't apply in practice
+even if wired up: every send goes through <code>Begin()</code>'s pinned connection, and
+<a href="../overview/#pinning-a-connection">pinned sends are exempt from coalescing</a>
+by the primitive's own rule.</p>
+<hr />
+<h2 id="smtpresponse"><code>SmtpResponse</code></h2>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">SmtpResponse</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">code</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">String</span><span class="w"> </span><span class="n">text</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">Success</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// code &gt;= 200 &amp;&amp; code &lt; 300</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">Continue</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// code == 354, DATA's go-ahead</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><code>code</code> and <code>text</code> are the <em>final</em> line of a (possibly multi-line) SMTP
+response. <code>Success()</code> checks the 2xx range; <code>Continue()</code> checks specifically
+for <code>354</code>, the go-ahead <code>DataStart()</code> expects before you send <code>DataBody()</code>.</p>
+<hr />
+<h2 id="tuning-limits">Tuning &amp; limits</h2>
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Relay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">SmtpEndpoint</span><span class="p">{</span><span class="s">"smtp.example.com:587"</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">SmtpEndpointConfig</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">connLimit</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">connectTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">requestTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">username</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">GetEnvString</span><span class="p">(</span><span class="s">"SMTP_USERNAME"</span><span class="p">),</span>
+<span class="w">    </span><span class="p">.</span><span class="n">password</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">GetEnvString</span><span class="p">(</span><span class="s">"SMTP_PASSWORD"</span><span class="p">),</span>
+<span class="w">    </span><span class="p">.</span><span class="n">heloName</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="s">"mail.example.com"</span><span class="p">,</span>
+<span class="p">}};</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connLimit</code></td>
+<td>Max simultaneous connections to this relay, per worker (default 4)</td>
+</tr>
+<tr>
+<td><code>connectTimeoutSeconds</code></td>
+<td>Budget for TCP connect + <code>EHLO</code>/<code>STARTTLS</code>/<code>EHLO</code>/<code>AUTH</code> combined (default 20)</td>
+</tr>
+<tr>
+<td><code>requestTimeoutSeconds</code></td>
+<td>Budget for one <code>MAIL</code>/<code>RCPT</code>/<code>DATA</code> command round trip (default 20)</td>
+</tr>
+<tr>
+<td><code>idleTimeoutSeconds</code></td>
+<td>Idle pooled connections close after this long (default 60)</td>
+</tr>
+<tr>
+<td><code>maxReconnectAttempts</code> / <code>reconnectBackoffBaseSeconds</code> / <code>reconnectBackoffMaxSeconds</code></td>
+<td>Same reconnect/backoff behavior as <a href="../overview/#reconnects-and-backoff">the primitive</a></td>
+</tr>
+<tr>
+<td><code>prewarm</code></td>
+<td>Connections to open eagerly on startup</td>
+</tr>
+<tr>
+<td><code>maxResponseLineBytes</code></td>
+<td>Cap on one response line's size (default 2048), a DoS defense against an endless line</td>
+</tr>
+<tr>
+<td><code>maxResponseLines</code></td>
+<td>Cap on the number of lines in one multi-line response (default 64), a DoS defense against an endless <code>250-...</code> flood</td>
+</tr>
+<tr>
+<td><code>username</code> / <code>password</code></td>
+<td>Credentials offered via <code>AUTH PLAIN</code> or <code>AUTH LOGIN</code>, whichever the server advertises. Never logged</td>
+</tr>
+<tr>
+<td><code>heloName</code></td>
+<td>The identity sent in <code>EHLO</code>, e.g. <code>"mail.example.com"</code></td>
+</tr>
+</tbody>
+</table>
+<p>There is no <code>tlsConfig</code> on <code>SmtpEndpointConfig</code>: STARTTLS is negotiated
+in-band by the client's own <code>onConnect</code> handshake, the underlying connection
+is always plaintext until that handshake upgrades it, see
+<a href="../overview/#in-band-tls-upgrades">In-band TLS upgrades</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Altered-commits
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

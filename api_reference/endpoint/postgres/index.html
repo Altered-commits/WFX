@@ -1,0 +1,2949 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../smtp/">
+      
+      
+        <link rel="next" href="../../utils/crypto/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Postgres - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../css/index.css">
+    
+      <link rel="stylesheet" href="../../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#postgres-endpoint" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Postgres
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../dev_reference/overview/" class="md-tabs__link">
+          
+  
+  
+  Developer Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../json/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Json
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_13" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_13" id="__nav_4_13_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_13_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Endpoint
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../smtp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SMTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Postgres
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Postgres
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-connecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring &amp; connecting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Declaring &amp; connecting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#encryption-and-authentication-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption and authentication policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#queries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queries
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Queries">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pgresult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pgrow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgRow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PgRow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pgrowget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgRow::Get
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pgerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgError
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#type-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type mapping
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Type mapping">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pgnumeric" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgNumeric
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#arrays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Arrays
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sessions-transactions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sessions &amp; transactions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sessions &amp; transactions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#savepoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Savepoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streaming-large-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming large results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#statement-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Statement cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-cancellation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query cancellation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tuning-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning &amp; limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Utils
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/crypto/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crypto & Hash
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/encoding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/jwk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../utils/jwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWT
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/dev_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/codebase_architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codebase Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/globals_and_singletons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Globals & Singletons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/abi_layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ABI Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/build_macros/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/metrics_and_observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics & Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-connecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring &amp; connecting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Declaring &amp; connecting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#encryption-and-authentication-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption and authentication policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#queries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queries
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Queries">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pgresult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgResult
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pgrow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgRow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PgRow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pgrowget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgRow::Get
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pgerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgError
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#type-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type mapping
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Type mapping">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pgnumeric" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PgNumeric
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#arrays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Arrays
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sessions-transactions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sessions &amp; transactions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sessions &amp; transactions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#savepoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Savepoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#streaming-large-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming large results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#statement-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Statement cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-cancellation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query cancellation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tuning-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning &amp; limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="postgres-endpoint">Postgres Endpoint</h1>
+<p><code>WFX::PostgresEndpoint</code> is a ready-to-use PostgreSQL client, built on top of
+the raw <a href="../overview/"><code>WFX::Endpoint&lt;&gt;</code> primitive</a>. One instance represents
+one database and its connection pool.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>This page only covers what's specific to Postgres. The connection pool, DNS
+resolution and refresh, reconnect/backoff behavior, and prewarm all work
+exactly as described on the <a href="../overview/">Endpoint overview</a>,
+<code>PostgresEndpoint</code> just wires them up for you with a Postgres-shaped
+handshake and wire protocol.</p>
+<p>To use it, include:
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;wfx/endpoint/postgres.hpp&gt;</span>
+</code></pre></div></p>
+</div>
+<p>Every query goes through the extended query protocol (<code>Parse</code> / <code>Bind</code> /
+<code>Describe</code> / <code>Execute</code> / <code>Sync</code>). Parameters travel through <code>Bind</code> as typed
+binary values, not as text interpolated into the SQL string. Results come
+back in binary wherever a codec exists for the column's type. Authentication
+is SCRAM-SHA-256 (the default since Postgres 10) or cleartext; MD5 isn't
+supported, since the engine's crypto backend only implements SHA-2.</p>
+<hr />
+<h2 id="declaring-connecting">Declaring &amp; connecting</h2>
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Db</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">PostgresEndpoint</span><span class="p">{</span><span class="s">"db.internal:5432"</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">PostgresConfig</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">user</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s">"app"</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">password</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">GetEnvString</span><span class="p">(</span><span class="s">"PGPASSWORD"</span><span class="p">),</span>
+<span class="w">    </span><span class="p">.</span><span class="n">database</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"app"</span><span class="p">,</span>
+<span class="p">}};</span>
+</code></pre></div>
+<p>Declaration rules (namespace scope, <code>"host:port"</code> format, no scheme prefix,
+eager DNS resolution at startup) are the same as the raw primitive, see
+<a href="../overview/#declaring-an-endpoint">Declaring an endpoint</a> for the full
+details.</p>
+<p><code>user</code> is the only field Postgres actually requires; leaving it empty is a
+fatal error at connect time rather than something the server gets to reject.
+Everything else defaults to a working, if generic, configuration, see
+<a href="#tuning-limits">Tuning &amp; limits</a> for the full list.</p>
+<h3 id="encryption-and-authentication-policy">Encryption and authentication policy</h3>
+<div class="highlight"><pre><span></span><code><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">PgEncryption</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">NONE</span><span class="p">,</span><span class="w">     </span><span class="c1">// never ask</span>
+<span class="w">    </span><span class="n">OPTIONAL</span><span class="p">,</span><span class="w"> </span><span class="c1">// ask, continue in plaintext if refused</span>
+<span class="w">    </span><span class="n">REQUIRED</span><span class="p">,</span><span class="w"> </span><span class="c1">// ask, fail if refused</span>
+<span class="p">};</span>
+
+<span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">PgAuthPolicy</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">ANY</span><span class="p">,</span><span class="w">          </span><span class="c1">// whatever the server asks for, cleartext included</span>
+<span class="w">    </span><span class="n">NO_PLAINTEXT</span><span class="p">,</span><span class="w"> </span><span class="c1">// refuse cleartext, allow SCRAM</span>
+<span class="w">    </span><span class="n">SCRAM_ONLY</span><span class="p">,</span><span class="w">   </span><span class="c1">// refuse everything except SCRAM</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><code>encryption</code> defaults to <code>REQUIRED</code> and <code>authPolicy</code> to <code>NO_PLAINTEXT</code>, so an
+endpoint declared with nothing but <code>user</code>/<code>password</code>/<code>database</code> already
+requires an encrypted connection and refuses a cleartext password. Setting
+<code>authPolicy = PgAuthPolicy::ANY</code> is what lets <code>PgEncryption::NONE</code> and a
+cleartext password coexist; without it, a server asking for a cleartext
+password on an unencrypted connection is refused.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>There is no <code>tlsConfig</code> on <code>PostgresConfig</code>. Postgres negotiates encryption
+<strong>in-band</strong>: the client sends <code>SSLRequest</code> over the still-plaintext
+connection and only wraps it in TLS if the server agrees, the same
+pattern <a href="../overview/#in-band-tls-upgrades">In-band TLS upgrades</a>
+describes for <code>SmtpEndpoint</code>'s <code>STARTTLS</code>. <code>encryption</code> is
+<code>PostgresEndpoint</code>'s own knob for that negotiation; the underlying
+primitive stays configured <code>EpTlsInsecure</code> internally so the in-band
+upgrade is the one deciding.</p>
+</div>
+<hr />
+<h2 id="queries">Queries</h2>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GET</span><span class="p">(</span><span class="s">"/users"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Coro</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">rows</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">Db</span><span class="p">.</span><span class="n">Query</span><span class="p">(</span>
+<span class="w">        </span><span class="s">"SELECT id, email FROM users WHERE active = $1 LIMIT $2"</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="mi">50</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="mi">502</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"database unavailable"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">rows</span><span class="o">-&gt;</span><span class="n">Failed</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="mi">500</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="n">rows</span><span class="o">-&gt;</span><span class="n">Error</span><span class="p">().</span><span class="n">Message</span><span class="p">());</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">rows</span><span class="o">-&gt;</span><span class="n">RowCount</span><span class="p">();</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">row</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">rows</span><span class="o">-&gt;</span><span class="n">At</span><span class="p">(</span><span class="n">i</span><span class="p">);</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">id</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">row</span><span class="p">.</span><span class="n">Get</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">int64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="s">"id"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">email</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">row</span><span class="p">.</span><span class="n">Get</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="o">&gt;</span><span class="p">(</span><span class="s">"email"</span><span class="p">);</span>
+<span class="w">        </span><span class="c1">// ...</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">});</span>
+</code></pre></div>
+<p><code>Query</code> takes a SQL string with <code>$1</code>, <code>$2</code>, ... placeholders and any number of
+typed C++ arguments, and returns the same <code>{status, out}</code> pair every
+<code>SendPayload</code> does, see <a href="../overview/#sending-a-request">Sending a request</a>.
+<code>out</code> is a <code>WFX::EndpointOutput&lt;PgResult&gt;</code>, following the same lifetime rule
+described there.</p>
+<p>There are two independent things worth checking, and it's easy to check only
+one:</p>
+<ul>
+<li><strong><code>status</code></strong> tells you whether a result exists at all. Anything other than
+  <code>WFX::EpOk</code> means the connection didn't deliver one, pool exhausted,
+  connect refused, TLS failed, the request timed out, and <code>rows</code> shouldn't be
+  touched.</li>
+<li><strong><code>rows-&gt;Failed()</code></strong> tells you whether the server answered with an
+  <code>ErrorResponse</code> instead of results, a syntax error, a constraint violation,
+  a permission failure. <code>rows-&gt;Error()</code> gives you a <a href="#pgerror"><code>PgError</code></a>
+  with the SQLSTATE and message.</li>
+</ul>
+<p>A query that fails with <code>rows-&gt;Failed()</code> still leaves the connection healthy
+and pooled, the same way a <code>4xx</code>/<code>5xx</code> from an HTTP upstream doesn't mean the
+connection itself is bad.</p>
+<h3 id="pgresult"><code>PgResult</code></h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="nf">RowCount</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="nf">ColumnCount</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="kt">bool</span><span class="w"> </span><span class="nf">Empty</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w">               </span><span class="c1">// RowCount() == 0</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">AffectedRows</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// rows affected, for INSERT/UPDATE/DELETE</span>
+
+<span class="k">const</span><span class="w"> </span><span class="n">PgError</span><span class="o">&amp;</span><span class="w"> </span><span class="nf">Error</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="kt">bool</span><span class="w"> </span><span class="nf">Failed</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w">              </span><span class="c1">// Error().IsSet()</span>
+
+<span class="n">PgRow</span><span class="w"> </span><span class="nf">At</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">row</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">PgRow</span><span class="w"> </span><span class="k">operator</span><span class="p">[](</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">row</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// same as At()</span>
+
+<span class="k">const</span><span class="w"> </span><span class="n">PgColumn</span><span class="o">&amp;</span><span class="w"> </span><span class="nf">Column</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">col</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">ColumnName</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">col</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="w"> </span><span class="nf">IndexOf</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">name</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// -1 if not found</span>
+
+<span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">Matches</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">col</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">Matches</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">name</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</code></pre></div>
+<p><code>AffectedRows()</code> is what <code>CommandComplete</code>'s tag reports (<code>"INSERT 0 5"</code>,
+<code>"UPDATE 3"</code>), which for <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code> is rows <em>affected</em>, not
+rows <em>returned</em>, a statement with no <code>RETURNING</code> clause has <code>RowCount() == 0</code>
+and <code>AffectedRows()</code> telling you what actually happened.</p>
+<p><code>Matches&lt;T&gt;()</code> reports whether <code>Get&lt;T&gt;()</code> on that column is something you can
+confirm from the column's declared type. <code>Get&lt;T&gt;</code> itself doesn't consult it,
+see <a href="#pgrowget"><code>PgRow::Get</code></a> below for why.</p>
+<h3 id="pgrow"><code>PgRow</code></h3>
+<p>A cheap-to-copy cursor over one row, valid only while the <code>PgResult</code> it came
+from is alive.</p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="nf">ColumnCount</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="w"> </span><span class="nf">IndexOf</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">name</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+
+<span class="kt">bool</span><span class="w"> </span><span class="nf">IsNull</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">col</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="kt">bool</span><span class="w"> </span><span class="nf">IsNull</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">name</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">Raw</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">col</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// undecoded wire bytes</span>
+
+<span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">Get</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">col</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">Get</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">name</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</code></pre></div>
+<h4 id="pgrowget"><code>PgRow::Get</code></h4>
+<div class="highlight"><pre><span></span><code><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">id</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">row</span><span class="p">.</span><span class="n">Get</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">int64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">email</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">row</span><span class="p">.</span><span class="n">Get</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="o">&gt;</span><span class="p">(</span><span class="s">"email"</span><span class="p">);</span>
+</code></pre></div>
+<p><code>Get&lt;T&gt;</code> decodes column <code>col</code> (by index or by name) as <code>T</code>, using whichever
+<a href="#type-mapping">type mapping</a> applies to <code>T</code>. It trusts the type you ask for
+rather than checking it: enums, domains, and extension types are assigned an
+OID per database, so no fixed table could recognize them, and rejecting a
+column just because its exact OID isn't in a static list would make every one
+of those types unreadable. Call <code>Matches&lt;T&gt;()</code> first if you need to confirm
+the column's declared type before trusting the decode.</p>
+<div class="admonition warning">
+<p class="admonition-title">NULL and lifetime</p>
+<p>Reading a <code>NULL</code> column yields a value-initialized <code>T</code> (<code>0</code>, an empty
+<code>std::string_view</code>, and so on). Call <code>IsNull()</code> first wherever a <code>NULL</code>
+and a real zero-ish value need to be told apart.</p>
+<p>Row data borrows the response buffer: a <code>std::string_view</code> read out of a
+row dies with the <code>EndpointOutput</code> that produced it, the same rule
+<a href="../overview/#sending-a-request"><code>EndpointOutput</code></a> always follows. Copy
+anything you need to outlive the handler.</p>
+</div>
+<h3 id="pgerror"><code>PgError</code></h3>
+<div class="highlight"><pre><span></span><code><span class="kt">bool</span><span class="w"> </span><span class="nf">IsSet</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w">               </span><span class="c1">// same as PgResult::Failed()</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">SqlState</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">Message</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">Detail</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">Hint</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">Severity</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">ConstraintName</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">TableName</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">ColumnName</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">SchemaName</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="w"> </span><span class="nf">Position</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w">    </span><span class="c1">// 1-based index into the failing query, 0 if unset</span>
+</code></pre></div>
+<p>Every field Postgres's <code>ErrorResponse</code> can carry, exposed directly.
+<code>SqlState()</code> is the one worth branching on programmatically (<code>"23505"</code> for a
+unique-violation, <code>"40001"</code> for a serialization failure worth retrying); the
+rest are for building a useful error message or log line.</p>
+<hr />
+<h2 id="parameters">Parameters</h2>
+<div class="highlight"><pre><span></span><code><span class="k">co_await</span><span class="w"> </span><span class="n">Db</span><span class="p">.</span><span class="n">Query</span><span class="p">(</span><span class="s">"INSERT INTO users (name, age, bio) VALUES ($1, $2, $3)"</span><span class="p">,</span>
+<span class="w">                  </span><span class="s">"Alice"</span><span class="p">,</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">PgNull</span><span class="p">{});</span>
+</code></pre></div>
+<p>Every argument after the SQL string becomes <code>$1</code>, <code>$2</code>, ... in order, encoded
+by its C++ type and sent through <code>Bind</code> as a length-prefixed binary value.
+The SQL string itself is the literal you wrote; a parameter's value has no
+way to change what gets parsed as SQL, since it never travels anywhere near
+the statement text. That's what makes this client's queries structurally
+resistant to the classic string-concatenation style of SQL injection.</p>
+<table>
+<thead>
+<tr>
+<th>C++ argument</th>
+<th>Binds as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WFX::PgNull{}</code></td>
+<td>SQL <code>NULL</code></td>
+</tr>
+<tr>
+<td>a string literal, <code>const char*</code>, or anything convertible to <code>std::string_view</code></td>
+<td><code>text</code></td>
+</tr>
+<tr>
+<td>any integer type</td>
+<td><code>int2</code>/<code>int4</code>/<code>int8</code>, sized from the C++ type</td>
+</tr>
+<tr>
+<td><code>float</code> / <code>double</code></td>
+<td><code>float4</code> / <code>float8</code></td>
+</tr>
+<tr>
+<td><code>bool</code></td>
+<td><code>bool</code></td>
+</tr>
+<tr>
+<td><code>WFX::PgBytes</code></td>
+<td><code>bytea</code></td>
+</tr>
+<tr>
+<td><code>WFX::PgUuid</code></td>
+<td><code>uuid</code></td>
+</tr>
+<tr>
+<td><code>WFX::PgTimestamp</code></td>
+<td><code>timestamptz</code></td>
+</tr>
+<tr>
+<td><code>WFX::PgDate</code></td>
+<td><code>date</code></td>
+</tr>
+<tr>
+<td><code>WFX::PgTime</code></td>
+<td><code>time</code></td>
+</tr>
+<tr>
+<td><code>WFX::PgInterval</code></td>
+<td><code>interval</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>WFX::PgNumeric</code> has no encoder: binding an arbitrary-precision value would
+mean this client owning a bignum implementation just to hand it back to
+Postgres, so a <code>numeric</code> parameter binds as <code>text</code> instead and the server
+parses it, the same as most clients that don't carry their own bignum type.</p>
+<p>Arrays can be <a href="#arrays">read back</a> from a result but not sent as a parameter,
+there's no array encoder yet.</p>
+<hr />
+<h2 id="type-mapping">Type mapping</h2>
+<p>Binary codecs exist for every type below; anything else decodes as <code>text</code> via
+<code>std::string_view</code>, and <code>Matches&lt;T&gt;()</code> reports <code>false</code> for a type with no
+dedicated codec.</p>
+<table>
+<thead>
+<tr>
+<th>Postgres type</th>
+<th>OID</th>
+<th>C++ type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bool</code></td>
+<td>16</td>
+<td><code>bool</code></td>
+</tr>
+<tr>
+<td><code>bytea</code></td>
+<td>17</td>
+<td><code>WFX::PgBytes</code></td>
+</tr>
+<tr>
+<td><code>int8</code></td>
+<td>20</td>
+<td>any integer type, width-flexible (see below)</td>
+</tr>
+<tr>
+<td><code>int2</code></td>
+<td>21</td>
+<td>any integer type</td>
+</tr>
+<tr>
+<td><code>int4</code></td>
+<td>23</td>
+<td>any integer type</td>
+</tr>
+<tr>
+<td><code>text</code>, <code>varchar</code>, <code>bpchar</code>, <code>name</code>, <code>char</code>, <code>json</code>, <code>xml</code></td>
+<td>25, 1043, 1042, 19, 18, 114, 142</td>
+<td><code>std::string_view</code></td>
+</tr>
+<tr>
+<td><code>oid</code></td>
+<td>26</td>
+<td>any integer type wide enough to hold it unsigned</td>
+</tr>
+<tr>
+<td><code>float4</code></td>
+<td>700</td>
+<td><code>float</code>, or <code>double</code> (widens losslessly)</td>
+</tr>
+<tr>
+<td><code>float8</code></td>
+<td>701</td>
+<td><code>double</code></td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td>1082</td>
+<td><code>WFX::PgDate</code></td>
+</tr>
+<tr>
+<td><code>time</code></td>
+<td>1083</td>
+<td><code>WFX::PgTime</code></td>
+</tr>
+<tr>
+<td><code>timestamp</code></td>
+<td>1114</td>
+<td><code>WFX::PgTimestamp</code> (treated as UTC, since it carries no zone)</td>
+</tr>
+<tr>
+<td><code>timestamptz</code></td>
+<td>1184</td>
+<td><code>WFX::PgTimestamp</code></td>
+</tr>
+<tr>
+<td><code>interval</code></td>
+<td>1186</td>
+<td><code>WFX::PgInterval</code></td>
+</tr>
+<tr>
+<td><code>numeric</code></td>
+<td>1700</td>
+<td><code>WFX::PgNumeric</code> (decode only, see <a href="#pgnumeric">below</a>)</td>
+</tr>
+<tr>
+<td><code>uuid</code></td>
+<td>2950</td>
+<td><code>WFX::PgUuid</code></td>
+</tr>
+<tr>
+<td><code>jsonb</code></td>
+<td>3802</td>
+<td><code>std::string_view</code> (the leading version byte is stripped for you)</td>
+</tr>
+</tbody>
+</table>
+<p>Integers widen but shouldn't narrow. <code>Get&lt;T&gt;</code>'s codec looks at the <em>column's</em>
+wire width, not <code>T</code>'s, so a <code>smallint</code> column decodes correctly into an
+<code>int64_t</code> you asked for. Going the other way, reading an <code>int8</code> column into
+an <code>int16_t</code>, would lose data, which is exactly why <code>Get&lt;T&gt;</code> trusts your
+choice of <code>T</code> instead of picking one for you. Pick <code>T</code> at least as wide as
+the column actually is.</p>
+<h3 id="pgnumeric"><code>PgNumeric</code></h3>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">PgNumeric</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">digits</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">nullptr</span><span class="p">;</span><span class="w"> </span><span class="c1">// base-10000 digit array, ndigits entries</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int16_t</span><span class="w"> </span><span class="n">ndigits</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int16_t</span><span class="w"> </span><span class="n">weight</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">      </span><span class="c1">// base-10000 exponent of the first digit</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint16_t</span><span class="w"> </span><span class="n">sign</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">NUMERIC_SIGN_POSITIVE</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int16_t</span><span class="w"> </span><span class="n">dscale</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">      </span><span class="c1">// decimal digits after the point</span>
+
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">IsNan</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">IsInf</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">IsNegative</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int16_t</span><span class="w"> </span><span class="nf">DigitAt</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">int16_t</span><span class="w"> </span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">double</span><span class="w"> </span><span class="nf">ToDouble</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><code>numeric</code> is arbitrary precision, stored on the wire as a base-10000 digit
+array, so no native C++ type holds it losslessly. <code>PgNumeric</code> exposes the raw
+components as a view rather than picking a lossy conversion for you.
+<code>ToDouble()</code> is there for when a <code>double</code>'s precision is genuinely enough for
+your use case (a chart, a rough total): it's exact only while the value fits
+a <code>double</code>'s 53-bit mantissa, which is why it's a separate opt-in call rather
+than what <code>Get&lt;double&gt;</code> would do automatically. It also correctly reports
+<code>NaN</code> and <code>+-Infinity</code>, both real <code>numeric</code> values Postgres can return.</p>
+<h3 id="arrays">Arrays</h3>
+<p>There is no <code>Get&lt;T[]&gt;</code>. Read an array column as a <code>WFX::PgArrayView</code> instead,
+through the same <code>Get&lt;T&gt;</code> every other type uses, then step through its
+elements one at a time:</p>
+<div class="highlight"><pre><span></span><code><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">arr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">row</span><span class="p">.</span><span class="n">Get</span><span class="o">&lt;</span><span class="n">WFX</span><span class="o">::</span><span class="n">PgArrayView</span><span class="o">&gt;</span><span class="p">(</span><span class="s">"tags"</span><span class="p">);</span>
+
+<span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">cursor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">arr</span><span class="p">.</span><span class="n">elements</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">elem</span><span class="p">;</span>
+<span class="kt">bool</span><span class="w"> </span><span class="n">isNull</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+
+<span class="k">while</span><span class="p">(</span><span class="n">arr</span><span class="p">.</span><span class="n">NextElement</span><span class="p">(</span><span class="n">cursor</span><span class="p">,</span><span class="w"> </span><span class="n">elem</span><span class="p">,</span><span class="w"> </span><span class="n">isNull</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">isNull</span><span class="p">)</span>
+<span class="w">        </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">    </span><span class="c1">// elem is one element's raw bytes, decode it the same way its scalar</span>
+<span class="w">    </span><span class="c1">// codec would (LoadBe32 for int4, etc.)</span>
+<span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">PgArrayView</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">elements</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">nullptr</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="w"> </span><span class="n">ndim</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">elementOid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="w"> </span><span class="n">dimLengths</span><span class="p">[</span><span class="mi">6</span><span class="p">]{};</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="w"> </span><span class="n">lowerBounds</span><span class="p">[</span><span class="mi">6</span><span class="p">]{};</span>
+
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="w"> </span><span class="nf">Count</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// product of dimLengths</span>
+
+<span class="w">    </span><span class="c1">// Steps one element starting from `cursor` (initialize it to .elements</span>
+<span class="w">    </span><span class="c1">// before the first call). Returns false once every element has been</span>
+<span class="w">    </span><span class="c1">// consumed or the data is truncated.</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">NextElement</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*&amp;</span><span class="w"> </span><span class="n">cursor</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="o">&amp;</span><span class="w"> </span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="o">&amp;</span><span class="w"> </span><span class="n">isNull</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>A malformed header, more than 6 dimensions, or any dimension with a negative
+length, decodes to a value-initialized <code>PgArrayView</code> (<code>elements == nullptr</code>),
+the same "NULL yields a value-initialized <code>T</code>" contract every other codec
+follows. <code>elements != nullptr</code> is how you tell a genuinely empty array
+(<code>Count() == 0</code> but still well-formed) apart from a decode failure.</p>
+<p>Treat <code>Count()</code> as informational rather than a value to size a loop or
+allocation from directly; <code>NextElement</code> walking the actual bytes is what
+tells you how many elements are really there.</p>
+<hr />
+<h2 id="sessions-transactions">Sessions &amp; transactions</h2>
+<p>A single <code>Query()</code> call may land on any pooled connection, which is fine for
+one-off statements but breaks anything where state lives on the connection: a
+multi-statement transaction, a prepared statement you want named explicitly,
+<code>SET</code>, an advisory lock. <code>Session()</code> pins one connection to you for as long
+as you hold it, the Postgres application of
+<a href="../overview/#pinning-a-connection">Pinning a connection</a>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_POST</span><span class="p">(</span><span class="s">"/transfer"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Coro</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">tx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Db</span><span class="p">.</span><span class="n">Session</span><span class="p">();</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="n">tx</span><span class="p">.</span><span class="n">IsValid</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="mi">503</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"no connection available"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">((</span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Begin</span><span class="p">()).</span><span class="n">first</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="mi">502</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"database unavailable"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Query</span><span class="p">(</span><span class="s">"UPDATE accounts SET balance = balance - $1 WHERE id = $2"</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Query</span><span class="p">(</span><span class="s">"UPDATE accounts SET balance = balance + $1 WHERE id = $2"</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">out</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Commit</span><span class="p">();</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">out</span><span class="o">-&gt;</span><span class="n">Failed</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="mi">502</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"commit failed"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">co_return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">"ok"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">});</span>
+</code></pre></div>
+<p><code>Query</code> on a <code>PgSession</code> has the same signature and return shape as
+<code>PostgresEndpoint::Query</code>, just running on the one pinned connection instead
+of whichever one the pool would have picked.</p>
+<p>A transaction is one use of a session, not what a session is for: prepared
+statements, <code>SET SESSION</code>, advisory locks, and anything else that's
+connection-scoped state also need one connection held for as long as they
+matter. <code>Begin()</code> is optional; without it, every statement still runs on the
+same connection, just outside a transaction.</p>
+<p><code>Begin(WFX::PgIsolation isolation = WFX::PgIsolation::READ_COMMITTED)</code> takes
+an isolation level: <code>READ_COMMITTED</code> (the default, and Postgres's own
+default), <code>REPEATABLE_READ</code>, or <code>SERIALIZABLE</code>. Pass it as the one argument,
+<code>co_await tx.Begin(WFX::PgIsolation::SERIALIZABLE)</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Always finish a transaction with <code>Commit()</code> or <code>Rollback()</code>. Letting <code>tx</code>
+go out of scope without one leaves the connection idle in a transaction,
+holding its row locks and blocking <code>VACUUM</code> across the database.
+<code>idleInTransactionTimeoutMs</code> (see <a href="#tuning-limits">Tuning &amp; limits</a>) is a
+server-side backstop if you want one, not a substitute for finishing your
+own transactions.</p>
+</div>
+<p>The pool stays correct either way: the next request to land on that
+connection sends a <code>ROLLBACK</code> ahead of its own statement before doing
+anything else, so an abandoned transaction doesn't leak into someone else's
+query. This happens automatically.</p>
+<h3 id="savepoints">Savepoints</h3>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">tx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Db</span><span class="p">.</span><span class="n">Session</span><span class="p">();</span>
+<span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Begin</span><span class="p">();</span>
+<span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Query</span><span class="p">(</span><span class="s">"INSERT INTO orders (id) VALUES ($1)"</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="k">if</span><span class="p">((</span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Savepoint</span><span class="p">(</span><span class="s">"before_risky"</span><span class="p">)).</span><span class="n">first</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">out</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Query</span><span class="p">(</span><span class="s">"INSERT INTO orders (id) VALUES ($1)"</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w"> </span><span class="c1">// duplicate</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">out</span><span class="o">-&gt;</span><span class="n">Failed</span><span class="p">())</span>
+<span class="w">        </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">RollbackTo</span><span class="p">(</span><span class="s">"before_risky"</span><span class="p">);</span><span class="w"> </span><span class="c1">// undo just this insert</span>
+<span class="w">    </span><span class="k">else</span>
+<span class="w">        </span><span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">ReleaseSavepoint</span><span class="p">(</span><span class="s">"before_risky"</span><span class="p">);</span><span class="w"> </span><span class="c1">// keep it, drop the marker</span>
+<span class="p">}</span>
+
+<span class="k">co_await</span><span class="w"> </span><span class="n">tx</span><span class="p">.</span><span class="n">Commit</span><span class="p">();</span>
+</code></pre></div>
+<p>A savepoint name can't be a bind parameter, Postgres syntax has no
+placeholder for an identifier, so this is the one place <code>PgSession</code> composes
+a statement from your input instead of sending it as data. <code>name</code> is checked
+against a plain-identifier grammar (letters, digits, underscores, not
+starting with a digit, at most 63 characters, <code>wire.hpp</code>'s
+<code>MAX_IDENTIFIER_LEN</code>) before it's composed into anything; a name that fails
+that check doesn't reach the wire, the call returns <code>WFX::EpSerializeError</code>
+immediately.</p>
+<ul>
+<li><strong><code>Savepoint(name)</code></strong> marks a point to come back to.</li>
+<li><strong><code>RollbackTo(name)</code></strong> undoes everything since the savepoint. The
+  transaction stays open, and the savepoint itself survives to be rolled
+  back to again.</li>
+<li><strong><code>ReleaseSavepoint(name)</code></strong> drops the savepoint, keeping the work done
+  since it was taken.</li>
+</ul>
+<hr />
+<h2 id="streaming-large-results">Streaming large results</h2>
+<p><code>Query()</code> (and <code>PgSession::Query</code>) materializes the whole result before
+handing it back, which is wrong for a result set too large to hold in memory
+at once. <code>Stream()</code> is the Postgres application of
+<a href="../overview/#streaming-large-responses">Streaming large responses</a>: it reads
+a chunk at a time, reusing one output object so peak memory tracks one chunk
+rather than the total.</p>
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GET</span><span class="p">(</span><span class="s">"/export"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Coro</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Db</span><span class="p">.</span><span class="n">Stream</span><span class="p">(</span><span class="mi">500</span><span class="p">,</span><span class="w"> </span><span class="s">"SELECT id, email FROM users"</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">while</span><span class="p">(</span><span class="nb">true</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">auto</span><span class="w"> </span><span class="n">chunk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">co_await</span><span class="w"> </span><span class="n">stream</span><span class="p">.</span><span class="n">Next</span><span class="p">();</span>
+<span class="w">        </span><span class="k">if</span><span class="p">(</span><span class="n">chunk</span><span class="p">.</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">EpOk</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">chunk</span><span class="p">.</span><span class="n">done</span><span class="p">)</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">for</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">chunk</span><span class="p">.</span><span class="n">data</span><span class="o">-&gt;</span><span class="n">RowCount</span><span class="p">();</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">auto</span><span class="w"> </span><span class="n">row</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">chunk</span><span class="p">.</span><span class="n">data</span><span class="o">-&gt;</span><span class="n">At</span><span class="p">(</span><span class="n">i</span><span class="p">);</span>
+<span class="w">            </span><span class="c1">// borrowed until the next Next(), copy anything you need to keep</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">co_return</span><span class="p">;</span>
+<span class="p">});</span>
+</code></pre></div>
+<p>The first argument is <code>chunkRows</code>, how many rows one <code>Execute</code> asks for at a
+time; the rest is the same SQL-plus-parameters shape <code>Query()</code> takes.
+Postgres calls this a <em>portal</em>: the server keeps the query's cursor open
+between rounds, and each <code>Next()</code> after the first re-serializes the request
+to fetch the next batch through it, <code>WFX::EpParseChunkFetch</code> in
+<a href="../overview/#streaming-large-responses">Streaming large responses</a>'s terms.</p>
+<p>A portal only survives past the <code>Sync</code> that ends its round while a
+transaction is holding it open, so a stream that wasn't handed one already
+open wraps itself in its own <code>BEGIN</code>/<code>COMMIT</code> automatically. Calling
+<code>Stream()</code> on a <code>PgSession</code> that's already inside a transaction you started
+with <code>Begin()</code> runs the stream inside that transaction instead, and leaves it
+open when the stream ends, only closing the portal it opened for itself.</p>
+<div class="admonition tip">
+<p class="admonition-title">Streaming a Postgres export straight to the client</p>
+<p><code>stream.Next()</code> pulls rows off the wire, but the example above just discards them, <code>Write(...)</code>
+still buffers the whole formatted response in memory. Pair it with
+<a href="../../request_and_response/#response"><code>Response::FlushStart()</code>/<code>Flush()</code>/<code>FlushEnd()</code></a> to push
+each batch to the client the moment it's formatted instead, so peak memory tracks one batch on
+both ends of the pipe, not the whole result set.</p>
+</div>
+<hr />
+<h2 id="statement-cache">Statement cache</h2>
+<p>Every connection keeps its own table of prepared statements, transparent to
+you. An unnamed statement lives only until the next one replaces it, so
+sending the same SQL as an unnamed statement every time makes Postgres parse
+and plan it fresh each time; naming it keeps the plan on the server, and a
+later request whose SQL and parameter types match sends <code>Bind</code> straight
+through with no <code>Parse</code> at all.</p>
+<p>SQL only earns a name after it's been seen <code>statementCacheMinUses</code> times
+(default 2), not on first use, so a genuinely one-off statement never takes a
+name away from something actually hot, and never pays for a <code>Parse</code> and
+server-side plan storage it will only use once.</p>
+<p>If a schema change invalidates a cached plan (<code>ALTER TABLE</code>, <code>DROP</code> and
+recreate), Postgres reports it as SQLSTATE <code>0A000</code>; a session reset losing
+the server's prepared statements reports <code>26000</code>. Either one moves a shared
+epoch counter once, invalidating every connection's cache entries at once
+rather than just the one that saw the error, and the next use of that SQL
+anywhere re-<code>Parse</code>s automatically. The query that hit the stale plan still
+fails once, its <code>ErrorResponse</code> surfaces normally through <code>Failed()</code>, and
+every query after it, on every connection, recovers on its own without any
+handling on your part.</p>
+<p>Set <code>statementCacheSize = 0</code> to turn the cache off entirely and always send
+unnamed statements, see <a href="#tuning-limits">Tuning &amp; limits</a>.</p>
+<hr />
+<h2 id="query-cancellation">Query cancellation</h2>
+<p>Postgres cancels a running query over a second connection, quoting a backend
+PID and secret key the server handed out during the original connection's
+handshake; <code>CancelRequest</code> isn't a message the original connection can
+carry. <code>PostgresEndpoint</code> wires this into
+<a href="../overview/#onabort-cancellation"><code>onAbort</code></a>: if the client that triggered a
+query goes away before the reply comes back, WFX opens a
+<a href="../overview/#opening-a-side-connection">side connection</a>, sends
+<code>CancelRequest</code>, and leaves the original connection alone to finish naturally
+and return to the pool.</p>
+<p>This is the real implementation behind <a href="../overview/#onabort-cancellation"><code>onAbort</code> cancellation</a>'s
+own illustrative Postgres example. Nothing about it needs configuring beyond
+<code>auxConnLimit</code> (see <a href="#tuning-limits">Tuning &amp; limits</a>), which caps how many
+cancellations can be in flight at once. <code>auxConnLimit = 0</code> disables the
+mechanism: <code>onAbort</code> still runs, but <code>OpenSideConnection()</code> fails
+immediately since there's no capacity for it, so a query a client walked away
+from still finishes normally on the server, just without anyone asking it to
+stop early.</p>
+<hr />
+<h2 id="tuning-limits">Tuning &amp; limits</h2>
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">Db</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">PostgresEndpoint</span><span class="p">{</span><span class="s">"db.internal:5432"</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">PostgresConfig</span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">connLimit</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">auxConnLimit</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">connectTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">requestTimeoutSeconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">user</span><span class="w">                  </span><span class="o">=</span><span class="w"> </span><span class="s">"app"</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">password</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">GetEnvString</span><span class="p">(</span><span class="s">"PGPASSWORD"</span><span class="p">),</span>
+<span class="w">    </span><span class="p">.</span><span class="n">database</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="s">"app"</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">applicationName</span><span class="w">       </span><span class="o">=</span><span class="w"> </span><span class="s">"my-service"</span><span class="p">,</span>
+<span class="p">}};</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connLimit</code></td>
+<td>Max simultaneous connections, per worker (default 8). Allocated exactly, not rounded up the way the raw primitive's own <code>connLimit</code> is, since a database's <code>max_connections</code> is a real ceiling worth respecting precisely. It's also per worker process: the server sees <code>connLimit * worker_processes</code> at most</td>
+</tr>
+<tr>
+<td><code>auxConnLimit</code></td>
+<td>Max simultaneous cancellation side connections, per worker (default 2), see <a href="#query-cancellation">Query cancellation</a></td>
+</tr>
+<tr>
+<td><code>connectTimeoutSeconds</code></td>
+<td>Budget for TCP connect + TLS + <code>StartupMessage</code> + auth combined (default 10)</td>
+</tr>
+<tr>
+<td><code>requestTimeoutSeconds</code></td>
+<td>Budget for one query round trip, measured on this side (default 30)</td>
+</tr>
+<tr>
+<td><code>idleTimeoutSeconds</code></td>
+<td>Idle pooled connections close after this long (default 300), kept under the ~350s idle cutoff common to proxies and NAT gateways, so a connection is closed here rather than silently dropped mid-use and failing on next use</td>
+</tr>
+<tr>
+<td><code>maxReconnectAttempts</code> / <code>reconnectBackoffBaseSeconds</code> / <code>reconnectBackoffMaxSeconds</code></td>
+<td>Same reconnect/backoff behavior as <a href="../overview/#reconnects-and-backoff">the primitive</a> (defaults 3 / 1 / 30)</td>
+</tr>
+<tr>
+<td><code>prewarm</code></td>
+<td>Connections to open eagerly on startup (default 0)</td>
+</tr>
+<tr>
+<td><code>dnsRefreshSeconds</code></td>
+<td><code>0</code> to follow the DNS record's own TTL, matching <a href="../overview/#dns-resolution-refresh">the primitive</a></td>
+</tr>
+<tr>
+<td><code>user</code> / <code>password</code> / <code>database</code></td>
+<td>Identity sent in the startup message. <code>password</code> is never logged</td>
+</tr>
+<tr>
+<td><code>applicationName</code></td>
+<td>Shows up in <code>pg_stat_activity</code>, useful for telling which service opened a connection</td>
+</tr>
+<tr>
+<td><code>encryption</code> / <code>authPolicy</code></td>
+<td>See <a href="#encryption-and-authentication-policy">Encryption and authentication policy</a></td>
+</tr>
+<tr>
+<td><code>searchPath</code> / <code>timeZone</code></td>
+<td>Sent as startup parameters, one round trip cheaper than issuing <code>SET</code> after connecting</td>
+</tr>
+<tr>
+<td><code>statementTimeoutMs</code> / <code>lockTimeoutMs</code> / <code>idleInTransactionTimeoutMs</code></td>
+<td>Server-side <code>statement_timeout</code> / <code>lock_timeout</code> / <code>idle_in_transaction_session_timeout</code>, <code>0</code> leaves each unset</td>
+</tr>
+<tr>
+<td><code>preferBinary</code></td>
+<td>Ask for binary-format columns where a codec exists (default <code>true</code>); has no effect on columns with no binary codec, which come back as text regardless</td>
+</tr>
+<tr>
+<td><code>maxMessageBytes</code></td>
+<td>Rejects any single incoming message whose declared length exceeds this (default 16 MiB), before it's used to size an allocation</td>
+</tr>
+<tr>
+<td><code>statementCacheSize</code></td>
+<td>Named statements kept per connection (default 64), <code>0</code> turns the cache off, see <a href="#statement-cache">Statement cache</a></td>
+</tr>
+<tr>
+<td><code>statementCacheMinUses</code></td>
+<td>Executions before SQL earns a name (default 2)</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Altered-commits
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

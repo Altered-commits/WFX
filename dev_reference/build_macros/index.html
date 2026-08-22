@@ -1,0 +1,2091 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../abi_layer/">
+      
+      
+        <link rel="next" href="../metrics_and_observability/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Build Macros - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../css/index.css">
+    
+      <link rel="stylesheet" href="../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#build-macros" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Build Macros
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api_reference/overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  Developer Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/json/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Json
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_13" id="__nav_4_13_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Endpoint
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/smtp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SMTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/endpoint/postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Postgres
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Utils
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/crypto/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crypto & Hash
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/encoding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/jwk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api_reference/utils/jwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWT
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codebase_architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codebase Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../globals_and_singletons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Globals & Singletons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../abi_layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ABI Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build Macros
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#platform-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compiler-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compiler detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-type-feature-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build-type / feature flags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#portability-utility-macros" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Portability / utility macros
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metrics_and_observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics & Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#platform-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compiler-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compiler detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-type-feature-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build-type / feature flags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#portability-utility-macros" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Portability / utility macros
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="build-macros">Build Macros</h1>
+<p>Every preprocessor macro WFX's own build system defines, grouped by what it's for. This does not
+list header include guards (<code>WFX_INC_*</code>, <code>WFX_UTILS_*</code>, ...) - those aren't build configuration,
+just the usual one-inclusion-per-TU boilerplate.</p>
+<hr />
+<h2 id="platform-detection">Platform detection</h2>
+<p>Defined in <code>shared/utils/detection_macro.hpp</code>, resolved from the compiler's own predefined macros.
+Exactly one of the four is set; the header itself <code>#error</code>s out if none match.</p>
+<table>
+<thead>
+<tr>
+<th>Macro</th>
+<th>Set when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WFX_PLATFORM_LINUX</code></td>
+<td><code>__linux__</code> defined. Also sets <code>WFX_PLATFORM_POSIX</code>.</td>
+</tr>
+<tr>
+<td><code>WFX_PLATFORM_MACOS</code></td>
+<td><code>__APPLE__</code> defined. Also sets <code>WFX_PLATFORM_POSIX</code>.</td>
+</tr>
+<tr>
+<td><code>WFX_PLATFORM_WINDOWS</code></td>
+<td><code>_WIN32</code> or <code>_WIN64</code> defined.</td>
+</tr>
+<tr>
+<td><code>WFX_PLATFORM_POSIX</code></td>
+<td>Convenience macro, set alongside Linux and macOS (never Windows).</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p><code>WFX_PLATFORM_LINUX</code> is the only platform with a real, working implementation today.
+<code>config/config.hpp</code>/<code>.cpp</code> and <code>http/connection/http_connection_factory.hpp</code> (which picks the
+connection backend - <code>os_specific/linux/epoll_connection.hpp</code> is the only one that exists)
+both <code>#error</code> on anything else. Windows/macOS platform macros exist and are partially wired up
+(<code>utils/diagnostics/crash_tracer.cpp</code> has per-platform unwind code, <code>utils/fileops/filesystem.cpp</code>
+picks the right <code>stat</code> mtime field), but there's no epoll-equivalent backend for either yet.</p>
+</div>
+<p>Also in the same header: <strong><code>WFX_ARCH_X64</code></strong>, <strong><code>WFX_ARCH_ARM64</code></strong>, <strong><code>WFX_ARCH_UNKNOWN</code></strong> - CPU
+architecture, from <code>__x86_64__</code>/<code>_M_X64</code> and <code>__aarch64__</code>/<code>_M_ARM64</code>. Used only by
+<code>crash_tracer.cpp</code> to pick the right register/unwind layout per platform+arch combination.</p>
+<hr />
+<h2 id="compiler-detection">Compiler detection</h2>
+<p>Also in <code>detection_macro.hpp</code>, mutually exclusive, <code>#error</code>s if none match:</p>
+<ul>
+<li><strong><code>WFX_COMPILER_MSVC</code></strong> - <code>_MSC_VER</code> and not clang-cl</li>
+<li><strong><code>WFX_COMPILER_CLANG</code></strong> - <code>__clang__</code></li>
+<li><strong><code>WFX_COMPILER_INTEL</code></strong> - <code>__INTEL_COMPILER</code>/<code>__ICC</code></li>
+<li><strong><code>WFX_COMPILER_GCC</code></strong> - <code>__GNUC__</code>, after clang/Intel are ruled out</li>
+</ul>
+<p>Only real usage by name is <code>shared/utils/hash.hpp</code> (<code>WFX_COMPILER_MSVC</code> picks <code>_umul128</code> vs a
+<code>__uint128_t</code>/manual-multiply fallback for WyHash's mix step). <code>shared/utils/compiler_macro.hpp</code>
+(next section) branches on the raw predefined macros directly rather than these - the two headers
+are independent, not layered on each other.</p>
+<hr />
+<h2 id="build-type-feature-flags">Build-type / feature flags</h2>
+<table>
+<thead>
+<tr>
+<th>Macro</th>
+<th>Set by</th>
+<th>Default</th>
+<th>Gates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WFX_ENGINE_BUILD</code></td>
+<td><code>add_compile_definitions(WFX_ENGINE_BUILD)</code> in root <code>CMakeLists.txt</code>, engine target only</td>
+<td>always on for the engine, never set for user-app builds</td>
+<td><code>shared/utils/memory.hpp</code> / <code>include/wfx/memory.hpp</code>: engine build allocates via <code>Utils::GetBufferPool()</code> directly; user-app build goes through the ABI's allocator table instead</td>
+</tr>
+<tr>
+<td><code>WFX_DEBUG</code></td>
+<td><code>$&lt;$&lt;CONFIG:Debug&gt;:WFX_DEBUG&gt;</code> in <code>CMakeLists.txt</code></td>
+<td>only with <code>CMAKE_BUILD_TYPE=Debug</code></td>
+<td>nothing yet - defined but no <code>#ifdef WFX_DEBUG</code> anywhere in source</td>
+</tr>
+<tr>
+<td><code>WFX_USE_OPENSSL</code></td>
+<td><code>option(WFX_USE_OPENSSL ...)</code> in <code>cmake/ssl.cmake</code>, applied via <code>target_compile_definitions</code></td>
+<td><strong>ON</strong></td>
+<td>selects the OpenSSL backend everywhere TLS/crypto is implemented: <code>shared/apis/crypto_api.cpp</code>, <code>utils/crypto/openssl/*</code>, <code>http/ssl/openssl/*</code>, <code>http/ssl/http_ssl_factory.hpp</code>. OpenSSL is the only backend that actually exists right now; <code>WFX_USE_WOLFSSL</code>/<code>WFX_USE_MBEDTLS</code> are commented-out placeholders in <code>ssl.cmake</code> for a future backend swap</td>
+</tr>
+<tr>
+<td><code>WFX_ENABLE_ASAN</code></td>
+<td><code>option(WFX_ENABLE_ASAN ...)</code> in root <code>CMakeLists.txt</code></td>
+<td><strong>OFF</strong></td>
+<td>not itself a preprocessor macro - only gates <code>-fsanitize=address,undefined -fno-omit-frame-pointer -g</code> and the matching link flags. Fails the configure step outright under MSVC.</td>
+</tr>
+<tr>
+<td><code>WFX_TARGET_FLAGS</code></td>
+<td><code>set(WFX_TARGET_FLAGS ... CACHE STRING ...)</code> in root <code>CMakeLists.txt</code></td>
+<td><code>-march=native</code></td>
+<td>also not a preprocessor macro. Replaces the architecture flag(s) passed to the compiler in the Release compile options (GCC, Clang, Intel oneAPI). <code>-march=native</code> is correct whenever the build machine is the run machine, which is every self-build (<code>install.sh</code>, <code>--local-*</code>). <code>.github/workflows/release_build.yml</code> overrides it per target instead, e.g. <code>-DWFX_TARGET_FLAGS="-mcpu=neoverse-n1"</code>, since those binaries are cross-built on a CI runner for a different machine. The value is split on whitespace into a proper CMake list (<code>separate_arguments</code>), so a target needing more than one flag, e.g. <code>-march=armv8.4-a -mcpu=neoverse-v1</code>, still reaches the compiler as two separate arguments instead of one.</td>
+</tr>
+<tr>
+<td><code>WFX_STATIC_SSL</code></td>
+<td><code>option(WFX_STATIC_SSL ...)</code> in <code>cmake/ssl_openssl.cmake</code></td>
+<td><strong>OFF</strong></td>
+<td>not a preprocessor macro either. Controls whether the custom-built OpenSSL is linked into <code>wfx</code> statically (<code>.a</code>) or dynamically (<code>.so</code>). Off by default so local/dev builds (<code>install.sh</code>, <code>--local-*</code>) stay dynamic, matching what <code>.github/workflows/audit_check.yml</code> already expects when it restores that <code>.so</code> build cache for test runs. <code>.github/workflows/release_build.yml</code> turns it on, so the binaries it publishes are self-contained and don't need this custom OpenSSL build's <code>.so</code> files present on the machine that runs them.</td>
+</tr>
+<tr>
+<td><code>WFX_ASAN_BUILD</code></td>
+<td>added via <code>add_compile_definitions(WFX_ASAN_BUILD)</code> when <code>WFX_ENABLE_ASAN</code> is on</td>
+<td>off unless ASan is on</td>
+<td><code>utils/diagnostics/crash_tracer.cpp</code>, inside <code>CrashTracer::Install()</code>: skips installing WFX's own <code>SIGSEGV</code>/<code>SIGABRT</code> crash-dump handler, so ASan's handler stays in control and prints its actual allocation/free-site report instead of a generic WFX crash dump. Also <code>utils/diagnostics/logger.cpp</code>, inside <code>GetLogger()</code>: calls <code>__lsan_ignore_object</code> on its one intentional heap-allocated-and-never-freed singleton, so LeakSanitizer ignores just that allocation instead of leak detection needing to be disabled process-wide, see <a href="../testing/">Testing</a></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p><code>WFX_ENABLE_ASAN</code> (the CMake option you pass on the command line) and <code>WFX_ASAN_BUILD</code> (the
+preprocessor macro it produces) are two different names - don't conflate them in source.</p>
+</div>
+<p>Where <code>WFX_ENABLE_ASAN</code> gets turned on:</p>
+<ul>
+<li><code>scripts/install.sh --local-debug</code> (contributor/dev builds) - <strong>on</strong>, paired with
+  <code>CMAKE_BUILD_TYPE=Debug</code>. Catches dangling-pointer/use-after-free/UB bugs as soon as you hit
+  them locally, at the cost of a noticeably slower binary. Use <code>scripts/install.sh --local-release</code>
+  instead if you need a fast build for perf testing (same checkout, same <code>build/</code> dir, ASan off).</li>
+<li><code>scripts/install.sh</code> (real end-user install, no flags) and <code>scripts/install.sh --local-release</code></li>
+<li>always <strong>off</strong>. Both are the optimized build real users (or perf testing) run.</li>
+<li><code>.github/workflows/compile_check.yml</code> and <code>tidy_check.yml</code> - always <strong>on</strong>, also paired with
+  <code>CMAKE_BUILD_TYPE=Debug</code> (not Release - Release strips symbols and enables LTO, which turns
+  ASan's crash traces into useless raw offsets). That build artifact is only ever consumed by
+  <code>audit_check.yml</code> inside CI, never distributed, so there's no downside to it always being
+  instrumented - every audit run catches this whole bug class automatically, with a real stack
+  trace when it does.</li>
+</ul>
+<hr />
+<h2 id="portability-utility-macros">Portability / utility macros</h2>
+<p>Compiler-agnostic helpers, all in <code>shared/utils/compiler_macro.hpp</code> unless noted, branching
+directly on raw compiler predefines (not on <code>WFX_COMPILER_*</code> above):</p>
+<table>
+<thead>
+<tr>
+<th>Macro</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WFX_EXPORT</code></td>
+<td>Forces a symbol to stay linked and externally visible (exported plugin/user-entry points)</td>
+</tr>
+<tr>
+<td><code>WFX_USED</code></td>
+<td>Prevents dead-strip/optimize-away without forcing external visibility</td>
+</tr>
+<tr>
+<td><code>WFX_UNREACHABLE</code></td>
+<td><code>__builtin_unreachable()</code> / <code>__assume(0)</code> equivalent per compiler</td>
+</tr>
+<tr>
+<td><code>WFX_FORCE_INLINE</code></td>
+<td><code>inline __attribute__((always_inline))</code> / <code>__forceinline</code> equivalent</td>
+</tr>
+<tr>
+<td><code>WFX_NOINLINE</code></td>
+<td><code>__attribute__((noinline))</code> / <code>__declspec(noinline)</code> equivalent</td>
+</tr>
+<tr>
+<td><code>WFX_ASSUME(cond)</code></td>
+<td>Optimizer hint; synthesized via <code>__builtin_unreachable()</code> on GCC/MinGW since they have no direct equivalent</td>
+</tr>
+</tbody>
+</table>
+<p>Project-specific (not compiler-branching, but worth knowing as a contributor):</p>
+<ul>
+<li><strong><code>WFX_CONCAT(a, b)</code></strong> (<code>include/core/core.hpp</code>) - token-pasting helper with an extra expansion
+  layer, used to build unique <code>__COUNTER__</code>-based identifiers in the route/middleware/constructor
+  registration macros below.</li>
+<li><strong><code>WFX_CONSTRUCTOR(...)</code></strong> (<code>include/core/constructor.hpp</code>) - user-facing SDK macro; generates a
+  static self-registering struct that runs at static-init time. See <code>wfx/app.hpp</code>.</li>
+<li><strong><code>WFX_GET</code> / <code>WFX_POST</code> / <code>WFX_GET_EX</code> / <code>WFX_POST_EX</code> / <code>WFX_GROUP_START</code> / <code>WFX_GROUP_END</code></strong>
+  (<code>include/http/routes.hpp</code>) - the route-registration DSL, same static-registration pattern.</li>
+<li><strong><code>WFX_MIDDLEWARE(name, ...)</code> / <code>WFX_MW_LIST(...)</code></strong> (<code>include/http/middleware.hpp</code>) -
+  middleware-registration DSL, same pattern again.</li>
+<li><strong><code>WFX_TRACE()</code></strong> (<code>utils/diagnostics/crash_tracer.hpp</code>) - captures a <code>__func__</code>/<code>__FILE__</code>/<code>__LINE__</code>
+  frame into the crash-tracer's ring buffer. Used at ~30 call sites across
+  <code>os_specific/linux/epoll_connection.cpp</code> and <code>engine/core_engine.cpp</code>.</li>
+<li><strong><code>WFX_CHECKPOINT(label)</code></strong> (<code>utils/diagnostics/crash_tracer.hpp</code>) - updates the current
+  <code>WFX_TRACE()</code> frame's label. Defined but currently has zero call sites - reserved for future use,
+  same as <code>WFX_DEBUG</code>.</li>
+<li><strong><code>WFX_IS_TTY()</code></strong>, <strong><code>WFX_STDOUT_WRITE(data, len)</code></strong>, <strong><code>WFX_LOCALTIME(tm, tt)</code></strong>
+  (<code>utils/diagnostics/logger.hpp</code>) - thin POSIX wrappers (<code>isatty</code>, a retrying write, <code>localtime_r</code>)
+  used by the logger. POSIX-only, unguarded by <code>WFX_PLATFORM_POSIX</code> since the engine only targets
+  Linux today anyway.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Altered-commits
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

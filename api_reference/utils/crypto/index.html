@@ -1,0 +1,2893 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Explicit, low-level C++ web framework">
+      
+      
+      
+      
+        <link rel="prev" href="../../endpoint/postgres/">
+      
+      
+        <link rel="next" href="../encoding/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Crypto & Hash - WFX Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../css/index.css">
+    
+      <link rel="stylesheet" href="../../../css/scrollbar_format.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#crypto-hash" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="WFX Documentation" class="md-header__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            WFX Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Crypto & Hash
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../getting_started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../core_concepts/project_structure/" class="md-tabs__link">
+          
+  
+  
+  Core Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../overview/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../dev_reference/overview/" class="md-tabs__link">
+          
+  
+  
+  Developer Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="WFX Documentation" class="md-nav__button md-logo" aria-label="WFX Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    WFX Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting_started/first_program/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Program
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/project_structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/engine_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engine Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core_concepts/wfx_toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WFX Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request_and_response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request & Response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../constructor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Constructor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../async/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../forms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Forms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../json/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Json
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_13" id="__nav_4_13_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Endpoint
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../endpoint/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../endpoint/http/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../endpoint/smtp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SMTP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../endpoint/postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Postgres
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_14" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_14" id="__nav_4_14_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_14_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Utils
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crypto & Hash
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crypto & Hash
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#crypto" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crypto
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Crypto">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hashing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hashing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hashing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-shot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-shot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#streaming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hmac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HMAC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HMAC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-shot_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-shot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#streaming_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aead-authenticated-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AEAD (authenticated encryption)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#key-derivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key derivation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#asymmetric-signverify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asymmetric (sign/verify)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Asymmetric (sign/verify)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#creating-a-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating a key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signing-and-verifying" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing and verifying
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exporting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#misc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Misc
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Misc">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#randombytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RandomBytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#constanttimeequals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConstantTimeEquals
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hash
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hash">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#wyhash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WyHash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fnv1a-fnv1acaseinsensitive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fnv1a / Fnv1aCaseInsensitive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#xxh3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Xxh3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integer-finalizers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integer finalizers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hashcombine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HashCombine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hashvalue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HashValue
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../encoding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encoding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jwk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JWT
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/dev_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/codebase_architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codebase Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/globals_and_singletons/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Globals & Singletons
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/abi_layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ABI Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/build_macros/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build Macros
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/metrics_and_observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics & Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../dev_reference/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#crypto" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crypto
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Crypto">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hashing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hashing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hashing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-shot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-shot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#streaming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hmac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HMAC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HMAC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-shot_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-shot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#streaming_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aead-authenticated-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AEAD (authenticated encryption)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#key-derivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key derivation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#asymmetric-signverify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asymmetric (sign/verify)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Asymmetric (sign/verify)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#creating-a-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating a key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signing-and-verifying" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing and verifying
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exporting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#misc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Misc
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Misc">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#randombytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RandomBytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#constanttimeequals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ConstantTimeEquals
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#full-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hash
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hash">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#wyhash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WyHash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fnv1a-fnv1acaseinsensitive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fnv1a / Fnv1aCaseInsensitive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#xxh3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Xxh3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integer-finalizers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integer finalizers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hashcombine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HashCombine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hashvalue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HashValue
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="crypto-hash">Crypto &amp; Hash</h1>
+<p>WFX ships two separate toolkits under this page:</p>
+<ul>
+<li><a href="#crypto"><strong>Crypto</strong></a>: cryptographic hashing, HMAC, AEAD encryption, key derivation, CSPRNG, and constant-time comparison, backed by the engine's crypto ABI (OpenSSL today). Use this for secrets, tokens, passwords, and authenticated encryption.</li>
+<li><a href="#hash"><strong>Hash</strong></a>: fast, non-cryptographic hashing for hash tables, cache keys, checksums, and rolling windows. Runs entirely in user code, no engine call involved.</li>
+</ul>
+<p>Do not use <code>Hash</code> functions for anything security-sensitive: they are not collision or preimage resistant against an adversary. Do not use <code>Crypto</code> hashing where raw speed matters more than cryptographic guarantees; use <code>Hash</code> instead.</p>
+<hr />
+<h2 id="crypto">Crypto</h2>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>All crypto functionality lives directly in the <code>WFX::</code> namespace.</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;wfx/utils/crypto.hpp&gt;</span>
+</code></pre></div>
+</div>
+<h3 id="overview">Overview</h3>
+<p>Every operation crosses into the engine via <code>Core::CryptoApiExt1()</code> and returns a <code>{CryptoStatus, result}</code> pair (or, for streaming APIs, a <code>CryptoStatus</code> alone). Always check the status before touching the result.</p>
+<div class="highlight"><pre><span></span><code><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">CryptoStatus</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">OK</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="n">INVALID_ARG</span><span class="p">,</span><span class="w">      </span><span class="c1">// Null pointer, or key/nonce/output length doesn't match the algo</span>
+<span class="w">    </span><span class="n">BUFFER_TOO_SMALL</span><span class="p">,</span><span class="w"> </span><span class="c1">// Caller-provided output buffer is too small</span>
+<span class="w">    </span><span class="n">AUTH_FAILED</span><span class="p">,</span><span class="w">      </span><span class="c1">// AEAD tag verification failed on decrypt; out is left untouched</span>
+<span class="w">    </span><span class="n">UNSUPPORTED</span><span class="p">,</span><span class="w">      </span><span class="c1">// Backend doesn't provide this algorithm (e.g. Argon2 provider missing)</span>
+<span class="w">    </span><span class="n">INTERNAL_ERROR</span><span class="w">    </span><span class="c1">// Underlying crypto library failure</span>
+<span class="p">};</span>
+
+<span class="kr">inline</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">CryptoOk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CryptoStatus</span><span class="o">::</span><span class="n">OK</span><span class="p">;</span><span class="w"> </span><span class="c1">// provided for convenience</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Zero-length input (e.g. <code>Sha256("")</code>, <code>RandomBytes(0)</code>) is a legitimate empty input, not an error, and returns <code>CryptoOk</code>. <code>INVALID_ARG</code> only fires for a genuinely malformed call, such as a null pointer paired with a nonzero length, or a key/nonce of the wrong size for the algorithm.</p>
+</div>
+<hr />
+<h3 id="hashing">Hashing</h3>
+<h4 id="one-shot">One-shot</h4>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">digest</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Sha256</span><span class="p">(</span><span class="n">data</span><span class="p">);</span><span class="w">   </span><span class="c1">// also: Sha384, Sha512</span>
+</code></pre></div>
+<ul>
+<li><code>data</code> (<code>std::string_view</code>): the bytes to hash</li>
+<li>Returns <code>std::pair&lt;CryptoStatus, Digest&lt;N&gt;&gt;</code>, where <code>N</code> is 32/48/64 for SHA256/384/512</li>
+</ul>
+<p><code>Digest&lt;N&gt;</code> is a small fixed-size wrapper:</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">N</span><span class="o">&gt;</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">Digest</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="p">,</span><span class="w"> </span><span class="n">N</span><span class="o">&gt;</span><span class="w"> </span><span class="n">bytes</span><span class="p">{};</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="nf">View</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// {bytes.data(), len}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">WFX_GET</span><span class="p">(</span><span class="s">"/checksum"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">digest</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Sha256</span><span class="p">(</span><span class="n">req</span><span class="p">.</span><span class="n">Body</span><span class="p">());</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"hash failed"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="n">digest</span><span class="p">.</span><span class="n">View</span><span class="p">());</span><span class="w"> </span><span class="c1">// raw digest bytes, not hex</span>
+<span class="p">});</span>
+</code></pre></div></p>
+<p>The generic form can also be called directly with an explicit algorithm:</p>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">digest</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Hash</span><span class="o">&lt;</span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoHashAlgo</span><span class="o">::</span><span class="n">SHA512</span><span class="o">&gt;</span><span class="p">(</span><span class="n">data</span><span class="p">);</span>
+</code></pre></div>
+<h4 id="streaming">Streaming</h4>
+<p>Use <code>HashStream&lt;Algo&gt;</code> when data arrives incrementally (e.g. across multiple <code>Response::Stream()</code> callback invocations) instead of as one in-memory buffer.</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="n">CryptoHashAlgo</span><span class="w"> </span><span class="n">Algo</span><span class="o">&gt;</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">HashStream</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="n">HashStream</span><span class="p">();</span><span class="w">                    </span><span class="c1">// creates a fresh hash context</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">Valid</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w">     </span><span class="c1">// false if context creation failed</span>
+
+<span class="w">    </span><span class="n">CryptoStatus</span><span class="w"> </span><span class="nf">Update</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">data</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Digest</span><span class="o">&lt;</span><span class="n">DigestLenFor</span><span class="o">&lt;</span><span class="n">Algo</span><span class="o">&gt;</span><span class="p">()</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">Final</span><span class="p">();</span>
+<span class="p">};</span>
+</code></pre></div>
+<ul>
+<li>Move-only, so it's safe to capture inside a <code>Response::Stream()</code> lambda</li>
+<li><code>Update()</code> may be called any number of times</li>
+<li><code>Final()</code> finalizes the digest; the stream should not be updated afterward</li>
+</ul>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="n">WFX</span><span class="o">::</span><span class="n">HashStream</span><span class="o">&lt;</span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoHashAlgo</span><span class="o">::</span><span class="n">SHA256</span><span class="o">&gt;</span><span class="w"> </span><span class="n">hasher</span><span class="p">;</span>
+
+<span class="n">hasher</span><span class="p">.</span><span class="n">Update</span><span class="p">(</span><span class="s">"hello "</span><span class="p">);</span>
+<span class="n">hasher</span><span class="p">.</span><span class="n">Update</span><span class="p">(</span><span class="s">"world"</span><span class="p">);</span>
+
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">digest</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">hasher</span><span class="p">.</span><span class="n">Final</span><span class="p">();</span>
+</code></pre></div></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Always check <code>.Valid()</code> after construction, and check the <code>CryptoStatus</code> from every <code>Update</code>/<code>Final</code> call. A failed context creation degrades every subsequent call to <code>INVALID_ARG</code> instead of crashing.</p>
+</div>
+<hr />
+<h3 id="hmac">HMAC</h3>
+<h4 id="one-shot_1">One-shot</h4>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">mac</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">HmacSha256</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">);</span><span class="w">   </span><span class="c1">// also: HmacSha384, HmacSha512</span>
+</code></pre></div>
+<p>Same <code>Digest&lt;N&gt;</code> result type and status semantics as hashing. Generic form: <code>WFX::Hmac&lt;Algo&gt;(key, data)</code>.</p>
+<h4 id="streaming_1">Streaming</h4>
+<p><code>HmacStream&lt;Algo&gt;</code> mirrors <code>HashStream&lt;Algo&gt;</code>, except the key is bound at construction:</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="n">CryptoHashAlgo</span><span class="w"> </span><span class="n">Algo</span><span class="o">&gt;</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">HmacStream</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">    </span><span class="k">explicit</span><span class="w"> </span><span class="n">HmacStream</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">key</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">bool</span><span class="w"> </span><span class="nf">Valid</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">CryptoStatus</span><span class="w"> </span><span class="nf">Update</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">data</span><span class="p">);</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Digest</span><span class="o">&lt;</span><span class="n">DigestLenFor</span><span class="o">&lt;</span><span class="n">Algo</span><span class="o">&gt;</span><span class="p">()</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">Final</span><span class="p">();</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><strong>Example (verifying a token)</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">mac</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">HmacSha256</span><span class="p">(</span><span class="n">secretKey</span><span class="p">,</span><span class="w"> </span><span class="n">payload</span><span class="p">);</span>
+
+<span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">!</span><span class="n">WFX</span><span class="o">::</span><span class="n">ConstantTimeEquals</span><span class="p">(</span><span class="n">mac</span><span class="p">.</span><span class="n">View</span><span class="p">(),</span><span class="w"> </span><span class="n">providedMac</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">UNAUTHORIZED</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"invalid signature"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<hr />
+<h3 id="aead-authenticated-encryption">AEAD (authenticated encryption)</h3>
+<div class="highlight"><pre><span></span><code><span class="kr">inline</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">CryptoAesGcm</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="n">CryptoAeadAlgo</span><span class="o">::</span><span class="n">AES_256_GCM</span><span class="p">;</span>
+<span class="kr">inline</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">CryptoChaCha20Poly1305</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">CryptoAeadAlgo</span><span class="o">::</span><span class="n">CHACHA20_POLY1305</span><span class="p">;</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">AeadEncrypt</span><span class="p">(</span>
+<span class="w">    </span><span class="n">CryptoAeadAlgo</span><span class="w"> </span><span class="n">algo</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">nonce</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">aad</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">plaintext</span><span class="p">);</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">AeadDecrypt</span><span class="p">(</span>
+<span class="w">    </span><span class="n">CryptoAeadAlgo</span><span class="w"> </span><span class="n">algo</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">nonce</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">aad</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">ciphertext</span><span class="p">);</span>
+</code></pre></div>
+<p><code>key</code>/<code>nonce</code> must match the algorithm's exact size, or <code>INVALID_ARG</code> is returned:</p>
+<table>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th>Key</th>
+<th>Nonce</th>
+<th>Tag</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AES_256_GCM</code></td>
+<td>32 bytes</td>
+<td>12 bytes</td>
+<td>16 bytes</td>
+</tr>
+<tr>
+<td><code>CHACHA20_POLY1305</code></td>
+<td>32 bytes</td>
+<td>12 bytes</td>
+<td>16 bytes</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>aad</code> (additional authenticated data) is authenticated but not encrypted; pass an empty <code>std::string_view</code> if unused</li>
+<li><code>AeadEncrypt</code> output is <code>ciphertext || tag</code> (tag appended, not separate)</li>
+<li><code>AeadDecrypt</code> expects that same <code>ciphertext || tag</code> layout as input</li>
+<li>On <code>AUTH_FAILED</code> (tag mismatch), <code>AeadDecrypt</code> returns an empty vector; unauthenticated plaintext is never exposed, even partially</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>AEAD is one-shot only. Both input and output live fully in memory. Inputs larger than <code>WFX::CryptoAeadMaxSize</code> (64 MiB) are rejected with <code>INVALID_ARG</code> up front, to fail loudly on an accidentally huge body instead of silently costing 2x its RAM. This is a hard cap, not a soft default. Genuinely large payloads need chunked, independently-authenticated framing (e.g. libsodium's <code>crypto_secretstream</code>), which WFX does not currently provide.</p>
+</div>
+<div class="admonition danger">
+<p class="admonition-title">Danger</p>
+<p>Never reuse a <code>(key, nonce)</code> pair for two different messages. For AES-256-GCM and ChaCha20-Poly1305, a random 12-byte nonce is only safe up to roughly 2^32 messages under one key before collision risk becomes non-negligible. High-volume callers should use a counter-based nonce instead of pure randomness.</p>
+</div>
+<p><strong>Example</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">ks</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">]</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">RandomBytes</span><span class="p">(</span><span class="mi">32</span><span class="p">);</span><span class="w"> </span><span class="c1">// AES-256-GCM key</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">ns</span><span class="p">,</span><span class="w"> </span><span class="n">nonce</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">RandomBytes</span><span class="p">(</span><span class="mi">12</span><span class="p">);</span><span class="w"> </span><span class="c1">// AES-256-GCM nonce</span>
+
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">es</span><span class="p">,</span><span class="w"> </span><span class="n">ciphertext</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">AeadEncrypt</span><span class="p">(</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoAesGcm</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="p">(</span><span class="k">reinterpret_cast</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">key</span><span class="p">.</span><span class="n">data</span><span class="p">()),</span><span class="w"> </span><span class="n">key</span><span class="p">.</span><span class="n">size</span><span class="p">()),</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="p">(</span><span class="k">reinterpret_cast</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">nonce</span><span class="p">.</span><span class="n">data</span><span class="p">()),</span><span class="w"> </span><span class="n">nonce</span><span class="p">.</span><span class="n">size</span><span class="p">()),</span>
+<span class="w">    </span><span class="cm">/* aad */</span><span class="w"> </span><span class="s">""</span><span class="p">,</span><span class="w"> </span><span class="n">plaintext</span><span class="p">);</span>
+
+<span class="k">if</span><span class="p">(</span><span class="n">es</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// handle failure</span>
+<span class="p">}</span>
+
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">ds</span><span class="p">,</span><span class="w"> </span><span class="n">decrypted</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">AeadDecrypt</span><span class="p">(</span>
+<span class="w">    </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoAesGcm</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="p">(</span><span class="k">reinterpret_cast</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">key</span><span class="p">.</span><span class="n">data</span><span class="p">()),</span><span class="w"> </span><span class="n">key</span><span class="p">.</span><span class="n">size</span><span class="p">()),</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="p">(</span><span class="k">reinterpret_cast</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">nonce</span><span class="p">.</span><span class="n">data</span><span class="p">()),</span><span class="w"> </span><span class="n">nonce</span><span class="p">.</span><span class="n">size</span><span class="p">()),</span>
+<span class="w">    </span><span class="cm">/* aad */</span><span class="w"> </span><span class="s">""</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="p">(</span><span class="k">reinterpret_cast</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">ciphertext</span><span class="p">.</span><span class="n">data</span><span class="p">()),</span><span class="w"> </span><span class="n">ciphertext</span><span class="p">.</span><span class="n">size</span><span class="p">()));</span>
+
+<span class="k">if</span><span class="p">(</span><span class="n">ds</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// tag mismatch or malformed input, treat as tampered</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<hr />
+<h3 id="key-derivation">Key derivation</h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">Pbkdf2</span><span class="p">(</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">password</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">salt</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">iterations</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">outLen</span><span class="p">);</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">Hkdf</span><span class="p">(</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">ikm</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">salt</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">info</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">outLen</span><span class="p">);</span>
+
+<span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">Argon2id</span><span class="p">(</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">password</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">salt</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">iterations</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">memoryKb</span><span class="p">,</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">parallelism</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">outLen</span><span class="p">);</span>
+</code></pre></div>
+<ul>
+<li><strong><code>Pbkdf2</code></strong>: PBKDF2-HMAC-SHA256 (RFC 8018). Writes exactly <code>outLen</code> bytes.</li>
+<li><strong><code>Hkdf</code></strong>: HKDF-SHA256, extract-then-expand (RFC 5869). Writes exactly <code>outLen</code> bytes. <code>info</code> may be empty.</li>
+<li><strong><code>Argon2id</code></strong>: password hashing (RFC 9106). <code>memoryKb</code> is the m_cost parameter in KiB, <code>iterations</code> is t_cost, <code>parallelism</code> is the lane count. Returns <code>UNSUPPORTED</code> if the backend's Argon2 provider isn't available.</li>
+</ul>
+<p>All three return an empty vector on any non-<code>OK</code> status.</p>
+<p><strong>Example (deriving a session key from a shared secret)</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">sessionKey</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Hkdf</span><span class="p">(</span><span class="n">sharedSecret</span><span class="p">,</span><span class="w"> </span><span class="n">salt</span><span class="p">,</span><span class="w"> </span><span class="s">"session-v1"</span><span class="p">,</span><span class="w"> </span><span class="mi">32</span><span class="p">);</span>
+</code></pre></div></p>
+<hr />
+<h3 id="asymmetric-signverify">Asymmetric (sign/verify)</h3>
+<p><code>AsymKey</code> is a move-only handle around a public or private key, used for signing and verifying only. There is no RSA-OAEP encryption or ECDH key agreement in this API; if you need that, you're outside what this wrapper covers.</p>
+<div class="highlight"><pre><span></span><code><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">CryptoAsymKeyType</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">RSA</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">EC_P256</span><span class="p">,</span><span class="w"> </span><span class="n">EC_P384</span><span class="p">,</span><span class="w"> </span><span class="n">ED25519</span><span class="w"> </span><span class="p">};</span>
+
+<span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">CryptoAsymScheme</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">RS256</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">RS384</span><span class="p">,</span><span class="w"> </span><span class="n">RS512</span><span class="p">,</span><span class="w"> </span><span class="c1">// RSASSA-PKCS1-v1_5</span>
+<span class="w">    </span><span class="n">PS256</span><span class="p">,</span><span class="w"> </span><span class="n">PS384</span><span class="p">,</span><span class="w"> </span><span class="n">PS512</span><span class="p">,</span><span class="w">     </span><span class="c1">// RSASSA-PSS, salt length == digest length</span>
+<span class="w">    </span><span class="n">ES256</span><span class="p">,</span><span class="w"> </span><span class="n">ES384</span><span class="p">,</span><span class="w">            </span><span class="c1">// ECDSA P-256/P-384, raw fixed-width R||S</span>
+<span class="w">    </span><span class="n">ED25519</span><span class="w">                  </span><span class="c1">// Pure EdDSA (RFC 8032), signs the whole message directly</span>
+<span class="p">};</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Scheme</th>
+<th>Digest</th>
+<th>Required key type</th>
+<th>Signature length</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RS256</code> / <code>PS256</code></td>
+<td>SHA-256</td>
+<td>RSA</td>
+<td>modulus size (e.g. 256 bytes for a 2048-bit key)</td>
+</tr>
+<tr>
+<td><code>RS384</code> / <code>PS384</code></td>
+<td>SHA-384</td>
+<td>RSA</td>
+<td>modulus size</td>
+</tr>
+<tr>
+<td><code>RS512</code> / <code>PS512</code></td>
+<td>SHA-512</td>
+<td>RSA</td>
+<td>modulus size</td>
+</tr>
+<tr>
+<td><code>ES256</code></td>
+<td>SHA-256</td>
+<td>EC, P-256 curve specifically</td>
+<td>64 bytes, fixed</td>
+</tr>
+<tr>
+<td><code>ES384</code></td>
+<td>SHA-384</td>
+<td>EC, P-384 curve specifically</td>
+<td>96 bytes, fixed</td>
+</tr>
+<tr>
+<td><code>ED25519</code></td>
+<td>none, hashed internally</td>
+<td>Ed25519</td>
+<td>64 bytes, fixed</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<ul>
+<li>Every <code>Sign</code>/<code>Verify</code> call checks the key's actual type against the requested scheme before touching the signature at all. A mismatch, e.g. <code>ES256</code> against an RSA key, or an EC key on the wrong curve, returns <code>CryptoInvalidArg</code> immediately instead of producing or accepting a bogus signature.</li>
+<li><code>ES256</code>/<code>ES384</code> signatures are raw fixed-width <code>R || S</code> (64 bytes for P-256, 96 for P-384), not OpenSSL's default ASN.1 DER <code>ECDSA-Sig-Value</code>. This isn't a JOSE-specific accommodation: RSA signatures here were never DER-wrapped either, and Ed25519 has no DER form anywhere. Raw, fixed-width output is the consistent choice across every scheme, DER is the extra X.509/CMS-era wrapper OpenSSL defaults to.</li>
+</ul>
+</div>
+<div class="admonition danger">
+<p class="admonition-title">Do not call <code>Load</code>/<code>Generate</code> per request</p>
+<p>RSA key generation is CPU-heavy (hundreds of milliseconds at 2048 bits, worse at 3072/4096), and even PEM/DER parsing in <code>Load</code> is not free. Calling either one inside a route handler means paying that cost on every request. Generate or load the key once, e.g. at startup, and hold onto the resulting <code>AsymKey</code> (a global, a value captured by a long-lived closure, or a cache keyed by <code>kid</code> for the JWKS case, see <a href="../jwk/">JWK</a>) for every subsequent <code>Sign</code>/<code>Verify</code> call. <code>Sign</code> and <code>Verify</code> themselves are cheap enough to call per request once the key already exists.</p>
+</div>
+<h4 id="creating-a-key">Creating a key</h4>
+<div class="highlight"><pre><span></span><code><span class="k">static</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">AsymKey</span><span class="o">&gt;</span><span class="w"> </span><span class="n">Load</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">keyData</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">isPrivate</span><span class="p">);</span>
+<span class="k">static</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">AsymKey</span><span class="o">&gt;</span><span class="w"> </span><span class="n">Generate</span><span class="p">(</span><span class="n">CryptoAsymKeyType</span><span class="w"> </span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">rsaBits</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2048</span><span class="p">);</span>
+<span class="k">static</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">AsymKey</span><span class="o">&gt;</span><span class="w"> </span><span class="n">FromRsaPublic</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">e</span><span class="p">);</span>
+<span class="k">static</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">AsymKey</span><span class="o">&gt;</span><span class="w"> </span><span class="n">FromEcPublic</span><span class="p">(</span><span class="n">CryptoAsymKeyType</span><span class="w"> </span><span class="n">curve</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">y</span><span class="p">);</span>
+</code></pre></div>
+<ul>
+<li><strong><code>Load</code></strong>: parses PEM or DER (auto-detected from the leading bytes), private or public per <code>isPrivate</code>. Returns <code>CryptoInternalError</code> on any parse failure.</li>
+<li><strong><code>Generate</code></strong>: creates a fresh keypair. <code>rsaBits</code> only applies to <code>CryptoAsymKeyType::RSA</code> (ignored for the other three types) and only <code>2048</code>/<code>3072</code>/<code>4096</code> are accepted; anything else fails the same as a parse error. Returns <code>CryptoInternalError</code> on failure, same status as <code>Load</code>.</li>
+<li><strong><code>FromRsaPublic</code></strong> / <strong><code>FromEcPublic</code></strong>: build a public-only key straight from raw big-endian integer components (<code>n</code>/<code>e</code> for RSA, <code>x</code>/<code>y</code> for EC), no PEM/DER involved at all. This is what you want when a key arrives as raw JWKS fields rather than a certificate or PEM blob. Returns <code>CryptoInvalidArg</code> on failure, <strong>not</strong> <code>CryptoInternalError</code>, a different status than <code>Load</code>/<code>Generate</code>, since a malformed field here is a caller input error, not a backend failure.</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Every public key this API constructs, via <code>Load(isPrivate = false)</code>, <code>FromRsaPublic</code>, or <code>FromEcPublic</code>, is run through OpenSSL's <code>EVP_PKEY_public_check</code> before the handle is considered valid. A structurally invalid public key (e.g. an EC point not actually on the curve) fails construction outright instead of producing a handle that only fails later, at sign/verify time. This matters directly when the key material is attacker-reachable, e.g. sourced from a JWKS endpoint.</p>
+</div>
+<p><strong>Example (generate once, cache, reuse across requests)</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Module-scope: paid once at process start, never inside a handler</span>
+<span class="k">static</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">AsymKey</span><span class="w"> </span><span class="n">g_signingKey</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[]()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">AsymKey</span><span class="o">::</span><span class="n">Generate</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoEd25519Key</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// Fail fast at startup</span>
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span>
+<span class="w">        </span><span class="n">WFX</span><span class="o">::</span><span class="n">LogFatal</span><span class="p">(</span><span class="s">"generate failed"</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">key</span><span class="p">);</span>
+<span class="p">}();</span>
+
+<span class="n">WFX_POST</span><span class="p">(</span><span class="s">"/tokens/issue"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">sig</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">g_signingKey</span><span class="p">.</span><span class="n">Sign</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoEd25519</span><span class="p">,</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">Body</span><span class="p">());</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"sign failed"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HexEncode</span><span class="p">({</span><span class="k">reinterpret_cast</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">sig</span><span class="p">.</span><span class="n">data</span><span class="p">()),</span><span class="w"> </span><span class="n">sig</span><span class="p">.</span><span class="n">size</span><span class="p">()}));</span>
+<span class="p">});</span>
+</code></pre></div></p>
+<p><strong>Example (loading a configured PEM private key at startup)</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">AsymKey</span><span class="o">::</span><span class="n">Load</span><span class="p">(</span><span class="n">ReadFile</span><span class="p">(</span><span class="s">"private_key.pem"</span><span class="p">),</span><span class="w"> </span><span class="cm">/* isPrivate */</span><span class="w"> </span><span class="nb">true</span><span class="p">);</span>
+
+<span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// malformed PEM/DER, or the file wasn't actually a private key</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Example (building a public key straight from JWKS fields)</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// n/e already base64url-decoded, see Encoding and JWK</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">pubKey</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">AsymKey</span><span class="o">::</span><span class="n">FromRsaPublic</span><span class="p">(</span>
+<span class="w">    </span><span class="p">{</span><span class="k">reinterpret_cast</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">n</span><span class="p">.</span><span class="n">data</span><span class="p">()),</span><span class="w"> </span><span class="n">n</span><span class="p">.</span><span class="n">size</span><span class="p">()},</span>
+<span class="w">    </span><span class="p">{</span><span class="k">reinterpret_cast</span><span class="o">&lt;</span><span class="kt">char</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">e</span><span class="p">.</span><span class="n">data</span><span class="p">()),</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">size</span><span class="p">()}</span>
+<span class="p">);</span>
+
+<span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// malformed n/e, or the resulting point failed EVP_PKEY_public_check</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<h4 id="signing-and-verifying">Signing and verifying</h4>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">Sign</span><span class="p">(</span><span class="n">CryptoAsymScheme</span><span class="w"> </span><span class="n">scheme</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">msg</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+<span class="n">CryptoStatus</span><span class="w"> </span><span class="nf">Verify</span><span class="p">(</span><span class="n">CryptoAsymScheme</span><span class="w"> </span><span class="n">scheme</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">sig</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+</code></pre></div>
+<ul>
+<li><strong><code>Sign</code></strong>: one-shot only, no streaming variant, for any scheme. Ed25519 in particular cannot be streamed at all (RFC 8032 signs the whole message in a single call), so there's no incremental signing API here regardless of scheme. Requires a private key; <code>CryptoInvalidArg</code> if the key/scheme don't match.</li>
+<li><strong><code>Verify</code></strong>: <code>CryptoOk</code> if the signature verifies, <code>CryptoAuthFailed</code> if it's well-formed but cryptographically rejected (tampered message, wrong key, or a signature that just doesn't verify), <code>CryptoInvalidArg</code> for a key/scheme mismatch or a malformed signature length (e.g. an <code>ES256</code> signature that isn't exactly 64 bytes gets rejected before verification is even attempted).</li>
+</ul>
+<p><strong>Example (verifying an externally-issued signature against a loaded public key)</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pubKey</span><span class="p">.</span><span class="n">Verify</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoRs256</span><span class="p">,</span><span class="w"> </span><span class="n">payload</span><span class="p">,</span><span class="w"> </span><span class="n">signature</span><span class="p">);</span>
+
+<span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoAuthFailed</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">UNAUTHORIZED</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"signature rejected"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">BAD_REQUEST</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"malformed signature"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<h4 id="exporting">Exporting</h4>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">ExportPublic</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">ExportPrivate</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+</code></pre></div>
+<p>Both return PEM-encoded key material. <code>ExportPrivate</code> returns <code>CryptoInvalidArg</code> if the handle only holds public key material, e.g. one built via <code>FromRsaPublic</code>/<code>FromEcPublic</code>, or <code>Load</code>ed with <code>isPrivate = false</code>.</p>
+<p><strong>Example (exporting a generated public key for distribution)</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">pem</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">g_signingKey</span><span class="p">.</span><span class="n">ExportPublic</span><span class="p">();</span>
+<span class="c1">// hand `pem` to whoever needs to verify signatures from this key</span>
+</code></pre></div></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Loading keys straight out of a JWKS document by <code>kid</code>, instead of hand-decoding <code>n</code>/<code>e</code>/<code>x</code>/<code>y</code> yourself, is covered by <a href="../jwk/">JWK</a>, which wraps <code>FromRsaPublic</code>/<code>FromEcPublic</code> for exactly that case.</p>
+</div>
+<hr />
+<h3 id="misc">Misc</h3>
+<h4 id="randombytes"><code>RandomBytes</code></h4>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">pair</span><span class="o">&lt;</span><span class="n">CryptoStatus</span><span class="p">,</span><span class="w"> </span><span class="n">Vector</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="n">RandomBytes</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">len</span><span class="p">);</span>
+</code></pre></div>
+<p>Fills a vector with cryptographically secure random bytes (CSPRNG). <code>len == 0</code> returns <code>CryptoOk</code> and an empty vector.</p>
+<h4 id="constanttimeequals"><code>ConstantTimeEquals</code></h4>
+<div class="highlight"><pre><span></span><code><span class="kt">bool</span><span class="w"> </span><span class="nf">ConstantTimeEquals</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">b</span><span class="p">);</span>
+</code></pre></div>
+<p>Timing-safe byte comparison for secrets (MACs, tokens, session IDs). Length is checked first and is not itself treated as secret, since comparing lengths directly before the byte-by-byte comparison is standard practice. Only the equal-length byte comparison runs in constant time.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>Never compare secrets with <code>==</code>, <code>std::string_view::compare</code>, or <code>memcmp</code>. All of these can leak timing information proportional to how many leading bytes match. Always use <code>ConstantTimeEquals</code> for MACs, tokens, and any other secret comparison.</p>
+</div>
+<hr />
+<h3 id="full-example">Full example</h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;wfx/http.hpp&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;wfx/utils/crypto.hpp&gt;</span>
+
+<span class="n">WFX_POST</span><span class="p">(</span><span class="s">"/login"</span><span class="p">,</span><span class="w"> </span><span class="p">[](</span><span class="n">WFX</span><span class="o">::</span><span class="n">Request</span><span class="w"> </span><span class="n">req</span><span class="p">,</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">Response</span><span class="w"> </span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">mac</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">HmacSha256</span><span class="p">(</span><span class="n">GetServerSecret</span><span class="p">(),</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">Body</span><span class="p">());</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">CryptoOk</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"crypto error"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">provided</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">req</span><span class="p">.</span><span class="n">Header</span><span class="p">(</span><span class="s">"X-Signature"</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="n">WFX</span><span class="o">::</span><span class="n">ConstantTimeEquals</span><span class="p">(</span><span class="n">mac</span><span class="p">.</span><span class="n">View</span><span class="p">(),</span><span class="w"> </span><span class="n">provided</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">res</span><span class="p">.</span><span class="n">Status</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">HttpStatus</span><span class="o">::</span><span class="n">UNAUTHORIZED</span><span class="p">).</span><span class="n">SendText</span><span class="p">(</span><span class="s">"bad signature"</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">res</span><span class="p">.</span><span class="n">SendText</span><span class="p">(</span><span class="s">"ok"</span><span class="p">);</span>
+<span class="p">});</span>
+</code></pre></div>
+<hr />
+<h2 id="hash">Hash</h2>
+<p>Fast, non-cryptographic hashing for hash tables, cache keys, checksums, and rolling windows. Everything here runs entirely in user code, with no engine ABI call involved, and none of it is safe against an adversary who controls the input. Do not use it for anything security-sensitive; use <a href="#crypto">Crypto</a> hashing for that instead.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>All hash functionality lives directly in the <code>WFX::</code> namespace.</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;wfx/utils/hash.hpp&gt;</span>
+</code></pre></div>
+</div>
+<h3 id="wyhash"><code>WyHash</code></h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">WyHash</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">seed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</code></pre></div>
+<p>General-purpose, high-quality, high-throughput hash. The default choice when you just need a good hash of some bytes: hash-map keys, cache keys, deduplication.</p>
+<h3 id="fnv1a-fnv1acaseinsensitive"><code>Fnv1a</code> / <code>Fnv1aCaseInsensitive</code></h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">Fnv1a</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">Fnv1aCaseInsensitive</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</code></pre></div>
+<p>FNV-1a. Simpler and slower than <code>WyHash</code>, but constexpr-friendly for compile-time string hashing. <code>Fnv1aCaseInsensitive</code> folds ASCII case before hashing (<code>'A'-'Z'</code> to lowercase), useful for header names and other case-insensitive keys.</p>
+<h3 id="xxh3"><code>Xxh3</code></h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">Xxh3</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string_view</span><span class="w"> </span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">seed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</code></pre></div>
+<p>XXH3 (64-bit variant). One of the most widely-deployed non-cryptographic hashes in production infrastructure today (Zstd, LZ4, RocksDB, the Linux kernel), with excellent throughput and avalanche behavior across every input size from a few bytes to gigabytes. Reach for this over <code>WyHash</code> when byte-for-byte compatibility with the reference XXH3 algorithm's output matters, e.g. matching hashes with another XXH3 implementation across a network boundary.</p>
+<h3 id="integer-finalizers">Integer finalizers</h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="nf">Murmur3Mix32</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">Murmur3Mix64</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+
+<span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="nf">HashInt32</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// == Murmur3Mix32(x)</span>
+<span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">HashInt64</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">x</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span><span class="w"> </span><span class="c1">// == Murmur3Mix64(x)</span>
+</code></pre></div>
+<p>MurmurHash3's integer finalizer (avalanche mixer). Use these to spread out already-numeric keys (IDs, counters) that would otherwise cluster in a hash table. <code>HashInt32</code>/<code>HashInt64</code> are plain aliases of the <code>Murmur3Mix*</code> functions.</p>
+<h3 id="hashcombine"><code>HashCombine</code></h3>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="nf">HashCombine</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">a</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</code></pre></div>
+<p>Combines two hashes into one (boost::hash_combine-style, 64-bit). Use it to build a composite hash from multiple fields:</p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">h</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">HashCombine</span><span class="p">(</span><span class="n">WFX</span><span class="o">::</span><span class="n">WyHash</span><span class="p">(</span><span class="n">name</span><span class="p">),</span><span class="w"> </span><span class="n">WFX</span><span class="o">::</span><span class="n">HashInt64</span><span class="p">(</span><span class="n">id</span><span class="p">));</span>
+</code></pre></div>
+<h3 id="hashvalue"><code>HashValue</code></h3>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="o">&gt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">HashValue</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">T</span><span class="o">&amp;</span><span class="w"> </span><span class="n">val</span><span class="p">)</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</code></pre></div>
+<p>Hashes any trivially copyable value by its raw bytes (<code>static_assert</code>s on <code>std::is_trivially_copyable_v&lt;T&gt;</code>). Useful for hashing PODs/structs directly without hand-rolling field-by-field combination.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Altered-commits
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "content.code.copy", "content.tabs.link"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
