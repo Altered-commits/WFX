@@ -4,6 +4,7 @@
 #ifndef WFX_INC_HTTP_USER_RESPONSE_HPP
 #define WFX_INC_HTTP_USER_RESPONSE_HPP
 
+#include "async/response.hpp"
 #include "core/core.hpp"
 #include "shared/json/json_object_fwd.hpp"
 #include "shared/apis/http_api.hpp"
@@ -132,6 +133,26 @@ public: // Main flow
     void Commit()
     {
         Core::HttpApiExt1()->commit(backend_);
+    }
+
+    // Opens chunked-streaming mode. Call before any Write()/WriteBodyData() on this response,
+    // then loop Write() + co_await Flush(), and finish with co_await FlushEnd()
+    void FlushStart()
+    {
+        Core::HttpApiExt1()->flushStart(backend_);
+    }
+
+    // Sends whatever's been written to the body since FlushStart()/the last Flush() as one
+    // chunk, then resets the buffer. Suspends only if the socket isn't immediately writable
+    Async::FlushAwaitable Flush()
+    {
+        return Async::FlushAwaitable{false};
+    }
+
+    // Same as Flush(), but also emits the terminating chunk and finalizes the connection
+    Async::FlushAwaitable FlushEnd()
+    {
+        return Async::FlushAwaitable{true};
     }
 
 public: // Sugar syntax

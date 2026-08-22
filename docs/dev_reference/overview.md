@@ -31,8 +31,10 @@ When user code calls `WFX::LogInfo(...)` or registers a route, it calls through 
 
 ## Where to go next
 
+- **Development Setup** -> building, formatting, static analysis, testing, and docs locally
 - **Architecture** -> startup flow, request lifecycle, and subsystem relationships
 - **Codebase Structure** -> folder layout and where to find things
 - **Globals and Singletons** -> the `Get...()` functions, their lifetimes and ownership
 - **ABI Layer** -> how to read and extend the API structs
 - **Metrics and Observability** -> how `MetricTracer` works
+- **Testing** -> the audit suites and how to run them

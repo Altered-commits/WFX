@@ -214,7 +214,8 @@ It provides a lightweight user-facing interface for:
 - adding response headers,
 - writing response bodies incrementally,
 - sending files and templates,
-- and registering streaming response generators.
+- registering streaming response generators,
+- and awaitable outbound chunk flushing.
 
 `Response` itself does not own the underlying response state and acts only as a thin wrapper around engine-managed resources.
 Internally, all operations are forwarded to the registered HTTP backend APIs.
@@ -249,6 +250,7 @@ Response operations write into the engine-managed response pipeline buffers and 
     - `SendFile(...)`
     - `SendTemplate(...)`
     - `Stream(...)`
+    - `FlushStart(...)`
 
     Once a body operation begins, status and every kind of header become immutable. Once
     committed, the entire response becomes immutable.
@@ -280,6 +282,11 @@ Response operations write into the engine-managed response pipeline buffers and 
     ```cpp
     res.Commit();
     res.Commit(); // INVALID
+    ```
+
+    ```cpp
+    res.Write("Hello");
+    res.FlushStart(); // INVALID: FlushStart() must be the very first body operation
     ```
 
 !!! important "Status line has no reason phrase"
@@ -621,3 +628,93 @@ Below are the primary methods exposed by `Response`.
 
     !!! note
         Stream buffer capacity is controlled by the `[Network] send_buffer_max` configuration value in `wfx.toml`.
+
+- **`FlushStart()`**  
+    Opens the response body in awaitable outbound-flush mode. `Transfer-Encoding: chunked` is sent
+    right away, and every `Write(...)` call from here on only stages data locally until an
+    explicit `Flush()` actually sends it.
+
+    This is the awaitable counterpart to `Stream(...)`. Both send chunked data incrementally, but
+    `Stream(...)` hands the engine a generator callback that it drives *after* the route handler
+    has already returned, while `Flush()`/`FlushEnd()` send real bytes *from inside* the handler
+    coroutine, so a handler can freely `co_await` something else, an upstream fetch, a database
+    row batch, between rounds. See [Async](async.md) for `co_await`/`WFX::Coro` basics.
+
+    !!! important
+        `FlushStart()` must be the very first body operation, before any `Write(...)` call.
+        Calling it after the body has already started some other way is a contract violation:
+        `Content-Length` and `Transfer-Encoding: chunked` are mutually exclusive response framings,
+        and that choice has to be made before the first body byte goes out, there is no way to
+        insert a header retroactively without moving already-written body bytes.
+
+    **Example**:
+    ```cpp
+    WFX_GET("/export.csv", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+        res.Header("Content-Type", "text/csv");
+        res.FlushStart();
+
+        res.Write("id,name\r\n");
+        // ... more Write(...) + Flush()/FlushEnd() below
+        co_return;
+    });
+    ```
+
+- **`Flush()`** *(awaitable)*  
+    Sends whatever has been `Write(...)`ten since the last `Flush()`/`FlushEnd()` as one HTTP
+    chunk, then resets the body buffer so the next round of `Write(...)` calls starts clean.
+
+    Must be `co_await`ed, and only makes sense after `FlushStart()`. It suspends the calling
+    coroutine only if the socket isn't immediately writable, real backpressure from the client,
+    not a fixed delay, otherwise it resumes in the same frame without ever yielding.
+
+    Calling `Flush()` with nothing written since the last round is a harmless no-op: nothing goes
+    out, and the same reserved framing stays ready for whenever real data eventually shows up.
+
+    **Example** (streaming a database export without buffering the whole result set):
+    ```cpp
+    WFX_GET("/export.csv", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+        res.Header("Content-Type", "text/csv");
+        res.FlushStart();
+        res.Write("id,name\r\n");
+
+        auto stream = Db.Stream(100, "SELECT id, name FROM users ORDER BY id");
+        while(true) {
+            auto chunk = co_await stream.Next();
+            if(chunk.status != WFX::EpOk || chunk.done)
+                break;
+
+            for(std::uint32_t i = 0; i < chunk.data->RowCount(); i++) {
+                auto row = chunk.data->At(i);
+                res.Write(row.Get<std::int64_t>("id"))
+                    .Write(",")
+                    .Write(row.Get<std::string_view>("name"))
+                    .Write("\r\n");
+            }
+
+            co_await res.Flush();
+        }
+
+        co_await res.FlushEnd();
+        co_return;
+    });
+    ```
+
+    !!! tip "Why this stays memory-bounded"
+        Each round only ever holds one batch's worth of formatted text in memory. `Flush()`
+        suspends the coroutine until the client has actually drained the previous round before the
+        next `stream.Next()` pulls more rows, so a slow client naturally throttles how fast rows
+        get fetched from the database. Peak memory is bounded by batch size, not by result-set
+        size, which is what lets a multi-gigabyte export stream to a browser download in a fixed,
+        small amount of RAM.
+
+- **`FlushEnd()`** *(awaitable)*  
+    Same as `Flush()`, sends whatever's pending as one last chunk, but also emits the chunked
+    terminator and finalizes the response. Call this once, in place of `Commit()`, right after the
+    loop that calls `Flush()` finishes.
+
+    !!! danger
+        If a handler that called `FlushStart()` returns without ever calling `FlushEnd()`, WFX
+        still terminates the chunked body cleanly on your behalf, the client never hangs or sees a
+        malformed response, but the response ends up silently truncated wherever the handler
+        stopped. This is a bug in the handler, not something to rely on: always
+        `co_await res.FlushEnd()` once the loop is done, even on an error path.

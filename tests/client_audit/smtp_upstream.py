@@ -2,16 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Altered-commits
 #
-# Hostile SMTP mock upstream for the WFX smtp_audit
+# Hostile SMTP mock upstream for the WFX client audit
 #
 # One persona per fixed port, each driving WFX::SmtpEndpoint's onConnect handshake
-# (EHLO -> STARTTLS -> re-EHLO -> AUTH) and transaction phase (MAIL FROM / RCPT TO /
-# DATA / body) down a specific hostile path. A client that ever authenticates over
-# plaintext, trusts pre-TLS bytes post-upgrade, or hangs/OOMs on a hostile response
-# has a real bug - see smtp_audit.py for what each persona proves.
+# (EHLO, STARTTLS, re-EHLO, AUTH) and its transaction phase (MAIL FROM, RCPT TO,
+# DATA, body) down one specific hostile path. A client that ever authenticates over
+# plaintext, trusts pre-TLS bytes after the upgrade, or hangs on a hostile response
+# has a real bug. See client_audit.py for what each persona proves.
 #
-# Control plane: a small line-based protocol on a dedicated port (not HTTP, this mock
-# speaks raw SMTP on its real ports) - "STATS <name>\n" -> one JSON line back.
+# Control plane: a small line-based protocol on a dedicated port, not HTTP, since
+# this mock speaks raw SMTP on its real ports. "STATS <name>\n" answers with one
+# JSON line.
 
 import argparse
 import base64
@@ -35,7 +36,7 @@ def _record_body(name, body):
     with _lock:
         _stat_init(name)["bodies"].append(body.decode("latin-1", "replace"))
 
-# vvv Per-connection SMTP state machine vvv
+# Per-connection SMTP state machine
 
 class ConnClosed(Exception):
     pass
@@ -84,7 +85,8 @@ def _send(sock, data, opts):
 
 def _send_multiline(sock, opts, code, lines, wrong_code=None):
     """RFC 5321 4.2.1 multi-line response: '-' on every line but the last, ' ' on the last.
-    wrong_code, if set, is used for exactly one continuation line - protocol-violation probe."""
+    wrong_code, when set, replaces the code on exactly one continuation line, which is
+    the probe for a client that reads a spliced response as one reply."""
     for i, text in enumerate(lines):
         is_last = i == len(lines) - 1
         sep = b" " if is_last else b"-"
@@ -127,8 +129,9 @@ def serve_conn(raw_sock, name, opts):
         _send_multiline(sock, opts, b"250", caps)
 
         if not opts.get("starttls", True):
-            # No STARTTLS offered. A correct client must never send AUTH/MAIL here - if it
-            # does anyway, refuse everything so a bug can't accidentally look like success
+            # No STARTTLS is offered, so a correct client must never send AUTH or MAIL
+            # here. One that does anyway is refused at every command, so a bug in it cannot
+            # accidentally look like success
             while True:
                 line = reader.read_line()
                 _send(sock, b"530 5.7.0 Must issue a STARTTLS command first\r\n", opts)
@@ -164,7 +167,8 @@ def serve_conn(raw_sock, name, opts):
             sock.close()
             return
 
-        # 4. Re-EHLO (post-TLS) - the only capability list a correct client may trust
+        # 4. Re-EHLO after the upgrade, whose capability list is the only one a correct
+        # client may trust
         line = reader.read_line()
         if not line.upper().startswith(b"EHLO"):
             return
@@ -232,7 +236,8 @@ def serve_conn(raw_sock, name, opts):
 
             silent_after = opts.get("silent_after")
             if silent_after and upper.startswith(silent_after.encode()):
-                # Goes quiet forever - only the client's own requestTimeoutSeconds ends this
+                # Goes quiet forever, leaving the client's own requestTimeoutSeconds to
+                # end it
                 time.sleep(3600)
                 return
 
@@ -276,7 +281,7 @@ def listener(host, port, name, opts):
             break
         threading.Thread(target=serve_conn, args=(conn, name, opts), daemon=True).start()
 
-# vvv Control plane: line-based, not HTTP (the real ports speak raw SMTP) vvv
+# Control plane: line-based, not HTTP, since the real ports speak raw SMTP
 
 def handle_control(conn):
     try:

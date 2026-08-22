@@ -50,7 +50,7 @@ Install required tools on common Linux distributions:
 
 ---
 
-## Install via Script (Recommended)
+## Install
 
 The install script handles everything: cloning, building, and adding `wfx` to your PATH.
 
@@ -92,9 +92,6 @@ your home directory:
 ~/.wfx/daemons/     # PID files for running servers (managed by wfx itself)
 ```
 
-See [Local install](#local-install) below for how `--local-debug`/`--local-release`
-(contributor mode) differ.
-
 It also appends the following line to your shell config (`~/.bashrc` on Linux):
 
 ```bash
@@ -103,79 +100,10 @@ export PATH="$HOME/.wfx/bin:$PATH"
 
 That is all it touches. No system directories, no sudo required after dependencies are installed.
 
-### Local install
-
-If you already have the source code cloned and want to build from it directly (the path
-contributors use), there are two local modes, both making `~/.wfx/src` a **symlink** to your
-checkout and building directly into its own `build/` directory:
-
-```bash
-# Dev mode: Debug build (full symbols, no optimization), ASan + UBSan on
-# This is what you want day to day, bugs surface immediately
-# Noticeably slower than a real install
-bash scripts/install.sh --local-debug
-
-# Perf-testing mode: same optimized, sanitizer-free settings as an-
-# -end-user install, just built from your own checkout
-bash scripts/install.sh --local-release
-```
-
-Either way the resulting binary is moved to `~/.wfx/bin/wfx`, same as the end-user path. Re-run
-whichever of the two you last used after pulling/editing to refresh the PATH binary, or just run
-`./wfx` directly from the checkout root while iterating. Switching between the two modes
-reconfigures and recompiles whatever the flag change touches, they share the same `build/`
-directory.
-
----
-
-## Manual Install
-
-If you prefer not to use the script:
-
-**1. Create the directory structure**
-
-```bash
-mkdir -p ~/.wfx/bin ~/.wfx/src ~/.wfx/daemons
-```
-
-**2. Clone the repository**
-
-```bash
-git clone https://github.com/Altered-commits/WFX.git ~/.wfx/src
-```
-
-**3. Build**
-
-```bash
-# With Ninja (recommended)
-cmake -S ~/.wfx/src -B ~/.wfx/src/build_install -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build ~/.wfx/src/build_install
-
-# Without Ninja
-cmake -S ~/.wfx/src -B ~/.wfx/src/build_install -DCMAKE_BUILD_TYPE=Release
-cmake --build ~/.wfx/src/build_install
-```
-
-**4. Copy the binary**
-
-```bash
-cp ~/.wfx/src/wfx ~/.wfx/bin/wfx
-chmod +x ~/.wfx/bin/wfx
-```
-
-**5. Add to PATH**
-
-Add the following line to your `~/.bashrc` or `~/.profile`:
-
-```bash
-export PATH="$HOME/.wfx/bin:$PATH"
-```
-
-Then reload:
-
-```bash
-source ~/.bashrc
-```
+!!! tip "Contributing to WFX?"
+    `install.sh` also has `--local-debug`/`--local-release` flags that build straight from a
+    cloned checkout instead of a fresh clone, that's the contributor path. See
+    [Development Setup](../dev_reference/dev_setup.md) in the Developer Reference.
 
 ---
 

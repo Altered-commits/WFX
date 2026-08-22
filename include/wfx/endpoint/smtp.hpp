@@ -545,10 +545,7 @@ inline EndpointDesc BuildDesc(SmtpOptions* opts) noexcept
 // exactly once per connection before it ever enters the pool
 // -----------------------------------------------------------------------
 
-// Accumulates one multi-line response from raw Receive() calls. Pure/non-async on purpose: the
-// actual co_await loop has to live inline in the onConnect coroutine (see the big comment at the
-// top of this file. Promise<T> is a closed set, so a reusable "co_await in a loop, return a
-// value" helper coroutine has nowhere to live), this is the part that CAN be factored out
+// Accumulates one multi-line response fed from raw Receive() calls, see ReadResponse below
 struct LineResponse {
     std::uint16_t code = 0;
     bool hasStartTls = false;
@@ -579,8 +576,10 @@ public:
         while(pos < len) {
             std::string_view line;
             auto status = ReadLine(buf, len, pos, lineAcc_, lim_->maxResponseLineBytes, line);
+
             if(status == LineReadStatus::TOO_LONG)
                 return fail(pos);
+
             if(status == LineReadStatus::NEED_MORE) {
                 consumed = len;
                 return true;
@@ -646,6 +645,29 @@ private: // Storage
     const SmtpOptions* lim_ = nullptr;
 };
 
+// Reads one (possibly multi-line) response off the wire.
+//
+// resp.ok stays false, LineResponse's default, on both a socket-level Receive() failure and a
+// malformed/over-limit response, so the caller's job is just to check resp.ok and bail with
+// EpFatal if it's not set.
+inline Async::Task<LineResponse> ReadResponse(SlotHandle h, const SmtpOptions* opts, std::uint32_t& pending)
+{
+    LineResponse resp{opts};
+
+    while(!resp.Done()) {
+        auto recv = co_await h.Receive(pending);
+        pending = 0;
+
+        if(recv.status != EpSlotOk)
+            co_return resp;
+
+        if(!resp.Feed(recv.buf, static_cast<std::uint32_t>(recv.len), pending))
+            co_return resp;
+    }
+
+    co_return resp;
+}
+
 inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 {
     const auto* opts = static_cast<const SlotState*>(slotStateVoid)->options;
@@ -660,26 +682,10 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
     // How much of the last Receive() result to trim next time, see SlotHandle::Receive
     std::uint32_t pending = 0;
 
-    // Every response read below follows the same shape: feed Receive() results into a
-    // LineResponse until it says Done(). This can't be factored into a shared helper function.
-    // See the file-level comment on why a reusable "co_await in a loop, return a value" coroutine
-    // has nowhere to live in this codebase's closed Promise<T> set, so it's inlined per read,
-    // seven times, deliberately
-#define WFX_SMTP_READ_RESPONSE(varName)                                                                                \
-    LineResponse varName{opts};                                                                                        \
-    while(!(varName).Done()) {                                                                                         \
-        auto recv = co_await h.Receive(pending);                                                                       \
-        pending = 0;                                                                                                   \
-        if(recv.status != EpSlotOk)                                                                                    \
-            co_return EpFatal;                                                                                         \
-        if(!(varName).Feed(recv.buf, static_cast<std::uint32_t>(recv.len), pending))                                   \
-            co_return EpFatal;                                                                                         \
-    }
-
     // 1. Unsolicited greeting banner
     {
-        WFX_SMTP_READ_RESPONSE(greet)
-        if(greet.code != SMTP_READY)
+        auto greet = co_await ReadResponse(h, opts, pending);
+        if(!greet.ok || greet.code != SMTP_READY)
             co_return EpFatal;
     }
 
@@ -697,8 +703,8 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
         co_return EpFatal;
 
     {
-        WFX_SMTP_READ_RESPONSE(ehlo1)
-        if(ehlo1.code != SMTP_OK)
+        auto ehlo1 = co_await ReadResponse(h, opts, pending);
+        if(!ehlo1.ok || ehlo1.code != SMTP_OK)
             co_return EpFatal;
 
         // 3. STARTTLS must be advertised. Refuse outright rather than ever consider a plaintext
@@ -712,8 +718,8 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
         co_return EpFatal;
 
     {
-        WFX_SMTP_READ_RESPONSE(startTlsResp)
-        if(startTlsResp.code != SMTP_READY)
+        auto startTlsResp = co_await ReadResponse(h, opts, pending);
+        if(!startTlsResp.ok || startTlsResp.code != SMTP_READY)
             co_return EpFatal;
     }
 
@@ -739,8 +745,8 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
     // PLAIN. Picked from what the server just advertised POST-TLS, never assumed
     bool authPlain, authLogin;
     {
-        WFX_SMTP_READ_RESPONSE(ehlo2)
-        if(ehlo2.code != SMTP_OK)
+        auto ehlo2 = co_await ReadResponse(h, opts, pending);
+        if(!ehlo2.ok || ehlo2.code != SMTP_OK)
             co_return EpFatal;
 
         authPlain = ehlo2.hasAuthPlain;
@@ -771,8 +777,8 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
             co_return EpFatal;
 
         {
-            WFX_SMTP_READ_RESPONSE(loginPrompt)
-            if(loginPrompt.code != SMTP_AUTH_CONTINUE)
+            auto loginPrompt = co_await ReadResponse(h, opts, pending);
+            if(!loginPrompt.ok || loginPrompt.code != SMTP_AUTH_CONTINUE)
                 co_return EpFatal;
         }
 
@@ -781,8 +787,8 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
             co_return EpFatal;
 
         {
-            WFX_SMTP_READ_RESPONSE(passPrompt)
-            if(passPrompt.code != SMTP_AUTH_CONTINUE)
+            auto passPrompt = co_await ReadResponse(h, opts, pending);
+            if(!passPrompt.ok || passPrompt.code != SMTP_AUTH_CONTINUE)
                 co_return EpFatal;
         }
 
@@ -796,15 +802,13 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
         co_return EpFatal;
 
     {
-        WFX_SMTP_READ_RESPONSE(authResp)
+        auto authResp = co_await ReadResponse(h, opts, pending);
         // Wrong credentials or a refusal both land here; no retry-with-the-same-credentials loop.
         // Reconnects go through the engine's own backoff (maxReconnectAttempts), not a tight
         // local one
-        if(authResp.code != SMTP_AUTH_SUCCESS)
+        if(!authResp.ok || authResp.code != SMTP_AUTH_SUCCESS)
             co_return EpFatal;
     }
-
-#undef WFX_SMTP_READ_RESPONSE
 
     co_return EpReady;
 }
@@ -905,6 +909,7 @@ public:
                   .reconnectBackoffBase = config.reconnectBackoffBaseSeconds,
                   .reconnectBackoffMax = config.reconnectBackoffMaxSeconds,
                   .tlsConfig = EpTlsInsecure, // STARTTLS is negotiated in-band by onConnect
+                  .exactSlots = true,
                   .prewarm = config.prewarm,
                   .maxConcurrentStreams = 0,
                   .alpnProtocols = {},

@@ -8,7 +8,7 @@
 
 // Fwd declare stuff
 namespace WFX::Http {
-class HttpConnectionHandler;
+struct HttpConnectionHandler;
 }
 
 namespace WFX::Shared {

@@ -131,7 +131,7 @@ flowchart TD
     C -- Parse error --> H[Mark connection close\nWrite 400 Bad Request]
     C -- Streaming body or unsupported --> I[Mark connection close\nWrite 501 Not Implemented]
 
-    C -- Success --> J[Increment request counter\nreset per-request async tracking]
+    C -- Success --> J[Increment request counter\nreset per-request async tracking\nstamp routeStartUs if latency metrics are on]
     J --> J1[Parse Connection header]
     J1 --> J2{Header combination valid?}
     J2 -- No --> J3[Mark connection close\nWrite 400 Bad Request]
@@ -141,22 +141,44 @@ flowchart TD
     J5 -- Init failed --> J6[Mark connection close\nWrite 500 Internal Server Error]
     J5 -- OK --> J7[Reset response object\nwire in write buffer HTTP version close flag]
 
-    J7 --> K{Path starts with /public/?}
+    J7 --> J8{AllowRequest:\nresolve client IP once per connection\nConnectionLimiter, then RequestRateLimiter}
+    J8 -- Over connection limit --> J9[Set 503 Service Unavailable]
+    J9 --> Finish
+    J8 -- Over rate limit --> J10[Set 429 Too Many Requests]
+    J10 --> Finish
+    J8 -- Allowed --> J11[HandleCors:\nmatched-origin requests get CORS headers\npersisted here, survive a later 404 or handler error]
+    J11 --> J12{Preflight fully answered here?}
+    J12 -- Yes --> J13[204 No Content, already committed]
+    J13 --> Finish
+    J12 -- No --> K{Path starts with /public/?}
+
     K -- Yes --> L[Resolve file under the public dir\nqueue it as the response\nskip routing and middleware]
     K -- No --> M[Match route in trie]
 
-    M -- No match --> N[Set 404 response]
+    M -- No match --> M1{HandleGenericOptions:\nOPTIONS on a path with other\nmethods registered?}
+    M1 -- Yes --> M2[204 No Content with Allow header]
+    M2 --> Finish
+    M1 -- No --> N[Set 404 response]
 
     L --> Finish[[FinishRequest, see: Sending the response]]
     N --> Finish
-    J3 --> Finish
-    J6 --> Finish
 
     M -- Match --> P[[HandleSuccess, see: Executing the route]]
 ```
 
 A header combination like `close` and `keep-alive` together is invalid and
-takes the same 400 path as any other malformed header.
+takes the same 400 path as any other malformed header. Unlike everything
+else in this diagram, `J3` and `J6` (an RFC-violating `Connection` header,
+and write-buffer init failure) write straight to the connection and `return`
+immediately, the same as `H` and `I` above them, they never reach
+`FinishRequest`, there is no response object to commit yet at that point.
+
+Connection/rate-limit acceptance and CORS are per-request, not per-connection
+setup, they run again on every request on a kept-alive connection. The
+client's resolved IP and its rate-limit slot are each acquired at most once
+per connection (`ipAcquired`/`rateLimiterAcquired` bits on the connection),
+and both are released together when the connection closes, whether or not it
+ever got past this point.
 
 ### Executing the route
 
@@ -193,6 +215,14 @@ flowchart TD
 `HandleResponse`, not through `FinishRequest` again, since `FinishRequest`
 already ran once, synchronously, right when the handler was first dispatched.
 
+`W`/`X` above are a black box from this diagram's point of view: a route
+handler is free to make its own outbound calls in there (Postgres, HTTP,
+SMTP, over `WFX::Endpoint<>`), each with its own connect/TLS/handshake/pool
+lifecycle and its own per-endpoint metrics (completions, bytes in/out,
+reconnects, TLS/connect failures, slots in use), none of which is this
+diagram's concern. See [Endpoint Overview](../api_reference/endpoint/overview.md)
+for that lifecycle.
+
 ### Sending the response
 
 ```mermaid
@@ -202,7 +232,7 @@ flowchart TD
     AC --> AC1{Response already committed?}
     AC1 -- No --> AC2[Commit response]
     AC1 -- Yes --> AC3
-    AC2 --> AC3[Update response-code metrics]
+    AC2 --> AC3[RecordRouteMetrics:\nper-route request count, full 1xx-5xx status histogram,\nbytesOut, and latency since routeStartUs if metrics.latency is on]
 
     AC3 --> AD{Response type}
 

@@ -250,12 +250,14 @@ void CoreEngine::HandleResponse(ClientCtx* ctx)
         return;
     }
 
-    if(res.IsStream()) {
+    if(res.IsGenStream()) {
         connHandler_->Stream(ctx, res.TakeGenerator());
         return;
     }
 
-    // 'rwBuffer' already has the full serialized wire response, just write that
+    // 'rwBuffer' already has the full serialized wire response, just write that. For AWAIT_STREAM
+    // it's already been sent incrementally by Flush()/FlushEnd() and left empty, so this just runs
+    // the same close-vs-keepalive decision every other body kind goes through.
     connHandler_->Write(ctx, {});
 }
 

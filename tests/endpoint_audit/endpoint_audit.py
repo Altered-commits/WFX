@@ -2,28 +2,29 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 Altered-commits
 #
-# WFX HttpEndpoint audit
+# WFX endpoint audit: the raw WFX::Endpoint<> primitive
 #
-# Boots a hostile mock upstream (http_upstream.py) and the WFX endpoint test app, then
-# drives 150+ adversarial vectors THROUGH WFX at the mock and asserts the client
-# side parser/serializer in include/wfx/endpoint/http.hpp behaves: never crashes,
-# never hangs past its timeout, never mis-frames one response into another, never
-# smuggles a request, never lets a hostile upstream poison a pooled connection
+# Drives include/wfx/endpoint/base.hpp through two hand-rolled protocols served by
+# primitive_upstream.py, one multiplexed (mux) and one not (solo). Two are needed
+# because half the primitive's surface is unreachable through a multiplexed
+# endpoint. See README.md for that reasoning and for what each phase proves.
 #
-# Architecture (mirrors tests/base_audit): the .py coordinates everything. The audit
-# talks to WFX; WFX talks to the mock. For byte-level fuzzing the audit STAGES a
-# raw response blob at the mock (/ctl/stage) then asks WFX to fetch /raw/<id>, so
-# the mock replays those exact bytes. WFX reflects the parsed outcome back as JSON:
-#   {"ep": <EndpointStatus int, 0==SUCCESS>, "status", "bodylen", "body", "hdr"}
+# Usage:
+#   python3 endpoint_audit.py                       # all phases
+#   python3 endpoint_audit.py --phase solo_streaming
+#   python3 endpoint_audit.py --list-phases
 #
-# Exit codes:  0 all pass   1 correctness failure   2 SECURITY finding (desync,
-#              smuggle, request-injection); these are called out separately
+# Exit codes:
+#   0   all phases passed
+#   1   correctness failure, or the worker died during the run
+#   2   security finding: one caller receiving another's response, a refused
+#       handshake still being served, a pinned connection shared with anyone else,
+#       an unsolicited push desyncing the framing, a failed TLS upgrade leaving
+#       the endpoint usable in plaintext, or memory growing with the total
+#       response size rather than the chunk size
+#   3   WFX never answered /health, so nothing was exercised
 
-import itertools
-import json
 import os
-import re
-import socket
 import subprocess
 import sys
 import threading
@@ -35,299 +36,72 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import common
 from common import net, term
 
-_green, _red, _yellow = term.green, term.red, term.yellow
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Mirrors EndpointStatus in shared/abis/types.hpp, keep in sync
+# EndpointStatus, mirrors shared/abis/types.hpp, keep in sync. Only the three this
+# suite asserts on by name are listed; every other failure is checked as "not success"
 EP_SUCCESS           = 0
-EP_POOL_EXHAUSTED    = 6
-EP_CONNECT_FAILURE   = 8
-EP_SSL_FAILURE       = 9
-EP_INTERNAL          = 10   # parse / protocol error surfaces here; also where SmtpOnConnect's
-                            # co_return EpFatal lands for every non-timeout handshake refusal
-                            # (bad cert, wrong AUTH creds, STARTTLS-stripping, ...): the coroutine
-                            # only ever returns EpReady/EpFatal, so the engine's generic
-                            # connect-failure funnel classifies it, not a per-cause SMTP status
-EP_SERIALIZE         = 11
+EP_INTERNAL          = 10  # where a co_return EpFatal from onConnect lands: the coroutine
+                           # only ever answers EpReady or EpFatal, so the engine's generic
+                           # connect-failure funnel classifies it, not a per-cause status
 EP_HANDSHAKE_TIMEOUT = 13
-EP_REQ_TIMEOUT       = 14
 
-# Transport, short names because they are on nearly every line below
-raw_send   = net.send
-_build     = net.request
-_body_of   = net.body
-_status_of = net.status
+# Waits the engine's own budgets dictate. Its timeout timer ticks every 5s
+# (INVOKE_TIMEOUT_COOLDOWN), so an N-second budget can take up to N+5 to be noticed
+IDLE_RECYCLE_WAIT    = 11.0  # idleTimeoutSeconds 5, plus a tick, plus slack
+AUX_RECLAIM_WAIT     = 5.5   # connectTimeoutSeconds 5 reclaiming a leaked side connection
+REQUEST_TIMEOUT_WAIT = 17.0  # requestTimeoutSeconds 10, plus a tick, plus slack
 
 # The mock upstream
 class Mock:
+    """primitive_upstream.py: the mux and solo listeners plus an HTTP counter plane."""
+
     def __init__(self, cfg):
         self.cfg = cfg
         self.proc = None
 
     def start(self):
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "http_upstream.py")
-        cmd = [sys.executable, script, "--host", self.cfg.host, "--port", str(self.cfg.up_port),
-              "--proto-port", str(self.cfg.proto_port), "--sp-port", str(self.cfg.sp_port)]
+        cmd = [sys.executable, os.path.join(HERE, "primitive_upstream.py"),
+               "--host", self.cfg.host,
+               "--control-port", str(self.cfg.control_port),
+               "--mux-port", str(self.cfg.mux_port),
+               "--solo-port", str(self.cfg.solo_port)]
         term.log("mock", "starting: %s" % " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+
         for _ in range(50):
             if self.ping():
-                term.log("mock", _green("up on %s:%d" % (self.cfg.host, self.cfg.up_port)))
+                term.log("mock", term.green("up on %s:%d" % (self.cfg.host, self.cfg.control_port)))
                 return
             time.sleep(0.1)
-        raise RuntimeError("mock upstream never came up on port %d" % self.cfg.up_port)
+
+        raise RuntimeError("mock upstream never came up on port %d" % self.cfg.control_port)
+
+    def _ctl(self, path):
+        raw = net.send(self.cfg.host, self.cfg.control_port, net.request("GET", path),
+                       rtimeout=2.0, ctimeout=2.0)
+        return net.body(raw) if raw else b""
 
     def ping(self):
-        raw = raw_send(self.cfg.host, self.cfg.up_port, _build("GET", "/ctl/ping"), rtimeout=1.0, ctimeout=1.0)
-        return _body_of(raw) == b"pong" if raw else False
+        return self._ctl("/ctl/ping") == b"pong"
 
-    def get(self, path):
-        raw = raw_send(self.cfg.host, self.cfg.up_port, _build("GET", path))
-        return _body_of(raw) if raw else b""
-
-    def stage(self, sid, blob, keep, mode="whole", arg=0):
-        raw_send(self.cfg.host, self.cfg.up_port,
-                 _build("POST", "/ctl/stage",
-                        {"X-Id": sid, "X-Keep": "1" if keep else "0",
-                         "X-Mode": mode, "X-Arg": str(arg)}, blob))
-
-    def coalesce_reset(self):
-        raw_send(self.cfg.host, self.cfg.up_port, _build("GET", "/ctl/coalesce/reset"))
-
-    def coalesce_count(self):
+    def mux_conns(self):
+        """Connections the mux listener accepted, the evidence for what got shared."""
         try:
-            return int(self.get("/ctl/coalesce/count"))
+            return int(self._ctl("/ctl/mux/conns"))
         except ValueError:
             return -1
 
-    def conn_count(self):
+    def cancels(self):
+        """(cancels seen on solo side connections, the connId the last one named)."""
         try:
-            return int(self.get("/ctl/conns"))
+            count, last = self._ctl("/ctl/solo/cancels").split()
+            return int(count), int(last)
         except ValueError:
-            return -1
+            return -1, -1
 
-    def proto_conn_count(self):
-        try:
-            return int(self.get("/ctl/protoconns"))
-        except ValueError:
-            return -1
-
-    def total_count(self):
-        try:
-            return int(self.get("/ctl/total"))
-        except ValueError:
-            return -1
-
-    def idle_conns(self):
-        # Atomic (accepted conns - served requests): idle/prewarmed connections
-        try:
-            return int(self.get("/ctl/idleconns"))
-        except ValueError:
-            return -1
-
-    def cancel_reset(self):
-        raw_send(self.cfg.host, self.cfg.up_port, _build("GET", "/ctl/cancels/reset"))
-
-    def cancel_count(self):
-        try:
-            return int(self.get("/ctl/cancels/count"))
-        except ValueError:
-            return -1
-
-    def cancel_last_id(self):
-        try:
-            return int(self.get("/ctl/cancels/lastid"))
-        except ValueError:
-            return -1
-
-    def stop(self):
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
-            try:
-                self.proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-
-# vvv SMTP mock (smtp_upstream.py), driving WFX::SmtpEndpoint vvv
-#
-# One persona per fixed port, mirroring tls_audit's PERSONAS table: (name, port, cert basename,
-# mock opts, expect). Every port and persona name here MUST match the WFX::SmtpEndpoint
-# declarations in app/src/main.cpp, they are compiled in, not passed on the command line
-SMTP_CONTROL_PORT = 8199
-
-SMTP_PERSONAS = [
-    # Happy paths
-    ("good",                8100, "good", {},                                          "accept"),
-    ("auth_login_only",     8101, "good", {"auth_mechanisms": "LOGIN"},                 "accept"),
-    # CVE-2011-0411 / CVE-2026-41319 class: plaintext spliced in right after the STARTTLS
-    # go-ahead. A correct client discards whatever's already buffered before the TLS wrap;
-    # anything still unread on the wire corrupts the handshake's own read and fails closed,
-    # so this is a refusal, not a transaction that goes through
-    ("inject",              8103, "good", {"inject": "MAIL FROM:<mitm@evil>\r\n"},       "refuse"),
-    # Handshake-phase refusals: server never offers STARTTLS, or protocol/cert/auth is hostile
-    ("no_starttls",         8102, "good",       {"starttls": "0"},           "refuse"),
-    ("selfsigned",          8104, "selfsigned", {},                          "refuse"),
-    ("wronghost",           8105, "wronghost",  {},                          "refuse"),
-    ("expired",             8106, "expired",    {},                         "refuse"),
-    ("auth_fail",           8107, "good",       {"auth_fail": "1"},          "refuse"),
-    ("no_auth_mechs",       8108, "good",       {"auth_mechanisms": ""},     "refuse"),
-    ("mismatched_code",     8109, "good",       {"mismatched_code": "1"},    "refuse"),
-    ("malformed_greeting",  8116, "good",       {"malformed_greeting": "1"}, "refuse"),
-    ("drop_greeting",       8117, "good",       {"drop_after": "greeting"},               "refuse"),
-    ("drop_pre_handshake",  8118, "good",       {"drop_after": "starttls_pre_handshake"}, "refuse"),
-    ("drop_starttls",       8119, "good",       {"drop_after": "starttls"},               "refuse"),
-    ("drop_auth",           8120, "good",       {"drop_after": "auth"},                   "refuse"),
-    ("drop_data_prompt",    8121, "good",       {"drop_after": "data_prompt"},            "refuse"),
-    # Hang/DoS-shaped personas: never complete on their own, only the client's own timeout
-    # ends these. Driven with the short-budget Smtp_hang endpoint (see main.cpp), not the
-    # default one, or each of these would cost a full connectTimeoutSeconds
-    ("flood_greeting",      8110, "good", {"flood_at": "greeting"},        "hang"),
-    ("flood_ehlo2",         8111, "good", {"flood_at": "ehlo2"},           "hang"),
-    ("huge_line_greeting",  8112, "good", {"huge_line_at": "greeting"},    "hang"),
-    ("huge_line_ehlo2",     8113, "good", {"huge_line_at": "ehlo2"},       "hang"),
-    ("slow_trickle",        8114, "good", {"slow_trickle": "0.05"},        "hang"),
-    ("silent_data",         8115, "good", {"silent_after": "DATA"},        "hang"),
-]
-
-def _ossl(args):
-    return subprocess.run(["openssl"] + args, capture_output=True, text=True)
-
-def smtp_persona_available(cfg, cert):
-    return cert in cfg.smtp_avail
-
-def ensure_smtp_certs(cfg):
-    """SMTP TLS certs for the STARTTLS mock: good / selfsigned / wronghost / expired, all plain
-    openssl (endpoint_audit has never depended on mkcert, and STARTTLS trust doesn't need a
-    browser-trusted cert, just one this suite's own CA signs). Every other persona above reuses
-    the 'good' cert, since they exercise protocol behavior rather than certificate trust."""
-    cd = cfg.cert_dir
-    os.makedirs(cd, exist_ok=True)
-
-    def p(x):
-        return os.path.join(cd, x)
-
-    ca_ok = _ossl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", p("ca-key.pem"),
-                   "-out", p("ca.pem"), "-days", "365", "-subj", "/CN=smtp-audit-test-ca",
-                   "-addext", "basicConstraints=critical,CA:true",
-                   "-addext", "keyUsage=critical,keyCertSign,cRLSign"]).returncode == 0
-    if not ca_ok:
-        raise RuntimeError("could not generate the SMTP audit's throwaway CA (openssl broken?)")
-    cfg.smtp_ca_path = p("ca.pem")
-
-    def sign(name, subj, san, days="365"):
-        csr, ext = p(name + ".csr"), p(name + "-ext.cnf")
-        with open(ext, "w") as f:
-            f.write("subjectAltName=%s\n" % san)
-        made_csr = _ossl(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", p(name + "-key.pem"),
-                          "-subj", subj, "-out", csr]).returncode == 0
-        signed = made_csr and _ossl(["x509", "-req", "-in", csr, "-CA", p("ca.pem"), "-CAkey", p("ca-key.pem"),
-                                     "-CAcreateserial", "-out", p(name + ".pem"), "-days", days,
-                                     "-extfile", ext]).returncode == 0
-        return signed and os.path.exists(p(name + ".pem"))
-
-    avail = set()
-    if sign("good", "/CN=127.0.0.1", "IP:127.0.0.1"):
-        avail.add("good")
-    if sign("wronghost", "/CN=evil.example", "DNS:evil.example"):
-        avail.add("wronghost")
-    # -days -1 backdates notAfter to yesterday: portable across OpenSSL versions, unlike
-    # -not_before/-not_after which are OpenSSL 3.0+ only (same trick tls_audit's ensure_certs uses)
-    if sign("expired", "/CN=127.0.0.1", "IP:127.0.0.1", days="-1"):
-        avail.add("expired")
-    if _ossl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", p("selfsigned-key.pem"),
-              "-out", p("selfsigned.pem"), "-days", "365", "-subj", "/CN=127.0.0.1",
-              "-addext", "subjectAltName=IP:127.0.0.1"]).returncode == 0:
-        avail.add("selfsigned")
-
-    term.log("smtp-certs", _green("personas available: %s" % ", ".join(sorted(avail))))
-    cfg.smtp_avail = avail
-    if "good" not in avail:
-        raise RuntimeError("could not generate the SMTP audit's 'good' cert")
-
-def patch_smtp_ssl_path(cfg):
-    """Points outbound_ca_path at the SMTP audit's throwaway CA so the 'good' persona's STARTTLS
-    cert is trusted. endpoint_audit's HTTP mock is plaintext, so this path is otherwise unused and
-    patching it doesn't weaken or affect any existing HTTP phase."""
-    toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
-    with open(toml) as f:
-        s = f.read()
-    s = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % cfg.smtp_ca_path, s)
-    with open(toml, "w") as f:
-        f.write(s)
-    term.log("patch", "outbound TLS CA trust -> %s" % cfg.smtp_ca_path)
-
-class SmtpMock:
-    def __init__(self, cfg):
-        self.cfg = cfg
-        self.proc = None
-        self._reader = None
-        self.ports = {name: port for name, port, cert, opts, expect in SMTP_PERSONAS
-                     if smtp_persona_available(cfg, cert)}
-
-    def start(self):
-        cd = self.cfg.cert_dir
-        cmd = [sys.executable, os.path.join(HERE, "smtp_upstream.py"), "--host", self.cfg.host,
-              "--control-port", str(SMTP_CONTROL_PORT)]
-        for name, port, cert, opts, expect in SMTP_PERSONAS:
-            if not smtp_persona_available(self.cfg, cert):
-                continue
-            spec = "name=%s,port=%d,cert=%s,key=%s" % (name, port, os.path.join(cd, cert + ".pem"),
-                                                       os.path.join(cd, cert + "-key.pem"))
-            for k, v in opts.items():
-                spec += ",%s=%s" % (k, v)
-            cmd += ["--listen", spec]
-
-        term.log("smtp-mock", "starting %d SMTP listeners" % len(self.ports))
-        # Stream output instead of discarding it, same reasoning as tls_audit's Mock: a listener
-        # thread that fails to bind or load its cert prints a traceback, and swallowing that makes
-        # a broken TEST FIXTURE indistinguishable from a real WFX bug
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     text=True, bufsize=1)
-        self._reader = threading.Thread(target=self._drain, daemon=True)
-        self._reader.start()
-
-        good_port = self.ports.get("good", 8100)
-        deadline = time.time() + 5.0
-        while time.time() < deadline:
-            try:
-                s = socket.create_connection((self.cfg.host, good_port), timeout=1.0)
-                s.close()
-                term.log("smtp-mock", _green("SMTP mock up"))
-                return
-            except OSError:
-                time.sleep(0.1)
-        raise RuntimeError("SMTP mock never came up on :%d, see [smtp-mock] output above" % good_port)
-
-    def _drain(self):
-        try:
-            for line in self.proc.stdout:
-                line = line.rstrip()
-                if line:
-                    print("%s %s" % (term.cyan("[smtp-mock]"), line), flush=True)
-        except (OSError, ValueError):
-            pass
-
-    def _control(self, cmd):
-        try:
-            s = socket.create_connection((self.cfg.host, SMTP_CONTROL_PORT), timeout=3.0)
-            s.sendall((cmd + "\n").encode())
-            buf = b""
-            while b"\n" not in buf:
-                d = s.recv(65536)
-                if not d:
-                    break
-                buf += d
-            s.close()
-            return json.loads(buf.split(b"\n", 1)[0].decode())
-        except (OSError, ValueError):
-            return {}
-
-    def stats(self, name):
-        return self._control("STATS %s" % name)
-
-    def reset(self, name):
-        self._control("RESET %s" % name)
+    def cancels_reset(self):
+        self._ctl("/ctl/solo/cancels/reset")
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -338,2033 +112,816 @@ class SmtpMock:
                 self.proc.kill()
 
 # Driving WFX
-# Staged responses are keyed by a unique id so a replay can never pick up a previous one
-_sid = itertools.count(1)
-def _next_sid():
-    return "s%d" % next(_sid)
+#
+# Every route answers 200 with a JSON body carrying at least "ep", the EndpointStatus
+# as an int. A None here means WFX itself never answered, which is a different (and
+# worse) failure than an outbound call that failed cleanly
+def _json(cfg, method, path, headers=None, rtimeout=15.0):
+    return net.get_json(cfg.host, cfg.port, method, path, headers, rtimeout=rtimeout)
 
-def drive(cfg, path, ep="default", method="GET", want=None, fwd=None, body=None, x_body=None, rtimeout=8.0):
-    """Hit WFX /call and return the parsed JSON dict (or None if WFX misbehaved).
+def mux_call(cfg, key="hello", mux="good", rtimeout=8.0):
+    return _json(cfg, "GET", "/mux/call", {"X-Mux": mux, "X-Key": key}, rtimeout)
 
-    rtimeout must exceed the outbound budget for slow/connect-failure endpoints:
-    WFX won't answer /call until the outbound request resolves (times out), which
-    can take up to ~10s (5s budget + up to a 5s timer-tick of slack)."""
-    headers = {"X-Ep": ep, "X-Method": method, "X-Path": path}
-    if want:
-        headers["X-Want"] = want
-    if fwd:
-        headers["X-Fwd"] = fwd
-    if x_body is not None:
-        headers["X-Body"] = x_body
-    raw = raw_send(cfg.host, cfg.port, _build("GET", "/call", headers, body or b""), rtimeout=rtimeout)
-    if not raw or _status_of(raw) != 200:
-        return None
-    try:
-        return json.loads(_body_of(raw))
-    except Exception:
-        return None
+def mux_disconnects(cfg):
+    return _json(cfg, "GET", "/mux/disconnects") or {}
 
-# keep defaults to True so the mock keeps the connection open after replaying a
-# COMPLETE self-delimiting (Content-Length / chunked) response, which is exactly
-# what the client does (it pools the keep-alive slot). If the mock closed instead
-# (keep=False) while the client pooled the slot, the NEXT staged request would
-# reuse a dead socket and intermittently get None. EOF / truncation / close-
-# delimited tests must pass keep=False explicitly, because they RELY on the close
-def drive_staged(cfg, mock, blob, ep="default", keep=True, mode="whole", arg=0):
-    sid = _next_sid()
-    mock.stage(sid, blob, keep, mode, arg)
-    return drive(cfg, "/raw/%s" % sid, ep=ep)
+def mux_disconnects_reset(cfg):
+    _json(cfg, "POST", "/mux/disconnects/reset")
 
-def drive_split(cfg, mock, blob, off=0, ep="default", keep=True):
-    """Deliver `blob` as two sends split at byte `off` (0 => midpoint)."""
-    return drive_staged(cfg, mock, blob, ep=ep, keep=keep, mode="split", arg=off)
+def solo_get(cfg, key="hello", solo="good", rtimeout=15.0):
+    return _json(cfg, "GET", "/solo/get", {"X-Solo": solo, "X-Key": key}, rtimeout)
 
-def drive_drip(cfg, mock, blob, piece=1, ep="default", keep=True):
-    """Deliver `blob` `piece` bytes at a time, one recv() boundary per piece."""
-    return drive_staged(cfg, mock, blob, ep=ep, keep=keep, mode="drip", arg=piece)
+def solo_stream(cfg, count=10, size=64, mode="server", stop=0, rtimeout=60.0):
+    return _json(cfg, "GET", "/solo/stream",
+                 {"X-Mode": mode, "X-Count": str(count), "X-Size": str(size), "X-Stop": str(stop)},
+                 rtimeout)
 
-def inject(cfg, mode, body, ep="default"):
-    headers = {"X-Ep": ep, "X-Inject": mode}
-    raw = raw_send(cfg.host, cfg.port, _build("POST", "/inject", headers, body))
-    if not raw or _status_of(raw) != 200:
-        return None
-    try:
-        return json.loads(_body_of(raw))
-    except Exception:
-        return None
+def solo_reserve(cfg, n=3, release="late", rtimeout=20.0):
+    return _json(cfg, "GET", "/solo/reserve", {"X-N": str(n), "X-Release": release}, rtimeout)
 
-# /smtp/send + /smtp/inject: driving WFX::SmtpEndpoint. rtimeout defaults are generous on
-# purpose - the "hang" personas below only fail once WFX's own connectTimeoutSeconds/
-# requestTimeoutSeconds (5s each on the fast personas, see main.cpp's SmtpCfgFast) fires, and the
-# timeout timer itself only ticks once every 5s (INVOKE_TIMEOUT_COOLDOWN), so the observed wait
-# can run up to budget + one tick of slack
-def smtp_send(cfg, persona="good", from_addr=None, from_name=None, to_addr=None, to_name=None,
-              subject=None, reply_to=None, body=b"hello", rtimeout=20.0):
-    headers = {"X-Persona": persona}
-    for hdr, val in (("X-From", from_addr), ("X-FromName", from_name), ("X-To", to_addr),
-                     ("X-ToName", to_name), ("X-Subject", subject), ("X-ReplyTo", reply_to)):
-        if val is not None:
-            headers[hdr] = val
-    raw = raw_send(cfg.host, cfg.port, _build("POST", "/smtp/send", headers, body), rtimeout=rtimeout)
-    if not raw or _status_of(raw) != 200:
-        return None
-    try:
-        return json.loads(_body_of(raw))
-    except Exception:
-        return None
+def solo_reserve_pair(cfg, rtimeout=20.0):
+    return _json(cfg, "GET", "/solo/reserve/pair", rtimeout=rtimeout)
 
-def smtp_inject(cfg, field, payload, rtimeout=20.0):
-    raw = raw_send(cfg.host, cfg.port, _build("POST", "/smtp/inject", {"X-Field": field}, payload), rtimeout=rtimeout)
-    if not raw or _status_of(raw) != 200:
-        return None
-    try:
-        return json.loads(_body_of(raw))
-    except Exception:
-        return None
+def solo_reserve_stream(cfg, count=6, rtimeout=30.0):
+    return _json(cfg, "GET", "/solo/reserve/stream", {"X-Count": str(count)}, rtimeout)
 
-def smtp_ok(r, stage="done"):
-    return bool(r) and r.get("ep") == EP_SUCCESS and r.get("stage") == stage
+def push_stats(cfg):
+    return _json(cfg, "GET", "/solo/push") or {}
 
-def smtp_err(r):
-    return bool(r) and r.get("ep") != EP_SUCCESS
+def push_reset(cfg):
+    _json(cfg, "POST", "/solo/push/reset")
 
-def smtp_errc(r, code):
-    return bool(r) and r.get("ep") == code
+def abort_stats(cfg):
+    return _json(cfg, "GET", "/solo/abort") or {}
 
-# /metrics: the per-endpoint metrics table (WFX::GetEndpointMetricsAt et al).
-# Several endpoint instances share the same host, so the metrics phase asserts on
-# the aggregate delta across every slot rather than one named endpoint
-def fetch_metrics(cfg):
-    raw = raw_send(cfg.host, cfg.port, _build("GET", "/metrics"), rtimeout=4.0)
-    if not raw or _status_of(raw) != 200:
-        return {}
-    try:
-        return json.loads(_body_of(raw))
-    except Exception:
-        return {}
+def worker_rss(cfg):
+    return (_json(cfg, "GET", "/rss") or {}).get("rss", 0)
 
-def _agg(metrics, field):
-    return sum(e.get(field, 0) for e in metrics.get("endpoints", []))
+def metrics(cfg):
+    return _json(cfg, "GET", "/metrics", rtimeout=4.0) or {}
 
-def _agg_lat(metrics, field):
-    return sum((e.get("latency") or {}).get(field, 0) for e in metrics.get("endpoints", []))
+def metric(snapshot, field):
+    """Sums one counter across every endpoint slot.
 
-# /proto/* helpers
-# onConnect / onDisconnect / multiplexing, driven against app/src/proto.cpp's raw
-# WFX::Endpoint<> instances (good/bad/slow/reset)
-def proto_call(cfg, key="hello", proto="good", rtimeout=8.0):
-    headers = {"X-Proto": proto, "X-Key": key}
-    raw = raw_send(cfg.host, cfg.port, _build("GET", "/proto/call", headers), rtimeout=rtimeout)
-    if not raw or _status_of(raw) != 200:
-        return None
-    try:
-        return json.loads(_body_of(raw))
-    except Exception:
-        return None
+    Several instances share a host, so a slot cannot be mapped back to one instance;
+    the aggregate delta either side of a driven call is what is assertable.
+    """
+    return sum(e.get(field, 0) for e in snapshot.get("endpoints", []))
 
-def proto_call_async(cfg, key="hello", proto="good", rtimeout=8.0):
-    """Fire proto_call on a background thread; returns a function that blocks for the result."""
-    box = {}
-    def run():
-        box["r"] = proto_call(cfg, key=key, proto=proto, rtimeout=rtimeout)
-    t = threading.Thread(target=run)
-    t.start()
-    def join():
-        t.join()
-        return box.get("r")
-    return join
+def latency_metric(snapshot, field):
+    return sum((e.get("latency") or {}).get(field, 0) for e in snapshot.get("endpoints", []))
 
-def proto_disconnects(cfg):
-    raw = raw_send(cfg.host, cfg.port, _build("GET", "/proto/disconnects"))
-    if not raw or _status_of(raw) != 200:
-        return {"idle": -1, "handshake": -1, "error": -1}
-    try:
-        return json.loads(_body_of(raw))
-    except Exception:
-        return {"idle": -1, "handshake": -1, "error": -1}
+# Abandoning a request mid-flight is what makes onAbort fire: the inbound connection
+# is dropped while the outbound call is still in the air
+def abandon_solo_get(cfg, headers, hold=0.15):
+    net.send_and_abandon(cfg.host, cfg.port, net.request("GET", "/solo/get", headers), hold=hold)
 
-def proto_disconnects_reset(cfg):
-    raw_send(cfg.host, cfg.port, _build("POST", "/proto/disconnects/reset"))
+def abandon_solo_stream(cfg, headers, hold=0.3):
+    net.send_and_abandon(cfg.host, cfg.port, net.request("GET", "/solo/stream", headers), hold=hold)
 
-# Expectation predicates over the parsed result dict
-def is_ok(r, status=None, body=None):
-    if not r or r.get("ep") != EP_SUCCESS:
-        return False
-    if status is not None and r.get("status") != status:
-        return False
-    if body is not None and r.get("body") != body:
-        return False
-    return True
+# Predicates
+def is_ok(r):
+    """WFX answered and the outbound call succeeded."""
+    return bool(r) and r.get("ep") == EP_SUCCESS
 
-def is_err(r):          # WFX answered, but the outbound call failed cleanly
+def is_err(r):
+    """WFX answered, but the outbound call failed cleanly."""
     return bool(r) and r.get("ep") != EP_SUCCESS
 
 def is_errc(r, code):
     return bool(r) and r.get("ep") == code
 
-def is_ok_sp(r):        # SP routes report ep plus value/conn, no HTTP status
-    return bool(r) and r.get("ep") == EP_SUCCESS
-
-def is_alive(r):        # WFX answered *something* well-formed (no crash/hang)
+def answered(r):
+    """WFX produced a well-formed answer at all, so it neither crashed nor hung."""
     return r is not None
 
-# /reflectraw helpers: inspect the EXACT request head WFX emitted
-def raw_head(cfg, fwd=None, fwd2=None, fwd3=None, method="GET", x_body=None):
-    """Drive /reflectraw and return the request head string WFX put on the wire."""
-    headers = {"X-Ep": "default", "X-Method": method, "X-Path": "/reflectraw"}
-    if fwd:
-        headers["X-Fwd"]  = fwd
-    if fwd2:
-        headers["X-Fwd2"] = fwd2
-    if fwd3:
-        headers["X-Fwd3"] = fwd3
-    if x_body is not None:
-        headers["X-Body"] = x_body
-    raw = raw_send(cfg.host, cfg.port, _build("GET", "/call", headers, b""))
-    if not raw or _status_of(raw) != 200:
-        return None
-    try:
-        return json.loads(_body_of(raw)).get("body")
-    except Exception:
-        return None
+def wfx_healthy(cfg):
+    raw = net.send(cfg.host, cfg.port, net.request("GET", "/health"), rtimeout=2.0, ctimeout=2.0)
+    return bool(raw) and net.status(raw) == 200
 
-def _count_ci(head, needle):
-    return head.lower().count(needle.lower())
-
-# SP protocol helpers (pinning / streaming / push / TLS upgrade)
-# SP is the non-multiplexed protocol on the third mock listener. Proto sets
-# hasCapacity so it is permanently multiplexed, and pinning + streaming are
-# single-slot-only paths, so none of this is reachable through Proto
-def sp_json(cfg, path, headers=None, rtimeout=15.0, method="GET"):
-    raw = raw_send(cfg.host, cfg.port, _build(method, path, headers or {}), rtimeout=rtimeout)
-    if not raw or _status_of(raw) != 200:
-        return None
-    try:
-        return json.loads(_body_of(raw))
-    except Exception:
-        return None
-
-def sp_get(cfg, key="hello", sp="good", rtimeout=15.0):
-    return sp_json(cfg, "/sp/get", {"X-Sp": sp, "X-Key": key}, rtimeout)
-
-def sp_stream(cfg, count=10, size=64, mode="server", stop=0, rtimeout=60.0):
-    return sp_json(cfg, "/sp/stream", {"X-Mode": mode, "X-Count": str(count),
-                                       "X-Size": str(size), "X-Stop": str(stop)}, rtimeout)
-
-def sp_reserve(cfg, n=3, release="late", rtimeout=20.0):
-    return sp_json(cfg, "/sp/reserve", {"X-N": str(n), "X-Release": release}, rtimeout)
-
-def sp_push_stats(cfg):
-    return sp_json(cfg, "/sp/push") or {}
-
-def sp_push_reset(cfg):
-    raw_send(cfg.host, cfg.port, _build("POST", "/sp/push/reset"))
-
-def sp_rss(cfg):
-    return sp_json(cfg, "/sp/rss") or {}
-
-def sp_async(fn, *a, **kw):
-    """Run any sp_* helper on a thread; returns a joiner."""
+# Concurrency
+def in_background(fn, *args, **kwargs):
+    """Runs one driver on its own thread. The returned callable blocks for its result."""
     box = {}
+
     def run():
-        box["r"] = fn(*a, **kw)
-    t = threading.Thread(target=run)
-    t.start()
+        box["r"] = fn(*args, **kwargs)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+
     def join():
-        t.join()
+        thread.join()
         return box.get("r")
+
     return join
 
-# Wire builders for staged responses
-def R(status_line, headers=(), body=b""):
-    if isinstance(body, str):
-        body = body.encode("latin-1")
-    head = status_line + "\r\n" + "".join("%s\r\n" % h for h in headers) + "\r\n"
-    return head.encode("latin-1") + body
+def in_parallel(fn, n, stagger=0.01):
+    """Runs fn(i) for i in range(n) at once, results in submission order.
 
-def CHUNKED(chunks_raw):
-    return b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + chunks_raw
-
-# PHASE: framing
-def phase_framing(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("framing")
-    p.check("content-length small",       is_ok(drive(cfg, "/ok"), 200, "hello"))
-    p.check("content-length zero",        is_ok(drive(cfg, "/empty"), 200, ""))
-    p.check("content-length 1000",        (lambda r: is_ok(r, 200) and r.get("bodylen") == 1000)(drive(cfg, "/cl/1000")))
-    p.check("chunked single",             is_ok(drive(cfg, "/chunked/1"), 200, "[c0]"))
-    p.check("chunked multi (5)",          is_ok(drive(cfg, "/chunked/5"), 200, "[c0][c1][c2][c3][c4]"))
-    p.check("chunked extension ignored",  is_ok(drive(cfg, "/chunked-ext"), 200, "abc"))
-    p.check("chunked trailer discarded",  is_ok(drive(cfg, "/chunked-trailer"), 200, "xy"))
-    p.check("close-delimited body",       is_ok(drive(cfg, "/close"), 200, "closebody"))
-    p.check("http/1.0 close-delimited",   is_ok(drive(cfg, "/http10"), 200, "ten"))
-    p.check("HEAD is bodyless",           is_ok(drive(cfg, "/evil/headbody", method="HEAD"), 200, "") or
-                                            is_ok(drive(cfg, "/kacount", method="HEAD"), 200, ""))
-    p.check("1xx: 100 then 200",          is_ok(drive(cfg, "/continue"), 200, "after"))
-    p.check("1xx: 8 informational ok",    is_ok(drive(cfg, "/continue/8"), 200, "done"))
-    p.check("response header retrievable", (lambda r: is_ok(r, 200) and r.get("hdr") == "alpha")(drive(cfg, "/ok", want="X-Mark")))
-    p.check("header get case-insensitive", (lambda r: is_ok(r, 200) and r.get("hdr") == "alpha")(drive(cfg, "/ok", want="x-mark")))
-    for code in (200, 201, 202, 301, 400, 404, 418, 500, 599, 999):
-        p.check("status passthrough %d" % code, is_ok(drive(cfg, "/status/%d" % code), code))
-    p.check("status 204 no body",         is_ok(drive(cfg, "/status/204"), 204, ""))
-    p.check("status 304 no body",         is_ok(drive(cfg, "/status/304"), 304, ""))
-
-# PHASE: statusline
-def phase_statusline(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("statusline")
-
-    # (name, status_line, expectation), response is <line>\r\nContent-Length: 0\r\n\r\n
-    ok_lines = [
-        ("valid 200",          "HTTP/1.1 200 OK"),
-        ("valid no reason",    "HTTP/1.1 200"),
-        ("valid 999",          "HTTP/1.1 999 X"),
-        ("valid 000",          "HTTP/1.1 000 X"),
-        ("http/1.0",           "HTTP/1.0 200 OK"),
-        ("valid 042 leadzero", "HTTP/1.1 042 X"),
-        ("reason with digits", "HTTP/1.1 200 200 OK"),
-        ("no-space reason",    "HTTP/1.1 200OK"),      # first 12 chars valid -> accepted
-        ("long reason",        "HTTP/1.1 200 " + "R" * 300),
-        ("reason w/ colon",    "HTTP/1.1 200 O:K"),
-        ("reason w/ tab-in",   "HTTP/1.1 200 O\tK"),
-        ("tab after code",     "HTTP/1.1 200\tOK"),    # separator before reason not validated -> accepted
-    ]
-    for name, line in ok_lines:
-        r = drive_staged(cfg, mock, (line + "\r\nContent-Length: 0\r\n\r\n").encode("latin-1"))
-        p.check("line ok: %s" % name, is_ok(r))
-
-    bad_lines = [
-        ("http/2.0",           "HTTP/2.0 200 OK"),
-        ("http/3.0",           "HTTP/3.0 200 OK"),
-        ("http/1.2 minor",     "HTTP/1.2 200 OK"),
-        ("http/0.9",           "HTTP/0.9 200 OK"),
-        ("http/1.9 minor",     "HTTP/1.9 200 OK"),
-        ("major non-digit",    "HTTP/x.1 200 OK"),
-        ("lowercase proto",    "http/1.1 200 OK"),
-        ("mixed-case proto",   "HTTp/1.1 200 OK"),
-        ("comma version",      "HTTP/1,1 200 OK"),
-        ("colon version",      "HTTP/1:1 200 OK"),
-        ("no dot version",     "HTTP/11 200 OK"),
-        ("underscore version", "HTTP/1_1 200 OK"),
-        ("dot shifted",        "HTTP/1.10 200 OK"),
-        ("backslash proto",    "HTTP\\1.1 200 OK"),
-        ("ICY (shoutcast)",    "ICY 200 OK"),
-        ("RTSP proto",         "RTSP/1.0 200 OK"),
-        ("leading space",      " HTTP/1.1 200 OK"),
-        ("prefix junk",        "XHTTP/1.1 200 OK"),
-        ("short line",         "HTTP/1.1 20"),
-        ("bare proto",         "HTTP/1.1"),
-        ("empty line",         ""),
-        ("2-digit code",       "HTTP/1.1 99 X"),
-        ("1-digit code",       "HTTP/1.1 2 X"),
-        ("alpha code",         "HTTP/1.1 abc X"),
-        ("plus code",          "HTTP/1.1 +20 X"),
-        ("minus code",         "HTTP/1.1 -20 X"),
-        ("spaced code",        "HTTP/1.1 20 0 X"),
-        ("double space",      r"HTTP/1.1  200 X"),
-        ("tab separator",      "HTTP/1.1\t200 X"),
-        ("no space after ver", "HTTP/1.1_200 X"),
-        ("http/3.0",           "HTTP/3.0 200 OK"),
-        ("http/1.11 minor",    "HTTP/1.11 200 OK"),
-        ("http/10.1 major",    "HTTP/10.1 200 OK"),
-        ("empty version",      "HTTP/. 200 OK"),
-        ("space in version",   "HTTP/1 .1 200 OK"),
-        ("trailing dot",       "HTTP/1. 200 OK"),
-        ("hex code 0x",        "HTTP/1.1 0x0 X"),
-        ("code with space",    "HTTP/1.1 2 0 0 X"),
-        ("nul in code",        "HTTP/1.1 2\x000 X"),
-        ("cr only line",       "HTTP/1.1 200 OK\r"),   # trailing \r stripped -> 'OK\r' becomes 'OK'? still valid; see below
-        ("just HTTP/",         "HTTP/"),
-        ("HTTP no slash",      "HTTP1.1 200 OK"),
-        ("SIP proto",          "SIP/2.0 200 OK"),
-        ("gopher junk",        "gopher://x 200"),
-        ("leading tab",        "\tHTTP/1.1 200 OK"),
-        ("double proto",       "HTTP/1.1 HTTP/1.1 200"),
-        ("code then letters",  "HTTP/1.1 20a X"),
-        ("negative version",   "HTTP/-1.1 200 OK"),
-    ]
-    for name, line in bad_lines:
-        # "cr only line" actually parses valid (trailing CR is stripped), so skip its err-assertion
-        if name == "cr only line":
-            r = drive_staged(cfg, mock, (line + "\nContent-Length: 0\r\n\r\n").encode("latin-1"))
-            p.check("line edge: %s" % name, is_alive(r))
-            continue
-        r = drive_staged(cfg, mock, (line + "\r\n\r\n").encode("latin-1"))
-        p.check("line bad: %s" % name, is_err(r), "expected err, got %r" % r)
-
-# PHASE: headers
-def phase_headers(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("headers")
-
-    def with_hdr(hdr_block, body=b"hi", cl=None):
-        cl = len(body) if cl is None else cl
-        return ("HTTP/1.1 200 OK\r\n%s\r\nContent-Length: %d\r\n\r\n" % (hdr_block, cl)).encode("latin-1") + body
-
-    # Accepted header shapes
-    p.check("empty value ok",        is_ok(drive_staged(cfg, mock, with_hdr("X-Empty:")), 200, "hi"))
-    p.check("value OWS trimmed",     (lambda r: is_ok(r, 200))(drive_staged(cfg, mock, with_hdr("X-A:    v   "))))
-    p.check("dup CL equal ok",       is_ok(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\nhi"), 200, "hi"))
-    p.check("CL leading zeros",      is_ok(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nContent-Length: 0002\r\n\r\nhi"), 200, "hi"))
-    p.check("Connection: close ok",  is_ok(drive_staged(cfg, mock, with_hdr("Connection: close")), 200, "hi"))
-    p.check("Connection keep,close", is_ok(drive_staged(cfg, mock, with_hdr("Connection: keep-alive, close")), 200, "hi"))
-    p.check("Connection Close case", is_ok(drive_staged(cfg, mock, with_hdr("Connection: Close")), 200, "hi"))
-    p.check("Connection close,keep", is_ok(drive_staged(cfg, mock, with_hdr("Connection: close, keep-alive")), 200, "hi"))
-    p.check("Connection tabs tokens",is_ok(drive_staged(cfg, mock, with_hdr("Connection: \tkeep-alive\t,\tclose\t")), 200, "hi"))
-    p.check("Connection closed!=close",is_ok(drive_staged(cfg, mock, with_hdr("Connection: closed")), 200, "hi"))
-    p.check("value many colons ok",  (lambda r: is_ok(r, 200))(drive_staged(cfg, mock, with_hdr("X-A: a:b:c:d"))))
-    p.check("value all-spaces empty", is_ok(drive_staged(cfg, mock, with_hdr("X-A:      ")), 200, "hi"))
-    p.check("value tab-trimmed",     is_ok(drive_staged(cfg, mock, with_hdr("X-A:\tv\t")), 200, "hi"))
-    p.check("dup CL triple equal",   is_ok(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\nhi"), 200, "hi"))
-    p.check("CL trailing OWS ok",    is_ok(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nContent-Length: 2 \r\n\r\nhi"), 200, "hi"))
-    p.check("many benign headers",   is_ok(drive_staged(cfg, mock, ("HTTP/1.1 200 OK\r\n" + "".join("X-H%d: v%d\r\n" % (i, i) for i in range(30)) + "Content-Length: 2\r\n\r\nhi").encode("latin-1")), 200, "hi"))
-    p.check("dup TE chunked ok",     is_ok(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n"), 200, "abc"))
-
-    # Rejected header shapes (framing / smuggling)
-    bad = [
-        ("obs-fold continuation", b"HTTP/1.1 200 OK\r\nX-Fold: a\r\n b\r\nContent-Length: 2\r\n\r\nhi"),
-        ("leading-tab fold",      b"HTTP/1.1 200 OK\r\n\tX: y\r\nContent-Length: 2\r\n\r\nhi"),
-        ("no colon",              with_hdr("NoColonHeader")),
-        ("empty name",            with_hdr(": value")),
-        ("space before colon",    with_hdr("Name : value")),
-        ("tab before colon",      with_hdr("Name\t: value")),
-        ("dup CL differ",         b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\nhi"),
-        ("CL then TE",            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\nhi"),
-        ("TE then CL",            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 2\r\n\r\nhi"),
-        ("CL non-numeric",        with_hdr("Content-Length: 2x", cl=None)),
-        ("CL hex",                b"HTTP/1.1 200 OK\r\nContent-Length: 0x2\r\n\r\nhi"),
-        ("CL plus",               b"HTTP/1.1 200 OK\r\nContent-Length: +2\r\n\r\nhi"),
-        ("CL minus",              b"HTTP/1.1 200 OK\r\nContent-Length: -2\r\n\r\nhi"),
-        ("CL internal space",     b"HTTP/1.1 200 OK\r\nContent-Length: 2 2\r\n\r\nhi"),
-        ("CL empty",              b"HTTP/1.1 200 OK\r\nContent-Length:\r\n\r\nhi"),
-        ("CL overflow u64",       b"HTTP/1.1 200 OK\r\nContent-Length: 99999999999999999999999999\r\n\r\nhi"),
-        ("TE gzip",               b"HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\nx"),
-        ("TE chunked,gzip",       b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\n\r\nx"),
-        ("TE gzip,chunked",       b"HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\nx"),
-        ("TE x-chunked",          b"HTTP/1.1 200 OK\r\nTransfer-Encoding: xchunked\r\n\r\nx"),
-        ("TE identity",           b"HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\n\r\nx"),
-        ("TE chunked;q=0",        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked;q=0\r\n\r\nx"),
-        ("TE Chunked,chunked",    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, chunked\r\n\r\nx"),
-        ("TE deflate",            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate\r\n\r\nx"),
-        ("TE then CL differ",     b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\nhi"),
-        ("CL then TE case",       b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\ntransfer-encoding: CHUNKED\r\n\r\nhi"),
-        ("dup CL differ 2vs0",    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 0\r\n\r\nhi"),
-        ("CL with plus-space",    b"HTTP/1.1 200 OK\r\nContent-Length: + 2\r\n\r\nhi"),
-        ("CL float",              b"HTTP/1.1 200 OK\r\nContent-Length: 2.0\r\n\r\nhi"),
-        ("CL binary 0b10",        b"HTTP/1.1 200 OK\r\nContent-Length: 0b10\r\n\r\nhi"),
-        ("CL comma sep",          b"HTTP/1.1 200 OK\r\nContent-Length: 2,2\r\n\r\nhi"),
-        ("CL leading space only", b"HTTP/1.1 200 OK\r\nContent-Length:    \r\n\r\nhi"),
-        ("blank-ish fold line",   b"HTTP/1.1 200 OK\r\n \r\nContent-Length: 2\r\n\r\nhi"),
-        ("only colon header",     b"HTTP/1.1 200 OK\r\n:\r\nContent-Length: 2\r\n\r\nhi"),
-        ("double colon empty nm", b"HTTP/1.1 200 OK\r\n::v\r\nContent-Length: 2\r\n\r\nhi"),
-    ]
-    for name, blob in bad:
-        r = drive_staged(cfg, mock, blob)
-        sec = name in ("obs-fold continuation", "space before colon", "CL then TE", "TE then CL",
-                       "dup CL differ", "TE chunked,gzip", "TE gzip,chunked", "TE then CL differ",
-                       "CL then TE case", "dup CL differ 2vs0", "TE Chunked,chunked", "TE chunked;q=0",
-                       "blank-ish fold line")
-        p.check("hdr bad: %s" % name, is_err(r), "expected err, got %r" % r, security=sec)
-
-    # Accepted TE spellings (need a real chunked body)
-    for name, te in [("TE Chunked case", "Chunked"), ("TE CHUNKED case", "CHUNKED"),
-                     ("TE leading space", " chunked"), ("TE trailing space", "chunked "),
-                     ("TE tab-wrapped", "\tchunked\t"), ("TE cHuNkEd", "cHuNkEd"),
-                     ("TE spaces both", "   chunked   ")]:
-        blob = ("HTTP/1.1 200 OK\r\nTransfer-Encoding: %s\r\n\r\n3\r\nabc\r\n0\r\n\r\n" % te).encode("latin-1")
-        p.check("hdr ok: %s" % name, is_ok(drive_staged(cfg, mock, blob), 200, "abc"))
-
-# PHASE: chunked
-def phase_chunked(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("chunked")
-
-    ok = [
-        ("upper hex size",   b"A\r\n0123456789\r\n0\r\n\r\n", "0123456789"),
-        ("lower hex size",   b"a\r\n0123456789\r\n0\r\n\r\n", "0123456789"),
-        ("leading zero size",b"003\r\nabc\r\n0\r\n\r\n", "abc"),
-        ("ext quoted",       b"3;a=\"b\"\r\nabc\r\n0\r\n\r\n", "abc"),
-        ("zero-only body",   b"0\r\n\r\n", ""),
-        ("many small chunks",b"1\r\na\r\n1\r\nb\r\n1\r\nc\r\n0\r\n\r\n", "abc"),
-        ("trailer then end", b"2\r\nxy\r\n0\r\nX-T: v\r\nY-T: w\r\n\r\n", "xy"),
-        ("long leadzero size",b"000000000003\r\nabc\r\n0\r\n\r\n", "abc"),
-        ("multi ext",        b"3;a=1;b=2\r\nabc\r\n0\r\n\r\n", "abc"),
-        ("ext no value",     b"3;flag\r\nabc\r\n0\r\n\r\n", "abc"),
-        ("uppercase hexdigs",b"F\r\n0123456789ABCDE\r\n0\r\n\r\n", "0123456789ABCDE"),
-        ("mixedcase size",   b"aB\r\n" + b"Z" * 0xAB + b"\r\n0\r\n\r\n", "Z" * 0xAB),
-        ("0-size w/ ext",    b"0;done\r\n\r\n", ""),
-        ("0-size w/ trailer",b"0\r\nX-Only-Trailer: yes\r\n\r\n", ""),
-        ("crlf-heavy tiny",  b"1\r\nx\r\n1\r\ny\r\n1\r\nz\r\n1\r\nw\r\n0\r\n\r\n", "xyzw"),
-    ]
-    for name, chunks, expect in ok:
-        p.check("chunk ok: %s" % name, is_ok(drive_staged(cfg, mock, CHUNKED(chunks)), 200, expect))
-
-    # 200 tiny 1-byte chunks must reassemble to exactly 200 bytes
-    many = b"".join(b"1\r\n%c\r\n" % (0x61 + (i % 26)) for i in range(200)) + b"0\r\n\r\n"
-    p.check("chunk 200x1-byte reassembly", (lambda r: is_ok(r, 200) and r.get("bodylen") == 200)(
-        drive_staged(cfg, mock, CHUNKED(many))))
-
-    bad = [
-        ("non-hex size",      b"zz\r\nabc\r\n0\r\n\r\n"),
-        ("partial-hex size",  b"1g\r\nabc\r\n0\r\n\r\n"),
-        ("0x prefix size",    b"0x3\r\nabc\r\n0\r\n\r\n"),
-        ("empty size ;ext",   b";ext\r\nabc\r\n0\r\n\r\n"),
-        ("size overflow",     b"FFFFFFFFFFFFFFFFFF\r\nabc\r\n0\r\n\r\n"),
-        ("negative size",     b"-1\r\nabc\r\n0\r\n\r\n"),
-        ("space in size",     b"3 \r\nabc\r\n0\r\n\r\n"),
-        ("tab in size",       b"3\t\r\nabc\r\n0\r\n\r\n"),
-        ("bad chunk terminator", b"3\r\nabcX5\r\n0\r\n\r\n"),
-        ("data shorter+eof",  b"5\r\nab"),
-        ("empty size line",   b"\r\nabc\r\n0\r\n\r\n"),
-        ("size plus sign",    b"+3\r\nabc\r\n0\r\n\r\n"),
-        ("size 0x prefix up", b"0X3\r\nabc\r\n0\r\n\r\n"),
-        ("size w/ inner space",b"3 0\r\nabc\r\n0\r\n\r\n"),
-        ("size hash junk",    b"3#\r\nabc\r\n0\r\n\r\n"),
-        ("size u64+1 overflow",b"10000000000000000\r\nabc\r\n0\r\n\r\n"),
-        ("term one byte off", b"3\r\nabcX\r\n0\r\n\r\n"),
-        ("term missing lf",   b"3\r\nabc\r0\r\n\r\n"),
-        ("data over size+eof",b"2\r\nabcdef"),
-        ("neg then valid",    b"-0\r\n\r\n"),
-        ("size dot",          b"3.\r\nabc\r\n0\r\n\r\n"),
-    ]
-    for name, chunks in bad:
-        sec = name in ("term one byte off", "bad chunk terminator", "term missing lf",
-                       "size w/ inner space", "data over size+eof")
-        # The "+eof" cases need the peer to CLOSE to signal truncation; the rest
-        # error immediately on parse, so keep-alive vs close is irrelevant there
-        p.check("chunk bad: %s" % name, is_err(drive_staged(cfg, mock, CHUNKED(chunks),
-                                                              keep=not name.endswith("+eof"))),
-              "expected err", security=sec)
-
-    # 4 GiB single chunk: valid hex, but must be rejected against the body cap
-    p.check("chunk 4GiB > cap", is_err(drive_staged(cfg, mock, CHUNKED(b"FFFFFFFF\r\n"))))
-
-# PHASE: eof
-def phase_eof(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("eof")
-    trunc = [
-        ("partial status line",   b"HTTP/1.1 200"),
-        ("status line only",      b"HTTP/1.1 200 OK\r\n"),
-        ("mid headers no blank",  b"HTTP/1.1 200 OK\r\nX: y\r\n"),
-        ("headers then CL nobody",b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n"),
-        ("mid CL body",           b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc"),
-        ("mid chunk size",        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3"),
-        ("chunk size no data",    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\n"),
-        ("mid chunk data",        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nab"),
-        ("chunk trailer no end",  b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nxy\r\n0\r\n"),
-    ]
-    for name, blob in trunc:
-        p.check("eof err: %s" % name, is_err(drive_staged(cfg, mock, blob, keep=False)), "expected err")
-
-    # Legit EOF-delimited successes
-    p.check("eof close-delimited ok", is_ok(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\n\r\nbodybytes", keep=False), 200, "bodybytes"))
-    p.check("eof empty body ok",      is_ok(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", keep=False), 200, ""))
-    p.check("zero-byte response",     is_err(drive(cfg, "/drop")))
-    p.check("connection reset (RST)", is_err(drive(cfg, "/reset")))
-    # Huge declared CL, tiny body, then close -> reserve path then EOF error
-    p.check("huge CL then eof",       is_err(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nContent-Length: 5000000\r\n\r\ntiny", keep=False)))
-
-    # Same truncations, but delivered a byte at a time so the incremental parser
-    # sits in each phase across many recv() boundaries before hitting EOF. Must
-    # still error cleanly, never hang, never spin
-    drip_trunc = [
-        ("drip mid status",       b"HTTP/1.1 200"),
-        ("drip mid headers",      b"HTTP/1.1 200 OK\r\nX: y\r\n"),
-        ("drip CL nobody",        b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nabc"),
-        ("drip mid chunk size",   b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3"),
-        ("drip mid chunk data",   b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nab"),
-    ]
-    for name, blob in drip_trunc:
-        p.check("eof %s" % name, is_err(drive_drip(cfg, mock, blob, piece=1, keep=False)), "expected err")
-
-# PHASE: desync
-def _reuse_clean(cfg, ep, n=10):
-    """After a poison request on `ep`, every following /ok must be pristine."""
-    for _ in range(n):
-        if not is_ok(drive(cfg, "/ok", ep=ep), 200, "hello"):
-            return False
-    return True
-
-def phase_desync(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("desync")
-
-    # Each poison uses the small pool (connLimit 2) then hammers /ok on it: if the
-    # hostile body poisoned a pooled connection, an /ok will misframe or return the
-    # smuggled bytes. All of these are SECURITY findings if they trip
-    scenarios = [
-        ("204 with body",        lambda: drive(cfg, "/evil/204body", ep="small")),
-        ("304 with body",        lambda: drive(cfg, "/evil/304body", ep="small")),
-        ("HEAD with body",       lambda: drive(cfg, "/evil/headbody", ep="small", method="HEAD")),
-        ("trailing smuggle",     lambda: drive(cfg, "/evil/trailing", ep="small")),
-        ("pipelined 2 responses",lambda: drive(cfg, "/evil/pipeline", ep="small")),
-    ]
-    for name, poison in scenarios:
-        poison()                       # fire the hostile response
-        clean = _reuse_clean(cfg, "small", n=12)
-        p.check("no poison after: %s" % name, clean,
-              "pooled connection corrupted after %s" % name, security=True)
-
-    # The smuggled body must never surface as a delivered response body
-    r = drive(cfg, "/evil/trailing", ep="default")
-    p.check("trailing body not smuggled", (r is None) or (r.get("body") != "SMUGGLE"),
-          "client delivered smuggled bytes: %r" % r, security=True)
-
-    # A legit 204/keep-alive connection stays reusable
-    drive(cfg, "/status/204", ep="small")
-    p.check("legit 204 keeps conn clean", _reuse_clean(cfg, "small"))
-
-# PHASE: serialize
-def phase_serialize(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("serialize")
-    host = "%s:%d" % (cfg.host, cfg.up_port) if cfg.up_port != 80 else cfg.host
-
-    def reflect(fwd=None, method="GET", x_body=None):
-        return drive(cfg, "/reflect", want=None, fwd=fwd, method=method, x_body=x_body)
-
-    # Engine owns Host / Content-Length / Transfer-Encoding: caller dupes dropped
-    for name, forged in [("Host lower", "host: evil.example"),
-                         ("Host upper", "HOST: evil.example"),
-                         ("Host mixed", "hOsT: evil.example")]:
-        r = reflect(fwd=forged)
-        ok = is_ok(r, 200) and ("host=%s|" % host) in (r.get("body") or "")
-        p.check("dedup %s" % name, ok, "reflected: %r" % (r and r.get("body")), security=True)
-
-    for name, forged in [("CL forge", "Content-Length: 999"), ("CL forge case", "content-length: 999")]:
-        r = reflect(fwd=forged, method="POST", x_body="1234")
-        ok = is_ok(r, 200) and "|clen=4|" in (r.get("body") or "")
-        p.check("dedup %s" % name, ok, "reflected: %r" % (r and r.get("body")), security=True)
-
-    for name, forged in [("TE forge", "Transfer-Encoding: chunked"), ("TE forge case", "transfer-encoding: chunked")]:
-        r = reflect(fwd=forged)
-        ok = is_ok(r, 200) and "|te=-|" in (r.get("body") or "")
-        p.check("dedup %s" % name, ok, "reflected: %r" % (r and r.get("body")), security=True)
-
-    # Normal header is forwarded verbatim
-    r = reflect(fwd="X-Test: hello")
-    p.check("forward normal header", is_ok(r, 200) and "|xtest=hello" in (r.get("body") or ""))
-
-    # Content-Length correctness for a range of body sizes
-    for n in (0, 1, 100, 1000):
-        body = "z" * n
-        r = drive(cfg, "/reflect", method="POST", x_body=body)
-        ok = is_ok(r, 200) and ("|clen=%d|" % n) in (r.get("body") or "") and ("|blen=%d|" % n) in (r.get("body") or "")
-        p.check("CL correct POST %d" % n, ok, "reflected: %r" % (r and r.get("body")))
-
-    # GET with no body: no Content-Length emitted at all
-    r = drive(cfg, "/reflect", method="GET")
-    p.check("GET emits no CL", is_ok(r, 200) and "|clen=-|" in (r.get("body") or ""))
-
-    # Large forwarded header forces serialize() buffer-grow retry; must still arrive
-    big = "P" * 6000
-    r = drive(cfg, "/reflect", fwd="X-Test: " + big)
-    p.check("buffer-grow big header", is_ok(r, 200) and ("|xtest=" + big) in (r.get("body") or ""))
-
-    # Request injection: hostile path / header bytes MUST be refused
-    path_vectors = [
-        ("CRLF in path",  b"/a\r\nX-Smuggle: 1"),
-        ("bare LF path",  b"/a\nX-Smuggle: 1"),
-        ("bare CR path",  b"/a\rX-Smuggle: 1"),
-        ("NUL in path",   b"/a\x00b"),
-        ("CRLF at end",   b"/ok\r\n"),
-    ]
-    for name, payload in path_vectors:
-        r = inject(cfg, "path", payload)
-        p.check("reject path: %s" % name, is_errc(r, EP_SERIALIZE), "expected serialize-err, got %r" % r, security=True)
-
-    hdr_vectors = [
-        ("CRLF in value", b"X-Evil: a\r\nX-Smuggle: b"),
-        ("bare LF value", b"X-Evil: a\nb"),
-        ("CRLF in name",  b"X-Evil\r\nX: b"),
-        ("NUL in value",  b"X-Evil: a\x00b"),
-    ]
-    for name, payload in hdr_vectors:
-        r = inject(cfg, "header", payload)
-        p.check("reject header: %s" % name, is_errc(r, EP_SERIALIZE), "expected serialize-err, got %r" % r, security=True)
-
-    # Injection controls: clean path / header succeed
-    p.check("clean path accepted",   is_ok(inject(cfg, "path", b"/ok"), 200, "hello"))
-    p.check("clean header accepted", is_ok(inject(cfg, "header", b"X-Ok: fine"), 200, "hello"))
-    # Space in path isn't an injection (no CR/LF/NUL): must not crash, no smuggle
-    p.check("space in path survives", is_alive(inject(cfg, "path", b"/a b")))
-
-    # Byte-exact serialization via /reflectraw ('|' == CR/LF on the wire)
-    hoststr = "%s:%d" % (cfg.host, cfg.up_port)
-    h = raw_head(cfg)
-    p.check("raw GET request line", bool(h) and h.startswith("GET /reflectraw HTTP/1.1|"), "head=%r" % h)
-    p.check("raw Host exactly once", bool(h) and _count_ci(h, "|host:") == 1 and hoststr in h, "head=%r" % h)
-    p.check("raw GET emits no CL",  bool(h) and _count_ci(h, "content-length") == 0, "head=%r" % h)
-
-    # Forged Host buried between two clean headers -> dropped; clean ones kept, in order
-    h = raw_head(cfg, fwd="X-One: 1", fwd2="Host: evil.example", fwd3="X-Two: 2")
-    ok = (bool(h) and _count_ci(h, "|host:") == 1 and "evil.example" not in h and
-          "|X-One: 1|" in h and "|X-Two: 2|" in h and h.index("X-One") < h.index("X-Two"))
-    p.check("raw forged Host dropped+order", ok, "head=%r" % h, security=True)
-
-    # Forged Content-Length / Transfer-Encoding dropped; engine's own CL is correct
-    h = raw_head(cfg, fwd="Content-Length: 999", fwd2="Transfer-Encoding: chunked", method="POST", x_body="abcd")
-    ok = (bool(h) and _count_ci(h, "content-length:") == 1 and "|Content-Length: 4|" in h and
-          _count_ci(h, "transfer-encoding") == 0 and "999" not in h)
-    p.check("raw forged CL/TE dropped", ok, "head=%r" % h, security=True)
-
-    # Three clean forwarded headers preserved verbatim and in submission order
-    h = raw_head(cfg, fwd="A: 1", fwd2="B: 2", fwd3="C: 3")
-    p.check("raw three headers ordered", bool(h) and "|A: 1|B: 2|C: 3|" in h, "head=%r" % h)
-
-    # Host header emitted immediately after the request line (before any forwarded header)
-    h = raw_head(cfg, fwd="Z-First: z")
-    p.check("raw Host precedes fwd headers", bool(h) and h.index("|Host:") < h.index("Z-First"), "head=%r" % h)
-
-    # PUT/PATCH/POST with an EMPTY body still emit Content-Length: 0
-    for m in ("PUT", "PATCH", "POST"):
-        r = drive(cfg, "/reflect", method=m)
-        p.check("%s empty emits CL0" % m, is_ok(r, 200) and "|clen=0|" in (r.get("body") or ""),
-              "reflected %r" % (r and r.get("body")))
-
-    # Large POST body forces a serialize() buffer-grow on the BODY, not just the header
-    bigbody = "D" * 8000
-    r = drive(cfg, "/reflect", method="POST", x_body=bigbody)
-    p.check("buffer-grow big body", is_ok(r, 200) and ("|clen=%d|" % len(bigbody)) in (r.get("body") or "") and
-          ("|blen=%d|" % len(bigbody)) in (r.get("body") or ""), "reflected clen/blen mismatch")
-
-# PHASE: limits
-def phase_limits(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("limits")
-    # EpSmall: maxHeaderBytes=256, maxBodyBytes=1024, maxHeaderCount=8
-    def hdr_block_bytes(total):
-        # Build a header block roughly `total` bytes long via one padded header
-        pad = max(0, total - len("X-P: \r\n"))
-        return ("HTTP/1.1 200 OK\r\nX-P: %s\r\nContent-Length: 0\r\n\r\n" % ("A" * pad)).encode("latin-1")
-
-    p.check("header block under cap", is_ok(drive_staged(cfg, mock, hdr_block_bytes(200), ep="small")))
-    p.check("header block over cap",  is_err(drive_staged(cfg, mock, hdr_block_bytes(400), ep="small")))
-    p.check("single huge header line",is_err(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nX-P: " + b"A" * 600 + b"\r\nContent-Length: 0\r\n\r\n", ep="small")))
-
-    def n_headers(n):
-        block = "".join("X-H%d: v\r\n" % i for i in range(n))
-        return ("HTTP/1.1 200 OK\r\n%sContent-Length: 0\r\n\r\n" % block).encode("latin-1")
-
-    p.check("header count at cap (8)", is_ok(drive_staged(cfg, mock, n_headers(7), ep="small")))
-    p.check("header count 8th ok",     is_ok(drive_staged(cfg, mock, n_headers(7), ep="small")))  # 7 + CL == 8
-    p.check("header count 9th over",   is_err(drive_staged(cfg, mock, n_headers(8), ep="small")))  # 8 + CL == 9
-    p.check("header count over cap",   is_err(drive_staged(cfg, mock, n_headers(20), ep="small")))
-
-    # Exact byte boundary on maxBodyBytes for close-delimited + chunked framings
-    p.check("chunk single at cap 1024",  (lambda r: is_ok(r, 200) and r.get("bodylen") == 1024)(
-        drive_staged(cfg, mock, CHUNKED(b"400\r\n" + b"B" * 0x400 + b"\r\n0\r\n\r\n"), ep="small")))
-    p.check("chunk single 1025 over",    is_err(drive_staged(cfg, mock, CHUNKED(b"401\r\n" + b"B" * 0x401 + b"\r\n0\r\n\r\n"), ep="small")))
-    p.check("close body at cap 1024",    (lambda r: is_ok(r, 200) and r.get("bodylen") == 1024)(
-        drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\n\r\n" + b"B" * 1024, keep=False, ep="small")))
-    p.check("header block exactly 256",  is_alive(drive_staged(cfg, mock, hdr_block_bytes(256), ep="small")))
-
-    p.check("body CL at cap (1024)",   (lambda r: is_ok(r, 200) and r.get("bodylen") == 1024)(
-        drive_staged(cfg, mock, R("HTTP/1.1 200 OK", ["Content-Length: 1024"], b"B" * 1024), ep="small")))
-    p.check("body CL over cap",        is_err(drive_staged(cfg, mock, R("HTTP/1.1 200 OK", ["Content-Length: 1025"], b"B" * 1025), ep="small")))
-
-    p.check("chunk cumulative over cap", is_err(drive_staged(cfg, mock, CHUNKED(b"320\r\n" + b"B" * 0x320 + b"\r\n320\r\n" + b"B" * 0x320 + b"\r\n0\r\n\r\n"), ep="small")))
-    p.check("close-delimited over cap",  is_err(drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\n\r\n" + b"B" * 2000, keep=False, ep="small")))
-    p.check("trailer count over cap",    is_err(drive_staged(cfg, mock, CHUNKED(b"2\r\nxy\r\n0\r\n" + b"".join(b"X-%d: v\r\n" % i for i in range(20)) + b"\r\n"), ep="small")))
-
-    # Informational cap (fixed at 8 in the client): exact boundary
-    p.check("1xx count at cap (8)", is_ok(drive(cfg, "/continue/8"), 200, "done"))
-    p.check("1xx count 9 over cap", is_err(drive(cfg, "/continue/9")))
-    p.check("1xx count over cap",   is_err(drive(cfg, "/continue/12")))
-
-    # The status line's reason phrase counts toward maxHeaderBytes too: a 300-byte
-    # reason on the 256-cap endpoint must be rejected, not silently accepted
-    p.check("reason phrase over cap", is_err(drive_staged(cfg, mock,
-        ("HTTP/1.1 200 " + "R" * 300 + "\r\nContent-Length: 0\r\n\r\n").encode("latin-1"), ep="small")))
-
-    # Content-Length exactly at cap, then a truncated body + EOF: reserve() runs at
-    # the cap, then the parser must error on the short read, never hang, never OOB
-    p.check("CL at cap then eof", is_err(drive_staged(cfg, mock,
-        b"HTTP/1.1 200 OK\r\nContent-Length: 1024\r\n\r\n" + b"B" * 512, keep=False, ep="small")))
-    # A 1xx that hides a body must not desync (client ignores the CL on 1xx)
-    p.check("1xx with body rejected", is_err(drive_staged(cfg, mock, b"HTTP/1.1 100 Continue\r\nContent-Length: 3\r\n\r\nXXXHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")), security=True)
-
-# PHASE: resource
-def _concurrent(fn, n, stagger=0.01):
-    # A tiny stagger between thread starts spreads the inbound connection burst so
-    # WFX's accept path isn't hit by N simultaneous SYNs (which dropped a few as
-    # None). 10ms x N stays well inside the 300ms coalesce window, so coalescing
-    # still engages
+    The small stagger spreads the inbound connection burst, so WFX's accept path is
+    not hit by n simultaneous SYNs, which used to drop a few of them as None.
+    """
     out = [None] * n
+
     def worker(i):
         out[i] = fn(i)
-    ts = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
-    for t in ts:
-        t.start()
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for thread in threads:
+        thread.start()
         if stagger:
             time.sleep(stagger)
-    for t in ts:
-        t.join()
+    for thread in threads:
+        thread.join()
+
     return out
 
-def phase_resource(ctx):
+# PHASE: mux_handshake
+def phase_mux_handshake(ctx):
     cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("resource")
+    p = ctx.phase("mux_handshake")
 
-    # Slow upstreams must surface as request-timeout on the fast (5s-budget) endpoint
-    # The outbound stalls 20s, so the timeout (5s + up to a 5s tick) wins; give the
-    # inbound read enough slack to receive WFX's eventual timeout response
-    t0 = time.time()
-    p.check("slow headers -> timeout", is_errc(drive(cfg, "/slow-headers", ep="fast", rtimeout=18), EP_REQ_TIMEOUT), "elapsed %.1fs" % (time.time() - t0))
-    p.check("slow body -> timeout",    is_errc(drive(cfg, "/slow-body", ep="fast", rtimeout=18), EP_REQ_TIMEOUT))
+    mux_disconnects_reset(cfg)
 
-    # Pool exhaustion: concurrent slow requests on a 2-slot pool. Every one must
-    # resolve (no hang); overflow shows up as pool-exhausted or timeout, never OK
-    # Requests queue behind the 2 slots and each burns the full 5s budget (+ up to a
-    # 5s tick), so keep the count low and the read window wide enough for two waves
-    res = _concurrent(lambda i: drive(cfg, "/slow-headers", ep="fast", rtimeout=30), 4)
-    all_resolved = all(is_alive(r) for r in res)
-    none_ok = all(not is_ok(r) for r in res)
-    p.check("pool exhaustion resolves", all_resolved and none_ok, "results: %r" % res)
+    r = mux_call(cfg, key="alpha")
+    p.check("onConnect accepted: the call is served and its value round-trips",
+            is_ok(r) and r.get("value") == "alpha", "r=%r" % r)
 
-    # Coalescing: 16 concurrent identical GETs must hit the backend ONCE
-    mock.coalesce_reset()
-    res = _concurrent(lambda i: drive(cfg, "/coalesce", ep="coalesce"), 16)
-    hits = mock.coalesce_count()
-    all_ok = all(is_ok(r, 200, "coalesced") for r in res)
-    p.check("coalesce: 16 waiters all ok", all_ok, "results: %r" % res)
-    p.check("coalesce: backend hit once", hits == 1, "backend hits = %d (expected 1)" % hits)
+    r = mux_call(cfg, mux="bad")
+    p.check("onConnect rejected: fails cleanly, the request is never served",
+            is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
 
-    # Control: without coalescing, all 16 reach the backend
-    mock.coalesce_reset()
-    _concurrent(lambda i: drive(cfg, "/coalesce", ep="default"), 16)
-    hits = mock.coalesce_count()
-    p.check("no-coalesce: 16 backend hits", hits == 16, "backend hits = %d (expected 16)" % hits)
-
-    # Clone integrity: every coalesced waiter gets its own full 1000-byte copy
-    mock.coalesce_reset()
-    res = _concurrent(lambda i: drive(cfg, "/coalesce-big", ep="coalesce"), 16)
-    good = all(r and r.get("ep") == EP_SUCCESS and r.get("bodylen") == 1000 and r.get("body") == "C" * 1000 for r in res)
-    p.check("coalesce clone integrity", good, "a waiter got a truncated/aliased body")
-
-    # Error fan-out: a single failing backend call fails every coalesced waiter
-    mock.coalesce_reset()
-    res = _concurrent(lambda i: drive(cfg, "/coalesce-bad", ep="coalesce"), 16)
-    p.check("coalesce error fan-out", all(is_err(r) for r in res), "results: %r" % res)
-
-    # Two DISTINCT coalesce keys in flight at once: each key must dedupe to its own
-    # single backend hit AND every waiter must receive ITS key's body, never the
-    # other group's. A key-collision / cross-delivery bug is an info-disclosure leak
-    mock.coalesce_reset()
-    def fire(i):
-        return ("small", drive(cfg, "/coalesce", ep="coalesce")) if i % 2 == 0 \
-               else ("big", drive(cfg, "/coalesce-big", ep="coalesce"))
-    res = _concurrent(fire, 16)
-    hits = mock.coalesce_count()
-    small_ok = all(is_ok(r, 200, "coalesced") for tag, r in res if tag == "small")
-    big_ok   = all(r and r.get("ep") == EP_SUCCESS and r.get("body") == "C" * 1000 for tag, r in res if tag == "big")
-    p.check("coalesce 2 keys no cross-delivery", small_ok and big_ok, "results: %r" % res, security=True)
-    p.check("coalesce 2 keys hit twice", hits == 2, "backend hits = %d (expected 2)" % hits)
-
-# PHASE: fragmentation
-def phase_fragmentation(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("fragmentation")
-
-    def cl(body):
-        return ("HTTP/1.1 200 OK\r\nX-Mark: m\r\nContent-Length: %d\r\n\r\n%s"
-                % (len(body), body)).encode("latin-1")
-
-    # Whole valid responses delivered one byte at a time: the client must
-    # reassemble the status line, each header, the blank line, and the body
-    # across a recv() boundary at literally every byte
-    p.check("drip CL body",        is_ok(drive_drip(cfg, mock, cl("hello"), piece=1), 200, "hello"))
-    p.check("drip empty body",     is_ok(drive_drip(cfg, mock, cl(""), piece=1), 200, ""))
-    p.check("drip 2-byte pieces",  is_ok(drive_drip(cfg, mock, cl("abcdefgh"), piece=2), 200, "abcdefgh"))
-    p.check("drip chunked",        is_ok(drive_drip(cfg, mock, CHUNKED(b"3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n"), piece=1), 200, "abcde"))
-    p.check("drip chunked ext+tr", is_ok(drive_drip(cfg, mock, CHUNKED(b"3;x=y\r\nabc\r\n0\r\nX-T: v\r\n\r\n"), piece=1), 200, "abc"))
-
-    # 1xx interleave delivered fragmented: flags from the 1xx block must not leak
-    info = b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone"
-    p.check("drip 1xx + final",    is_ok(drive_drip(cfg, mock, info, piece=1), 200, "done"))
-    p.check("split 1xx + final",   is_ok(drive_split(cfg, mock, info, 17), 200, "done"))
-
-    # Single split at EVERY byte offset of a fixed CL response: one aggregate check
-    blob = cl("SPLITBODY")
-    bad_off = None
-    for off in range(1, len(blob)):
-        if not is_ok(drive_split(cfg, mock, blob, off), 200, "SPLITBODY"):
-            bad_off = off
-            break
-    p.check("split CL at every offset", bad_off is None, "misframed when split at byte %r" % bad_off)
-
-    # Split a chunked response at points inside the size line and inside the data
-    ch = CHUNKED(b"5\r\nabcde\r\n3\r\nfgh\r\n0\r\n\r\n")   # body == "abcdefgh"
-    base = len(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
-    for k in (0, 1, 3, 5, 8, 12):
-        p.check("split chunked @ +%d" % k, is_ok(drive_split(cfg, mock, ch, base + k), 200, "abcdefgh"))
-
-    # Larger body, coarse and fine fragmentation, exact length must survive
-    big = cl("Q" * 500)
-    p.check("split big body mid",  (lambda r: is_ok(r, 200) and r.get("bodylen") == 500)(drive_split(cfg, mock, big, len(big) // 2)))
-    p.check("drip big 8-byte",     (lambda r: is_ok(r, 200) and r.get("bodylen") == 500)(drive_drip(cfg, mock, big, piece=8)))
-
-# PHASE: methods
-def phase_methods(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("methods")
-
-    for m in ("GET", "OPTIONS", "DELETE"):
-        h = raw_head(cfg, method=m)
-        p.check("%s request line" % m, bool(h) and h.startswith("%s /reflectraw HTTP/1.1|" % m), "head=%r" % h)
-        p.check("%s no CL (no body)" % m, bool(h) and _count_ci(h, "content-length") == 0, "head=%r" % h)
-
-    for m in ("POST", "PUT", "PATCH"):
-        h = raw_head(cfg, method=m, x_body="abcd")
-        ok = bool(h) and h.startswith("%s /reflectraw HTTP/1.1|" % m) and "|Content-Length: 4|" in h
-        p.check("%s body + CL" % m, ok, "head=%r" % h)
-
-    # Every verb round-trips against a live upstream and reflects its own method
-    for m in ("GET", "OPTIONS", "DELETE", "POST", "PUT", "PATCH"):
-        r = drive(cfg, "/ok", method=m)
-        p.check("%s round-trips" % m, is_ok(r, 200, "hello"), "got %r" % r)
-
-    # HEAD stays bodyless even when the upstream advertises a Content-Length
-    p.check("HEAD bodyless", is_ok(drive(cfg, "/evil/headbody", method="HEAD"), 200, ""))
-
-# PHASE: security
-def phase_security(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("security")
-
-    # No cross-request bleed across keep-alive reuse (single-slot pool)
-    # Two distinct responses share one connection + parse state. Neither status,
-    # body, nor header set may bleed into the other, in either interleaving
-    mock.stage("secA", b"HTTP/1.1 201 Created\r\nX-A: aaa\r\nContent-Length: 5\r\n\r\nAAAAA", keep=True)
-    mock.stage("secB", b"HTTP/1.1 202 Accepted\r\nX-B: bbb\r\nContent-Length: 3\r\n\r\nBBB", keep=True)
-    p.check("reuse A intact",        is_ok(drive(cfg, "/raw/secA", ep="reuse"), 201, "AAAAA"))
-    p.check("reuse B intact",        is_ok(drive(cfg, "/raw/secB", ep="reuse"), 202, "BBB"))
-    p.check("reuse A->B->A no bleed", is_ok(drive(cfg, "/raw/secA", ep="reuse"), 201, "AAAAA"), security=True)
-    p.check("reuse no header bleed",  (lambda r: is_ok(r, 202) and (r.get("hdr") in (None, "")))(
-        drive(cfg, "/raw/secB", ep="reuse", want="X-A")), "B surfaced A's header", security=True)
-
-    # Trailer headers must NEVER surface as response headers (trailer smuggle)
-    mock.stage("sectr", CHUNKED(b"2\r\nhi\r\n0\r\nX-Trailer-Secret: leak\r\nSet-Cookie: e=1\r\n\r\n"), keep=True)
-    p.check("trailer body correct",   is_ok(drive(cfg, "/raw/sectr"), 200, "hi"))
-    p.check("trailer secret hidden",  (lambda r: is_ok(r, 200) and (r.get("hdr") in (None, "")))(
-        drive(cfg, "/raw/sectr", want="X-Trailer-Secret")), "trailer surfaced as header", security=True)
-    p.check("trailer cookie hidden",  (lambda r: is_ok(r, 200) and (r.get("hdr") in (None, "")))(
-        drive(cfg, "/raw/sectr", want="Set-Cookie")), "trailer cookie surfaced", security=True)
-
-    # 1xx header block must NOT leak into the final response's headers
-    mock.stage("secinfo", b"HTTP/1.1 103 Early Hints\r\nX-Info-Leak: secret\r\nLink: </s>\r\n\r\n"
-                          b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi", keep=True)
-    p.check("1xx final body ok",      is_ok(drive(cfg, "/raw/secinfo"), 200, "hi"))
-    p.check("1xx header not leaked",  (lambda r: is_ok(r, 200) and (r.get("hdr") in (None, "")))(
-        drive(cfg, "/raw/secinfo", want="X-Info-Leak")), "1xx header leaked into final", security=True)
-
-    # CL-bounded body: extra bytes past Content-Length are NOT part of body
-    r = drive_staged(cfg, mock, b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ngoodSMUGGLE!", ep="default", keep=True)
-    p.check("CL body exact, extra dropped", is_ok(r, 200, "good") and r.get("bodylen") == 4,
-          "delivered past-CL bytes: %r" % r, security=True)
-
-    # Keep-alive poisoning via chunked / no-body-status framings
-    poisons = [
-        ("chunked trailing smuggle", CHUNKED(b"4\r\ngood\r\n0\r\n\r\n") + b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nSMUGGLE"),
-        ("204 + TE chunked body",    b"HTTP/1.1 204 No Content\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"),
-        ("304 + TE chunked body",    b"HTTP/1.1 304 Not Modified\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"),
-        ("204 + hidden CL body",     b"HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\nhelloHTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBAD"),
-    ]
-    for name, blob in poisons:
-        drive_staged(cfg, mock, blob, ep="small", keep=True)
-        p.check("no poison: %s" % name, _reuse_clean(cfg, "small", n=12),
-              "pooled connection poisoned by %s" % name, security=True)
-
-    # A 204 whose (illegal) body is delivered LATE, dribbled in after the client has
-    # already completed the no-body response and returned the socket to the pool, can't
-    # be discarded at completion time, so the phantom bytes land on the idle keep-alive
-    # connection. The engine releases a pooled slot that receives unsolicited bytes, but
-    # that races with immediate reuse, so the very next request may break. The security
-    # guarantees that MUST hold regardless of the race: the phantom bytes are NEVER
-    # delivered as a response body (no data smuggle), and the pool recovers (a later
-    # request succeeds cleanly). PHANTOM99 is not a valid HTTP response, so if reuse
-    # loses the race the poisoned request errors out rather than surfacing the payload
-    drive_drip(cfg, mock, b"HTTP/1.1 204 No Content\r\nContent-Length: 9\r\n\r\nPHANTOM99",
-               piece=1, ep="small", keep=True)
-    outs = [drive(cfg, "/ok", ep="small") for _ in range(10)]
-    no_smuggle = all((o is None) or o.get("body") != "PHANTOM99" for o in outs)
-    recovered = any(is_ok(o, 200, "hello") for o in outs[-4:])
-    p.check("drip 204+body: no data smuggled", no_smuggle,
-          "phantom 204 body surfaced as a response", security=True)
-    p.check("drip 204+body: pool recovers", recovered,
-          "pool never recovered after a late 204 body")
-
-    # Request-side injection breadth: every CR/LF/NUL form must be refused
-    path_ctrl = [
-        ("bare CR",       b"/a\rb"),      ("bare LF",   b"/a\nb"),   ("CRLF", b"/a\r\nb"),
-        ("NUL",           b"/a\x00b"),    ("LF then CR",b"/a\n\rb"), ("CR CR LF", b"/a\r\r\nb"),
-        ("smuggle line",  b"/a\r\nHost: evil\r\nGET /x HTTP/1.1\r\n"),
-        ("trailing CRLF", b"/a\r\n"),     ("leading CRLF", b"\r\n/a"),
-        ("double CRLF",   b"/a\r\n\r\nGET /evil HTTP/1.1"),
-    ]
-    for name, vec in path_ctrl:
-        result = inject(cfg, "path", vec)
-        p.check("reject path: %s" % name, is_errc(result, EP_SERIALIZE),
-                "expected serialize-err, got %r" % (result,), security=True)
-
-    hdr_ctrl = [
-        ("CR value",   b"X-E: a\rb"),   ("LF value", b"X-E: a\nb"),   ("CRLF value", b"X-E: a\r\nb"),
-        ("NUL value",  b"X-E: a\x00b"), ("CR name",  b"X-E\rX: b"),   ("LF name",   b"X-E\nX: b"),
-        ("NUL name",   b"X-\x00E: b"),
-        ("smuggle value", b"X-E: a\r\nContent-Length: 0\r\n\r\nGET /evil HTTP/1.1"),
-    ]
-    for name, vec in hdr_ctrl:
-        result = inject(cfg, "header", vec)
-        p.check("reject header: %s" % name, is_errc(result, EP_SERIALIZE),
-                "expected serialize-err, got %r" % (result,), security=True)
-
-    # Bytes that are NOT CR/LF/NUL are passed through (documents the exact filter):
-    # must neither crash nor smuggle: WFX simply answers
-    for name, vec in [("VT", b"/a\x0bb"), ("FF", b"/a\x0cb"), ("DEL", b"/a\x7fb"),
-                      ("high 0xFF", b"/a\xffb"), ("tab", b"/a\tb")]:
-        p.check("path passthrough: %s" % name, is_alive(inject(cfg, "path", vec)))
-
-    # DoS caps: unbounded input must be refused, not buffered forever
-    # A giant line with no newline, dribbled in, must trip maxHeaderBytes
-    p.check("no-newline flood capped", is_err(drive_drip(cfg, mock, b"H" * 4096, piece=64, ep="small", keep=False)))
-    # Header-count amplification well beyond the cap
-    flood = ("HTTP/1.1 200 OK\r\n" + "".join("X-%d: v\r\n" % i for i in range(500)) + "Content-Length: 0\r\n\r\n").encode("latin-1")
-    p.check("header-count amplification capped", is_err(drive_staged(cfg, mock, flood, ep="small")))
-    # A pile of pipelined responses: only the first is delivered, none smuggled
-    burst = b"".join(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nR%02d" % i for i in range(8))
-    r = drive_staged(cfg, mock, burst, ep="default", keep=True)
-    p.check("pipelined burst first only", is_ok(r, 200) and r.get("body") == "R00",
-          "delivered smuggled pipelined response: %r" % r, security=True)
-
-# PHASE: lifecycle
-def _wfx_healthy(cfg):
-    raw = raw_send(cfg.host, cfg.port, _build("GET", "/health"), rtimeout=2.0, ctimeout=2.0)
-    return bool(raw) and _status_of(raw) == 200
-
-def phase_lifecycle(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("lifecycle")
-
-    # Connect refused: nothing listening on the target port. The request must fail
-    # cleanly (connect budget + backoff, capped by the 5s request budget + tick),
-    # never hang. Bound is generous because timeouts resolve on the 5s timer tick
-    t0 = time.time()
-    r = drive(cfg, "/ok", ep="dead", rtimeout=18)
-    dt = time.time() - t0
-    p.check("connect refused -> error", is_err(r) and dt < 16, "elapsed %.1fs r=%r" % (dt, r))
-
-    # Connect timeout: unrouteable TEST-NET address, SYN black-holed. Must surface as
-    # an error inside the connect/request budget rather than blocking forever
-    t0 = time.time()
-    r = drive(cfg, "/ok", ep="unreach", rtimeout=24)
-    dt = time.time() - t0
-    p.check("connect unreachable -> error", is_err(r) and dt < 22, "elapsed %.1fs r=%r" % (dt, r))
-
-    # The worker must remain healthy after those connect failures
-    p.check("worker survives connect fails", _wfx_healthy(cfg) and mock.ping())
-
-    # Reconnect after the upstream drops the connection: request #1 rides a conn the
-    # server closes (Connection: close); request #2 must transparently reconnect
-    p.check("close then reconnect ok",
-          is_ok(drive(cfg, "/close", ep="reuse"), 200, "closebody") and
-          is_ok(drive(cfg, "/ok", ep="reuse"), 200, "hello"))
-
-    # Keep-alive reuse: two back-to-back requests ride the SAME pooled connection, so
-    # the mock's per-connection request counter climbs 1 -> 2
-    r1 = drive(cfg, "/kacount", ep="idle")
-    r2 = drive(cfg, "/kacount", ep="idle")
-    p.check("keep-alive reuses conn", is_ok(r1, 200, "1") and is_ok(r2, 200, "2"),
-          "r1=%r r2=%r" % (r1, r2))
-
-    # Idle timeout: after > idleTimeoutSeconds (5s, fired on the next 5s timer tick,
-    # so wait 12s) of inactivity the pooled conn is closed, so the next request opens
-    # a fresh one and the per-connection counter resets to 1
-    time.sleep(12)
-    r3 = drive(cfg, "/kacount", ep="idle")
-    p.check("idle timeout recycles conn", is_ok(r3, 200, "1"),
-          "expected fresh conn (body '1'), got %r" % r3)
-
-    # Prewarm: EpPrewarm eagerly opened its connections at boot, before any request
-    # was driven anywhere. Those connections were accepted by the mock but sent no
-    # request, so at boot (snapshot in main) accepted-conns minus served-requests
-    # was at least `prewarm` (3)
-    idle_prewarmed = getattr(cfg, "prewarm_idle", -1)
-    p.check("prewarm opened idle conns", idle_prewarmed >= 3,
-          "idle prewarmed conns at boot = %d (expected >= 3)" % idle_prewarmed)
-
-# PHASE: protocol
-def phase_protocol(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("protocol")
-
-    proto_disconnects_reset(cfg)
-
-    # onConnect: the handshake gate
-    p.check("onConnect success -> value round-trips",
-          (lambda r: is_alive(r) and r.get("ep") == EP_SUCCESS and r.get("value") == "alpha")(
-              proto_call(cfg, key="alpha", proto="good")))
-
-    p.check("onConnect rejected (bad auth) -> clean failure, never served",
-          is_errc(proto_call(cfg, proto="bad"), EP_INTERNAL), security=True)
-
-    p.check("onConnect dropped mid-handshake -> clean failure, never served",
-          is_errc(proto_call(cfg, proto="reset"), EP_INTERNAL), security=True)
+    r = mux_call(cfg, mux="reset")
+    p.check("onConnect dropped mid-handshake: fails cleanly, the request is never served",
+            is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
 
     t0 = time.time()
-    r = proto_call(cfg, proto="slow", rtimeout=20.0)
-    dt = time.time() - t0
-    p.check("onConnect handshake timeout -> EpHandshakeTimeout",
-          is_errc(r, EP_HANDSHAKE_TIMEOUT) and dt < 18, "elapsed %.1fs r=%r" % (dt, r))
+    r = mux_call(cfg, mux="slow", rtimeout=20.0)
+    elapsed = time.time() - t0
+    p.check("onConnect stalled: surfaces as a handshake timeout, not a hang",
+            is_errc(r, EP_HANDSHAKE_TIMEOUT) and elapsed < 18.0,
+            "elapsed %.1fs r=%r" % (elapsed, r))
 
-    p.check("worker survives every onConnect failure", _wfx_healthy(cfg) and mock.ping())
+    p.check("worker survives every onConnect failure", wfx_healthy(cfg) and mock.ping())
 
-    # onDisconnect: the right reason for the right scenario
-    dc = proto_disconnects(cfg)
-    p.check("onDisconnect: handshake-timeout counted", dc.get("handshake", 0) >= 1, "counters=%r" % dc)
-    p.check("onDisconnect: error counted (bad + reset)", dc.get("error", 0) >= 2, "counters=%r" % dc)
+    # onDisconnect has to report the reason the scenario actually produced, not just
+    # that something disconnected
+    counters = mux_disconnects(cfg)
+    p.check("onDisconnect: the stalled handshake is reported as a handshake timeout",
+            counters.get("handshake", 0) >= 1, "counters=%r" % counters)
+    p.check("onDisconnect: the rejected and dropped handshakes are reported as errors",
+            counters.get("error", 0) >= 2, "counters=%r" % counters)
 
-    # Recovery
     # A rejected, dropped or timed-out handshake must not poison the pool for the
     # next legitimate connection attempt
-    p.check("good connection still works after prior failures",
-          (lambda r: is_alive(r) and r.get("ep") == EP_SUCCESS and r.get("value") == "still-good")(
-              proto_call(cfg, key="still-good", proto="good")))
+    r = mux_call(cfg, key="still-good")
+    p.check("a fresh connection still works after every prior handshake failure",
+            is_ok(r) and r.get("value") == "still-good", "r=%r" % r)
 
-    # Multiplexing
-    # N concurrent requests over one connLimit=1 slot, deliberately resolved out
-    # of order (varied sleep delays): every caller must get back exactly its own
-    # value, never another caller's, which is the bleed check
-    conns_before = mock.proto_conn_count()
-    n = 12
+# PHASE: mux_multiplex
+def phase_mux_multiplex(ctx):
+    cfg, mock = ctx.cfg, ctx.mock
+    p = ctx.phase("mux_multiplex")
+
+    # Requests deliberately resolved out of order: every caller must get back exactly
+    # its own value, never another caller's, which is the bleed check
     delays = [0.30, 0.02, 0.18, 0.05, 0.25, 0.01, 0.12, 0.28, 0.08, 0.22, 0.03, 0.15]
-    joins = [proto_call_async(cfg, key="sleep:%.2f:tok%d" % (delays[i], i), proto="good", rtimeout=10.0)
-             for i in range(n)]
-    got = [j() for j in joins]
 
-    all_ok = all(is_alive(r) and r.get("ep") == EP_SUCCESS for r in got)
-    p.check("multiplexing: all concurrent requests succeed", all_ok, "results=%r" % got)
+    conns_before = mock.mux_conns()
+    joins = [in_background(mux_call, cfg, key="sleep:%.2f:tok%d" % (delays[i], i), rtimeout=10.0)
+             for i in range(len(delays))]
+    got = [join() for join in joins]
+    conns_after = mock.mux_conns()
 
-    matched = all(is_alive(got[i]) and got[i].get("value") == "tok%d" % i for i in range(n))
-    p.check("multiplexing: no cross-request bleed (id-matched, not order-matched)", matched,
-          "expected tok0..tok%d in order, got %r" % (n - 1, [r.get("value") if r else None for r in got]),
-          security=True)
+    p.check("every concurrent request on one connection succeeds",
+            all(is_ok(r) for r in got), "results=%r" % got)
 
-    conns_after = mock.proto_conn_count()
-    p.check("multiplexing: shares one connection under load", conns_after - conns_before <= 1,
-          "proto connections before=%d after=%d (expected at most +1)" % (conns_before, conns_after))
+    matched = all(is_ok(got[i]) and got[i].get("value") == "tok%d" % i for i in range(len(delays)))
+    p.check("no cross-request bleed: replies are matched by id, not by arrival order", matched,
+            "expected tok0..tok%d, got %r" % (len(delays) - 1,
+                                              [r.get("value") if r else None for r in got]),
+            security=True)
 
-    # onDisconnect: idle timeout
-    # idleTimeoutSeconds=5 (engine floor), fired on the next 5s timer tick, so
-    # wait past both. No request rides this connection in the meantime
-    time.sleep(11)
-    dc2 = proto_disconnects(cfg)
-    p.check("onDisconnect: idle timeout counted", dc2.get("idle", 0) >= 1, "counters=%r" % dc2)
+    p.check("concurrent requests share one physical connection",
+            conns_after - conns_before <= 1,
+            "mux connections before=%d after=%d, expected at most one more"
+            % (conns_before, conns_after))
 
-# PHASE: soak
-def phase_soak(ctx):
+    # Nothing rides the connection from here on, so the idle timer is free to fire
+    time.sleep(IDLE_RECYCLE_WAIT)
+    counters = mux_disconnects(cfg)
+    p.check("onDisconnect: an idle connection is reported as an idle timeout",
+            counters.get("idle", 0) >= 1, "counters=%r" % counters)
+
+# PHASE: mux_soak
+def phase_mux_soak(ctx):
     cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("soak")
+    p = ctx.phase("mux_soak")
 
-    n = 2500
-    conns_before = mock.proto_conn_count()
+    sequential = 2500
+    conns_before = mock.mux_conns()
 
-    failed_at = None
-    bad = None
-    for i in range(n):
+    failed_at, failure = None, None
+    for i in range(sequential):
         key = "k%d" % i
-        r = proto_call(cfg, key=key, proto="good", rtimeout=10.0)
-        if not (is_alive(r) and r.get("ep") == EP_SUCCESS and r.get("value") == key):
-            failed_at = i
-            bad = r
+        r = mux_call(cfg, key=key, rtimeout=10.0)
+        if not (is_ok(r) and r.get("value") == key):
+            failed_at, failure = i, r
             break
 
-    conns_after = mock.proto_conn_count()
+    conns_after = mock.mux_conns()
 
-    p.check("soak: %d sequential multiplexed requests all succeeded" % n,
-          failed_at is None,
-          "first failure at request #%s: %r (multiplexed write buffer not reclaimed?)" % (failed_at, bad))
-    # connLimit=1, so a healthy run rides exactly one connection start to finish.
-    # A silt-then-reopen would bump this as the poisoned slot is replaced
-    p.check("soak: sustained load stayed on one pooled connection",
-          conns_after - conns_before <= 1,
-          "proto connections before=%d after=%d (expected at most +1)" % (conns_before, conns_after),
-          security=False)
+    p.check("%d sequential multiplexed requests all succeeded" % sequential, failed_at is None,
+            "first failure at request #%s: %r, is the multiplexed write buffer reclaimed?"
+            % (failed_at, failure))
 
-    # Repeated concurrent waves on the same multiplexed connection: churns the
-    # pendingStreams map and per-stream parse-state alloc/free under sustained
-    # concurrency, many streams in flight at once, over and over. A single 12-request
-    # burst (phase_protocol) touches each of those paths once; this hammers them, so a
-    # use-after-free or leak on the multiplexed completion path shows up here (as a
-    # mismatch, or via the sanitizer gate killing the worker mid-wave)
+    p.check("sustained load stayed on one pooled connection", conns_after - conns_before <= 1,
+            "mux connections before=%d after=%d, expected at most one more"
+            % (conns_before, conns_after))
+
+    # Repeated concurrent waves churn the pending-stream map and the per-stream parse
+    # state under sustained concurrency, many streams in flight at once, over and
+    # over. One 12-request burst touches each of those paths once; this hammers them,
+    # so a use-after-free or a leak on the completion path surfaces here, either as a
+    # mismatch or as the sanitizer gate killing the worker mid-wave
     waves, width = 30, 16
-    wave_fail = 0
-    for w in range(waves):
-        expect = set("w%d_%d" % (w, i) for i in range(width))
-        joins = [proto_call_async(cfg, key=k, proto="good", rtimeout=10.0) for k in expect]
-        got = [j() for j in joins]
-        vals = set(r.get("value") for r in got if is_alive(r) and r.get("ep") == EP_SUCCESS)
-        if vals != expect:
-            wave_fail += 1
-    p.check("soak: %d concurrent multiplexed waves (%d-wide) all matched" % (waves, width),
-          wave_fail == 0,
-          "%d/%d waves had a missing or mismatched response" % (wave_fail, waves),
-          security=True)
+    wave_failures = 0
+    for wave in range(waves):
+        expect = set("w%d_%d" % (wave, i) for i in range(width))
+        joins = [in_background(mux_call, cfg, key=key, rtimeout=10.0) for key in expect]
+        got = [join() for join in joins]
+        if set(r.get("value") for r in got if is_ok(r)) != expect:
+            wave_failures += 1
 
-    p.check("worker healthy after soak phase", _wfx_healthy(cfg) and mock.ping())
+    p.check("%d concurrent waves of %d all delivered their own values" % (waves, width),
+            wave_failures == 0, "%d of %d waves had a missing or mismatched response"
+            % (wave_failures, waves), security=True)
 
-# PHASE: pinning
-def phase_pinning(ctx):
+    p.check("worker healthy after the soak", wfx_healthy(cfg) and mock.ping())
+
+# PHASE: solo_pinning
+def phase_solo_pinning(ctx):
     cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("pinning")
+    p = ctx.phase("solo_pinning")
 
-    # Every request on one reservation must land on the SAME physical connection
+    # Every request on one reservation must land on the same physical connection.
     # connId comes from the mock's accept counter, so this is observed, not assumed
-    r = sp_reserve(cfg, n=4, release="late")
-    p.check("reserve: acquired a slot", bool(r) and r.get("reserved") == 1, "r=%r" % r)
-    p.check("reserve: all 4 requests on one connection",
-          bool(r) and r.get("same") == 1 and r.get("conn", 0) > 0, "r=%r" % r)
+    r = solo_reserve(cfg, n=4, release="late")
+    p.check("reserve: a slot is acquired", bool(r) and r.get("reserved") == 1, "r=%r" % r)
+    p.check("reserve: all four requests ran on one connection",
+            bool(r) and r.get("same") == 1 and r.get("conn", 0) > 0, "r=%r" % r)
     p.check("reserve: every pinned request succeeded",
-          bool(r) and r.get("last") == EP_SUCCESS, "r=%r" % r)
+            bool(r) and r.get("last") == EP_SUCCESS, "r=%r" % r)
 
-    # Two live reservations must be two different connections. If they collapsed
-    # onto one, a transaction opened on A would be visible to B
-    r = sp_json(cfg, "/sp/reserve/pair", rtimeout=20.0)
-    p.check("reserve: two reservations both granted",
-          bool(r) and r.get("a_ok") == 1 and r.get("b_ok") == 1, "r=%r" % r)
+    # Two live reservations must be two different connections. Collapsed onto one, a
+    # transaction opened on A would be visible to B
+    r = solo_reserve_pair(cfg)
+    p.check("reserve: two simultaneous reservations are both granted",
+            bool(r) and r.get("a_ok") == 1 and r.get("b_ok") == 1, "r=%r" % r)
     p.check("reserve: distinct reservations get distinct connections",
-          bool(r) and r.get("distinct") == 1, "r=%r" % r, security=True)
-    p.check("reserve: identical bytes on two pins were NOT coalesced",
-          bool(r) and r.get("sa") == EP_SUCCESS and r.get("sb") == EP_SUCCESS
-          and r.get("conn_a") != r.get("conn_b"), "r=%r" % r, security=True)
+            bool(r) and r.get("distinct") == 1, "r=%r" % r, security=True)
+    p.check("reserve: byte-identical payloads on two pins still use both connections",
+            bool(r) and r.get("sa") == EP_SUCCESS and r.get("sb") == EP_SUCCESS
+            and r.get("conn_a") != r.get("conn_b"), "r=%r" % r, security=True)
 
-    # Release patterns: explicit-early, destructor-late, and double-release must
-    # all leave the pool usable. A double release that double-freed the bitmap
-    # bit would corrupt the pool for every later caller
+    # Explicit-early, destructor-late and double release must all leave the pool
+    # usable. A double release that cleared the same bitmap bit twice would corrupt
+    # the pool for every later caller
     for mode in ("early", "late", "double"):
-        r = sp_reserve(cfg, n=2, release=mode)
+        r = solo_reserve(cfg, n=2, release=mode)
         p.check("reserve: release=%s completes cleanly" % mode,
-              bool(r) and r.get("reserved") == 1 and r.get("same") == 1, "r=%r" % r)
+                bool(r) and r.get("reserved") == 1 and r.get("same") == 1, "r=%r" % r)
 
-    p.check("reserve: pool still healthy after all release patterns",
-          is_ok_sp(sp_get(cfg, key="after-release")), "")
+    p.check("reserve: the pool is still healthy after every release pattern",
+            is_ok(solo_get(cfg, key="after-release")), "")
 
-    # Reservations must return to the pool. connLimit is 4, so if any reservation
-    # above leaked its slot this loop starves
-    ok = True
-    for _ in range(8):
-        rr = sp_reserve(cfg, n=1, release="early")
-        if not rr or rr.get("reserved") != 1:
-            ok = False
+    # Reservations have to come back to the pool. SoloGood leaves exactSlots off, so
+    # its connLimit of 4 rounds up to a full 64-bit bitmap word and the pool really
+    # holds 64 slots; a run longer than that is what a leaked reservation starves
+    reservations = 70
+    starved = False
+    for _ in range(reservations):
+        r = solo_reserve(cfg, n=1, release="early")
+        if not r or r.get("reserved") != 1:
+            starved = True
             break
-    p.check("reserve: 8 sequential reservations never exhaust the pool", ok, security=True)
+    p.check("reserve: %d sequential reservations never exhaust the pool" % reservations,
+            not starved, "a reservation was refused, so an earlier one leaked its slot")
 
-    # Streaming through a pinned connection: the two features must compose, and
-    # every chunk must come off the reserved slot rather than a pooled one
-    r = sp_json(cfg, "/sp/reserve/stream", {"X-Count": "6"}, rtimeout=30.0)
-    p.check("reserve+stream: reservation held for the whole stream",
-          bool(r) and r.get("reserved") == 1 and r.get("chunks") == 6, "r=%r" % r)
-    p.check("reserve+stream: all chunks from the same pinned connection",
-          bool(r) and r.get("same") == 1, "r=%r" % r, security=True)
+    # Pinning and streaming have to compose, with every chunk coming off the reserved
+    # slot rather than a pooled one
+    r = solo_reserve_stream(cfg, count=6)
+    p.check("reserve+stream: the reservation is held for the whole stream",
+            bool(r) and r.get("reserved") == 1 and r.get("chunks") == 6, "r=%r" % r)
+    p.check("reserve+stream: every chunk came off the same pinned connection",
+            bool(r) and r.get("same") == 1, "r=%r" % r, security=True)
 
-    p.check("worker healthy after pinning phase", _wfx_healthy(cfg) and mock.ping())
+    p.check("worker healthy after the pinning phase", wfx_healthy(cfg) and mock.ping())
 
-# PHASE: push
-def phase_push(ctx):
+# PHASE: solo_push
+def phase_solo_push(ctx):
     cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("push")
+    p = ctx.phase("solo_push")
 
-    sp_push_reset(cfg)
-
-    # Baseline: pushes land on an idle slot and are decoded there, not mistaken
-    # for a response to some later request
-    r = sp_get(cfg, key="push:5")
-    p.check("push: request itself still answered correctly", is_ok_sp(r), "r=%r" % r)
+    # Baseline: pushes land on an idle slot and are decoded there, rather than being
+    # mistaken for the response to some later request
+    push_reset(cfg)
+    r = solo_get(cfg, key="push:5")
+    p.check("push: the request that provoked them is still answered correctly", is_ok(r), "r=%r" % r)
     time.sleep(0.6)
-    st = sp_push_stats(cfg)
-    p.check("push: 5 unsolicited messages delivered to onPush",
-          st.get("count", 0) >= 5, "stats=%r" % st)
-    p.check("push: connection still usable afterwards",
-          is_ok_sp(sp_get(cfg, key="after-push")), "")
+    stats = push_stats(cfg)
+    p.check("push: all five unsolicited messages reached onPush", stats.get("count", 0) >= 5,
+            "stats=%r" % stats)
+    p.check("push: the connection is still usable afterwards",
+            is_ok(solo_get(cfg, key="after-push")), "")
 
-    # A push arriving WHILE a request is in flight must be consumed by parse(),
-    # never routed to onPush. Getting this wrong desyncs framing: the push bytes
-    # would be read as part of the response
-    sp_push_reset(cfg)
-    before = sp_push_stats(cfg).get("count", 0)
-    r = sp_get(cfg, key="pushinflight")
-    p.check("push: in-flight push handled by parse, request still answered",
-          is_alive(r), "r=%r" % r, security=True)
+    # A push arriving WHILE a request is in flight must be consumed by parse, never
+    # routed to onPush. Getting that split wrong desyncs framing, because the push
+    # bytes would be read as part of the response
+    push_reset(cfg)
+    before = push_stats(cfg).get("count", 0)
+    r = solo_get(cfg, key="pushinflight")
+    p.check("push: an in-flight push is handled by parse and the request still answered",
+            answered(r), "r=%r" % r, security=True)
     time.sleep(0.4)
-    after = sp_push_stats(cfg).get("count", 0)
-    p.check("push: in-flight push did NOT reach onPush (no desync)",
-          after == before, "before=%d after=%d" % (before, after), security=True)
+    after = push_stats(cfg).get("count", 0)
+    p.check("push: an in-flight push never reaches onPush", after == before,
+            "onPush count before=%d after=%d" % (before, after), security=True)
 
-    # Partial message with no trailing newline: onPush reports consumed=0 every
-    # time. The engine must park and wait for more bytes, not spin on a buffer it
-    # cannot drain and not wedge the slot against future use
-    sp_push_reset(cfg)
+    # A partial message with no trailing newline makes onPush report consumed=0 every
+    # time. The engine has to park and wait for more bytes, rather than spinning on a
+    # buffer it cannot drain or wedging the slot against future use
+    push_reset(cfg)
     t0 = time.time()
-    r = sp_get(cfg, key="pushpartial")
-    p.check("push: partial-message request answered", is_alive(r), "r=%r" % r)
+    r = solo_get(cfg, key="pushpartial")
+    p.check("push: the request behind a partial push is still answered", answered(r), "r=%r" % r)
     time.sleep(0.5)
-    p.check("push: partial message did not spin or hang the worker",
-          _wfx_healthy(cfg) and (time.time() - t0) < 10.0,
-          "elapsed %.1fs" % (time.time() - t0), security=True)
+    elapsed = time.time() - t0
+    p.check("push: a partial push neither spins nor hangs the worker",
+            wfx_healthy(cfg) and elapsed < 10.0, "elapsed %.1fs" % elapsed, security=True)
 
-    # Undecodable bytes: onPush returns false and the engine closes the slot. The
-    # endpoint must recover rather than stay poisoned
-    sp_push_reset(cfg)
-    r = sp_get(cfg, key="pushgarbage")
-    p.check("push: undecodable push answered current request", is_alive(r), "r=%r" % r)
+    # Undecodable bytes make onPush return false and the engine close the slot. The
+    # endpoint has to recover rather than stay poisoned
+    push_reset(cfg)
+    r = solo_get(cfg, key="pushgarbage")
+    p.check("push: the request behind an undecodable push is still answered", answered(r),
+            "r=%r" % r)
     time.sleep(0.5)
-    st = sp_push_stats(cfg)
-    p.check("push: undecodable push rejected by handler",
-          st.get("rejects", 0) >= 1, "stats=%r" % st)
-    p.check("push: endpoint recovers after a rejected push",
-          is_ok_sp(sp_get(cfg, key="after-garbage")), "", security=True)
+    stats = push_stats(cfg)
+    p.check("push: an undecodable push is rejected by the handler", stats.get("rejects", 0) >= 1,
+            "stats=%r" % stats)
+    p.check("push: the endpoint recovers after a rejected push",
+            is_ok(solo_get(cfg, key="after-garbage")), "", security=True)
 
-    # Flood: 2000 pushes back to back. The engine must drain them incrementally
-    # rather than buffering the whole burst
-    sp_push_reset(cfg)
-    rss_before = sp_rss(cfg).get("rss", 0)
-    r = sp_get(cfg, key="pushflood:2000")
-    p.check("push: flood request answered", is_alive(r), "r=%r" % r)
+    # Flood: the engine has to drain 2000 pushes incrementally rather than buffering
+    # the whole burst
+    push_reset(cfg)
+    flood = 2000
+    rss_before = worker_rss(cfg)
+    r = solo_get(cfg, key="pushflood:%d" % flood)
+    p.check("push: the request behind a flood is still answered", answered(r), "r=%r" % r)
     time.sleep(1.5)
-    st = sp_push_stats(cfg)
-    rss_after = sp_rss(cfg).get("rss", 0)
+    stats = push_stats(cfg)
+    rss_after = worker_rss(cfg)
     growth = rss_after - rss_before
-    p.check("push: flood decoded (>=1500 of 2000)",
-          st.get("count", 0) >= 1500, "stats=%r" % st)
-    # ~140KB of wire data; multiple MB of RSS growth means it accumulated instead
-    p.check("push: flood did not balloon worker memory",
-          rss_before == 0 or growth < 8 * 1024 * 1024,
-          "rss %d -> %d (+%d)" % (rss_before, rss_after, growth), security=True)
 
-    p.check("worker healthy after push phase", _wfx_healthy(cfg) and mock.ping())
+    p.check("push: the flood was decoded", stats.get("count", 0) >= flood * 3 // 4, "stats=%r" % stats)
+    # The flood is roughly 140KB on the wire, so several MB of RSS growth means it
+    # accumulated instead of draining
+    p.check("push: the flood did not balloon worker memory",
+            rss_before == 0 or growth < 8 * 1024 * 1024,
+            "rss %d -> %d, +%d bytes" % (rss_before, rss_after, growth), security=True)
 
-# PHASE: streaming
-def phase_streaming(ctx):
+    p.check("worker healthy after the push phase", wfx_healthy(cfg) and mock.ping())
+
+# PHASE: solo_streaming
+def phase_solo_streaming(ctx):
     cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("streaming")
+    p = ctx.phase("solo_streaming")
 
     # Server-driven (CHUNK_READY): the mock keeps sending until END
-    r = sp_stream(cfg, count=10, size=64, mode="server")
-    p.check("stream: server-driven delivered all 10 chunks",
-          bool(r) and r.get("chunks") == 10 and r.get("done") == 1, "r=%r" % r)
-    p.check("stream: byte count matches 10 x 64",
-          bool(r) and r.get("bytes") == 640, "r=%r" % r)
+    r = solo_stream(cfg, count=10, size=64, mode="server")
+    p.check("stream: server-driven delivered all ten chunks",
+            bool(r) and r.get("chunks") == 10 and r.get("done") == 1, "r=%r" % r)
+    p.check("stream: server-driven moved 10 x 64 bytes", bool(r) and r.get("bytes") == 640,
+            "r=%r" % r)
 
-    # Cursor-driven (CHUNK_READY_FETCH): the mock sends NOTHING until asked, so
-    # this only completes if the engine re-serialized a continuation each time
-    # Same shape as Postgres Execute, Cassandra paging_state, Redis SCAN
-    r = sp_stream(cfg, count=10, size=64, mode="fetch")
-    p.check("stream: cursor-driven delivered all 10 chunks",
-          bool(r) and r.get("chunks") == 10 and r.get("done") == 1, "r=%r" % r)
-    p.check("stream: cursor continuation moved the same byte count",
-          bool(r) and r.get("bytes") == 640, "r=%r" % r)
+    # Cursor-driven (CHUNK_READY_FETCH): the mock sends nothing until asked, so this
+    # only completes if the engine re-serialized a continuation each time. Same shape
+    # as a Postgres Execute, a Cassandra paging_state, a Redis SCAN cursor
+    r = solo_stream(cfg, count=10, size=64, mode="fetch")
+    p.check("stream: cursor-driven delivered all ten chunks",
+            bool(r) and r.get("chunks") == 10 and r.get("done") == 1, "r=%r" % r)
+    p.check("stream: cursor-driven moved the same 10 x 64 bytes",
+            bool(r) and r.get("bytes") == 640, "r=%r" % r)
 
-    # Both families over identical data must fold to the same checksum, proving
-    # chunk boundaries neither drop nor duplicate bytes
-    a = sp_stream(cfg, count=8, size=100, mode="server")
-    c = sp_stream(cfg, count=8, size=100, mode="fetch")
-    p.check("stream: server-driven and cursor-driven agree byte-for-byte",
-          bool(a) and bool(c) and a.get("checksum") == c.get("checksum")
-          and a.get("checksum", 0) != 0, "server=%r fetch=%r" % (a, c))
+    # Both families over identical data must fold to the same checksum, which is what
+    # proves chunk boundaries neither drop nor duplicate bytes
+    served = solo_stream(cfg, count=8, size=100, mode="server")
+    fetched = solo_stream(cfg, count=8, size=100, mode="fetch")
+    p.check("stream: the two chunk families agree byte for byte",
+            bool(served) and bool(fetched) and served.get("checksum") == fetched.get("checksum")
+            and served.get("checksum", 0) != 0, "server=%r fetch=%r" % (served, fetched))
 
-    # THE memory assertion: same chunk size, 200x the chunk count. If the engine
-    # accumulated chunks rather than reusing one output object, peak RSS scales
-    # with total bytes instead of staying flat
-    small = sp_stream(cfg, count=50, size=1024, mode="server", rtimeout=60.0)
-    rss_small = sp_rss(cfg).get("rss", 0)
-    big = sp_stream(cfg, count=10000, size=1024, mode="server", rtimeout=120.0)
-    rss_big = sp_rss(cfg).get("rss", 0)
+    # The memory assertion: same chunk size, 200x the chunk count. An engine that
+    # accumulated chunks instead of reusing one output object would grow peak RSS
+    # with the total size rather than holding flat
+    small = solo_stream(cfg, count=50, size=1024, mode="server", rtimeout=60.0)
+    rss_small = worker_rss(cfg)
+    big = solo_stream(cfg, count=10000, size=1024, mode="server", rtimeout=120.0)
+    rss_big = worker_rss(cfg)
     growth = rss_big - rss_small
 
-    p.check("stream: 50-chunk baseline complete",
-          bool(small) and small.get("chunks") == 50, "r=%r" % small)
-    p.check("stream: 10000-chunk response complete",
-          bool(big) and big.get("chunks") == 10000 and big.get("done") == 1, "r=%r" % big)
-    p.check("stream: 10000 chunks moved ~10MB of payload",
-          bool(big) and big.get("bytes", 0) >= 10000 * 1024,
-          "bytes=%r" % (big or {}).get("bytes"))
-    p.check("stream: peak memory bounded by chunk size, not total size",
-          rss_small == 0 or growth < 6 * 1024 * 1024,
-          "rss %d -> %d (+%d) across 200x more data" % (rss_small, rss_big, growth),
-          security=True)
+    p.check("stream: the 50-chunk baseline completed", bool(small) and small.get("chunks") == 50,
+            "r=%r" % small)
+    p.check("stream: the 10000-chunk response completed",
+            bool(big) and big.get("chunks") == 10000 and big.get("done") == 1, "r=%r" % big)
+    p.check("stream: 10000 chunks carried the full ~10MB of payload",
+            bool(big) and big.get("bytes", 0) >= 10000 * 1024,
+            "bytes=%r" % (big or {}).get("bytes"))
+    p.check("stream: peak memory tracks the chunk size, not the total size",
+            rss_small == 0 or growth < 6 * 1024 * 1024,
+            "rss %d -> %d, +%d bytes across 200x more data" % (rss_small, rss_big, growth),
+            security=True)
 
-    # Abandonment: caller stops reading after 3 of 500 chunks. The slot must be
-    # reclaimed, not stranded holding a half-drained response
-    r = sp_stream(cfg, count=500, size=64, mode="server", stop=3, rtimeout=60.0)
-    p.check("stream: abandoned after 3 chunks", bool(r) and r.get("chunks") == 3, "r=%r" % r)
-    p.check("stream: endpoint usable after abandonment",
-          is_ok_sp(sp_get(cfg, key="after-abandon")), "", security=True)
-    p.check("stream: a fresh stream works after abandonment",
-          (lambda x: bool(x) and x.get("chunks") == 5 and x.get("done") == 1)(
-              sp_stream(cfg, count=5, size=32, mode="server")), "")
+    # Abandonment: the caller stops reading after 3 of 500 chunks, so the slot has to
+    # be reclaimed rather than stranded holding a half-drained response
+    r = solo_stream(cfg, count=500, size=64, mode="server", stop=3, rtimeout=60.0)
+    p.check("stream: a stream abandoned after three chunks stops there",
+            bool(r) and r.get("chunks") == 3, "r=%r" % r)
+    p.check("stream: the endpoint is usable after an abandoned stream",
+            is_ok(solo_get(cfg, key="after-abandon")), "", security=True)
+    r = solo_stream(cfg, count=5, size=32, mode="server")
+    p.check("stream: a fresh stream works after an abandoned one",
+            bool(r) and r.get("chunks") == 5 and r.get("done") == 1, "r=%r" % r)
 
     # Zero-chunk response: END arrives with no CHUNK at all
-    r = sp_stream(cfg, count=0, size=64, mode="server")
-    p.check("stream: empty stream terminates cleanly",
-          bool(r) and r.get("chunks") == 0 and r.get("done") == 1, "r=%r" % r)
+    r = solo_stream(cfg, count=0, size=64, mode="server")
+    p.check("stream: an empty stream terminates cleanly",
+            bool(r) and r.get("chunks") == 0 and r.get("done") == 1, "r=%r" % r)
 
-    # Concurrent streams must not cross-deliver. Each asks for a distinct chunk
-    # count, so a swapped delivery shows up as a wrong count
-    joiners = [sp_async(sp_stream, cfg, count=n, size=32, mode="server", rtimeout=60.0)
-               for n in (4, 7, 11, 15)]
-    got = [j() for j in joiners]
-    p.check("stream: 4 concurrent streams all completed",
-          all(bool(x) and x.get("done") == 1 for x in got), "got=%r" % got)
-    p.check("stream: concurrent streams got their OWN chunk counts (no cross-delivery)",
-          [x.get("chunks") for x in got if x] == [4, 7, 11, 15], "got=%r" % got, security=True)
+    # Concurrent streams must not cross-deliver. Each asks for a distinct chunk count,
+    # so a swapped delivery shows up as the wrong count
+    counts = (4, 7, 11, 15)
+    joins = [in_background(solo_stream, cfg, count=n, size=32, mode="server", rtimeout=60.0)
+             for n in counts]
+    got = [join() for join in joins]
+    p.check("stream: four concurrent streams all completed",
+            all(bool(r) and r.get("done") == 1 for r in got), "got=%r" % got)
+    p.check("stream: each concurrent stream got its OWN chunk count",
+            [r.get("chunks") for r in got if r] == list(counts), "got=%r" % got, security=True)
 
-    p.check("worker healthy after streaming phase", _wfx_healthy(cfg) and mock.ping())
+    p.check("worker healthy after the streaming phase", wfx_healthy(cfg) and mock.ping())
 
-# PHASE: upgrade
-def phase_upgrade(ctx):
+# PHASE: solo_upgrade
+def phase_solo_upgrade(ctx):
     cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("upgrade")
+    p = ctx.phase("solo_upgrade")
 
-    # Server answers "N" to an endpoint whose protocol requires TLS
+    # The server answers "N" to an endpoint whose protocol requires TLS. Continuing in
+    # plaintext here is the CVE-2015-3152 / CVE-2025-49146 failure mode
     t0 = time.time()
-    r = sp_get(cfg, key="x", sp="downgrade", rtimeout=20.0)
-    dt = time.time() - t0
-    p.check("upgrade: refused downgrade fails closed, never plaintext",
-          is_alive(r) and r.get("ep") != EP_SUCCESS, "r=%r" % r, security=True)
-    p.check("upgrade: downgrade refusal is prompt, not a hang",
-          dt < 18.0, "elapsed %.1fs" % dt)
+    r = solo_get(cfg, key="x", solo="downgrade", rtimeout=20.0)
+    elapsed = time.time() - t0
+    p.check("upgrade: a refused upgrade fails closed, never continues in plaintext",
+            is_err(r), "r=%r" % r, security=True)
+    p.check("upgrade: the refusal is prompt rather than a hang", elapsed < 18.0,
+            "elapsed %.1fs" % elapsed)
 
-    # Server answers "S" then sends junk instead of a ServerHello
+    # The server answers "S" then sends junk instead of a ServerHello
     t0 = time.time()
-    r = sp_get(cfg, key="x", sp="tlsgarbage", rtimeout=20.0)
-    dt = time.time() - t0
-    p.check("upgrade: garbage handshake fails cleanly",
-          is_alive(r) and r.get("ep") != EP_SUCCESS, "r=%r" % r, security=True)
-    p.check("upgrade: garbage handshake did not hang the worker",
-          dt < 18.0 and _wfx_healthy(cfg), "elapsed %.1fs" % dt)
+    r = solo_get(cfg, key="x", solo="tlsgarbage", rtimeout=20.0)
+    elapsed = time.time() - t0
+    p.check("upgrade: a garbage handshake fails cleanly", is_err(r), "r=%r" % r, security=True)
+    p.check("upgrade: a garbage handshake does not hang the worker",
+            elapsed < 18.0 and wfx_healthy(cfg), "elapsed %.1fs" % elapsed)
 
     # A failed upgrade must not poison the endpoint for unrelated traffic
-    p.check("upgrade: plaintext endpoint unaffected by failed upgrades",
-          is_ok_sp(sp_get(cfg, key="after-upgrade-failures")), "", security=True)
+    p.check("upgrade: the plaintext endpoint is unaffected by the failed upgrades",
+            is_ok(solo_get(cfg, key="after-upgrade-failures")), "", security=True)
 
-    p.check("worker healthy after upgrade phase", _wfx_healthy(cfg) and mock.ping())
+    p.check("worker healthy after the upgrade phase", wfx_healthy(cfg) and mock.ping())
+
+# PHASE: solo_abort
+def phase_solo_abort(ctx):
+    cfg, mock = ctx.cfg, ctx.mock
+    p = ctx.phase("solo_abort")
+
+    # Happy path: the cancel is delivered, names the right connection, and the primary
+    # connection survives rather than being force-closed
+    mock.cancels_reset()
+    warmup = solo_get(cfg, key="warmup", solo="abort")
+    p.check("abort: the warm-up request succeeds", is_ok(warmup), "r=%r" % warmup)
+    aborted_conn = warmup.get("conn", -1) if warmup else -1
+
+    abandon_solo_get(cfg, {"X-Solo": "abort", "X-Key": "slow:1.0"})
+    time.sleep(0.4)  # the side connection dials and sends well before the 1.0s reply
+    count, last_id = mock.cancels()
+    p.check("abort: exactly one cancel is delivered", count == 1, "count=%d" % count)
+    p.check("abort: the cancel names the connection actually being aborted",
+            last_id == aborted_conn, "cancel named connId=%d, expected %d" % (last_id, aborted_conn),
+            security=True)
+
+    time.sleep(1.0)  # let the now-orphaned reply land and return the slot to the pool
+    r = solo_get(cfg, key="after-abort", solo="abort")
+    p.check("abort: the connection is reused afterwards, so it was never force-closed",
+            is_ok(r) and r.get("conn") == aborted_conn,
+            "r=%r expected connId=%d" % (r, aborted_conn))
+
+    # auxConnLimit 0: onAbort still runs, and OpenSideConnection has to fail gracefully
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    abandon_solo_get(cfg, {"X-Solo": "abortnoaux", "X-Key": "slow:1.0"})
+    time.sleep(0.4)
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort: with no aux capacity no cancel is sent", count == 0, "count=%d" % count)
+    p.check("abort: onAbort still ran and recorded the side-open failure",
+            after.get("side_failures", 0) - before.get("side_failures", 0) == 1,
+            "before=%r after=%r" % (before, after))
+    time.sleep(1.0)
+    p.check("abort: the worker is healthy with no aux capacity", wfx_healthy(cfg) and mock.ping())
+
+    # Concurrent aborts on one endpoint's aux pool. SoloAbort leaves exactSlots off, so
+    # its auxConnLimit of 1 rounds up to a full 64-bit bitmap word and both side
+    # connections comfortably fit. What this proves is that concurrent aborts do not
+    # corrupt or fight over each other, not that the configured limit is a hard cap
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    in_parallel(lambda i: abandon_solo_get(cfg, {"X-Solo": "abort", "X-Key": "slow:1.5"}, hold=0.05),
+                2, stagger=0.03)
+    time.sleep(2.0)
+    after = abort_stats(cfg)
+    opens = after.get("side_opens", 0) - before.get("side_opens", 0)
+    failures = after.get("side_failures", 0) - before.get("side_failures", 0)
+    count, _ = mock.cancels()
+    p.check("abort: two concurrent aborts on one endpoint both open cleanly",
+            opens == 2 and failures == 0, "side opens=%d failures=%d" % (opens, failures))
+    p.check("abort: both cancels reached the mock", count == 2, "count=%d" % count)
+    p.check("worker healthy after concurrent aborts", wfx_healthy(cfg) and mock.ping())
+
+    # A leaked side connection (onAbort chooses not to Close it) must never hang or
+    # crash the worker, and connectTimeoutSeconds has to be the working safety net
+    # that reclaims it rather than a config value nobody exercises
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    abandon_solo_get(cfg, {"X-Solo": "abort", "X-Key": "slow:1.0", "X-Leak": "1"}, hold=0.1)
+    time.sleep(0.3)
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort: a leaking onAbort still opens its side connection",
+            after.get("side_opens", 0) - before.get("side_opens", 0) == 1,
+            "before=%r after=%r" % (before, after))
+    p.check("abort: the leaked connection's cancel still arrived", count == 1, "count=%d" % count)
+
+    time.sleep(AUX_RECLAIM_WAIT)
+    p.check("abort: the endpoint is fully usable once the leaked slot self-heals",
+            is_ok(solo_get(cfg, key="after-leak", solo="abort")), "")
+    p.check("worker healthy after the leak-reclaim sequence", wfx_healthy(cfg) and mock.ping())
+
+    # Regression guard: the client disconnects while onConnect is still in flight.
+    # onAbort must not fire there, since it would steal onConnect's own asyncData
+    # mid-await and strand its coroutine forever. Force-closing instead is correct,
+    # because no request ever reached the backend
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    abandon_solo_get(cfg, {"X-Solo": "abortmidconnect", "X-Key": "x"})
+    time.sleep(1.5)  # past the mock's 1.0s AUTH stall
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort: onAbort never fires while onConnect is still in flight",
+            after.get("runs", 0) == before.get("runs", 0), "before=%r after=%r" % (before, after),
+            security=True)
+    p.check("abort: no cancel is sent, nothing had reached the backend yet", count == 0,
+            "count=%d" % count)
+    p.check("abort: the endpoint is healthy after a mid-connect abort",
+            is_ok(solo_get(cfg, key="after-midconnect", solo="abortmidconnect")), "")
+    p.check("worker healthy after the mid-connect abort race", wfx_healthy(cfg) and mock.ping())
+
+    # Hostile onAbort: closes its side connection three times and keeps the handle
+    # afterwards. A real protocol author will get this wrong at least once, so the
+    # engine must survive it rather than double-free the aux slot or corrupt whichever
+    # connection that slot is handed to next
+    mock.cancels_reset()
+    abandon_solo_get(cfg, {"X-Solo": "abortbadclose", "X-Key": "slow:0.8"}, hold=0.1)
+    time.sleep(1.3)
+    count, _ = mock.cancels()
+    p.check("abort: a double and triple Close on a side connection never crashes the worker",
+            wfx_healthy(cfg) and mock.ping(), "", security=True)
+    p.check("abort: the hostile onAbort still delivered its one cancel", count == 1,
+            "count=%d" % count)
+    p.check("abort: the endpoint is still usable after that misuse",
+            is_ok(solo_get(cfg, key="after-badclose", solo="abortbadclose")), "")
+
+    # Scope cut: once a request is already streaming, past its first chunk, a client
+    # disconnect still force-closes. onAbort is defined for single-slot in-flight
+    # requests only, never for a stream mid-delivery
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    abandon_solo_stream(cfg, {"X-Solo": "abort", "X-Count": "4", "X-StallAfter": "1",
+                              "X-StallMs": "2000"})
+    time.sleep(2.5)
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort: onAbort never fires for a slot that is already streaming",
+            after.get("runs", 0) == before.get("runs", 0), "before=%r after=%r" % (before, after),
+            security=True)
+    p.check("abort: an abandoned stream sends no cancel, it force-closes instead", count == 0,
+            "count=%d" % count)
+    p.check("abort: the endpoint is healthy after abandoning a stream mid-flight",
+            is_ok(solo_get(cfg, key="after-stream-abort", solo="abort")), "")
+
+    # Cross-endpoint isolation: every endpoint owns its own aux pool, so one endpoint
+    # holding its aux slot must not block or interfere with a different endpoint's
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    abandon_solo_get(cfg, {"X-Solo": "abort", "X-Key": "slow:1.5", "X-Leak": "1"}, hold=0.05)
+    time.sleep(0.2)  # let the first endpoint's onAbort claim and hold its aux slot
+    abandon_solo_get(cfg, {"X-Solo": "abortbadclose", "X-Key": "slow:0.5"}, hold=0.05)
+    time.sleep(0.8)
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort: one endpoint holding its aux slot never blocks another endpoint's",
+            after.get("side_opens", 0) - before.get("side_opens", 0) == 2,
+            "before=%r after=%r" % (before, after), security=True)
+    p.check("abort: both endpoints' cancels arrived", count == 2, "count=%d" % count)
+    time.sleep(AUX_RECLAIM_WAIT)  # let the leaked slot self-heal before anything else runs
+    p.check("worker healthy after the cross-endpoint isolation check",
+            wfx_healthy(cfg) and mock.ping())
+
+    # Soak: rapid abort and reclaim cycles must never leak a primary slot, an aux slot
+    # or a coroutine frame. The in-use gauge returning to zero is the same invariant
+    # the metrics phase checks, here under abort load
+    mock.cancels_reset()
+    soak = 20
+    for _ in range(soak):
+        abandon_solo_get(cfg, {"X-Solo": "abort", "X-Key": "slow:0.05"}, hold=0.01)
+        time.sleep(0.03)
+    time.sleep(1.0)
+    count, _ = mock.cancels()
+    p.check("abort: a soak of %d rapid aborts recorded that many cancels" % soak, count == soak,
+            "count=%d expected=%d" % (count, soak))
+    in_use = metric(metrics(cfg), "slots_in_use")
+    p.check("abort: the in-use slot gauge is back to zero after the soak", in_use == 0,
+            "expected 0, got %d" % in_use)
+    p.check("worker healthy after the abort soak", wfx_healthy(cfg) and mock.ping())
+
+    # A backend that never responds, even after the cancel: onAbort still sends its
+    # cancel normally, since it has no idea whether one "worked", and
+    # requestTimeoutSeconds is what eventually force-closes the already-aborted slot.
+    # onAbort adds no timer plumbing of its own, this is the budget every request gets
+    mock.cancels_reset()
+    warmup = solo_get(cfg, key="warmup-timeout", solo="abort")
+    p.check("abort: the warm-up before the timeout check succeeds", is_ok(warmup), "r=%r" % warmup)
+    stale_conn = warmup.get("conn", -1) if warmup else -1
+
+    before = metrics(cfg)
+    abandon_solo_get(cfg, {"X-Solo": "abort", "X-Key": "slow:30"})
+    time.sleep(0.5)
+    count, _ = mock.cancels()
+    p.check("abort: the cancel is still sent even though the backend will never reply",
+            count == 1, "count=%d" % count)
+
+    time.sleep(REQUEST_TIMEOUT_WAIT)
+    after = metrics(cfg)
+    p.check("abort: a never-responding backend is recorded as a request timeout",
+            metric(after, "request_timeouts") - metric(before, "request_timeouts") >= 1,
+            "request_timeouts before=%d after=%d"
+            % (metric(before, "request_timeouts"), metric(after, "request_timeouts")))
+
+    r = solo_get(cfg, key="after-timeout", solo="abort")
+    p.check("abort: the timed-out slot was force-closed, so the next call gets a fresh one",
+            is_ok(r) and r.get("conn") != stale_conn, "r=%r, timed-out connId=%d" % (r, stale_conn))
+    p.check("worker healthy after the never-responding backend timed out",
+            wfx_healthy(cfg) and mock.ping())
 
 # PHASE: metrics
 def phase_metrics(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("metrics")
 
-    before = fetch_metrics(cfg)
-    p.check("metrics: latency histograms enabled", before.get("latency_enabled") is True,
-            "expected [Metrics] latency = true in wfx.toml, got %r" % before.get("latency_enabled"))
-    p.check("metrics: endpoints registered with host identity",
-            len(before.get("endpoints", [])) > 0 and all("host" in e for e in before["endpoints"]),
-            "endpoints[]=%r" % before.get("endpoints"))
-    # At rest every lease is returned, so the in-use gauge nets to zero
-    p.check("metrics: slots_in_use gauge quiescent at rest", _agg(before, "slots_in_use") == 0,
-            "expected 0 in-use slots before driving, got %d" % _agg(before, "slots_in_use"))
+    start = metrics(cfg)
+    p.check("metrics: latency histograms are enabled", start.get("latency_enabled") is True,
+            "expected [Metrics] latency = true in wfx.local.toml, got %r"
+            % start.get("latency_enabled"))
+    p.check("metrics: every endpoint is registered with its host identity",
+            len(start.get("endpoints", [])) > 0 and all("host" in e for e in start["endpoints"]),
+            "endpoints=%r" % start.get("endpoints"))
+    # At rest every lease has been returned, so the in-use gauge nets to zero
+    in_use = metric(start, "slots_in_use")
+    p.check("metrics: the in-use slot gauge is quiescent at rest", in_use == 0,
+            "expected 0 in-use slots, got %d" % in_use)
 
-    # Success path: requests, completed, status_2xx and latency-count each move by
-    # exactly the number driven; bytes flow in both directions
-    n_ok = 20
-    ok = [drive(cfg, "/ok", ep="default") for _ in range(n_ok)]
-    p.check("metrics: driven calls all succeeded", all(is_ok(r, 200, "hello") for r in ok),
-            "results=%r" % ok)
-    a = fetch_metrics(cfg)
-    for label, field, want in (("requests", "requests", n_ok), ("completed", "completed", n_ok),
-                               ("2xx status class", "status_2xx", n_ok)):
-        got = _agg(a, field) - _agg(before, field)
-        p.check("metrics: %s matches driven calls" % label, got == want,
-                "expected +%d, got +%d" % (want, got))
-    p.check("metrics: latency sample per completion", _agg_lat(a, "count") - _agg_lat(before, "count") == n_ok,
-            "expected +%d, got +%d" % (n_ok, _agg_lat(a, "count") - _agg_lat(before, "count")))
-    p.check("metrics: bytes_out recorded on send", _agg(a, "bytes_out") - _agg(before, "bytes_out") > 0)
-    p.check("metrics: bytes_in recorded on receive", _agg(a, "bytes_in") - _agg(before, "bytes_in") > 0)
+    # Success path: requests, completions and latency samples each move by exactly the
+    # number driven, and bytes flow in both directions
+    driven = 20
+    results = [mux_call(cfg) for _ in range(driven)]
+    p.check("metrics: the driven calls all succeeded", all(is_ok(r) for r in results),
+            "results=%r" % results)
 
-    # Non-2xx status classes, each mapped by the mock's /status/<code> to its own bucket
-    for code, field, other in ((301, "status_3xx", "status_2xx"),
-                               (404, "status_4xx", "status_2xx"),
-                               (503, "status_5xx", "status_4xx")):
-        b = fetch_metrics(cfg)
-        n = 4
-        rs = [drive(cfg, "/status/%d" % code, ep="default") for _ in range(n)]
-        a = fetch_metrics(cfg)
-        p.check("metrics: %d calls completed" % code, all(is_ok(r, code) for r in rs), "results=%r" % rs)
-        p.check("metrics: %s bucket matches" % field, _agg(a, field) - _agg(b, field) == n,
-                "expected +%d, got +%d" % (n, _agg(a, field) - _agg(b, field)))
-        p.check("metrics: %d never lands in %s" % (code, other), _agg(a, other) - _agg(b, other) == 0)
+    after = metrics(cfg)
+    for field in ("requests", "completed"):
+        moved = metric(after, field) - metric(start, field)
+        p.check("metrics: %s matches the calls driven" % field, moved == driven,
+                "expected +%d, got +%d" % (driven, moved))
 
-    p.check("metrics: 1xx bucket stays zero (no final-1xx over HTTP)",
-            _agg(a, "status_1xx") - _agg(before, "status_1xx") == 0)
+    moved = latency_metric(after, "count") - latency_metric(start, "count")
+    p.check("metrics: one latency sample per completion", moved == driven,
+            "expected +%d, got +%d" % (driven, moved))
+    p.check("metrics: bytes_out is recorded on send",
+            metric(after, "bytes_out") - metric(start, "bytes_out") > 0)
+    p.check("metrics: bytes_in is recorded on receive",
+            metric(after, "bytes_in") - metric(start, "bytes_in") > 0)
 
-    # Connect failure: nothing listening on the dead endpoint. The attempt is counted
-    # (requests) and classed as a connect failure, and never as a completion. This is
-    # the synchronous ECONNREFUSED path that used to slip past the metrics entirely
-    b2 = fetch_metrics(cfg)
-    n_dead = 2
-    dead = [drive(cfg, "/ok", ep="dead", rtimeout=18) for _ in range(n_dead)]
-    a2 = fetch_metrics(cfg)
-    p.check("metrics: dead-endpoint calls failed cleanly", all(is_err(r) for r in dead), "results=%r" % dead)
-    p.check("metrics: connect failures counted", _agg(a2, "connect_failures") - _agg(b2, "connect_failures") == n_dead,
-            "expected +%d, got +%d" % (n_dead, _agg(a2, "connect_failures") - _agg(b2, "connect_failures")))
-    p.check("metrics: failed attempt still counted as a request",
-            _agg(a2, "requests") - _agg(b2, "requests") == n_dead,
-            "expected +%d, got +%d" % (n_dead, _agg(a2, "requests") - _agg(b2, "requests")))
-    p.check("metrics: a failed call never counts as completed",
-            _agg(a2, "completed") - _agg(b2, "completed") == 0)
+    # Every failure has to land in one of these rather than being dropped on the floor
+    buckets = ("connect_failures", "reconnects", "other_errors", "tls_failures")
 
-    # Request timeout: a backend that stalls past the fast endpoint's 5s budget
-    b3 = fetch_metrics(cfg)
-    rt = drive(cfg, "/slow-headers", ep="fast", rtimeout=18)
-    a3 = fetch_metrics(cfg)
-    p.check("metrics: slow backend timed out", is_errc(rt, EP_REQ_TIMEOUT), "r=%r" % rt)
-    p.check("metrics: request timeout counted", _agg(a3, "request_timeouts") - _agg(b3, "request_timeouts") == 1,
-            "expected +1, got +%d" % (_agg(a3, "request_timeouts") - _agg(b3, "request_timeouts")))
+    def bucket_deltas(baseline):
+        snapshot = metrics(cfg)
+        return {name: metric(snapshot, name) - baseline[name] for name in buckets}
 
-    # Pool exhaustion: the slot pool rounds connLimit up to a power of two (64) so slot
-    # indexing wraps with a mask instead of a modulo, so an endpoint only refuses once
-    # that rounded capacity is in flight, not at connLimit itself. Fire a burst wider
-    # than the rounded pool: the surplus that finds no free slot is refused outright with
-    # POOL_EXHAUSTED, one metric increment per refusal (never a completion or a timeout)
-    b4 = fetch_metrics(cfg)
-    burst = _concurrent(lambda i: drive(cfg, "/slow-headers", ep="fast", rtimeout=30), 96)
-    a4 = fetch_metrics(cfg)
-    refused = sum(1 for r in burst if is_errc(r, EP_POOL_EXHAUSTED))
-    p.check("metrics: burst wider than the pool refuses the surplus", refused >= 1,
-            "no request out of 96 came back POOL_EXHAUSTED")
-    p.check("metrics: pool exhaustion counted once per refusal",
-            _agg(a4, "pool_exhausted") - _agg(b4, "pool_exhausted") == refused,
-            "refused=%d, pool_exhausted delta=%d" % (refused, _agg(a4, "pool_exhausted") - _agg(b4, "pool_exhausted")))
-    p.check("metrics: a refused request is never also served", all(not is_ok(r) for r in burst),
-            "a burst request came back 2xx")
+    # A handshake the server refuses outright never becomes a served request
+    baseline = {name: metric(metrics(cfg), name) for name in buckets}
+    r = mux_call(cfg, mux="bad", rtimeout=18.0)
+    moved = bucket_deltas(baseline)
+    p.check("metrics: a refused handshake is never served", is_err(r), "r=%r" % r)
+    p.check("metrics: a refused handshake lands in a failure bucket", sum(moved.values()) >= 1,
+            "no failure bucket moved: %r" % moved)
 
-    # Protocol / parse failure: a reply that is not valid HTTP surfaces as other_errors
-    b5 = fetch_metrics(cfg)
-    bad = drive_staged(cfg, mock, b"NOT-HTTP AT ALL\r\n\r\n", keep=False)
-    a5 = fetch_metrics(cfg)
-    p.check("metrics: malformed reply failed cleanly", is_err(bad), "r=%r" % bad)
-    p.check("metrics: parse failure counted as other_errors",
-            _agg(a5, "other_errors") - _agg(b5, "other_errors") >= 1,
-            "expected >= 1, got +%d" % (_agg(a5, "other_errors") - _agg(b5, "other_errors")))
+    # A garbage ServerHello fails inside onConnect, where the waiting caller is not
+    # attached to the slot, so the exact bucket depends on timing: an immediate
+    # OpenSSL error with the caller attached lands in tls_failures, a stall trips the
+    # connect timer into connect_failures, and a background retry shows as reconnects.
+    # What must always hold is that it is recorded somewhere and never served
+    baseline = {name: metric(metrics(cfg), name) for name in buckets}
+    r = solo_get(cfg, key="x", solo="tlsgarbage", rtimeout=20.0)
+    moved = bucket_deltas(baseline)
+    p.check("metrics: a garbage TLS handshake is never served", is_err(r), "r=%r" % r)
+    p.check("metrics: a failed TLS handshake lands in a failure bucket", sum(moved.values()) >= 1,
+            "no failure bucket moved: %r" % moved)
 
-    # TLS failure: the upgrade endpoint gets a garbage ServerHello, so the handshake
-    # fails. It fails inside onConnect (the in-band upgrade), where the waiting caller is
-    # not attached to the slot as clientCtx, so the failure class depends on timing: an
-    # immediate OpenSSL error with the client attached lands in tls_failures, a stall
-    # trips the connect timer into connect_failures, and a background reschedule shows as
-    # reconnects. The tls_failures bucket is only reliably hit by the auto-TLS path, which
-    # has no endpoint here. What must always hold is that the failure is recorded, never
-    # silently dropped, so assert it lands in one of the failure buckets and is never served
-    tls_buckets = ("tls_failures", "connect_failures", "reconnects", "other_errors")
-    m6 = fetch_metrics(cfg)
-    b6 = {k: _agg(m6, k) for k in tls_buckets}
-    tg = sp_get(cfg, key="x", sp="tlsgarbage", rtimeout=20.0)
-    a6 = fetch_metrics(cfg)
-    d6 = {k: _agg(a6, k) - b6[k] for k in tls_buckets}
-    p.check("metrics: garbage TLS handshake failed, never served", is_err(tg), "r=%r" % tg)
-    p.check("metrics: failed TLS handshake recorded as a failure, never dropped",
-            sum(d6.values()) >= 1, "no failure bucket moved: %r" % d6)
+    # Gauge invariant: every lease taken above has since been returned, which is what
+    # catches an unbalanced increment and decrement
+    end = metrics(cfg)
+    p.check("metrics: the in-use slot gauge is back to zero after the phase",
+            metric(end, "slots_in_use") == 0,
+            "expected 0 in-use slots, got %d" % metric(end, "slots_in_use"))
 
-    # Coalescing: N concurrent identical requests collapse to one backend call; the
-    # merged waiters are counted as coalesce_hits, not as completions
-    mock.coalesce_reset()
-    b7 = fetch_metrics(cfg)
-    res = _concurrent(lambda i: drive(cfg, "/coalesce", ep="coalesce"), 16)
-    a7 = fetch_metrics(cfg)
-    p.check("metrics: coalesced waiters all ok", all(is_ok(r, 200, "coalesced") for r in res), "results=%r" % res)
-    p.check("metrics: coalesce hits recorded", _agg(a7, "coalesce_hits") - _agg(b7, "coalesce_hits") > 0,
-            "expected > 0, got +%d" % (_agg(a7, "coalesce_hits") - _agg(b7, "coalesce_hits")))
-
-    # Gauge invariant: every lease taken above has since been returned, so the in-use
-    # gauge is back to zero. Catches an unbalanced increment/decrement
-    end = fetch_metrics(cfg)
-    p.check("metrics: slots_in_use gauge back to zero after phase", _agg(end, "slots_in_use") == 0,
-            "expected 0 in-use slots, got %d" % _agg(end, "slots_in_use"))
-
-    p.check("worker healthy after metrics phase", _wfx_healthy(cfg) and mock.ping())
-
-# PHASE: abort
-def phase_abort(ctx):
-    cfg, mock = ctx.cfg, ctx.mock
-    p = ctx.phase("abort")
-
-    # --- 1. Happy path: cancel delivered, references the right connection, the
-    # original connection survives (isn't force-closed) and gets reused afterward
-    mock.cancel_reset()
-    r0 = sp_get(cfg, key="warmup", sp="abort")
-    p.check("abort: warmup request succeeds", is_ok_sp(r0), "r=%r" % r0)
-    conn_before = r0.get("conn", -1) if r0 else -1
-
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:1.0"}),
-                        hold=0.15)
-    time.sleep(0.4) # onAbort's side connection dials + sends CANCEL well before the 1.0s reply
-    p.check("abort: cancel delivered exactly once", mock.cancel_count() == 1,
-          "count=%d" % mock.cancel_count())
-    p.check("abort: cancel references the SAME connection being aborted",
-          mock.cancel_last_id() == conn_before,
-          "cancel id=%d expected=%d" % (mock.cancel_last_id(), conn_before), security=True)
-
-    time.sleep(1.0) # let the now-orphaned real reply land and return the slot to the pool
-    r1 = sp_get(cfg, key="after-abort", sp="abort")
-    p.check("abort: connection reused after abort, not force-closed",
-          is_ok_sp(r1) and r1.get("conn") == conn_before, "r=%r expected conn=%d" % (r1, conn_before))
-
-    # --- 2. auxConnLimit=0: onAbort still runs, OpenSideConnection() fails gracefully
-    mock.cancel_reset()
-    b = sp_json(cfg, "/sp/abort") or {}
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/get", {"X-Sp": "abortnoaux", "X-Key": "slow:1.0"}),
-                        hold=0.15)
-    time.sleep(0.4)
-    a = sp_json(cfg, "/sp/abort") or {}
-    p.check("abortnoaux: no cancel sent, no aux capacity to send it on",
-          mock.cancel_count() == 0, "count=%d" % mock.cancel_count())
-    p.check("abortnoaux: onAbort ran and recorded the side-open failure",
-          a.get("side_failures", 0) - b.get("side_failures", 0) == 1, "before=%r after=%r" % (b, a))
-    time.sleep(1.0)
-    p.check("abortnoaux: worker still healthy", _wfx_healthy(cfg) and mock.ping())
-
-    # --- 3. Concurrent aborts on the same endpoint's aux pool. auxConnLimit=1 rounds
-    # up to 64 internally (BitmapPool stays branch-free, see EndpointConfig doc), so
-    # 2 concurrent side connections comfortably both succeed - this proves concurrent
-    # aborts on one endpoint don't corrupt or fight over each other, not a hard cap
-    mock.cancel_reset()
-    b = sp_json(cfg, "/sp/abort") or {}
-
-    def _fire_concurrent(i):
-        net.send_and_abandon(cfg.host, cfg.port,
-                            net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:1.5"}), hold=0.05)
-    _concurrent(_fire_concurrent, 2, stagger=0.03)
-    time.sleep(2.0)
-
-    a = sp_json(cfg, "/sp/abort") or {}
-    opens = a.get("side_opens", 0) - b.get("side_opens", 0)
-    fails = a.get("side_failures", 0) - b.get("side_failures", 0)
-    p.check("abort: 2 concurrent aborts on one endpoint both succeed cleanly",
-          opens == 2 and fails == 0, "opens=%d fails=%d" % (opens, fails))
-    p.check("abort: mock received both cancels", mock.cancel_count() == 2, "count=%d" % mock.cancel_count())
-    p.check("worker healthy after concurrent aborts", _wfx_healthy(cfg) and mock.ping())
-
-    # --- 4. Leaked side connection (onAbort forgets/chooses not to Close()) must
-    # never hang or crash the worker, and connectTimeoutSeconds is the real, working
-    # safety net that eventually reclaims it - not just a config value nobody exercises
-    mock.cancel_reset()
-    b = sp_json(cfg, "/sp/abort") or {}
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:1.0", "X-Leak": "1"}),
-                        hold=0.1)
-    time.sleep(0.3)
-    s1 = sp_json(cfg, "/sp/abort") or {}
-    p.check("abort: leak opens a side connection and sends its cancel",
-          s1.get("side_opens", 0) - b.get("side_opens", 0) == 1, "s1=%r" % s1)
-    p.check("abort: mock received the leaked connection's cancel", mock.cancel_count() == 1,
-          "count=%d" % mock.cancel_count())
-
-    time.sleep(5.5) # past SpAbort's connectTimeoutSeconds=5, the leaked slot self-heals
-    r = sp_get(cfg, key="after-leak", sp="abort")
-    p.check("abort: endpoint still fully usable after a leaked side connection", is_ok_sp(r), "r=%r" % r)
-    p.check("worker healthy after leak-reclaim sequence", _wfx_healthy(cfg) and mock.ping())
-
-    # --- 5. Regression guard: client disconnects while onConnect (AUTH) is still
-    # in flight. onAbort must not fire here - it would steal onConnect's own
-    # asyncData mid-await and strand its coroutine forever. Force-close instead,
-    # exactly the pre-onAbort behavior, since no request ever reached the backend
-    mock.cancel_reset()
-    b = sp_json(cfg, "/sp/abort") or {}
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/get", {"X-Sp": "abortmidconnect", "X-Key": "x"}),
-                        hold=0.15)
-    time.sleep(1.5) # past the mock's 1.0s AUTH stall
-    a = sp_json(cfg, "/sp/abort") or {}
-    p.check("abort: onAbort never fires while onConnect is still in flight",
-          a.get("runs", 0) == b.get("runs", 0), "before=%r after=%r" % (b, a), security=True)
-    p.check("abort: no cancel sent, nothing had reached the backend yet",
-          mock.cancel_count() == 0, "count=%d" % mock.cancel_count())
-
-    r = sp_get(cfg, key="after-midconnect-abort", sp="abortmidconnect")
-    p.check("abort: endpoint still healthy after mid-connect abort", is_ok_sp(r), "r=%r" % r)
-    p.check("worker healthy after mid-connect abort race", _wfx_healthy(cfg) and mock.ping())
-
-    # --- 6. Hostile onAbort: closes its side connection three times and keeps the
-    # handle around afterward. A real protocol author will get this wrong at least
-    # once; the engine must survive it (no double-free, no corrupting whatever
-    # connection the freed aux slot gets reused for next), not just the well-behaved case
-    mock.cancel_reset()
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/get", {"X-Sp": "abortbadclose", "X-Key": "slow:0.8"}),
-                        hold=0.1)
-    time.sleep(1.3)
-    p.check("abort: double/triple Close() on a side connection never crashes the worker",
-          _wfx_healthy(cfg) and mock.ping(), security=True)
-    p.check("abort: hostile onAbort still delivered its one cancel",
-          mock.cancel_count() == 1, "count=%d" % mock.cancel_count())
-    r = sp_get(cfg, key="after-badclose", sp="abortbadclose")
-    p.check("abort: endpoint still usable after hostile onAbort misuse", is_ok_sp(r), "r=%r" % r)
-
-    # --- 7. Scope cut: once a request is already streaming (isStreaming=1, i.e. past
-    # its first chunk), a client disconnect must still force-close as before. onAbort
-    # is defined for single-slot in-flight requests only, never a stream mid-delivery
-    mock.cancel_reset()
-    b = sp_json(cfg, "/sp/abort") or {}
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/stream", {"X-Sp": "abort", "X-Count": "4",
-                                                          "X-StallAfter": "1", "X-StallMs": "2000"}),
-                        hold=0.3)
-    time.sleep(2.5)
-    a = sp_json(cfg, "/sp/abort") or {}
-    p.check("abort: onAbort never fires for a slot already streaming",
-          a.get("runs", 0) == b.get("runs", 0), "before=%r after=%r" % (b, a), security=True)
-    p.check("abort: no cancel sent for an abandoned stream (force-close instead)",
-          mock.cancel_count() == 0, "count=%d" % mock.cancel_count())
-    r = sp_get(cfg, key="after-stream-abort", sp="abort")
-    p.check("abort: endpoint healthy after abandoning a stream mid-flight", is_ok_sp(r), "r=%r" % r)
-
-    # --- 8. Cross-endpoint isolation: each EndpointEntry owns its own auxPool. One
-    # endpoint's aux slot being fully held must never block or interfere with a
-    # completely different endpoint's own (separate) aux pool
-    mock.cancel_reset()
-    b = sp_json(cfg, "/sp/abort") or {}
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:1.5", "X-Leak": "1"}),
-                        hold=0.05)
-    time.sleep(0.2) # let SpAbort's onAbort claim (and hold) its one aux slot first
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/get", {"X-Sp": "abortbadclose", "X-Key": "slow:0.5"}),
-                        hold=0.05)
-    time.sleep(0.8)
-    a = sp_json(cfg, "/sp/abort") or {}
-    p.check("abort: a different endpoint's aux pool is unaffected by SpAbort's exhaustion",
-          a.get("side_opens", 0) - b.get("side_opens", 0) == 2, "before=%r after=%r" % (b, a), security=True)
-    p.check("abort: mock received both endpoints' cancels", mock.cancel_count() == 2,
-          "count=%d" % mock.cancel_count())
-    time.sleep(5.5) # let SpAbort's leaked slot self-heal before anything else runs
-    p.check("worker healthy after cross-endpoint isolation check", _wfx_healthy(cfg) and mock.ping())
-
-    # --- 9. Soak: rapid repeated abort/reclaim cycles must never leak a primary
-    # slot, an aux slot, or a coroutine frame. slots_in_use returning to 0 is the
-    # same invariant phase_metrics checks after every other phase, under abort load
-    mock.cancel_reset()
-    n_soak = 20
-    for i in range(n_soak):
-        net.send_and_abandon(cfg.host, cfg.port,
-                            net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:0.05"}),
-                            hold=0.01)
-        time.sleep(0.03)
-    time.sleep(1.0)
-    p.check("abort: soak of %d rapid aborts recorded that many cancels" % n_soak,
-          mock.cancel_count() == n_soak, "count=%d expected=%d" % (mock.cancel_count(), n_soak))
-
-    end = fetch_metrics(cfg)
-    p.check("abort: slots_in_use gauge back to zero after abort soak", _agg(end, "slots_in_use") == 0,
-          "expected 0, got %d" % _agg(end, "slots_in_use"))
-    p.check("worker healthy after abort soak", _wfx_healthy(cfg) and mock.ping())
-
-    # --- 10. Backend that never responds, even after the cancel: onAbort still runs
-    # and sends its cancel normally (it has no idea whether the cancel "worked"),
-    # but if the backend genuinely never replies, requestTimeoutSeconds is what
-    # eventually force-closes the already-aborted slot. onAbort adds no new timer
-    # plumbing of its own, this is the exact same budget every other request gets
-    mock.cancel_reset()
-    r0 = sp_get(cfg, key="warmup-timeout", sp="abort")
-    p.check("abort: warmup before timeout test succeeds", is_ok_sp(r0), "r=%r" % r0)
-    conn_before = r0.get("conn", -1) if r0 else -1
-
-    b = fetch_metrics(cfg)
-    net.send_and_abandon(cfg.host, cfg.port,
-                        net.request("GET", "/sp/get", {"X-Sp": "abort", "X-Key": "slow:30"}),
-                        hold=0.15)
-    time.sleep(0.5)
-    p.check("abort: cancel still sent even though the backend will never reply",
-          mock.cancel_count() == 1, "count=%d" % mock.cancel_count())
-
-    time.sleep(17.0) # past SpAbort's requestTimeoutSeconds=10 (+ up to a 5s timer tick, plus slack)
-    a = fetch_metrics(cfg)
-    p.check("abort: never-responding backend recorded as a request timeout",
-          _agg(a, "request_timeouts") - _agg(b, "request_timeouts") >= 1,
-          "before=%d after=%d" % (_agg(b, "request_timeouts"), _agg(a, "request_timeouts")))
-
-    r1 = sp_get(cfg, key="after-timeout", sp="abort")
-    p.check("abort: fresh connection after the timed-out slot was force-closed",
-          is_ok_sp(r1) and r1.get("conn") != conn_before,
-          "r=%r old_conn=%d" % (r1, conn_before))
-    p.check("worker healthy after never-responding-backend timeout", _wfx_healthy(cfg) and mock.ping())
-
-# vvv WFX::SmtpEndpoint phases vvv
-#
-# Every persona here is driven through /smtp/send or /smtp/inject against the smtp_upstream.py
-# mock (see SMTP_PERSONAS above). Refusal checks assert the exact EndpointStatus where the code
-# path is unambiguous (traced directly against os_specific/linux/epoll_connection.cpp, not
-# guessed): a co_return EpFatal from SmtpOnConnect with no timeout involved always surfaces as
-# EP_INTERNAL (the engine's generic connect-failure funnel, DisconnectReasonToStatus's default
-# case), a connect-phase hang surfaces as EP_HANDSHAKE_TIMEOUT, and a hang on an already
-# established connection (mid-transaction) surfaces as EP_REQ_TIMEOUT
-
-def _smtp_skip(p, label):
-    p.check(label + " (skipped, no cert)", True)
-
-# PHASE: smtp_handshake
-def phase_smtp_handshake(ctx):
-    cfg, mock = ctx.cfg, ctx.smtp_mock
-    p = ctx.phase("smtp_handshake")
-
-    r = smtp_send(cfg, "good", body=b"hello world")
-    p.check("good: full transaction round-trips", smtp_ok(r), "r=%r" % r)
-    p.check("good: final SMTP code is 250", bool(r) and r.get("code") == 250, "r=%r" % r)
-
-    st = mock.stats("good")
-    p.check("good: mock recorded a completed TLS handshake", st.get("handshakes", 0) >= 1, "stats=%r" % st)
-    p.check("good: mock recorded a successful AUTH", st.get("auth_ok", 0) >= 1, "stats=%r" % st)
-
-    # RFC 5321 4.5.2 dot-stuffing round trip: a body line starting with '.' must survive the
-    # client's stuffing + the mock's un-stuffing byte-for-byte, not be swallowed as though it
-    # were the DATA terminator
-    mock.reset("good")
-    body = b"Hello\n.leading dot line\nEnd"
-    r2 = smtp_send(cfg, "good", body=body)
-    p.check("good: dot-stuffed body round-trips", smtp_ok(r2), "r=%r" % r2)
-    st2 = mock.stats("good")
-    bodies = st2.get("bodies", [])
-    p.check("good: mock received exactly one DATA body", len(bodies) == 1, "bodies=%r" % bodies)
-    got = bodies[-1] if bodies else ""
-    p.check("good: leading-dot line preserved, not swallowed as the terminator",
-          "\r\n.leading dot line\r\n" in got, "got=%r" % got)
-
-# PHASE: smtp_auth
-def phase_smtp_auth(ctx):
-    cfg, mock = ctx.cfg, ctx.smtp_mock
-    p = ctx.phase("smtp_auth")
-
-    r = smtp_send(cfg, "auth_login_only")
-    p.check("auth_login_only: AUTH LOGIN fallback succeeds when PLAIN isn't offered", smtp_ok(r), "r=%r" % r)
-    st = mock.stats("auth_login_only")
-    p.check("auth_login_only: mock recorded AUTH LOGIN success", st.get("auth_ok", 0) >= 1, "stats=%r" % st)
-
-    r = smtp_send(cfg, "auth_fail")
-    p.check("auth_fail: wrong credentials refused", smtp_errc(r, EP_INTERNAL), "r=%r" % r)
-    p.check("auth_fail: refused at the mail stage (handshake never completed)",
-          bool(r) and r.get("stage") == "mail", "r=%r" % r)
-    st = mock.stats("auth_fail")
-    p.check("auth_fail: mock recorded the failed AUTH", st.get("auth_fail", 0) >= 1, "stats=%r" % st)
-    p.check("auth_fail: client never treated it as authenticated", st.get("auth_ok", 0) == 0, "stats=%r" % st)
-
-    r = smtp_send(cfg, "no_auth_mechs")
-    p.check("no_auth_mechs: refused rather than falling back to an unimplemented mechanism",
-          smtp_errc(r, EP_INTERNAL), "r=%r" % r)
-
-# PHASE: smtp_starttls
-def phase_smtp_starttls(ctx):
-    cfg, mock = ctx.cfg, ctx.smtp_mock
-    p = ctx.phase("smtp_starttls")
-
-    r = smtp_send(cfg, "no_starttls")
-    p.check("no_starttls: client never falls back to plaintext AUTH",
-          smtp_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
-    st = mock.stats("no_starttls")
-    p.check("no_starttls: mock never even saw a TLS handshake attempt",
-          st.get("handshakes", 0) == 0, "stats=%r" % st)
-
-    # CVE-2011-0411 / CVE-2026-41319 class: plaintext spliced in right after the STARTTLS
-    # go-ahead. A correct client discards what's already buffered before the TLS wrap; anything
-    # still unread on the wire corrupts the handshake's own read and fails closed. The security
-    # bar is that the injected bytes are never trusted, not that the handshake survives them
-    mock.reset("inject")
-    r = smtp_send(cfg, "inject", body=b"still fine")
-    p.check("inject: fails closed rather than falling back to plaintext",
-          smtp_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
-    st = mock.stats("inject")
-    p.check("inject: pre-TLS plaintext injection never reaches an authenticated session",
-          st.get("auth_ok", 0) == 0 and not st.get("bodies"), "stats=%r" % st, security=True)
-
-    r = smtp_send(cfg, "mismatched_code")
-    p.check("mismatched_code: spliced-response continuation line refused, not silently accepted",
-          smtp_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
-
-    r = smtp_send(cfg, "malformed_greeting")
-    p.check("malformed_greeting: non-SMTP banner refused", smtp_errc(r, EP_INTERNAL), "r=%r" % r)
-
-# PHASE: smtp_certs
-def phase_smtp_certs(ctx):
-    cfg, mock = ctx.cfg, ctx.smtp_mock
-    p = ctx.phase("smtp_certs")
-    labels = {
-        "selfsigned": "untrusted self-signed STARTTLS cert refused",
-        "wronghost":  "hostname-mismatch STARTTLS cert refused",
-        "expired":    "expired STARTTLS cert refused",
-    }
-    for name, port, cert, opts, expect in SMTP_PERSONAS:
-        if name not in labels:
-            continue
-        if not smtp_persona_available(cfg, cert):
-            _smtp_skip(p, labels[name])
-            continue
-        r = smtp_send(cfg, name)
-        p.check(labels[name], smtp_err(r), "client ACCEPTED it (r=%r), MitM possible" % r, security=True)
-        st = mock.stats(name)
-        p.check(name + ": client bailed at the TLS layer", st.get("hs_fail", 0) >= 1,
-              "stats=%r (want at least one failed handshake)" % st, security=True)
-
-# PHASE: smtp_resource
-def phase_smtp_resource(ctx):
-    cfg = ctx.cfg
-    p = ctx.phase("smtp_resource")
-
-    # Connect-phase hangs: response flood / oversized unterminated lines / byte-at-a-time
-    # trickling across the whole handshake. Two legitimate ways this can resolve, both proving
-    # the client never actually hangs: LineResponse's own maxResponseLines/maxResponseLineBytes
-    # caps reject a malformed/oversized line fast (EP_INTERNAL, faster than any timeout), or -
-    # when the hostile stream doesn't trip those caps in time - connectTimeoutSeconds ends it
-    # (EP_HANDSHAKE_TIMEOUT). Which one fires is a race between two independent defenses, not
-    # something worth pinning down to one exact code
-    hang_handshake = ("flood_greeting", "flood_ehlo2", "huge_line_greeting", "huge_line_ehlo2", "slow_trickle")
-    for name in hang_handshake:
-        r = smtp_send(cfg, name, rtimeout=15.0)
-        p.check(name + ": hostile handshake refused rather than hanging forever",
-              smtp_errc(r, EP_INTERNAL) or smtp_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
-
-    # Post-connect hang: the mock authenticates normally, then goes silent forever the moment
-    # DATA arrives. requestTimeoutSeconds, not connectTimeoutSeconds, is what has to catch this
-    r = smtp_send(cfg, "silent_data", rtimeout=15.0)
-    p.check("silent_data: mid-transaction hang times out via requestTimeoutSeconds",
-          smtp_errc(r, EP_REQ_TIMEOUT), "r=%r" % r)
-    p.check("silent_data: times out at the data_start stage",
-          bool(r) and r.get("stage") == "data_start", "r=%r" % r)
-
-# PHASE: smtp_drops
-def phase_smtp_drops(ctx):
-    cfg = ctx.cfg
-    p = ctx.phase("smtp_drops")
-
-    handshake_drops = ("drop_greeting", "drop_pre_handshake", "drop_starttls", "drop_auth")
-    for name in handshake_drops:
-        r = smtp_send(cfg, name)
-        p.check(name + ": abrupt close during the handshake refused cleanly",
-              smtp_errc(r, EP_INTERNAL), "r=%r" % r)
-        p.check(name + ": refused at the mail stage", bool(r) and r.get("stage") == "mail", "r=%r" % r)
-
-    # Drops after DATA's "354 go-ahead" but before the body is sent: the handshake and MAIL/
-    # RCPT both already succeeded, this is a live-connection drop, not a connect failure
-    r = smtp_send(cfg, "drop_data_prompt")
-    p.check("drop_data_prompt: abrupt close after the DATA prompt refused, not hung",
-          smtp_err(r), "r=%r" % r)
-
-# PHASE: smtp_inject
-def phase_smtp_inject(ctx):
-    cfg = ctx.cfg
-    p = ctx.phase("smtp_inject")
-
-    vectors = {
-        "mailfrom": b"attacker@evil.com>\r\nRCPT TO:<victim@x>\r\nDATA\r\nsmuggled\r\n.\r\nMAIL FROM:<x",
-        "rcptto":   b"victim@x>\r\nDATA\r\nsmuggled\r\n.\r\nMAIL FROM:<x",
-        "fromname": b"Evil\r\nBcc: attacker@evil.com",
-        "toname":   b"Evil\r\nBcc: attacker@evil.com",
-        "subject":  b"innocuous\r\nBcc: attacker@evil.com",
-        "replyto":  b"attacker@evil.com\r\nBcc: attacker@evil.com",
-        "body":     b"line one\x00line two", # NUL only, CR/LF is legitimate body line structure
-    }
-    for field, payload in vectors.items():
-        r = smtp_inject(cfg, field, payload)
-        p.check(field + ": CR/LF/NUL injection refused at the serializer",
-              smtp_errc(r, EP_SERIALIZE), "r=%r" % r, security=True)
-
-    # heloName: operator config today, not per-request input, but screened anyway (see smtp.hpp's
-    # SmtpOnConnect comment) - CPython's smtplib had a real CVE through this exact parameter
-    # (local_hostname, bpo-30585). A poisoned heloName must never even open the connection
-    r = smtp_send(cfg, "heloinject", rtimeout=10.0)
-    p.check("heloName: CRLF-poisoned EHLO identity refused before any byte reaches the wire",
-          smtp_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+    p.check("worker healthy after the metrics phase", wfx_healthy(cfg) and mock.ping())
 
 class EndpointAudit(common.Suite):
     name = "endpoint_audit"
-    description = "WFX HttpEndpoint audit"
+    description = "WFX Endpoint<> primitive audit"
     phases = {
-        "framing":    phase_framing,
-        "statusline": phase_statusline,
-        "headers":    phase_headers,
-        "chunked":    phase_chunked,
-        "eof":        phase_eof,
-        "desync":     phase_desync,
-        "serialize":  phase_serialize,
-        "limits":     phase_limits,
-        "resource":   phase_resource,
-        "fragmentation": phase_fragmentation,
-        "methods":    phase_methods,
-        "security":   phase_security,
-        "lifecycle":  phase_lifecycle,
-        "protocol":   phase_protocol,
-        "soak":       phase_soak,
-        "pinning":    phase_pinning,
-        "push":       phase_push,
-        "streaming":  phase_streaming,
-        "upgrade":    phase_upgrade,
-        "metrics":    phase_metrics,
-        "abort":      phase_abort,
-        "smtp_handshake": phase_smtp_handshake,
-        "smtp_auth":      phase_smtp_auth,
-        "smtp_starttls":  phase_smtp_starttls,
-        "smtp_certs":     phase_smtp_certs,
-        "smtp_resource":  phase_smtp_resource,
-        "smtp_drops":     phase_smtp_drops,
-        "smtp_inject":    phase_smtp_inject,
+        "mux_handshake":  phase_mux_handshake,
+        "mux_multiplex":  phase_mux_multiplex,
+        "mux_soak":       phase_mux_soak,
+        "solo_pinning":   phase_solo_pinning,
+        "solo_push":      phase_solo_push,
+        "solo_streaming": phase_solo_streaming,
+        "solo_upgrade":   phase_solo_upgrade,
+        "solo_abort":     phase_solo_abort,
+        "metrics":        phase_metrics,
     }
 
     def add_arguments(self, parser):
-        parser.add_argument("--up-port", type=int, default=8091,
-                            help="mock upstream port (MUST match UPSTREAM in app/src/main.cpp)")
-        parser.add_argument("--proto-port", type=int, default=8092,
-                            help="mock proto-upstream port (MUST match PROTO_UPSTREAM in app/src/proto.cpp)")
-        parser.add_argument("--sp-port", type=int, default=8093,
-                            help="mock sp-upstream port (MUST match SP_UPSTREAM in app/src/main.cpp)")
+        parser.add_argument("--control-port", type=int, default=8091,
+                            help="mock control-plane port, read by this suite only")
+        parser.add_argument("--mux-port", type=int, default=8092,
+                            help="mock mux port, MUST match MUX_UPSTREAM in app/src/main.cpp")
+        parser.add_argument("--solo-port", type=int, default=8093,
+                            help="mock solo port, MUST match SOLO_UPSTREAM in app/src/main.cpp")
 
     def configure(self, cfg):
-        cfg.up_port = cfg.args.up_port
-        cfg.proto_port = cfg.args.proto_port
-        cfg.sp_port = cfg.args.sp_port
+        cfg.control_port = cfg.args.control_port
+        cfg.mux_port = cfg.args.mux_port
+        cfg.solo_port = cfg.args.solo_port
 
-        # These are compiled into the app, so a mismatch means the audit silently tests nothing
-        for flag, port, default, source in (("--up-port", cfg.up_port, 8091, "UPSTREAM in app/src/main.cpp"),
-                                            ("--proto-port", cfg.proto_port, 8092, "PROTO_UPSTREAM in app/src/proto.cpp"),
-                                            ("--sp-port", cfg.sp_port, 8093, "SP_UPSTREAM in app/src/main.cpp")):
+        # The two protocol ports are compiled into the app, so a mismatch means the
+        # audit drives an endpoint that can never reach the mock
+        for flag, port, default, source in (("--mux-port", cfg.mux_port, 8092, "MUX_UPSTREAM"),
+                                            ("--solo-port", cfg.solo_port, 8093, "SOLO_UPSTREAM")):
             if port != default:
-                term.log("runner", _yellow("NOTE: %s=%d must match %s (default %d), the port is baked in "
-                                        "at compile time" % (flag, port, source, default)))
-
-        cfg.cert_dir = os.path.join(HERE, "certs")
-        ensure_smtp_certs(cfg)
-        patch_smtp_ssl_path(cfg)
+                term.log("runner", term.yellow(
+                    "NOTE: %s=%d must match %s in app/src/main.cpp (default %d), the port is baked "
+                    "in at compile time" % (flag, port, source, default)))
 
     def setup(self, ctx):
         ctx.resources["mock"] = Mock(ctx.cfg)
         ctx.mock.start()
-        ctx.resources["smtp_mock"] = SmtpMock(ctx.cfg)
-        ctx.smtp_mock.start()
 
     def before_phases(self, ctx):
-        cfg, mock = ctx.cfg, ctx.mock
-
-        # EpPrewarm opens `prewarm` connections eagerly at boot. The mock accepts them but they
-        # send nothing, so (accepted conns - served requests) counts idle prewarmed ones. Snapshot
-        # it before any request is driven, or later traffic makes it unreadable
-        cfg.prewarm_idle = -1
-        for _ in range(50):
-            cfg.prewarm_idle = mock.idle_conns()
-            if cfg.prewarm_idle >= 3:
-                break
-            time.sleep(0.1)
-
-        term.log("runner", "idle prewarmed connections at boot: %d" % cfg.prewarm_idle)
-
-        # Without this every phase fails for the same uninformative reason
-        if not is_ok(drive(cfg, "/ok"), 200, "hello"):
-            ctx.phase("preflight").failed("WFX can reach the mock upstream",
-                                          "is UPSTREAM in main.cpp == %d?" % cfg.up_port)
+        # Without this, every phase fails for the same uninformative reason
+        if not is_ok(mux_call(ctx.cfg)):
+            ctx.phase("preflight").failed(
+                "WFX can reach the mock's mux listener",
+                "is MUX_UPSTREAM in app/src/main.cpp pointing at port %d?" % ctx.cfg.mux_port)
             return False
 
     def teardown(self, ctx):
         if "mock" in ctx.resources:
             ctx.mock.stop()
-        if "smtp_mock" in ctx.resources:
-            ctx.smtp_mock.stop()
 
 if __name__ == "__main__":
     common.run(EndpointAudit)

@@ -238,10 +238,7 @@ terminator. It builds all of this for you from the arguments:
 - **`replyTo`** is optional. If you pass one, a `Reply-To:` header is added.
 
 `Date`, `Message-ID`, and `MIME-Version`/`Content-Type` headers are added on
-top of that automatically, you don't provide them. Every one of the
-caller-supplied fields above is screened for CR/LF/NUL before any of this
-reaches the wire, see [Injection defenses](#injection-defenses) below. A
-success reply is `250`.
+top of that automatically, you don't provide them. A success reply is `250`.
 
 ### `Reset()`
 
@@ -331,45 +328,3 @@ There is no `tlsConfig` on `SmtpEndpointConfig`: STARTTLS is negotiated
 in-band by the client's own `onConnect` handshake, the underlying connection
 is always plaintext until that handshake upgrades it, see
 [In-band TLS upgrades](overview.md#in-band-tls-upgrades).
-
----
-
-## Security posture
-
-Every one of these is load-bearing, not incidental:
-
-- **`AUTH` is refused outright if the server never advertised `STARTTLS`.**
-  There is no silent plaintext-credential fallback in this client, ever, see
-  [`no_starttls`/`inject` audit coverage](../../dev_reference/testing.md).
-- **The pre-TLS `EHLO` capability list is discarded and re-fetched after the
-  TLS upgrade completes.** Trusting the pre-TLS list would let a MITM strip
-  the `STARTTLS`/`AUTH` capabilities off the wire and force a downgrade (the
-  CVE-2011-0411-class STARTTLS-stripping attack).
-- **Whatever's buffered before the TLS wrap is discarded before the
-  handshake starts.** A malicious relay can append plaintext right after its
-  `"220 Ready to start TLS"` go-ahead, before the real handshake even begins.
-  A byte sequence like that was never a valid TLS record to start with, so
-  the handshake either never sees it (it was already discarded) or fails
-  outright trying to parse it as one, either way it is never read back as
-  though the authenticated peer had sent it, and never reaches an
-  authenticated `MAIL`/`RCPT`/`DATA` exchange.
-- **Every user-suppliable field** (envelope addresses, display names,
-  subject, `Reply-To`) is scanned for CR/LF/NUL before it reaches the wire,
-  see [Injection defenses](#injection-defenses).
-- **The message body is dot-stuffed** so a line starting with `.` can't be
-  mistaken for the `DATA` terminator.
-- **Server certificate verification reuses the engine's existing outbound TLS
-  trust decision.** No SMTP-specific certificate logic exists to get wrong.
-- **Multi-line responses are bounded** (`maxResponseLineBytes` /
-  `maxResponseLines`) so a hostile or compromised relay can't OOM or hang a
-  worker with an endless response.
-
-### Injection defenses
-
-`MailFrom`, `RcptTo`, and every `DataBody` field are scanned for CR, LF, and
-NUL before serialization; a hit fails the call outright (`WFX::EpSerializeError`,
-surfaced as the request's status) rather than emitting a partially-escaped
-command. This is SMTP's analogue of HTTP header/request-line injection: an
-address or subject containing `"\r\nMAIL FROM:<attacker>"` is exactly the
-kind of smuggled-command attack this closes off. `heloName` gets the same
-screening at connect time, before the first byte of any handshake is sent.
