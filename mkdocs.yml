@@ -67,6 +67,7 @@ nav:
       - JWT: api_reference/utils/jwt.md
   - Developer Reference:
     - Overview: dev_reference/overview.md
+    - Development Setup: dev_reference/dev_setup.md
     - Architecture: dev_reference/architecture.md
     - Codebase Architecture: dev_reference/codebase_architecture.md
     - Globals & Singletons: dev_reference/globals_and_singletons.md

@@ -23,12 +23,14 @@ Returns the per-worker logger instance. Handles stdout output, file rotation, AN
 ```cpp
 Logger& GetLogger() noexcept
 {
-    static Logger* __GlobalLogger = new Logger();
-    return *__GlobalLogger;
+    static Logger* GlobalLogger = new Logger();
+    return *GlobalLogger;
 }
 ```
 
-The reason is static destruction order. When the process exits, globals across translation units are destroyed in an undefined order. Several globals call `GetLogger()` in their destructors (for example `BufferPool` logs its shutdown metrics). If `__GlobalLogger` were a plain static and got destroyed before `BufferPool`, those destructor calls would use a dangling reference and crash. Heap-allocating the logger means its destructor never runs, so it is always valid regardless of what order other globals destruct. The OS reclaims the memory on exit.
+The reason is static destruction order. When the process exits, globals across translation units are destroyed in an undefined order. Several globals call `GetLogger()` in their destructors (for example `BufferPool` logs its shutdown metrics). If `GlobalLogger` were a plain static and got destroyed before `BufferPool`, those destructor calls would use a dangling reference and crash. Heap-allocating the logger means its destructor never runs, so it is always valid regardless of what order other globals destruct. The OS reclaims the memory on exit.
+
+This is the one intentional, permanent heap allocation in the whole engine, so on an ASan build `GetLogger()` also calls `__lsan_ignore_object(GlobalLogger)` right after allocating it (guarded by `WFX_ASAN_BUILD`, see [Build Macros](build_macros.md)), telling LeakSanitizer this specific object is not a leak. That keeps real leak detection on everywhere else instead of disabling it process-wide, which is what the test suite used to do before this existed, see [Testing](testing.md).
 
 ---
 

@@ -91,7 +91,8 @@ raw pointer past that point.
 ### Status codes
 
 `status` (the first element of the pair) tells you what happened. Always check it
-before touching `out`, a non-`EpOk` status means `out` is empty.
+before touching `out`, a non-`EpOk` status means `out` is empty. The type behind these
+constants is `WFX::EndpointStatus`, if you need to name it explicitly instead of relying on `auto`.
 
 | Status | Meaning |
 |--------|---------|

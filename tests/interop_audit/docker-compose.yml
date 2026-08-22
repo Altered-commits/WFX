@@ -1,0 +1,71 @@
+# Real Postgres and real SMTP for interop_audit, both on real TLS. The HTTP leg doesn't need
+# a container at all: WFX::HttpEndpoint is driven against a second, ordinary WFX server
+# (interop_audit/upstream/), running real HTTPS via WFX's own [SSL] cert_path/key_path, so the
+# "real upstream" for HTTP is WFX itself, not a third-party image.
+#
+# Certs are generated and permission-fixed by interop_audit.py's setup(), not by hand:
+# `python3 interop_audit.py` alone brings this whole stack up. `docker compose up -d` works too
+# once certs/ already exists (see README.md for the one-time cert step if you want that path).
+#
+# Every service is reachable on 127.0.0.1 at a fixed host port, mirroring how every other
+# audit's mocks are addressed; interop_audit/app/src/main.cpp dials those same ports.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: interop
+      POSTGRES_PASSWORD: interop-pass
+      POSTGRES_DB: interop
+    command: ["-c", "ssl=on", "-c", "ssl_cert_file=/certs/pg/server.crt", "-c", "ssl_key_file=/certs/pg/server.key"]
+    volumes:
+      - ./certs/pg:/certs/pg:ro
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5533:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U interop -d interop"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # PLAIN and LOGIN both offered (smtp4dev's default), so the client's preferred AUTH PLAIN
+  # path is what gets exercised against this one.
+  smtp4dev:
+    image: rnwood/smtp4dev:latest
+    environment:
+      ServerOptions__HostName: localhost
+      ServerOptions__TlsMode: StartTls
+      ServerOptions__TlsCertificate: /certs/shared/server.crt
+      ServerOptions__TlsCertificatePrivateKey: /certs/shared/server.key
+      ServerOptions__AuthenticationRequired: "true"
+      ServerOptions__Users__0__Username: interop
+      ServerOptions__Users__0__Password: interop-pass
+    volumes:
+      - ./certs/shared:/certs/shared:ro
+    ports:
+      - "127.0.0.1:2525:25"
+      - "127.0.0.1:5080:80"
+
+  # Same cert and credentials, but only LOGIN is offered, which is what forces WFX's AUTH LOGIN
+  # fallback path: AUTH PLAIN is always preferred when a server offers it, so that path never
+  # gets reached against the instance above.
+  smtp4dev-loginonly:
+    image: rnwood/smtp4dev:latest
+    environment:
+      ServerOptions__HostName: localhost
+      ServerOptions__TlsMode: StartTls
+      ServerOptions__TlsCertificate: /certs/shared/server.crt
+      ServerOptions__TlsCertificatePrivateKey: /certs/shared/server.key
+      ServerOptions__AuthenticationRequired: "true"
+      ServerOptions__SmtpEnabledAuthTypesWhenSecureConnection: LOGIN
+      ServerOptions__Users__0__Username: interop
+      ServerOptions__Users__0__Password: interop-pass
+    volumes:
+      - ./certs/shared:/certs/shared:ro
+    ports:
+      - "127.0.0.1:2526:25"
+      - "127.0.0.1:5081:80"
+
+volumes:
+  pgdata:

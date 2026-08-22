@@ -62,7 +62,7 @@ def launch_env(app_dir):
     # scan_crash_reports() below can turn it into a hard failure
     env = dict(os.environ)
     log_path = "log_path=%s" % os.path.join(crash_dir, _SANITIZER_PREFIX)
-    env["ASAN_OPTIONS"] = "%s:detect_leaks=0:halt_on_error=1" % log_path
+    env["ASAN_OPTIONS"] = "%s:halt_on_error=1" % log_path
     env["UBSAN_OPTIONS"] = "%s:print_stacktrace=1:halt_on_error=1" % log_path
 
     return env

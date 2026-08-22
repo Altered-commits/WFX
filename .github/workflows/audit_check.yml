@@ -15,10 +15,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        audit: [base, endpoint, client, tls, crypto, ip]
+        audit: [base, endpoint, client, tls, crypto, ip, interop]
 
     env:
-      ASAN_OPTIONS: abort_on_error=1:halt_on_error=1:detect_leaks=0
+      ASAN_OPTIONS: abort_on_error=1:halt_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
 
     steps:
@@ -63,10 +63,11 @@ jobs:
             "$HOME/.wfx/bin/wfx.real" > "$HOME/.wfx/bin/wfx"
           chmod +x "$HOME/.wfx/bin/wfx"
 
-      # Only two entries need these: the tls audit generates its certs with mkcert
-      # and openssl, the client audit generates its STARTTLS certs with openssl
-      # alone. Installed for every entry anyway, so the six jobs stay identical
-      # instead of branching on matrix.audit
+      # Not every entry needs these: mkcert + libnss3-tools are for tls_audit's certs only,
+      # openssl is shared by client_audit, tls_audit and interop_audit's own throwaway certs.
+      # Installed for every entry anyway, so the jobs stay identical instead of branching on
+      # matrix.audit. Docker and the compose plugin interop_audit needs come preinstalled on
+      # this runner image, nothing to add for those.
       - name: Install audit dependencies
         run: |
           sudo apt-get update

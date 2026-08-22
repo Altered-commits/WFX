@@ -17,10 +17,17 @@ sanitizer output to tell "the test failed" apart from "the worker died".
 | `tls_audit` | **TLS trust**, both directions: outbound cert verification and inbound mTLS | hostile TLS, one listener per persona |
 | `crypto_audit` | The **crypto surface**: hashing, HMAC, AEAD, KDFs, asymmetric keys, JWK, JWT, encoding | none |
 | `ip_audit` | **Client-identity** handling: real-IP extraction, trusted proxies, per-identity limits | none |
+| `interop_audit` | Real-upstream **interoperability** for the same protocol clients: Postgres, SMTP, HTTP | real Docker Postgres/smtp4dev, and a real WFX server as the HTTP upstream |
 
 `endpoint_audit` and `client_audit` are two layers of the same stack: the
 primitive and the protocols built on it. A vector belongs in whichever suite owns
 the layer that would have to change to fix it.
+
+`interop_audit` is not adversarial like the rest of this page: it sends nothing malformed and has
+no security exit code. `client_audit` proves the same three clients survive a hostile server;
+`interop_audit` proves they actually work against a real one. See its own README for setup, it
+needs Docker and runs as its own CI matrix job, but is kept out of the default no-flag local
+sequence below since not every dev machine has Docker running; reach it with `--audit interop`.
 
 ## Running
 
@@ -36,7 +43,7 @@ the layer that would have to change to fix it.
 
 ```bash
 ./scripts/install.sh --local-debug   # ASan + UBSan, what you want while fixing a bug
-./scripts/install.sh --local         # optimised
+./scripts/install.sh --local-release # optimised
 ```
 
 Run the debug build unless you have a reason not to. Sanitizer reports are wired into the run
