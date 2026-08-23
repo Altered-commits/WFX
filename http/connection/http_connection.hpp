@@ -316,8 +316,8 @@ struct EndpointMetadata {
     std::uint32_t lastMultiplexHintIdx = 0; // Last slot idx that had multiplex capacity, tried first next time
     Shared::EndpointDesc desc = {0};
     Shared::EndpointConfig config = {0};
-    std::unordered_map<std::uint64_t, CoalesceEntry> coalescePending; // TODO: Gotta switch to our hashmap
-    void* cachedTlsSession = nullptr;                                 // Opaque SSL_SESSION*, see HttpWFXSSL::WrapClient
+    std::unordered_map<std::uint64_t, CoalesceEntry> coalescePending;
+    void* cachedTlsSession = nullptr; // Opaque SSL_SESSION*, see HttpWFXSSL::WrapClient
 };
 static_assert(sizeof(EndpointMetadata) <= 512, "'EndpointMetadata' must be <= 512 bytes");
 

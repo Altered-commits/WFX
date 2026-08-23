@@ -122,9 +122,11 @@ HttpParseState Parse(ClientCtx* ctx)
                     return HttpParseState::PARSE_ERROR;
 
                 // Sanity check: are we about to exceed our max buffer size or max body size?
-                // If so, reject oversized payload
-                if(contentLen > maxBodyTotalSize || contentLen > maxBufferSize - 1 ||
-                   headerEnd > maxBufferSize - 1 - contentLen) {
+                // If so, reject oversized payload. The 'contentLen > maxBufferSize' guard must
+                // come first: it's what makes 'maxBufferSize - contentLen' below safe from
+                // underflow, short-circuiting before that subtraction ever runs
+                if(contentLen > maxBodyTotalSize || contentLen > maxBufferSize ||
+                   headerEnd > maxBufferSize - contentLen) {
                     // If client sent "Expect", reply with 417 else fail the response
                     if(hasExpectHeader)
                         return HttpParseState::PARSE_EXPECT_417;

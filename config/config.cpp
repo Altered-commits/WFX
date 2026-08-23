@@ -115,6 +115,74 @@ void Config::LoadCoreSettings(std::string_view path)
     catch(const toml::parse_error& err) {
         logger.Fatal("[Config]: File -> '", path, "', Error -> ", err.what());
     }
+
+    ValidateSettings();
+}
+
+void Config::ValidateSettings()
+{
+    Logger& logger = GetLogger();
+
+    // vvv Network vvv
+    // http_parser.cpp rejects a request once headerEnd > maxReadBufferSize - contentLen, so a
+    // maximally-sized-but-legal request (header and body both at their configured caps) can
+    // only ever succeed if the buffer holds both in full
+    const auto requiredBuffer = std::uint64_t{networkConfig.maxHeaderTotalSize} + networkConfig.maxBodyTotalSize;
+    if(networkConfig.maxReadBufferSize < requiredBuffer)
+        logger.Fatal("[Config]: recv_buffer_max (", networkConfig.maxReadBufferSize,
+                     ") must be at least max_header_size + max_body_size (", requiredBuffer, ")");
+
+    // 0 is a deliberate "grow to exactly what's needed in one shot" mode (see rw_buffer.cpp), but
+    // an increment bigger than its own ceiling can never do anything a same-size clamp wouldn't
+    if(networkConfig.readBufferIncSize > networkConfig.maxReadBufferSize)
+        logger.Fatal("[Config]: recv_buffer_incr (", networkConfig.readBufferIncSize,
+                     ") cannot exceed recv_buffer_max (", networkConfig.maxReadBufferSize, ")");
+    if(networkConfig.sendBufferIncSize > networkConfig.maxSendBufferSize)
+        logger.Fatal("[Config]: send_buffer_incr (", networkConfig.sendBufferIncSize,
+                     ") cannot exceed send_buffer_max (", networkConfig.maxSendBufferSize, ")");
+
+    // BitmapPool treats 0 slots as a deliberate always-empty pool, not a failure, so this
+    // wouldn't crash: it would just silently make the server unable to ever accept a connection
+    if(networkConfig.maxConnections == 0)
+        logger.Fatal("[Config]: max_connections must be greater than 0");
+
+    // http_parser.cpp rejects a request the moment the header count exceeds this, so 0 would
+    // reject every request outright, including the mandatory Host header
+    if(networkConfig.maxHeaderTotalCount == 0)
+        logger.Fatal("[Config]: max_header_count must be greater than 0");
+
+    // vvv IP vvv
+    // ConnectionLimiter denies a connection once connectionCount >= maxConnectionsPerIp; at 0
+    // that's true before any connection ever lands, denying every IP forever
+    if(ipConfig.maxConnectionsPerIp == 0)
+        logger.Fatal("[Config]: max_connections_per_ip must be greater than 0");
+
+    // RequestRateLimiter can never track more identities than this (FindOrCreate evicts before
+    // overflowing); at 0 nothing is ever tracked, and AllowRequest denies by default for
+    // anything untracked, so the whole rate limiter silently denies every request forever
+    if(ipConfig.maxTrackedIdentities == 0)
+        logger.Fatal("[Config]: max_tracked_identities must be greater than 0");
+
+    // vvv SSL vvv
+    // http_openssl.cpp already clamps/defaults an out-of-range value at the point of use, so
+    // this can't crash. It exists purely to catch a silent, unnoticed security downgrade: e.g.
+    // a typo'd min_proto_version falling back to TLS1.2 instead of the caller's real intent
+    if(sslConfig.minProtoVersion < 1 || sslConfig.minProtoVersion > 3)
+        logger.Fatal("[Config]: min_proto_version must be 1 (TLSv1.1), 2 (TLSv1.2), or 3 (TLSv1.3)");
+    if(sslConfig.securityLevel < 0 || sslConfig.securityLevel > 5)
+        logger.Fatal("[Config]: security_level must be between 0 and 5");
+
+    // vvv Logging vvv
+    // Cast directly to Logger::Level with no range check (logger.cpp), so an out-of-range value
+    // here is undefined behavior, not just a silently-wrong log level
+    if(loggingConfig.minLevel > 5)
+        logger.Fatal("[Config]: min_level must be between 0 (trace) and 5 (fatal)");
+
+    // vvv Misc vvv
+    // Fed straight into nanosleep({masterPollInterval, 0}) in the master wait loop; 0 means a
+    // zero-duration sleep, so the master process busy-spins at 100% CPU forever
+    if(miscConfig.masterPollInterval == 0)
+        logger.Fatal("[Config]: master_poll_interval must be greater than 0");
 }
 
 void Config::LoadFinalSettings(const std::string& projectDir)
