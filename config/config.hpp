@@ -163,7 +163,6 @@ struct MiscConfig {
 };
 
 // Main Config loader
-// TODO: Add checks for maxReadBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
 class Config final {
 public: // Load from TOML
     void LoadCoreSettings(std::string_view path);
@@ -181,6 +180,9 @@ public: // Main storage space for configurations
     LoggingConfig loggingConfig;
     MiscConfig miscConfig;
     MetricsConfig metricsConfig;
+
+private: // Cross-field validation, called at the end of LoadCoreSettings
+    void ValidateSettings();
 };
 
 // Free function declaration (defined in 'config.cpp')

@@ -83,6 +83,14 @@ void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareConfigOrder order)
                          "' was listed in config but has not been registered."
                          " This may be a typo or missing registration");
     }
+
+    // Every registered middleware must be accounted for in config, otherwise it's dead
+    // code that silently never runs.
+    for(const auto& [name, cb] : middlewareFactories_) {
+        if(!loadedNames.contains(name))
+            logger.Fatal("[HttpMiddleware]: Middleware '", name,
+                         "' was registered but is missing from config's 'middleware_list'");
+    }
 }
 
 void HttpMiddleware::DiscardFactoryMap()

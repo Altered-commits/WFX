@@ -93,10 +93,9 @@ The above code:
 !!! note
     Middleware registration and configuration follow these rules:
 
-    1. If a middleware is defined in user code but **not listed** in `[Project] middleware_list`, it is treated as dead code and will never execute.  
-       **No warning or error is currently emitted**. This is a known limitation and should be considered a bug.
+    1. If a middleware is defined in user code but **not listed** in `[Project] middleware_list`, the server fails to start with a fatal error.
 
-    2. If a middleware name is listed in `[Project] middleware_list` but **no corresponding middleware is registered in user code**, the server will fail to start with a fatal error.
+    2. If a middleware name is listed in `[Project] middleware_list` but **no corresponding middleware is registered in user code**, the server also fails to start with a fatal error.
 
     3. Middleware **names must be unique**:
         

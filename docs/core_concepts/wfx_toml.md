@@ -10,10 +10,10 @@ for how `--env` picks which file gets loaded.
     - If a setting does not explicitly mention `(In bytes)`, its value should be interpreted as a count, not a size. For example, `file_cache_size` represents the number of cached files, while `cache_chunk_size` and `template_chunk_size` explicitly specify `(In bytes)`, meaning their values are treated as byte sizes.
 
 !!! warning
-    WFX currently does **not validate value ranges or semantics**.
-    It only checks for the **presence of certain required keys** (marked with `*`).
-    If a required key is missing, startup fails.
-    If a value is invalid but syntactically correct, behavior is **undefined and entirely the user's responsibility**.
+    Beyond checking for the **presence of certain required keys** (marked with `*`), WFX only
+    validates the specific cross-field and range constraints called out under each setting below.
+    Anything not explicitly called out is **not validated**: a syntactically valid but semantically
+    wrong value is undefined behavior and entirely the user's responsibility.
 
 ---
 
@@ -79,15 +79,15 @@ max_connections              = 2000    # 32-bit Unsigned Integer
 ### Buffers
 
 - `send_buffer_max`: Max total outbound buffer per connection
-- `send_buffer_incr`: Growth increment when send buffer expands
-- `recv_buffer_max`: Max total inbound buffer per connection
-- `recv_buffer_incr`: Growth increment when receive buffer expands
+- `send_buffer_incr`: Growth increment when send buffer expands. **Validated: cannot exceed `send_buffer_max`.**
+- `recv_buffer_max`: Max total inbound buffer per connection. **Validated: must be at least `max_header_size + max_body_size`**, or a request maxed out on both could never fit and would always be rejected.
+- `recv_buffer_incr`: Growth increment when receive buffer expands. **Validated: cannot exceed `recv_buffer_max`.**
 - `header_reserve_hint`: Initial allocation hint for headers
 
 ### Headers & Body
 
 - `max_header_size`: Max combined size of all headers
-- `max_header_count`: Max number of headers allowed
+- `max_header_count`: Max number of headers allowed. **Validated: must be greater than 0**, or every request is rejected outright.
 - `max_body_size`: Max request body size
 
 ### Timeouts
@@ -101,7 +101,8 @@ max_connections              = 2000    # 32-bit Unsigned Integer
 - `max_connections`  
   Maximum number of simultaneous connections handled by a single worker process.  
   Internally, WFX rounds this value **up to the nearest multiple of 64** for efficiency.  
-  This is a hard cap; once reached, new connections are rejected by that worker.
+  This is a hard cap; once reached, new connections are rejected by that worker.  
+  **Validated: must be greater than 0**, or that worker could never accept a single connection.
 
 ---
 
@@ -140,7 +141,8 @@ trusted_proxies              = []      # Array of Strings (CIDR blocks)
 
 - `max_connections_per_ip`  
   Maximum number of simultaneous connections allowed from a single IP address per worker process.  
-  This prevents one client from consuming all available connections.
+  This prevents one client from consuming all available connections.  
+  **Validated: must be greater than 0**, or every IP is denied every connection unconditionally.
 
 - `max_request_burst_per_ip`  
   The number of requests an IP address is allowed to send immediately without being throttled.  
@@ -157,7 +159,9 @@ trusted_proxies              = []      # Array of Strings (CIDR blocks)
   memory instead: once the cap is reached, the least-recently-seen identity is evicted to make
   room for a new one, never one still tied to an open connection.  
   **Always rounded up to a multiple of 64 internally, so the real minimum is 64** regardless of
-  the configured value.
+  the configured value.  
+  **Validated: must be greater than 0**, or no identity is ever tracked and the rate limiter
+  denies every request unconditionally.
 
 ### Real IP
 
@@ -322,11 +326,13 @@ security_level              = 2               # Integer (0 - 5 only)
 
 - `min_proto_version`  
   Sets the minimum TLS version allowed.  
-  **Example**: `2` means TLS 1.2 or higher only; older clients using TLS 1.0 or 1.1 will be rejected for security reasons.
+  **Example**: `2` means TLS 1.2 or higher only; older clients using TLS 1.0 or 1.1 will be rejected for security reasons.  
+  **Validated: must be 1, 2, or 3.**
 
 - `security_level`  
   OpenSSL security strictness (0-5). Higher values enforce stronger algorithms, longer keys, and stricter certificate checks.  
-  **Example**: `2` is a reasonable default, while `5` is extremely strict and may block older clients.
+  **Example**: `2` is a reasonable default, while `5` is extremely strict and may block older clients.  
+  **Validated: must be between 0 and 5.**
 
 ---
 
@@ -380,7 +386,7 @@ max_file_size     = 16777216  # 32-bit Unsigned Integer (In bytes)
 max_rotations     = 2         # 16-bit Unsigned Integer
 ```
 
-- `min_level`: Minimum log level to emit. `0` = trace, `1` = debug, `2` = info, `3` = warn, `4` = error, `5` = fatal. Lines below this level are discarded entirely.
+- `min_level`: Minimum log level to emit. `0` = trace, `1` = debug, `2` = info, `3` = warn, `4` = error, `5` = fatal. Lines below this level are discarded entirely. **Validated: must be between 0 and 5.**
 - `enable_stdout`: Write log output to stdout.
 - `enable_colors`: ANSI color codes on stdout. Automatically disabled if stdout is not a TTY.
 - `enable_timestamps`: Prepend `[HH:MM:SS.mmm]` to each log line.
@@ -435,7 +441,7 @@ worker_backoff_max   = 16    # 16-bit Unsigned Integer (In seconds)
 - `file_cache_size`: Number of files cached in memory (LFU)
 - `template_chunk_size`: Max I/O chunk size during template compilation
 - `cache_chunk_size`: Max I/O chunk size for template cache files
-- `master_poll_interval`: How often the master process wakes up to check for dead workers and poll memory metrics. Lower values mean faster crash detection at the cost of slightly more wakeups.
+- `master_poll_interval`: How often the master process wakes up to check for dead workers and poll memory metrics. Lower values mean faster crash detection at the cost of slightly more wakeups. **Validated: must be greater than 0**, or the master process busy-spins at 100% CPU instead of sleeping.
 - `max_worker_restarts`: Maximum number of times a crashed worker slot will be restarted before it is marked permanently dead until the server restarts.
 - `worker_backoff_base`: Starting backoff delay in seconds before the first restart attempt. Doubles on each subsequent attempt.
 - `worker_backoff_max`: Maximum backoff delay cap in seconds. Backoff will never exceed this value regardless of how many attempts have occurred.

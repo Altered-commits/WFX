@@ -10,10 +10,11 @@ preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure
 send_buffer_max              = 1100000  # ~1.05 MiB: /crypto/hash-stream-response and the largest
                                         # AEAD hex response (100KB plaintext -> ~200KB hex) both fit
 send_buffer_incr             = 16384   # Buffer growth step (in bytes)
-recv_buffer_max               = 70000000 # >= max_body_size: recv_buffer_max is the buffer's actual
-                                        # capacity, not a chunk size (see base_audit/wfx.toml) - it
-                                        # must fit the whole body or the 64MiB+1 AEAD-cap request
-                                        # never reaches the route at all, it just gets cut off by the
+recv_buffer_max               = 70008192 # >= max_header_size + max_body_size: recv_buffer_max is
+                                        # the buffer's actual capacity, not a chunk size (see
+                                        # base_audit/wfx.toml) - it must fit the whole request
+                                        # (headers plus body) or the 64MiB+1 AEAD-cap request never
+                                        # reaches the route at all, it just gets cut off by the
                                         # engine's own buffering before WFX::AeadEncrypt ever runs
 recv_buffer_incr             = 65536   # Buffer growth step (in bytes)
 header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)

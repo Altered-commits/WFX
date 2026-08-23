@@ -4,8 +4,8 @@
 #ifndef WFX_UTILS_TIMER_HEAP_HPP
 #define WFX_UTILS_TIMER_HEAP_HPP
 
+#include "utils/hash_map/hash_shard.hpp"
 #include <vector>
-#include <unordered_map>
 #include <cstdint>
 
 namespace WFX::Utils {
@@ -18,7 +18,7 @@ struct TimerNode {
 
 class TimerHeap {
 public:
-    TimerHeap() = default;
+    TimerHeap();
     ~TimerHeap() = default;
 
 public: // Main Functions
@@ -35,7 +35,7 @@ private: // Helper Functions
 
 private:
     std::vector<TimerNode> heap_;
-    std::unordered_map<std::uint64_t, std::size_t> idMap_;
+    HashShard<std::uint64_t, std::size_t> idMap_;
 };
 
 } // namespace WFX::Utils
