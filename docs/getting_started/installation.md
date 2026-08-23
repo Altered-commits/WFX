@@ -18,7 +18,7 @@ This section covers installing WFX, what it puts on your system, and how to remo
 
 - **C++20 compiler** (GCC or Clang)
 - **CMake 3.20+**
-- **Git**
+- **Git** (only needed for [Build from source](#build-from-source) below, not for a prebuilt install)
 - **Ninja** (optional, recommended for faster builds)
 
 Install required tools on common Linux distributions:
@@ -48,11 +48,76 @@ Install required tools on common Linux distributions:
     sudo pacman -S ninja
     ```
 
+!!! warning "One install family per machine"
+    A machine is locked to whichever family it first installed with: plain end-user/`--local-*`
+    ("local"), or `--prebuilt-*` ("prebuilt"). Re-running `install.sh` under a different family
+    is refused, run `bash ~/.wfx/src/scripts/uninstall.sh` first to switch. Re-running with a
+    flag from the *same* family (e.g. `--prebuilt-known` again with a newer version) just
+    updates your existing install.
+
 ---
 
 ## Install
 
-The install script handles everything: cloning, building, and adding `wfx` to your PATH.
+The fastest way to get `wfx` running: download a prebuilt binary and headers from a GitHub
+Release instead of building the engine yourself. A compiler and CMake are still needed on your
+machine though: your own project's route-handler code always gets compiled locally into a shared
+library that `wfx` `dlopen`s, prebuilt engine or not.
+
+For a guided walkthrough, picking a version and CPU target interactively, WFX checks for that
+compiler/CMake and offers to install whatever's missing:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Altered-commits/WFX/main/scripts/install.sh | sh -s -- --prebuilt-interactive
+```
+
+For scripted/unattended use (provisioning scripts, EC2 user-data, Dockerfiles), no prompts and no
+prerequisite checking either, this is assumed to already be part of your own provisioning:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Altered-commits/WFX/main/scripts/install.sh \
+    | sh -s -- --prebuilt-known <version> <target>
+```
+
+- `<version>` is a release tag (e.g. `v1.2.3`) or the literal word `latest`.
+- `<target>` is one of:
+
+    | Target | Description |
+    |---|---|
+    | `linux-x86_64-v2` | x86-64, safe baseline (any 2009+ Intel/AMD box) |
+    | `linux-x86_64-v3` | x86-64, AVX2 (most current-gen cloud Intel/AMD) |
+    | `linux-arm64-neoverse-n1` | ARM64, AWS Graviton2 (t4g family) |
+    | `linux-arm64-neoverse-v1` | ARM64, AWS Graviton3 (c7g/m7g family) |
+
+This creates the following structure under your home directory:
+
+```
+~/.wfx/
+~/.wfx/bin/wfx                     # downloaded binary
+~/.wfx/src/include/                # downloaded headers
+~/.wfx/src/shared/                 # downloaded headers
+~/.wfx/src/scripts/uninstall.sh    # downloaded, works the same as below
+~/.wfx/daemons/                    # PID files for running servers (managed by wfx itself)
+```
+
+It also appends the following line to your shell config (`~/.bashrc` on Linux):
+
+```bash
+export PATH="$HOME/.wfx/bin:$PATH"
+```
+
+That is all it touches. No system directories, no sudo required after dependencies are installed.
+
+After the script finishes, restart your terminal or run `source ~/.bashrc`, then verify with
+`wfx`. You should see **WFX** printed.
+
+---
+
+## Build from source
+
+If you'd rather build the engine itself locally, e.g. no prebuilt target matches your CPU, or
+you just prefer not to run a downloaded binary, `install.sh` with no flags clones the full repo
+and builds it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Altered-commits/WFX/main/scripts/install.sh | sh
@@ -66,24 +131,10 @@ curl -fsSL https://raw.githubusercontent.com/Altered-commits/WFX/dev/scripts/ins
 
 The `dev` branch gets new features and fixes first but may be less stable than `main`. Use it only if you specifically need something not yet in `main`.
 
-After the script finishes, restart your terminal or run:
+After the script finishes, restart your terminal or run `source ~/.bashrc`, then verify with
+`wfx`. You should see **WFX** printed.
 
-```bash
-source ~/.bashrc
-```
-
-Then verify:
-
-```bash
-wfx
-```
-
-You should see **WFX** printed.
-
-### What the installer does
-
-For a plain end-user install (no flags), the installer creates the following structure under
-your home directory:
+This creates the following structure under your home directory:
 
 ```
 ~/.wfx/
@@ -92,76 +143,13 @@ your home directory:
 ~/.wfx/daemons/        # PID files for running servers (managed by wfx itself)
 ```
 
-It also appends the following line to your shell config (`~/.bashrc` on Linux):
-
-```bash
-export PATH="$HOME/.wfx/bin:$PATH"
-```
-
-That is all it touches. No system directories, no sudo required after dependencies are installed.
+Same PATH setup as the prebuilt install above. That is all it touches, no system directories, no
+sudo required after dependencies are installed.
 
 !!! tip "Contributing to WFX?"
-    `install.sh` also has `--local-debug`/`--local-release` flags that build straight from a
-    cloned checkout instead of a fresh clone, that's the contributor path. See
-    [Development Setup](../dev_reference/dev_setup.md) in the Developer Reference.
-
-!!! warning "One install family per machine"
-    A machine is locked to whichever family it first installed with: plain end-user/`--local-*`
-    ("local"), or `--prebuilt-*` ("prebuilt"). Re-running `install.sh` under a different family
-    is refused, run `bash ~/.wfx/src/scripts/uninstall.sh` first to switch. Re-running with a
-    flag from the *same* family (e.g. `--prebuilt-known` again with a newer version) just
-    updates your existing install.
-
----
-
-## Prebuilt install
-
-If you don't need to build the WFX engine itself from source, download a prebuilt `wfx` binary
-and headers from a GitHub Release instead. This skips compiling the engine, but a compiler,
-CMake, and (optionally) Ninja are still needed on your machine: your own project's route-handler
-code always gets compiled locally into a shared library that `wfx` `dlopen`s, prebuilt engine or
-not.
-
-For a guided walkthrough, picking a version and CPU target interactively:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Altered-commits/WFX/main/scripts/install.sh | sh -s -- --prebuilt-interactive
-```
-
-For scripted/unattended use (provisioning scripts, EC2 user-data, Dockerfiles):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Altered-commits/WFX/main/scripts/install.sh \
-    | sh -s -- --prebuilt-known <version> <target> [--yes] [--skip-prereqs]
-```
-
-- `<version>` is a release tag (e.g. `v1.2.3`) or the literal word `latest`.
-- `<target>` is one of:
-
-    | Target | Description |
-    |---|---|
-    | `linux-x86_64-v2` | x86-64, safe baseline (any 2009+ Intel/AMD box) |
-    | `linux-x86_64-v3` | x86-64, AVX2 (most current-gen cloud Intel/AMD) |
-    | `linux-arm64-neoverse-n1` | ARM64, AWS Graviton2 (t4g family) |
-    | `linux-arm64-neoverse-v1` | ARM64, AWS Graviton3 (c7g/m7g family) |
-
-- `--yes` auto-confirms installing any missing prerequisites (compiler/CMake) instead of just
-  warning about them.
-- `--skip-prereqs` skips that prerequisite check entirely, e.g. a container image that already
-  has its own toolchain baked in.
-
-Prebuilt mode lays out `~/.wfx` differently, since nothing is built locally, only downloaded:
-
-```
-~/.wfx/
-~/.wfx/bin/wfx                     # downloaded binary
-~/.wfx/src/include/                # downloaded headers
-~/.wfx/src/shared/                 # downloaded headers
-~/.wfx/src/scripts/uninstall.sh    # downloaded, works the same as below
-~/.wfx/daemons/
-```
-
-Everything else, PATH setup included, is identical to the source-build install above.
+    This isn't the contributor path, it clones a fresh, disposable copy for your own project to
+    build against. See [Development Setup](../dev_reference/dev_setup.md) in the Developer
+    Reference instead: forking, `--local-*` flags, formatting, and testing all live there.
 
 ---
 

@@ -121,7 +121,10 @@ private: // Helper Functions
     // Overflow-safe 'count * elemSize'
     static std::size_t SafeByteSize(std::size_t count, std::size_t elemSize);
 
-    static bool IsFull(std::uint8_t m) noexcept { return (m & 0x80) == 0; }
+    static bool IsFull(std::uint8_t m) noexcept
+    {
+        return (m & 0x80) == 0;
+    }
 
     // 'meta' is allocated with GROUP_WIDTH extra bytes past 'capacity', mirroring the first
     // GROUP_WIDTH bytes, so a group read starting anywhere in [0, capacity) can safely span

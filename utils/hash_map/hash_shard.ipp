@@ -132,7 +132,7 @@ template <typename K, typename V> inline bool HashShard<K, V>::KeysEqual(const K
 
 template <typename K, typename V>
 typename HashShard<K, V>::SlotResult HashShard<K, V>::FindSlot(const Entry* ents, const std::uint8_t* meta,
-                                                                 std::size_t capacity, const K& key)
+                                                               std::size_t capacity, const K& key)
 {
     const std::size_t hash = WFXHash(key);
     const auto h2 = static_cast<std::uint8_t>(hash >> 57); // top 7 bits of the hash, bit 7 always 0
@@ -180,8 +180,8 @@ typename HashShard<K, V>::SlotResult HashShard<K, V>::FindSlot(const Entry* ents
 }
 
 template <typename K, typename V>
-typename HashShard<K, V>::AvailSlot HashShard<K, V>::FindAvailableSlot(const std::uint8_t* meta,
-                                                                        std::size_t capacity, const K& key)
+typename HashShard<K, V>::AvailSlot HashShard<K, V>::FindAvailableSlot(const std::uint8_t* meta, std::size_t capacity,
+                                                                       const K& key)
 {
     const std::size_t hash = WFXHash(key);
     const auto h2 = static_cast<std::uint8_t>(hash >> 57);
