@@ -4,15 +4,18 @@
 #
 # Mock upstream for the WFX Endpoint<> primitive audit
 #
-# Two hand-rolled protocols, one listener each, plus a tiny HTTP control plane the
-# harness reads counters from. Two are needed because half the primitive is
-# unreachable through a multiplexed endpoint, see app/src/main.cpp for exactly why:
+# Two hand-rolled protocols, one listener each, a gate listener, and a tiny HTTP control
+# plane the harness reads counters from. Two protocols are needed because half the
+# primitive is unreachable through a multiplexed endpoint, see app/src/main.cpp for
+# exactly why:
 #
 #   mux   multiplexed. onConnect, onDisconnect, and several requests sharing one
 #         physical connection with replies deliberately returned out of order
 #   solo  never multiplexed. Slot pinning, both chunk families of streaming,
 #         onPush, onAbort's side connection, and the two UpgradeToTLS outcomes
 #         that need no certificate: a refusal, and a garbage ServerHello
+#   gate  solo again, on a listener whose accept queue the audit can fill, so a
+#         connect to it stays in flight until the kernel retries its SYN
 #
 # Both wire formats are documented above their listener here and mirrored in the
 # app at app/src/main.cpp. This mock is a byte oracle, not a conformant server: the
@@ -42,6 +45,18 @@ _solo_conn_seq = 0
 _solo_cancels = 0
 _solo_last_cancel_id = 0
 
+# The gate listener. Closed, a filler connection occupies its whole accept queue (backlog
+# 0 holds exactly one), so the kernel drops every new SYN and a connect stays in flight
+# until its retry about a second later. _gate_requests counts lines gated connections
+# sent after AUTH, i.e. requests that actually reached the backend
+_GATE_POLL = 0.05
+_gate_addr = None
+_gate_lock = threading.Lock()
+_gate_open = threading.Event()
+_gate_open.set()
+_gate_filler = None
+_gate_requests = 0
+
 def _int(text, default):
     try:
         return int(text)
@@ -63,6 +78,9 @@ def _float(text, default):
 #   GET /ctl/mux/conns            -> connections the mux listener accepted
 #   GET /ctl/solo/cancels         -> "<count> <last connId>"
 #   GET /ctl/solo/cancels/reset   -> "ok", zeroes both
+#   GET /ctl/gate/close           -> "ok", new connects to the gate stay in flight
+#   GET /ctl/gate/open            -> "ok", a held connect lands on its next SYN retry
+#   GET /ctl/gate/requests        -> lines gated connections sent after AUTH
 def _control_body(path):
     global _solo_cancels, _solo_last_cancel_id
 
@@ -82,6 +100,18 @@ def _control_body(path):
             _solo_cancels = 0
             _solo_last_cancel_id = 0
         return "ok"
+
+    if path == "/ctl/gate/close":
+        _gate_close()
+        return "ok"
+
+    if path == "/ctl/gate/open":
+        _gate_reopen()
+        return "ok"
+
+    if path == "/ctl/gate/requests":
+        with _lock:
+            return str(_gate_requests)
 
     return None
 
@@ -241,8 +271,8 @@ def _serve_mux_conn(sock):
 def _solo_payload(size):
     return "x" * max(1, size)
 
-def _serve_solo_conn(sock):
-    global _solo_conn_seq, _solo_cancels, _solo_last_cancel_id
+def _serve_solo_conn(sock, gated=False):
+    global _solo_conn_seq, _solo_cancels, _solo_last_cancel_id, _gate_requests
     with _lock:
         _solo_conn_seq += 1
         conn_id = _solo_conn_seq
@@ -318,6 +348,10 @@ def _serve_solo_conn(sock):
                 else:
                     send("ERR\n")
                 continue
+
+            if gated:
+                with _lock:
+                    _gate_requests += 1
 
             if line.startswith("GET "):
                 _solo_serve_get(send, conn_id, line[4:])
@@ -423,18 +457,65 @@ def _listen(host, port, handler, label):
             break
         threading.Thread(target=handler, args=(conn,), daemon=True).start()
 
+# Closing stops the accept loop first, then parks the filler in the queue, so the filler
+# is never accepted while closed. Opening drops it and resumes accepting, so a held
+# connect lands on its next SYN retry
+def _gate_close():
+    global _gate_filler
+    with _gate_lock:
+        if not _gate_open.is_set():
+            return
+        _gate_open.clear()
+        time.sleep(_GATE_POLL * 2)  # lets the loop's in-flight accept() time out first
+        _gate_filler = socket.create_connection(_gate_addr, timeout=2.0)
+
+def _gate_reopen():
+    global _gate_filler
+    with _gate_lock:
+        if _gate_filler is not None:
+            try:
+                _gate_filler.close()
+            except OSError:
+                pass
+            _gate_filler = None
+        _gate_open.set()
+
+def _listen_gate(host, port):
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind((host, port))
+    srv.listen(0)
+    srv.settimeout(_GATE_POLL)
+    print("mock gate listener on %s:%d" % (host, port), flush=True)
+
+    while True:
+        _gate_open.wait()
+        try:
+            conn, _ = srv.accept()
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        threading.Thread(target=_serve_solo_conn, args=(conn, True), daemon=True).start()
+
 def main():
+    global _gate_addr
+
     ap = argparse.ArgumentParser(description="WFX endpoint-audit mock upstream")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--control-port", type=int, default=8091)
     ap.add_argument("--mux-port", type=int, default=8092)
     ap.add_argument("--solo-port", type=int, default=8093)
+    ap.add_argument("--gate-port", type=int, default=8094)
     args = ap.parse_args()
+
+    _gate_addr = (args.host, args.gate_port)
 
     threading.Thread(target=_listen, args=(args.host, args.mux_port, _serve_mux_conn, "mux"),
                      daemon=True).start()
     threading.Thread(target=_listen, args=(args.host, args.solo_port, _serve_solo_conn, "solo"),
                      daemon=True).start()
+    threading.Thread(target=_listen_gate, args=(args.host, args.gate_port), daemon=True).start()
 
     try:
         _listen(args.host, args.control_port, _serve_control_conn, "control")

@@ -1834,20 +1834,22 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
                     desc.destroyOutput(abandoned);
             }
         }
-        // Non-multiplexed: let onAbort try a graceful cancel if the protocol defines one, the
-        // request isn't already streaming (DeliverStreamChunk isn't taught to tolerate an
-        // orphaned-by-abort stream yet, a separate change), and onConnect isn't still running
-        // on this same ctx. inOnConnectPhase matters: onConnect's coroutine may be suspended
-        // mid-Send/Receive/UpgradeToTLS, owning slotCtx->asyncData for its own resume. FireOnAbort
-        // unconditionally overwrites that same field, so firing it here would strand the
-        // onConnect coroutine forever (its completion never arrives) while a second coroutine
-        // starts on the same slot. Nothing meaningful is lost falling back to force-close: no
-        // request has reached the backend yet at this point anyway.
+        // Non-multiplexed, or a multiplexed request still parked before serialize (streamKey 0).
+        // onAbort tries a graceful cancel only for a request that actually reached the backend
+        // and isn't streaming (DeliverStreamChunk can't take an orphaned-by-abort stream yet).
+        // Otherwise force-close, which loses nothing since the backend never saw the request:
+        //  - pendingConnectReq: still parked for the connect/onConnect, and it points into the
+        //    coroutine frame destroyed above, so it is dropped here before anything flushes it
+        //  - inOnConnectPhase: onConnect's coroutine owns slotCtx->asyncData mid-await, and
+        //    FireOnAbort would overwrite it, stranding that coroutine forever
         else {
             epCtx->clientCtx = nullptr;
 
+            const bool parked = epCtx->pendingConnectReq != nullptr;
+            epCtx->pendingConnectReq = nullptr;
+
             auto& epEntry = endpoints_[epCtx->endpointIdx];
-            if(epEntry.meta.desc.onAbort && !epCtx->isStreaming && !epCtx->inOnConnectPhase) {
+            if(epEntry.meta.desc.onAbort && !parked && !epCtx->isStreaming && !epCtx->inOnConnectPhase) {
                 epCtx->isAborted = 1;
                 FireOnAbort(epCtx, epEntry);
             }
