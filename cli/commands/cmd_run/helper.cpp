@@ -53,6 +53,11 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
 
     // --- Child Worker ---
     if(pid == 0) {
+        // fork() copies the master's random pool as is, so without this every worker (and every
+        // respawn) would hand out the same byte stream. Refill before anything draws from it.
+        if(!GetRandomPool().Reseed())
+            logger.Fatal("[WFX-Worker]: Failed to reseed random pool");
+
         // First worker becomes group leader, rest join its group
         if(globalState.workerPGID == 0)
             setpgid(0, 0);

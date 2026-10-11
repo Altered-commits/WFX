@@ -651,6 +651,10 @@ ROUTE_CHECKS = [
     ("GET",  "/ctx",              None, b"", 200, b"42", None),
     # Async handler
     ("GET",  "/async/sleep",      None, b"", 200, b"slept", None),
+    # Async middleware and route that complete without ever suspending
+    ("GET",  "/mw/async-inline",  None, b"", 200, b"async-mw-ok", ("X-Async-MW", b"hit")),
+    ("GET",  "/mw/async-inline-break", None, b"", 403, b"async-blocked", None),
+    ("GET",  "/async/inline",     None, b"", 200, b"inline", None),
     # JSON: immediate mode
     ("GET",  "/json/im",          None, b"", 200, b'"immediate"', None),
     ("GET",  "/json/im",          None, b"", 200, b'"meta"', None),

@@ -173,9 +173,17 @@ MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(ClientCtx* ctx, Request
 
     // Engine passes its own callback into the async middleware
     // The middleware coroutine's 'final_suspend' will fire this when done
+    ctx->SetAsyncCallState(AsyncCallState::INLINE_RUNNING);
+
     mw.async(req, res, WFX::Core::CoreEngine::OnCoroutineComplete, ctx);
 
+    const bool doneInline = ctx->GetAsyncCallState() == AsyncCallState::INLINE_DONE;
+    ctx->SetAsyncCallState(AsyncCallState::IDLE);
     httpApi->setGlobalPtrData(nullptr);
+
+    // Finished without suspending, its action is already recorded, so the chain goes on as if sync
+    if(doneInline)
+        return {*ctx->trackAsync.GetMAction(), false};
 
     return {MiddlewareAction::CONTINUE, true};
 }

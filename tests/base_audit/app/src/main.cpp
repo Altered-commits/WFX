@@ -359,6 +359,26 @@ WFX_GET_EX("/mw/skipnext",
                        }),
            [](WFX::Request, WFX::Response res) { res.Status(200).SendText("handler-ran"); })
 
+// Async middleware that finishes without ever suspending, the way an auth check deciding on what
+// the request already carries would. Its coroutine completes inside the call that starts it.
+WFX_GET_EX("/mw/async-inline", WFX_MW_LIST([](WFX::Request, WFX::Response res) -> WFX::MwCoro {
+               res.Header("X-Async-MW", "hit");
+               co_return WFX::MwContinue;
+           }),
+           [](WFX::Request, WFX::Response res) { res.Header("Content-Type", "text/plain").Write("async-mw-ok").Commit(); })
+
+// Same, but it rejects: sends 403 and breaks the chain before the handler
+WFX_GET_EX("/mw/async-inline-break", WFX_MW_LIST([](WFX::Request, WFX::Response res) -> WFX::MwCoro {
+               res.Status(403).SendText("async-blocked");
+               co_return WFX::MwBreak;
+           }),
+           [](WFX::Request, WFX::Response res) { res.Status(200).SendText("unreachable"); })
+
+// Async route that responds and returns without awaiting anything
+WFX_GET("/async/inline", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    res.Status(200).SendText("inline");
+    co_return;
+})
 
 // Async handler that exercises the coroutine + timer path under load
 WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
