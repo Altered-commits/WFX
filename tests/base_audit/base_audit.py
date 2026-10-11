@@ -651,6 +651,7 @@ ROUTE_CHECKS = [
     ("GET",  "/ctx",              None, b"", 200, b"42", None),
     # Async handler
     ("GET",  "/async/sleep",      None, b"", 200, b"slept", None),
+    ("GET",  "/async/nested-slow", None, b"", 200, b"nested-done", None),
     # Async middleware and route that complete without ever suspending
     ("GET",  "/mw/async-inline",  None, b"", 200, b"async-mw-ok", ("X-Async-MW", b"hit")),
     ("GET",  "/mw/async-inline-break", None, b"", 403, b"async-blocked", None),
@@ -1074,6 +1075,19 @@ def phase_features(ctx):
                     findings.append(("ASYNC_INTERLEAVE", "%s then /text on one connection: got %r, expected %r"
                                      % (path.decode(), got, expected)))
 
+        # A client that leaves mid-sleep makes the engine kill the whole suspended chain, the route's
+        # frame and the helper it awaits. The worker must survive that, and a frame left behind fails
+        # the run in the exit-time leak scan
+        with term.progress("features", "async:abandon-nested") as pr:
+            net.send_and_abandon(host, port, net.request("GET", "/async/nested-slow"), hold=0.3)
+            time.sleep(1.2)  # past the helper's 1 s sleep, so a surviving frame would have resumed by now
+            st = net.status(net.send(host, port, net.request("GET", "/health"), rtimeout=3.0))
+            if st == 200:
+                pr.ok()
+            else:
+                pr.bad()
+                findings.append(("ASYNC_ABANDON", "/health after abandoning /async/nested-slow: status=%r" % st))
+
         # template/cond: branch isolation: wrong branches must not appear
         with term.progress("features", "tmpl:cond-isolation") as pr:
             for n, expected, forbidden in [
@@ -1243,11 +1257,13 @@ def phase_features(ctx):
             else:
                 pr.ok()
 
-        # /stream: chunked streaming response via res.Stream() (512 chunks x 256 'S'
-        # bytes). This whole response-streaming path had no coverage: no ROUTE_CHECK
-        # ever requested it. Drive it and verify the full 131072-byte body reassembles
+        # /stream: chunked streaming response via res.Stream() (512 chunks x 256 'S' bytes). Verify
+        # the full 131072-byte body reassembles, and that the request's Connection: close still
+        # holds: the server closes once the last chunk is out, rather than at its idle timeout
         with term.progress("features", "stream:chunked") as pr:
+            t0 = time.time()
             st, raw = raw_send(host, port, _build("GET", "/stream"), rtimeout=8.0, rmax=1 << 20)
+            elapsed = time.time() - t0
             sbody = net.dechunk(body_of(raw)) if raw else b""
             expected = b"S" * (512 * 256)
             if st != 200 or sbody != expected:
@@ -1255,6 +1271,10 @@ def phase_features(ctx):
                 findings.append(("STREAM_FAIL",
                                   "/stream: status=%s len=%d (expected 200, %d bytes of 'S')"
                                   % (st, len(sbody), len(expected))))
+            elif elapsed >= 2.0:
+                pr.bad()
+                findings.append(("STREAM_KEEPALIVE", "/stream with Connection: close: the server closed after "
+                                 "%.1fs, expected right after the last chunk" % elapsed))
             else:
                 pr.ok()
 

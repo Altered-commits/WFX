@@ -157,7 +157,7 @@ inline constexpr auto AsyncNone = Shared::AsyncStatus::NONE;
 // Return one of these from your Stream() generator callable:
 //
 //   return { bytesWritten, WFX::StreamContinue };   // more chunks to come
-//   return { bytesWritten, WFX::StreamDone };       // finished, keep connection alive
+//   return { bytesWritten, WFX::StreamDone };       // finished, connection kept as the request asked
 //   return { bytesWritten, WFX::StreamClose };      // finished, close connection
 // -----------------------------------------------------------------------
 inline constexpr auto StreamContinue = Shared::StreamAction::CONTINUE;

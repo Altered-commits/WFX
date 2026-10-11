@@ -289,6 +289,13 @@ EpollConnectionHandler::~EpollConnectionHandler()
         for(std::uint32_t i = 0; i < entry.pool.GetSlots(); i++) {
             EndpointCtx* ctx = entry.pool.GetPtr(i);
             ctx->rwBuffer.ResetBuffer();
+
+            // A pooled TLS connection still open at exit holds a reference on the client SSL_CTX,
+            // which would otherwise never drop to zero
+            if(ctx->sslConn && sslHandler_) {
+                sslHandler_->ForceShutdown(ctx->sslConn);
+                ctx->sslConn = nullptr;
+            }
             if(ctx->parseStateObj && desc.destroyParseState) {
                 desc.destroyParseState(ctx->parseStateObj);
                 ctx->parseStateObj = nullptr;
@@ -296,6 +303,14 @@ EpollConnectionHandler::~EpollConnectionHandler()
             if(ctx->outputObj && desc.destroyOutput) {
                 desc.destroyOutput(ctx->outputObj);
                 ctx->outputObj = nullptr;
+            }
+            if(ctx->pendingStreams) {
+                for(auto& [key, stream] : *ctx->pendingStreams)
+                    if(stream.parseState && desc.destroyParseState)
+                        desc.destroyParseState(stream.parseState);
+
+                Shared::Delete(ctx->pendingStreams);
+                ctx->pendingStreams = nullptr;
             }
             if(ctx->slotState && desc.destroySlotState) {
                 desc.destroySlotState(ctx->slotState);
@@ -2374,10 +2389,9 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
             return;
         }
 
-        if(isTerminal)
-            ctx->SetConnectionState(result.action == StreamAction::STOP_AND_ALIVE_CONN
-                                        ? ConnectionState::CONNECTION_ALIVE
-                                        : ConnectionState::CONNECTION_CLOSE);
+        // The generator may end the connection early, never revive one the client asked to close
+        if(isTerminal && result.action == StreamAction::STOP_AND_CLOSE_CONN)
+            ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
 
         if(result.writtenBytes > 0) {
             // Non-chunked: raw bytes go out as-is. Chunked: wrap them in "<size-hex>\r\n<data>\r\n"

@@ -66,6 +66,10 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     T await_resume() noexcept
     {
+        // Completed normally, so the awaiting coroutine is the one running this: the child must not
+        // take it down as its frame goes (see ~BasePromise)
+        handle.promise().continuation = nullptr;
+
         if constexpr(std::is_void_v<T>)
             handle.destroy();
         else {

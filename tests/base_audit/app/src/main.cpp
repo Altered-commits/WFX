@@ -414,6 +414,19 @@ WFX_GET_EX("/mw/async-slow", WFX_MW_LIST([](WFX::Request, WFX::Response res) -> 
            }),
            [](WFX::Request, WFX::Response res) { res.Status(200).SendText("mw-slow-done"); })
 
+// A helper coroutine the route below awaits, so a suspended request is a two-frame chain: a client
+// that leaves mid-sleep has the engine kill the route's frame and this one together
+static WFX::Coro NestedSleep()
+{
+    co_await WFX::SleepFor(1000); // 1 s
+}
+
+WFX_GET("/async/nested-slow", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    co_await NestedSleep();
+    res.Status(200).SendText("nested-done");
+    co_return;
+})
+
 // JSON routes
 // Immediate-mode JSON (zero-heap streaming into response buffer)
 WFX_GET("/json/im", [](WFX::Request, WFX::Response res) {

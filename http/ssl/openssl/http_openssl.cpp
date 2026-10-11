@@ -20,6 +20,37 @@ using namespace WFX::Core;  // For 'Config'
 // vvv Constants vvv
 static constexpr unsigned char DEFAULT_PROTOS[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
 
+// vvv Helpers vvv
+static SSLReturn ClassifyFailure(SSL* ssl, int ret) noexcept
+{
+    // Maps a failed (ret <= 0) TLS call to SSLReturn. The routine WANT case is read straight off this
+    // connection: the same checks SSL_get_error makes, minus its first look at the thread-wide error
+    // queue, where an error another connection left would turn this connection's WANT into a fatal
+    // one. OpenSSL resets rwstate before any record I/O and the socket BIO clears its retry flags on
+    // every call, so a retry flag here means the last read/write hit EAGAIN and nothing failed
+    if(SSL_want_read(ssl) && BIO_should_read(SSL_get_rbio(ssl)))
+        return SSLReturn::WANT_READ;
+    if(SSL_want_write(ssl) && BIO_should_write(SSL_get_wbio(ssl)))
+        return SSLReturn::WANT_WRITE;
+
+    // A real failure: classify it, then drain the queue so nothing outlives the call that raised it
+    const int err = SSL_get_error(ssl, ret);
+    ERR_clear_error();
+
+    switch(err) {
+        case SSL_ERROR_WANT_READ:
+            return SSLReturn::WANT_READ;
+        case SSL_ERROR_WANT_WRITE:
+            return SSLReturn::WANT_WRITE;
+        case SSL_ERROR_ZERO_RETURN:
+            return SSLReturn::CLOSED;
+        case SSL_ERROR_SYSCALL:
+            return SSLReturn::SYSCALL;
+        default:
+            return SSLReturn::FATAL;
+    }
+}
+
 // vvv Constructors and Destructors vvv
 HttpOpenSSL::HttpOpenSSL(bool initServer)
 {
@@ -410,19 +441,7 @@ SSLReturn HttpOpenSSL::Handshake(void* conn)
     if(ret == 1)
         return SSLReturn::SUCCESS;
 
-    const int err = SSL_get_error(ssl, ret);
-    switch(err) {
-        case SSL_ERROR_WANT_READ:
-            return SSLReturn::WANT_READ;
-        case SSL_ERROR_WANT_WRITE:
-            return SSLReturn::WANT_WRITE;
-        case SSL_ERROR_ZERO_RETURN:
-            return SSLReturn::CLOSED;
-        case SSL_ERROR_SYSCALL:
-            return SSLReturn::SYSCALL;
-        default:
-            return SSLReturn::FATAL;
-    }
+    return ClassifyFailure(ssl, ret);
 }
 
 SSLResult HttpOpenSSL::Read(void* conn, char* buf, int len)
@@ -433,19 +452,7 @@ SSLResult HttpOpenSSL::Read(void* conn, char* buf, int len)
     if(ret > 0)
         return {SSLReturn::SUCCESS, ret};
 
-    const int err = SSL_get_error(ssl, ret);
-    switch(err) {
-        case SSL_ERROR_WANT_READ:
-            return {SSLReturn::WANT_READ, 0};
-        case SSL_ERROR_WANT_WRITE:
-            return {SSLReturn::WANT_WRITE, 0};
-        case SSL_ERROR_ZERO_RETURN:
-            return {SSLReturn::CLOSED, 0};
-        case SSL_ERROR_SYSCALL:
-            return {SSLReturn::SYSCALL, 0};
-        default:
-            return {SSLReturn::FATAL, 0};
-    }
+    return {ClassifyFailure(ssl, ret), 0};
 }
 
 SSLResult HttpOpenSSL::Write(void* conn, const char* buf, int len)
@@ -456,19 +463,7 @@ SSLResult HttpOpenSSL::Write(void* conn, const char* buf, int len)
     if(ret > 0)
         return {SSLReturn::SUCCESS, ret};
 
-    const int err = SSL_get_error(ssl, ret);
-    switch(err) {
-        case SSL_ERROR_WANT_READ:
-            return {SSLReturn::WANT_READ, 0};
-        case SSL_ERROR_WANT_WRITE:
-            return {SSLReturn::WANT_WRITE, 0};
-        case SSL_ERROR_ZERO_RETURN:
-            return {SSLReturn::CLOSED, 0};
-        case SSL_ERROR_SYSCALL:
-            return {SSLReturn::SYSCALL, 0};
-        default:
-            return {SSLReturn::FATAL, 0};
-    }
+    return {ClassifyFailure(ssl, ret), 0};
 }
 
 SSLResult HttpOpenSSL::WriteFile(void* conn, SSLSocket fd, FileOffset offset, std::size_t count)
@@ -484,19 +479,7 @@ SSLResult HttpOpenSSL::WriteFile(void* conn, SSLSocket fd, FileOffset offset, st
     if(ret > 0)
         return {SSLReturn::SUCCESS, ret};
 
-    const int err = SSL_get_error(ssl, static_cast<int>(ret));
-    switch(err) {
-        case SSL_ERROR_WANT_READ:
-            return {SSLReturn::WANT_READ, 0};
-        case SSL_ERROR_WANT_WRITE:
-            return {SSLReturn::WANT_WRITE, 0};
-        case SSL_ERROR_ZERO_RETURN:
-            return {SSLReturn::CLOSED, 0};
-        case SSL_ERROR_SYSCALL:
-            return {SSLReturn::SYSCALL, 0};
-        default:
-            return {SSLReturn::FATAL, 0};
-    }
+    return {ClassifyFailure(ssl, static_cast<int>(ret)), 0};
 }
 
 SSLReturn HttpOpenSSL::Shutdown(void* conn)
@@ -519,11 +502,9 @@ SSLReturn HttpOpenSSL::Shutdown(void* conn)
     if(ret == 0)
         return SSLReturn::WANT_READ;
 
-    const int err = SSL_get_error(ssl, ret);
-    if(err == SSL_ERROR_WANT_READ)
-        return SSLReturn::WANT_READ;
-    if(err == SSL_ERROR_WANT_WRITE)
-        return SSLReturn::WANT_WRITE;
+    const SSLReturn status = ClassifyFailure(ssl, ret);
+    if(status == SSLReturn::WANT_READ || status == SSLReturn::WANT_WRITE)
+        return status;
 
     // Any other fatal error
     SSL_free(ssl);
