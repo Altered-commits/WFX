@@ -318,7 +318,7 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
         node->callback.async(userReq, userRes, CoreEngine::OnCoroutineComplete, ctx);
 
         const bool doneInline = ctx->GetAsyncCallState() == AsyncCallState::INLINE_DONE;
-        ctx->SetAsyncCallState(AsyncCallState::IDLE);
+        ctx->SetAsyncCallState(doneInline ? AsyncCallState::IDLE : AsyncCallState::SUSPENDED);
         httpApi->setGlobalPtrData(nullptr);
 
         // Finished without suspending, respond now the same way a sync route does

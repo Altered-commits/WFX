@@ -1040,6 +1040,34 @@ def phase_features(ctx):
                 else:
                     pr.ok()
 
+        # Pipelining isn't supported: a request sent while the previous one on the same connection is
+        # still suspended is never answered, and the suspended one comes back intact. One path
+        # suspends in the route, the other in middleware.
+        with term.progress("features", "async:next-request-while-suspended") as pr:
+            for path, want in [(b"/async/slow", b"slow-done"), (b"/mw/async-slow", b"mw-slow-done")]:
+                try:
+                    sock = socket.create_connection((host, port), timeout=5.0)
+                    try:
+                        sock.sendall(b"GET " + path + b" HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n")
+                        time.sleep(0.2)  # the first request is now suspended in its 1 s sleep
+                        sock.sendall(b"GET /text HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n")
+
+                        st1, b1, buf = net.read_response(sock, b"", 5.0)
+                        st2, _, _ = net.read_response(sock, buf, 1.0)
+                        got = (st1, b1, st2)
+                    finally:
+                        sock.close()
+                except OSError as e:
+                    got = ("connect/send failed", str(e))
+
+                expected = (200, want, None)
+                if got == expected:
+                    pr.ok()
+                else:
+                    pr.bad()
+                    findings.append(("ASYNC_INTERLEAVE", "%s then /text on one connection: got %r, expected %r"
+                                     % (path.decode(), got, expected)))
+
         # template/cond: branch isolation: wrong branches must not appear
         with term.progress("features", "tmpl:cond-isolation") as pr:
             for n, expected, forbidden in [
@@ -2083,44 +2111,6 @@ def phase_chaos(ctx):
 
     ctx.phase("chaos").record(findings, vectors=stats.get("kills", 0) + stats.get("stops", 0))
 
-def _read_http_response(sock, buf):
-    """Read exactly one CL-framed HTTP response off `sock`. Returns (status, body, leftover)."""
-    while b"\r\n\r\n" not in buf:
-        try:
-            d = sock.recv(65536)
-        except OSError:
-            return None, b"", buf
-        if not d:
-            return None, b"", buf
-        buf += d
-
-    head, _, rest = buf.partition(b"\r\n\r\n")
-    lines = head.split(b"\r\n")
-    try:
-        status = int(lines[0].split(b" ")[1])
-    except (IndexError, ValueError):
-        return None, b"", rest
-
-    clen = 0
-    for line in lines[1:]:
-        if line.lower().startswith(b"content-length:"):
-            try:
-                clen = int(line.split(b":", 1)[1].strip())
-            except ValueError:
-                clen = 0
-            break
-
-    while len(rest) < clen:
-        try:
-            d = sock.recv(65536)
-        except OSError:
-            break
-        if not d:
-            break
-        rest += d
-
-    return status, rest[:clen], rest[clen:]
-
 # PHASE: soak
 def phase_soak(ctx):
     cfg = ctx.cfg
@@ -2160,7 +2150,7 @@ def phase_soak(ctx):
                     pr.bad()
                     break
 
-                st, rbody, buf = _read_http_response(sock, buf)
+                st, rbody, buf = net.read_response(sock, buf)
                 if st != exp_st or rbody != exp_body:
                     findings.append(("SOAK_MISFRAME",
                                       "request #%d %s -> status=%r body=%r (expected %d / %r)"

@@ -178,7 +178,7 @@ MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(ClientCtx* ctx, Request
     mw.async(req, res, WFX::Core::CoreEngine::OnCoroutineComplete, ctx);
 
     const bool doneInline = ctx->GetAsyncCallState() == AsyncCallState::INLINE_DONE;
-    ctx->SetAsyncCallState(AsyncCallState::IDLE);
+    ctx->SetAsyncCallState(doneInline ? AsyncCallState::IDLE : AsyncCallState::SUSPENDED);
     httpApi->setGlobalPtrData(nullptr);
 
     // Finished without suspending, its action is already recorded, so the chain goes on as if sync

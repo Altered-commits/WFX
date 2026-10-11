@@ -133,6 +133,7 @@ void ClientCtx::Clear()
         responseInfo->Reset();
 
     CleanupStreamGenerator();
+    SetAsyncCallState(AsyncCallState::IDLE);
 
     isFileOperation = 0;
     isStreamOperation = 0;

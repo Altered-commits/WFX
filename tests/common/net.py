@@ -142,6 +142,49 @@ def send_and_abandon(host, port, payload, ctimeout=5.0, hold=0.0):
     finally:
         _close(sock)
 
+def read_response(sock, buf, rtimeout=None):
+    """Reads exactly one CL-framed response off an open keep-alive socket. Returns (status, body,
+    leftover), or (None, b"", buf) on a closed, dead or timed out socket. rtimeout None keeps the
+    socket's own timeout. Never raises."""
+    try:
+        if rtimeout is not None:
+            sock.settimeout(rtimeout)
+
+        while b"\r\n\r\n" not in buf:
+            data = sock.recv(65536)
+            if not data:
+                return None, b"", buf
+            buf += data
+    except OSError:
+        return None, b"", buf
+
+    head, _, rest = buf.partition(b"\r\n\r\n")
+    lines = head.split(b"\r\n")
+    try:
+        code = int(lines[0].split(b" ")[1])
+    except (IndexError, ValueError):
+        return None, b"", rest
+
+    clen = 0
+    for line in lines[1:]:
+        if line.lower().startswith(b"content-length:"):
+            try:
+                clen = int(line.split(b":", 1)[1].strip())
+            except ValueError:
+                clen = 0
+            break
+
+    try:
+        while len(rest) < clen:
+            data = sock.recv(65536)
+            if not data:
+                break
+            rest += data
+    except OSError:
+        pass
+
+    return code, rest[:clen], rest[clen:]
+
 def request(method, path, headers=None, body=b""):
     """Builds a well-formed request. Suites testing malformed framing build their own bytes."""
     if isinstance(body, str):

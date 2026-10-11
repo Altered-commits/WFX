@@ -391,6 +391,28 @@ WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     co_return;
 })
 
+// Async handler that stays suspended long enough for a client to send its next request on the
+// same connection before this one is answered
+WFX_GET("/async/slow", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    auto s = co_await WFX::SleepFor(1000); // 1 s
+    if(s != WFX::AsyncOk) {
+        res.Status(500).SendText("timer failed");
+        co_return;
+    }
+    res.Status(200).SendText("slow-done");
+    co_return;
+})
+
+// Async middleware that stays suspended the same way, in front of a sync route
+WFX_GET_EX("/mw/async-slow", WFX_MW_LIST([](WFX::Request, WFX::Response res) -> WFX::MwCoro {
+               auto s = co_await WFX::SleepFor(1000); // 1 s
+               if(s != WFX::AsyncOk) {
+                   res.Status(500).SendText("timer failed");
+                   co_return WFX::MwBreak;
+               }
+               co_return WFX::MwContinue;
+           }),
+           [](WFX::Request, WFX::Response res) { res.Status(200).SendText("mw-slow-done"); })
 
 // JSON routes
 // Immediate-mode JSON (zero-heap streaming into response buffer)

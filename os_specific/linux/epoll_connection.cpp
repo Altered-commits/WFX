@@ -80,7 +80,8 @@ template <typename Ctx> bool EpollConnectionHandler::RegisterEpoll(Ctx* ctx, int
     epoll_event* evPtr = nullptr;
 
     if(op != EPOLL_CTL_DEL) {
-        ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
+        // RDHUP reports a peer FIN without a read, which a client suspended in async never gets
+        ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLET;
         ev.data.u64 = PackEpollData(ctx);
         evPtr = &ev;
     }
@@ -2631,7 +2632,7 @@ void EpollConnectionHandler::HandleClientHandshake(ClientCtx* ctx, std::uint32_t
 
     // Handshake done, if data already arrived, process it immediately
     if(ev & EPOLLIN)
-        HandleClientEpollIn(ctx);
+        HandleClientEpollIn(ctx, ev);
 }
 
 void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx)
@@ -2738,7 +2739,7 @@ void EpollConnectionHandler::HandleClientEvent(ClientCtx* ctx, std::uint32_t ev,
     }
 
     if(ev & EPOLLIN)
-        HandleClientEpollIn(ctx);
+        HandleClientEpollIn(ctx, ev);
 
     // Re-check: HandleClientEpollIn may have closed this slot
     if((ev & EPOLLOUT) && ctx->generationId == gen)
@@ -2800,12 +2801,22 @@ void EpollConnectionHandler::HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t
 }
 
 // Single EPOLLIN dispatch point for clients, routes by eventType
-void EpollConnectionHandler::HandleClientEpollIn(ClientCtx* ctx)
+void EpollConnectionHandler::HandleClientEpollIn(ClientCtx* ctx, std::uint32_t ev)
 {
     WFX_TRACE();
 
     switch(ctx->eventType) {
         case EventType::EVENT_RECV:
+            // A suspended async handler still owns this client's request and response. Pipelining
+            // isn't supported, so nothing the client sends is read, but its FIN still aborts the
+            // request the way the read hitting EOF used to.
+            if(ctx->GetAsyncCallState() == AsyncCallState::SUSPENDED) {
+                if(ev & EPOLLRDHUP)
+                    Close(ctx);
+
+                return;
+            }
+
             // Read whatever is currently available on the socket
             if(Receive(ctx))
                 onReceive_(ctx);

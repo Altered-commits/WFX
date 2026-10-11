@@ -61,14 +61,16 @@ enum class HttpParseState : std::uint8_t {
 };
 
 // Where a client's async middleware or route stands relative to the engine call that started it.
-// 'OnCoroutineComplete' reads this to tell a coroutine that finished inside that call, which the
-// caller then carries on from itself, from one the event loop resumed and finished later.
+// 'OnCoroutineComplete' reads it to tell a coroutine that finished inside that call (the caller
+// carries on) from one the event loop resumed later. Once anything suspends the request stays
+// SUSPENDED until 'Clear', and the event loop reads nothing from the client till then.
 enum class AsyncCallState : std::uint8_t {
     IDLE,           // No engine call is starting an async callback for this client
     INLINE_RUNNING, // Started, not completed yet
-    INLINE_DONE     // Completed before the call that started it returned
+    INLINE_DONE,    // Completed before the call that started it returned
+    SUSPENDED       // Suspended past that call, request in flight until its response is written
 };
-static_assert(static_cast<std::uint8_t>(AsyncCallState::INLINE_DONE) <= 3,
+static_assert(static_cast<std::uint8_t>(AsyncCallState::SUSPENDED) <= 3,
               "'AsyncCallState' no longer fits ClientCtx's 2-bit asyncCallState field");
 
 enum class EventType : std::uint8_t {
@@ -245,7 +247,7 @@ struct ClientCtx : public ConnectionTag {
             std::uint16_t rateLimiterAcquired : 1; // set once RequestRateLimiter has counted this connection too
             std::uint16_t isAwaitFlush : 1;    // mid FlushChunk() write, EVENT_SEND resumes into it instead of Write()
             std::uint16_t awaitFlushFinal : 1; // the in-flight FlushChunk() is the terminating one
-            std::uint16_t asyncCallState : 2;  // AsyncCallState
+            std::uint16_t asyncCallState : 2;
         };
         std::uint16_t flags = 0;
     }; // 2 bytes
