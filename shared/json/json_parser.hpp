@@ -551,6 +551,11 @@ public: // vvv Object and Array vvv
 
             JsonRef valRef{nullptr, JSON_NIL};
 
+            // A new key always allocates its value node and an existing one does not, so an
+            // unchanged node count means a duplicate. Rejected: reparsing into that node leaks its
+            // old buffer, and parsers disagree on which of two duplicates wins
+            const std::uint32_t nodesBefore = r.s_->nodeLen;
+
             if(!hasEscape) {
                 // Fast path: key has no escape sequences, copy directly from src
                 const std::uint32_t klen = static_cast<std::uint32_t>(end - keyStart);
@@ -586,6 +591,11 @@ public: // vvv Object and Array vvv
 
             if(!valRef.Valid()) {
                 Fail("out of memory");
+                return false;
+            }
+
+            if(r.s_->nodeLen == nodesBefore) {
+                Fail("duplicate key");
                 return false;
             }
 

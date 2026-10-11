@@ -672,6 +672,12 @@ ROUTE_CHECKS = [
              b'{"broken":', 400, None, None),
     ("POST", "/parse-json",       {"Content-Type": "application/json"},
              b"",            400, None, None),
+    # JSON: duplicate keys are rejected. A repeated container key would leak the first one's
+    # buffer, and a repeated scalar reads differently to parsers that keep the first value
+    ("POST", "/parse-json",       {"Content-Type": "application/json"},
+             b'{"name":"wfx","meta":{"a":1},"meta":{"b":2},"version":7}', 400, None, None),
+    ("POST", "/parse-json",       {"Content-Type": "application/json"},
+             b'{"name":"a","name":"b","version":7}', 400, None, None),
     # Chained headers
     ("GET",  "/chain",            None, b"", 200, b"chain", None),
     # Templates: static

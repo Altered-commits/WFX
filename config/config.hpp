@@ -157,7 +157,6 @@ struct MiscConfig {
     std::uint16_t cacheChunkSize = 2 * 1024;
     std::uint32_t templateChunkSize = 16 * 1024;
     std::uint16_t masterPollInterval = 2; // In seconds
-    std::uint16_t maxWorkerRestarts = 5;
     std::uint16_t workerBackoffBase = 1; // In seconds
     std::uint16_t workerBackoffMax = 16; // In seconds
 };

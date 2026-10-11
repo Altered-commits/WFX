@@ -497,6 +497,37 @@ def phase_mtls(ctx):
         p.check("intermediate-signed leaf WITH the intermediate accepted", _status_of(r) == 200,
               "status=%r" % _status_of(r))
 
+# PHASE: isolation
+def phase_isolation(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("isolation")
+
+    # A record that fails to authenticate on one connection leaves an error in the worker's OpenSSL
+    # queue. Another connection's next read must not take it for its own fatal error. Both connect
+    # first: a handshake clears the queue on its own, so A's read is the first TLS call after B's
+    a = net.connect(cfg.host, cfg.port, tls=True, certfile=CLIENT_CERT, keyfile=CLIENT_KEY)
+    b = net.connect(cfg.host, cfg.port, tls=True, certfile=CLIENT_CERT, keyfile=CLIENT_KEY)
+    status = None
+    try:
+        if a and b:
+            # Written under B's TLS layer: an application-data record whose ciphertext can't authenticate
+            raw = socket.socket(fileno=os.dup(b.fileno()))
+            raw.sendall(b"\x17\x03\x03\x00\x20" + bytes(32))
+            raw.close()
+            time.sleep(0.3)  # the worker fails B's record before A sends anything
+
+            a.sendall(_build("GET", "/health"))
+            status, _, _ = net.read_response(a, b"", 5.0)
+    except OSError:
+        pass
+    finally:
+        for sock in (a, b):
+            if sock:
+                sock.close()
+
+    p.check("a bad record on one connection never drops another's request", status == 200,
+            "status=%r" % status, security=True)
+
 # PHASE: framing
 def phase_framing(ctx):
     cfg, mock = ctx.cfg, ctx.mock
@@ -674,6 +705,7 @@ class TlsAudit(common.Suite):
         "verify":     phase_verify,
         "protocol":   phase_protocol,
         "mtls":       phase_mtls,
+        "isolation":  phase_isolation,
         "framing":    phase_framing,
         "desync":     phase_desync,
         "inject":     phase_inject,

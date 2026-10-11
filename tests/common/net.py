@@ -36,9 +36,8 @@ def _close(sock):
         except OSError:
             pass
 
-def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=False, sni="localhost",
-        certfile=None, keyfile=None):
-    """Write payload, read until close or timeout. Returns raw bytes, or None if it never landed.
+def connect(host, port, ctimeout=5.0, tls=False, sni="localhost", certfile=None, keyfile=None):
+    """Opens a connection, TLS when asked, handshake done. Returns the socket, or None. Never raises.
 
     certfile/keyfile present a client certificate during the handshake, for suites driving mTLS.
     """
@@ -50,8 +49,16 @@ def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=Fals
             if certfile:
                 ctx.load_cert_chain(certfile, keyfile)
             sock = ctx.wrap_socket(sock, server_hostname=sni)
+        return sock
     except (OSError, ssl.SSLError):
         _close(sock)
+        return None
+
+def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=False, sni="localhost",
+        certfile=None, keyfile=None):
+    """Write payload, read until close or timeout. Returns raw bytes, or None if it never landed."""
+    sock = connect(host, port, ctimeout, tls, sni, certfile, keyfile)
+    if sock is None:
         return None
 
     try:

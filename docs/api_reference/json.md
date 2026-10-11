@@ -281,6 +281,8 @@ WFX_GET("/order", [](WFX::Request req, WFX::Response res) {
 
 `ParseJson` parses a JSON string into an `RmJson` compatible object that you can read using the same `Get`, `IsX`, and `AsX` methods described above.
 
+An object that repeats a key is rejected with the error `duplicate key`. Parsers disagree on which of two duplicates wins, so a body like `{"role":"user","role":"admin"}` could mean one thing to a proxy or validator in front and another to your handler.
+
 ```cpp
 inline Shared::JsonParseResult ParseJson(
     std::string_view body,

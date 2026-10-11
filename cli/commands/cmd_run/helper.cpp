@@ -29,9 +29,7 @@ using namespace WFX::Core;  // For 'Config', 'TemplateEngine'
 // Slot state encoding via workerPids:
 //   >= 0  -> live worker PID
 //   -1    -> marked for revival (backoff window not yet expired)
-//   -2    -> permanently dead (max restart attempts exceeded)
 static constexpr pid_t SLOT_PENDING = -1;
-static constexpr pid_t SLOT_DEAD = -2;
 
 // vvv Helper Functions vvv
 static void InstallSignal(int sig, void (*handler)(int), const char* name)
@@ -166,18 +164,12 @@ static void ReapDeadWorkers()
             logger.Warn("[WFX-Master]: Worker ", slotIndex, " died with exit code ", WEXITSTATUS(status),
                         " (pid=", dead, ")");
 
-        // -------------------- BACKOFF CHECK --------------------
+        // -------------------- BACKOFF --------------------
         const std::int64_t now = static_cast<std::int64_t>(std::time(nullptr));
         const std::uint32_t attempts = slot->self.backoffAttempts;
 
-        if(attempts >= miscConfig.maxWorkerRestarts) {
-            logger.Error("[WFX-Master]: Worker ", slotIndex, " exceeded max restart attempts (",
-                         miscConfig.maxWorkerRestarts, "). Slot remains dead until server restart");
-            globalState.workerPids[slotIndex] = SLOT_DEAD;
-            continue;
-        }
-
-        // Compute backoff window and mark as pending revival
+        // Compute backoff window and mark as pending revival. There is no restart budget, a slot
+        // is always revived, once the backoff hits workerBackoffMax every retry waits that long
         const std::uint32_t base = miscConfig.workerBackoffBase;
         const std::uint32_t backoffSecs =
             (attempts >= 32) ? static_cast<std::uint32_t>(miscConfig.workerBackoffMax)
@@ -188,7 +180,7 @@ static void ReapDeadWorkers()
         globalState.workerPids[slotIndex] = SLOT_PENDING;
 
         logger.Info("[WFX-Master]: Worker ", slotIndex, " marked for revival in ", backoffSecs, "s (attempt ",
-                    slot->self.backoffAttempts + 1, "/", miscConfig.maxWorkerRestarts, ")");
+                    slot->self.backoffAttempts + 1, ")");
     }
 }
 
@@ -216,16 +208,17 @@ static void RevivePendingWorkers(const std::string& dllDir, const std::string& l
         if(slot->self.nextRetryAt > now)
             continue;
 
-        logger.Info("[WFX-Master]: Reviving worker ", i, " (attempt ", slot->self.backoffAttempts + 1, "/",
-                    miscConfig.maxWorkerRestarts, ")");
+        logger.Info("[WFX-Master]: Reviving worker ", i, " (attempt ", slot->self.backoffAttempts + 1, ")");
 
         if(SpawnWorker(i, dllDir, logsDir, crashLogsDir, useHttps, pinToCpu, host, port)) {
             slot->self.restarts++;
             slot->self.backoffAttempts++;
         }
         else {
-            logger.Error("[WFX-Master]: Failed to revive worker ", i);
-            globalState.workerPids[i] = SLOT_DEAD;
+            // fork() failing is usually transient (EAGAIN, ENOMEM), so the slot stays pending
+            logger.Error("[WFX-Master]: Failed to revive worker ", i, ", retrying in ", miscConfig.workerBackoffMax,
+                         "s");
+            slot->self.nextRetryAt = now + miscConfig.workerBackoffMax;
         }
     }
 }
@@ -485,7 +478,7 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(osConfig.workerProcesses); i++) {
         const pid_t pid = globalState.workerPids[i];
 
-        // Slot may be dead from backoff exhaustion or failed restart
+        // A slot pending revival has no process to wait on
         if(pid > 0)
             pending.push_back(pid);
     }
