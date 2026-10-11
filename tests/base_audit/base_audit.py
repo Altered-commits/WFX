@@ -1088,6 +1088,38 @@ def phase_features(ctx):
                 pr.bad()
                 findings.append(("ASYNC_ABANDON", "/health after abandoning /async/nested-slow: status=%r" % st))
 
+        # RmJson values taken from another object (Merge, Set(key, JsonRef)) must be copies: the
+        # source object is already destroyed when /json/merge writes its response
+        with term.progress("features", "json:merge-across-objects") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/json/merge"), rtimeout=5.0)
+            try:
+                got = json.loads(body_of(raw)) if st == 200 else None
+            except ValueError:
+                got = None
+            expected = {"keep": 1, "name": "src-owned", "nested": {"inner": "deep"}, "list": [7, "eight"],
+                        "root": {"alias": {"inner": "deep"}}}
+            if got == expected:
+                pr.ok()
+            else:
+                pr.bad()
+                findings.append(("JSON_MERGE", "/json/merge: status=%r body=%r" % (st, body_of(raw)[:200] if raw else None)))
+
+        # A scalar assigned over an existing object or array replaces it, and the container's buffer
+        # has to be freed with it: the exit-time leak scan catches one that's dropped instead
+        with term.progress("features", "json:overwrite-container") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/json/overwrite"), rtimeout=5.0)
+            try:
+                got = json.loads(body_of(raw)) if st == 200 else None
+            except ValueError:
+                got = None
+            expected = {"num": 5, "str": "text", "nil": None}
+            if got == expected:
+                pr.ok()
+            else:
+                pr.bad()
+                findings.append(("JSON_OVERWRITE", "/json/overwrite: status=%r body=%r"
+                                 % (st, body_of(raw)[:200] if raw else None)))
+
         # template/cond: branch isolation: wrong branches must not appear
         with term.progress("features", "tmpl:cond-isolation") as pr:
             for n, expected, forbidden in [

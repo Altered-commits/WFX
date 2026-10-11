@@ -240,7 +240,7 @@ base.Merge(extra);
 base.Write(res);   // {"type":"user","role":"admin"}
 ```
 
-Merge is shallow. Nested objects inside the source are aliased, not deep-copied.
+Merge copies values, nested objects and arrays included, so the source can be changed or destroyed afterwards. It is shallow only in that a key both objects have is replaced, not merged recursively. The same goes for `Set(key, ref)` when `ref` belongs to another object; a `ref` from the same object is aliased instead.
 
 ### Capacity hints
 

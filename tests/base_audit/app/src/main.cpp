@@ -451,6 +451,43 @@ WFX_GET("/json/rm", [](WFX::Request, WFX::Response res) {
     o.Write(res);
 })
 
+// RmJson Merge and Set(key, JsonRef) taking values from another object. The source is destroyed
+// before the target is written, so anything the target still shares with it shows up as freed
+// memory or as the wrong bytes
+WFX_GET("/json/merge", [](WFX::Request, WFX::Response res) {
+    auto dst = WFX::RmJson();
+    dst["keep"] = (std::uint64_t)1;
+    {
+        auto src = WFX::RmJson();
+        src["name"] = std::string_view{"src-owned"};
+        src["nested"]["inner"] = std::string_view{"deep"};
+        src["list"].PushBack((std::uint64_t)7);
+        src["list"].PushBack(std::string_view{"eight"});
+
+        dst.Merge(src);
+        dst["root"].Set("alias", src["nested"]);
+    }
+
+    res.Status(200);
+    dst.Write(res);
+})
+
+// RmJson scalars assigned over an existing object or array. Each container's buffer has to be
+// freed rather than lost with the pointer to it, which the exit-time leak scan would catch
+WFX_GET("/json/overwrite", [](WFX::Request, WFX::Response res) {
+    auto o = WFX::RmJson();
+    o["num"]["a"] = (std::uint64_t)1;
+    o["str"].PushBack((std::uint64_t)2);
+    o["nil"]["b"]["c"] = true;
+
+    o["num"] = (std::uint64_t)5;
+    o["str"] = std::string_view{"text"};
+    o["nil"] = nullptr;
+
+    res.Status(200);
+    o.Write(res);
+})
+
 // JSON body parsing: echoes "name" (string) and "version" (uint) from POST body
 WFX_POST("/parse-json", [](WFX::Request req, WFX::Response res) {
     auto result = WFX::ParseJson(req.Body(), true);

@@ -980,8 +980,9 @@ def phase_encoding(ctx):
     # "====" is not on this list - an all-padding string legitimately decodes to empty bytes
     # (confirmed against Python's own base64.b64decode, not a WFX-specific leniency). '=' in a
     # non-trailing position is the genuinely invalid shape: only a *trailing* run of '=' is
-    # stripped as padding, so an embedded one is just an unrecognized character
-    for bad in ("!!!!", "abc def", "a\x00bc=", "AB=A"):
+    # stripped as padding, so an embedded one is just an unrecognized character. The bytes
+    # vector covers both ends of 0xF0-0xFF, the top of the decoders' shared char table
+    for bad in ("!!!!", "abc def", "a\x00bc=", "AB=A", b"\xf0\xff\xf0\xff"):
         rd = b64_decode(bad)
         p.check("base64 decode rejects invalid input: %r" % bad, bool(rd) and rd.get("ok") is False,
               "got %r" % rd)
@@ -1012,7 +1013,7 @@ def phase_encoding(ctx):
         p.check("hex decode round-trip (upper) len=%d" % n,
               bool(r) and r.get("ok") and r.get("hex") == data.hex(), "got %r" % r)
 
-    for bad in ("0", "zz", "gg", "12345", "  "):
+    for bad in ("0", "zz", "gg", "12345", "  ", b"\xf0\xff"):
         r = hex_decode(bad)
         p.check("hex decode rejects invalid input: %r" % bad, bool(r) and r.get("ok") is False, "got %r" % r)
 
@@ -1029,7 +1030,7 @@ def phase_encoding(ctx):
     p.check("url decode '+' tolerated as space",
           bool(r) and r.get("ok") and bytes.fromhex(r.get("hex", "")) == b"a b", "got %r" % r)
 
-    for bad in ("%", "%4", "%zz", "100%"):
+    for bad in ("%", "%4", "%zz", "100%", b"%\xf0\xff"):
         r = url_decode(bad)
         p.check("url decode rejects truncated/invalid escape: %r" % bad,
               bool(r) and r.get("ok") is False, "got %r" % r)
