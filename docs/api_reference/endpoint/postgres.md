@@ -366,14 +366,15 @@ struct PgArrayView {
 };
 ```
 
-A malformed header, more than 6 dimensions, or any dimension with a negative
-length, decodes to a value-initialized `PgArrayView` (`elements == nullptr`),
-the same "NULL yields a value-initialized `T`" contract every other codec
-follows. `elements != nullptr` is how you tell a genuinely empty array
+A malformed header, more than 6 dimensions, any dimension with a negative
+length, or more elements than the array's bytes can hold, decodes to a
+value-initialized `PgArrayView` (`elements == nullptr`, `ndim` and `Count()`
+both 0), the same "NULL yields a value-initialized `T`" contract every other
+codec follows. `elements != nullptr` is how you tell a genuinely empty array
 (`Count() == 0` but still well-formed) apart from a decode failure.
 
-Treat `Count()` as informational rather than a value to size a loop or
-allocation from directly; `NextElement` walking the actual bytes is what
+`Count()` never exceeds what the received bytes could hold, but an element
+can still be truncated, so `NextElement` walking the actual bytes is what
 tells you how many elements are really there.
 
 ---

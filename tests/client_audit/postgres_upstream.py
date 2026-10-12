@@ -312,7 +312,7 @@ def _magic_datarow_first():
     return [data_row([struct.pack(">i", 1)])], "SELECT 1"
 
 def _magic_array_overflow():
-    # int4[], 6 dims of 50000 each: the product overflows int32, no element bytes needed
+    # int4[], 6 dims of 50000 each: the product overflows int32, and no element bytes follow
     hdr = struct.pack(">iii", 6, 0, OID_INT4)
     for _ in range(6):
         hdr += struct.pack(">ii", 50000, 1)

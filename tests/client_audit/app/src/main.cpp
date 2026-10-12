@@ -550,19 +550,18 @@ static void WritePgValue(WFX::Shared::JsonWriter& j, const WFX::PgResult& result
             break;
         }
         case 1007: { // int4[]
-            // Get<PgArrayView> leaves elements null on a decode failure (a malformed
-            // header) and sets it, even for a genuinely empty array, on success, so it
-            // doubles as the ok/fail signal DecodeArray's own bool return would give
+            // A malformed header leaves the view empty, elements null included, while
+            // even a genuinely empty array sets elements, so it doubles as the ok/fail
+            // signal. ndim and Count() are reported either way, since an empty view
+            // must say 0 for both
             const auto av = row.Get<WFX::PgArrayView>(col);
             const bool ok = av.elements != nullptr;
             j.Write("array_ok", ok);
             j.Write("array_ndim", static_cast<std::int64_t>(av.ndim));
-            j.Write("array_count", static_cast<std::int64_t>(ok ? av.Count() : 0));
+            j.Write("array_count", static_cast<std::int64_t>(av.Count()));
 
-            // Walking is a second, independent check from Count(): a header that
-            // overflows Count()'s product can still legitimately have zero walkable
-            // bytes behind it, and a truncated element has to stop the walk rather
-            // than read past what actually arrived
+            // Walking is a second, independent check from Count(): a truncated
+            // element has to stop the walk rather than read past what actually arrived
             std::int64_t walked = 0;
             bool anyNull = false;
             if(ok) {

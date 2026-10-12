@@ -2187,26 +2187,25 @@ def phase_pg_types(ctx):
             "infinity rather than reading past the digit array",
             is_ok(r) and not r.get("failed") and r.get("value") == "inf", "r=%r" % r)
 
-    # PgArrayView::Count() (types.hpp) has no overflow guard on the dimension product, so
-    # this documents the current behaviour rather than asserting the result is meaningful.
-    # array_walked stays 0 regardless: the header claims 6 dimensions of 50000, but no
-    # element bytes ever followed it, so Count()'s garbage product and what NextElement
-    # can actually step are two independent, and here disagreeing, signals
+    # A malformed array header must leave the view empty, ndim and Count() both 0, never
+    # half-filled from the header it rejected
+    def array_rejected(r):
+        return (is_ok(r) and not r.get("failed") and r.get("array_ok") is False and
+                r.get("array_ndim") == 0 and r.get("array_count") == 0)
+
+    # 6 dimensions of 50000 is within MAX_ARRAY_DIMS, but claims more elements than an int32
+    # can count and far more than the zero element bytes behind it can hold
     r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_OVERFLOW")
-    p.check("PGAUDIT_ARRAY_OVERFLOW: 6 dimensions is within MAX_ARRAY_DIMS, so DecodeArray accepts "
-            "it and the worker does not crash computing Count()",
-            is_ok(r) and not r.get("failed") and r.get("array_ok") is True and r.get("array_ndim") == 6,
-            "r=%r" % r)
-    p.check("PGAUDIT_ARRAY_OVERFLOW: Count()'s overflowed product has nothing walkable behind it",
-            r.get("array_walked") == 0, "r=%r" % r)
+    p.check("PGAUDIT_ARRAY_OVERFLOW: a header claiming more elements than its bytes can hold is "
+            "rejected and leaves the view empty", array_rejected(r), "r=%r" % r)
 
     r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_BADDIM")
-    p.check("PGAUDIT_ARRAY_BADDIM: more dimensions than MAX_ARRAY_DIMS is rejected by DecodeArray",
-            is_ok(r) and not r.get("failed") and r.get("array_ok") is False, "r=%r" % r)
+    p.check("PGAUDIT_ARRAY_BADDIM: more dimensions than MAX_ARRAY_DIMS is rejected and leaves the "
+            "view empty", array_rejected(r), "r=%r" % r)
 
     r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_NEGDIM")
-    p.check("PGAUDIT_ARRAY_NEGDIM: a negative dimension length is rejected by DecodeArray",
-            is_ok(r) and not r.get("failed") and r.get("array_ok") is False, "r=%r" % r)
+    p.check("PGAUDIT_ARRAY_NEGDIM: a negative dimension length is rejected and leaves the view empty",
+            array_rejected(r), "r=%r" % r)
 
     # The good path none of the vectors above exercise: a well-formed array with real
     # element bytes actually has to decode through Get<PgArrayView> and NextElement,
