@@ -175,6 +175,11 @@ class Suite:
             # answering, a leak only shows at exit). Fold it in before rendering so it fails the run
             self._check_sanitizer_reports(ctx)
 
+            # Every worker has to stop on the master's SIGTERM. One the master force-killed instead
+            # would cut off in-flight requests on every deploy, and no phase check sees it
+            for line in logs.forced_worker_kills(cfg.app_dir):
+                report.phase("shutdown").failed("worker ignored SIGTERM and was force-killed", line)
+
             return report.render(alive=alive)
         finally:
             follower.stop()

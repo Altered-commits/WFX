@@ -62,6 +62,7 @@ def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=Fals
         return None
 
     try:
+        sock.settimeout(rtimeout)
         sock.sendall(payload)
         return _drain(sock, rtimeout, rmax)
     except (OSError, ssl.SSLError):

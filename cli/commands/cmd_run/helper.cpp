@@ -122,7 +122,7 @@ static bool SpawnWorker(int slotIndex, const std::string& dllDir, const std::str
     return true;
 }
 
-// Step 1: Reap dead workers and mark slots for revival or permanently dead
+// Step 1: Reap dead workers and mark their slots for revival
 static void ReapDeadWorkers()
 {
     auto& globalState = GetMasterState();
@@ -131,6 +131,7 @@ static void ReapDeadWorkers()
 
     int status;
     pid_t dead;
+    bool reaped = false;
 
     // Drain all dead children, SIGCHLD can be coalesced so we loop until nothing is left
     while((dead = waitpid(-1, &status, WNOHANG)) > 0) {
@@ -178,10 +179,24 @@ static void ReapDeadWorkers()
         slot->self.nextRetryAt = now + backoffSecs;
 
         globalState.workerPids[slotIndex] = SLOT_PENDING;
+        reaped = true;
 
         logger.Info("[WFX-Master]: Worker ", slotIndex, " marked for revival in ", backoffSecs, "s (attempt ",
                     slot->self.backoffAttempts + 1, ")");
     }
+
+    if(!reaped)
+        return;
+
+    // The workers' process group only exists while it has members, and once the last one is reaped its
+    // id is free for the kernel to reuse. Keeping it would leave revived workers unable to join (so they
+    // miss the shutdown SIGTERM) and aim that broadcast at whatever reuses the id. The next spawn
+    // founds a new group instead
+    for(const pid_t pid : globalState.workerPids)
+        if(pid > 0)
+            return;
+
+    globalState.workerPGID = 0;
 }
 
 // Step 2: Revive slots whose backoff window has expired
