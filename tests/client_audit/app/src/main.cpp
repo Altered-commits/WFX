@@ -64,6 +64,14 @@
 // mirrored in client_audit.py as HTTP_PORT.
 #define UPSTREAM "127.0.0.1:8091"
 
+// The same mock behind TLS, recording the ALPN each client offers. Mirrored in
+// client_audit.py as HTTP_TLS_PORT.
+#define UPSTREAM_TLS "127.0.0.1:8092"
+
+// What the custom-ALPN endpoints offer instead of their protocol's own. Mirrored in
+// client_audit.py as ALPN_CUSTOM.
+#define ALPN_CUSTOM "x-wfx-probe"
+
 // WFX::HttpEndpoint instances
 //
 // They differ only in the knobs one group of vectors needs: caps small enough to
@@ -170,6 +178,20 @@ inline const auto EpPrewarm = WFX::HttpEndpoint{UPSTREAM, WFX::HttpEndpointConfi
     .prewarm               = 3,
 }};
 
+// Over TLS, one left at HTTP's own ALPN and one configured with its own, so the mock can
+// tell which each offered.
+inline const auto EpTlsDefault = WFX::HttpEndpoint{UPSTREAM_TLS, WFX::HttpEndpointConfig{
+    .connLimit             = 1,
+    .requestTimeoutSeconds = 10,
+    .tlsConfig             = WFX::EpTlsRequire,
+}};
+inline const auto EpTlsCustom = WFX::HttpEndpoint{UPSTREAM_TLS, WFX::HttpEndpointConfig{
+    .connLimit             = 1,
+    .requestTimeoutSeconds = 10,
+    .tlsConfig             = WFX::EpTlsRequire,
+    .alpn                  = ALPN_CUSTOM,
+}};
+
 // WFX::SmtpEndpoint instances
 //
 // One per smtp_upstream.py persona. Both the port and the name are compiled in here
@@ -206,6 +228,11 @@ inline const auto Smtp_good               = WFX::SmtpEndpoint{"127.0.0.1:8100", 
 // alive slot from a genuinely fresh one, so phase_smtp_inject could silently inherit a connection
 // left over from phase_smtp_handshake's earlier /smtp/send "good" calls instead of a clean one
 inline const auto Smtp_good_injectroute   = WFX::SmtpEndpoint{"127.0.0.1:8100", SmtpCfg()};
+inline const auto Smtp_alpn_custom        = WFX::SmtpEndpoint{"127.0.0.1:8122", [] {
+    auto cfg = SmtpCfg();
+    cfg.alpn = ALPN_CUSTOM;
+    return cfg;
+}()};
 inline const auto Smtp_auth_login_only    = WFX::SmtpEndpoint{"127.0.0.1:8101", SmtpCfg()};
 inline const auto Smtp_inject             = WFX::SmtpEndpoint{"127.0.0.1:8103", SmtpCfg()};
 inline const auto Smtp_no_starttls        = WFX::SmtpEndpoint{"127.0.0.1:8102", SmtpCfg()};
@@ -245,6 +272,7 @@ inline const auto Smtp_heloinject = WFX::SmtpEndpoint{"127.0.0.1:8100", WFX::Smt
 
 static const WFX::SmtpEndpoint* SmtpEndpointOf(std::string_view e) noexcept
 {
+    if(e == "alpn_custom")        return &Smtp_alpn_custom;
     if(e == "auth_login_only")    return &Smtp_auth_login_only;
     if(e == "inject")             return &Smtp_inject;
     if(e == "no_starttls")        return &Smtp_no_starttls;
@@ -387,6 +415,15 @@ inline const auto Pg_scram_mixed          = WFX::PostgresEndpoint{"127.0.0.1:816
 inline const auto Pg_scram_server_error   = WFX::PostgresEndpoint{"127.0.0.1:8165", PgCfg()};
 inline const auto Pg_error_at_handshake   = WFX::PostgresEndpoint{"127.0.0.1:8166", PgCfg()};
 
+// A full TLS handshake each, one left at Postgres's own ALPN and one configured with its
+// own, so the mock can tell which each offered
+inline const auto Pg_alpn_default         = WFX::PostgresEndpoint{"127.0.0.1:8167", PgCfg(8, 8, WFX::PgEncryption::REQUIRED)};
+inline const auto Pg_alpn_custom          = WFX::PostgresEndpoint{"127.0.0.1:8168", [] {
+    auto cfg = PgCfg(8, 8, WFX::PgEncryption::REQUIRED);
+    cfg.alpn = ALPN_CUSTOM;
+    return cfg;
+}()};
+
 static const WFX::PostgresEndpoint* PgEndpointOf(std::string_view e) noexcept
 {
     if(e == "drop_startup")          return &Pg_drop_startup;
@@ -425,6 +462,8 @@ static const WFX::PostgresEndpoint* PgEndpointOf(std::string_view e) noexcept
     if(e == "scram_mixed")           return &Pg_scram_mixed;
     if(e == "scram_server_error")    return &Pg_scram_server_error;
     if(e == "error_at_handshake")    return &Pg_error_at_handshake;
+    if(e == "alpn_default")          return &Pg_alpn_default;
+    if(e == "alpn_custom")           return &Pg_alpn_custom;
     return &Pg_good;
 }
 
@@ -569,6 +608,8 @@ static const WFX::HttpEndpoint* EndpointOf(std::string_view e) noexcept
     if(e == "unreach")  return &EpUnreach;
     if(e == "idle")     return &EpIdle;
     if(e == "prewarm")  return &EpPrewarm;
+    if(e == "tls_default") return &EpTlsDefault;
+    if(e == "tls_custom")  return &EpTlsCustom;
     return &EpDefault;
 }
 

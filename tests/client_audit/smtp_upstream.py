@@ -23,14 +23,21 @@ import threading
 import time
 
 _lock = threading.Lock()
-_stats = {}  # name -> {"handshakes", "hs_fail", "auth_ok", "auth_fail", "bodies": [...]}
+_stats = {}  # name -> {"handshakes", "hs_fail", "auth_ok", "auth_fail", "alpn", "bodies": [...]}
 
 def _stat_init(name):
-    return _stats.setdefault(name, {"handshakes": 0, "hs_fail": 0, "auth_ok": 0, "auth_fail": 0, "bodies": []})
+    return _stats.setdefault(name, {"handshakes": 0, "hs_fail": 0, "auth_ok": 0, "auth_fail": 0, "alpn": "",
+                                    "bodies": []})
 
 def _bump(name, key, n=1):
     with _lock:
         _stat_init(name)[key] += n
+
+def _record_alpn(name, sock):
+    """The protocol this side selected from what the client offered, "" when it offered none
+    of ours. Read against the persona's probe list, built so each answer has one offer behind it."""
+    with _lock:
+        _stat_init(name)["alpn"] = sock.selected_alpn_protocol() or ""
 
 def _record_body(name, body):
     with _lock:
@@ -153,6 +160,8 @@ def serve_conn(raw_sock, name, opts):
 
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(certfile=opts["cert"], keyfile=opts["key"])
+        if opts.get("alpn"):
+            ctx.set_alpn_protocols(opts["alpn"].split("|"))
         try:
             sock = ctx.wrap_socket(raw_sock, server_side=True)
         except (ssl.SSLError, OSError) as e:
@@ -160,6 +169,7 @@ def serve_conn(raw_sock, name, opts):
             print("smtp mock '%s' TLS handshake failed: %r" % (name, e), flush=True)
             return
         _bump(name, "handshakes")
+        _record_alpn(name, sock)
         sock.settimeout(opts.get("timeout", 60.0))
         reader.set_sock(sock)
 

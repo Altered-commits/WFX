@@ -52,6 +52,37 @@ static constexpr EndpointStatus DisconnectReasonToStatus(DisconnectReason reason
     }
 }
 
+// Encodes "h2,http/1.1" into the length-prefixed list a ClientHello carries (RFC 7301), most
+// preferred first. False when a name is empty or longer than one length byte can say, or the
+// list is longer than the extension can carry. An empty list encodes to nothing, offering none
+static bool EncodeAlpnList(std::string_view names, std::string& wire)
+{
+    constexpr std::size_t MAX_NAME_LEN = 255;
+    constexpr std::size_t MAX_LIST_LEN = 65535;
+
+    wire.clear();
+    if(names.empty())
+        return true;
+
+    for(std::size_t start = 0;;) {
+        const std::size_t comma = names.find(',', start);
+        const std::string_view name = names.substr(start, comma - start);
+
+        if(name.empty() || name.size() > MAX_NAME_LEN)
+            return false;
+
+        wire.push_back(static_cast<char>(name.size()));
+        wire.append(name);
+
+        if(comma == std::string_view::npos)
+            break;
+
+        start = comma + 1;
+    }
+
+    return wire.size() <= MAX_LIST_LEN;
+}
+
 // vvv Shared Templates vvv
 template <typename Ctx> bool EpollConnectionHandler::TryHandshake(Ctx* ctx, EventType onSuccess, EventType stayState)
 {
@@ -570,6 +601,12 @@ std::uint16_t EpollConnectionHandler::AllocateEndpoint(const char* host, Endpoin
     meta.config = config;
     meta.hostname = std::move(hostname);
     meta.port = port;
+
+    // A list TLS cannot carry would fail every handshake instead, far from where it was set
+    const std::string_view alpn{config.alpnProtocols.data, config.alpnProtocols.length};
+    if(!EncodeAlpnList(alpn, meta.alpnWire))
+        logger_.Fatal("[Epoll]: EndpointConfig.alpnProtocols '", alpn, "' is not an ALPN list TLS can send ",
+                      "(names separated by commas, each 1 to 255 bytes) for endpoint: ", host);
 
     const bool useTLS = EndpointUsesTls(config, port);
 
@@ -1353,9 +1390,7 @@ void EpollConnectionHandler::SlotUpgradeTls(EndpointCtx* slotCtx, AsyncData asyn
     slotCtx->rwBuffer.ClearReadBuffer();
 
     slotCtx->sslConn =
-        sslHandler_->WrapClient(slotCtx->socket, meta.hostname.c_str(),
-                                std::string_view{meta.config.alpnProtocols.data, meta.config.alpnProtocols.length},
-                                &meta.cachedTlsSession);
+        sslHandler_->WrapClient(slotCtx->socket, meta.hostname.c_str(), meta.alpnWire, &meta.cachedTlsSession);
 
     if(!slotCtx->sslConn) {
         logger_.Error("[Epoll]: 'SlotUpgradeTls -> WrapClient' failed for endpoint '", meta.hostname, "'");
@@ -2977,10 +3012,8 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx)
 
             // TLS required, try SSL handshake
             if(ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE) {
-                ctx->sslConn = sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(),
-                                                       std::string_view{meta.config.alpnProtocols.data,
-                                                                        meta.config.alpnProtocols.length},
-                                                       &meta.cachedTlsSession);
+                ctx->sslConn =
+                    sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(), meta.alpnWire, &meta.cachedTlsSession);
 
                 if(!ctx->sslConn) {
                     if(ctx->isSideConnection)
@@ -4462,10 +4495,8 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
 
         // Immediate SSL connect (no EINPROGRESS). Attempt handshake now
         if(ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE) {
-            ctx->sslConn = sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(),
-                                                   std::string_view{meta.config.alpnProtocols.data,
-                                                                    meta.config.alpnProtocols.length},
-                                                   &meta.cachedTlsSession);
+            ctx->sslConn =
+                sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(), meta.alpnWire, &meta.cachedTlsSession);
             if(!ctx->sslConn)
                 return EndpointStatus::SSL_FAILURE;
 

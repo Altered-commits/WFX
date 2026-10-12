@@ -322,6 +322,7 @@ struct CoalesceEntry {
 
 struct EndpointMetadata {
     std::string hostname;
+    std::string alpnWire; // config.alpnProtocols encoded once at allocation, what WrapClient offers
     Utils::ResolvedAddrs addrs;
     std::uint64_t dnsNextRefreshSeconds = 0;
     std::uint16_t nextAddrIdx = 0;

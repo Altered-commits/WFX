@@ -18,7 +18,8 @@ using namespace WFX::Utils; // For 'Logger'
 using namespace WFX::Core;  // For 'Config'
 
 // vvv Constants vvv
-static constexpr unsigned char DEFAULT_PROTOS[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
+// What the server selects from a client's offer: it speaks HTTP/1.1 only
+static constexpr unsigned char SERVER_PROTOS[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
 
 // vvv Helpers vvv
 static SSLReturn ClassifyFailure(SSL* ssl, int ret) noexcept
@@ -207,8 +208,8 @@ void HttpOpenSSL::InitServerContext()
         serverCtx_,
         [](SSL*, const unsigned char** out, unsigned char* outlen, const unsigned char* in, unsigned int inlen,
            void*) -> int {
-            if(SSL_select_next_proto(const_cast<unsigned char**>(out), outlen, DEFAULT_PROTOS, sizeof(DEFAULT_PROTOS),
-                                     in, inlen) == OPENSSL_NPN_NEGOTIATED)
+            if(SSL_select_next_proto(const_cast<unsigned char**>(out), outlen, SERVER_PROTOS, sizeof(SERVER_PROTOS), in,
+                                     inlen) == OPENSSL_NPN_NEGOTIATED)
                 return SSL_TLSEXT_ERR_OK;
 
             // Client didn't offer http/1.1 but don't reject. Accept without ALPN
@@ -371,12 +372,10 @@ void* HttpOpenSSL::WrapClient(SSLSocket sock, const char* host, std::string_view
         }
     }
 
-    // ALPN: SSL_set_alpn_protos is client side per-connection advertisement
-    const unsigned char* alpnData =
-        alpnList.empty() ? DEFAULT_PROTOS : reinterpret_cast<const unsigned char*>(alpnList.data());
-    const unsigned int alpnLen = alpnList.empty() ? sizeof(DEFAULT_PROTOS) : static_cast<unsigned int>(alpnList.size());
-
-    if(SSL_set_alpn_protos(ssl, alpnData, alpnLen) != 0) {
+    // ALPN: only what this endpoint's protocol asked for. A server may refuse a handshake over a
+    // protocol it does not speak, as PostgreSQL 17 does over anything but "postgresql"
+    if(!alpnList.empty() && SSL_set_alpn_protos(ssl, reinterpret_cast<const unsigned char*>(alpnList.data()),
+                                                static_cast<unsigned int>(alpnList.size())) != 0) {
         SSL_free(ssl);
         return nullptr;
     }

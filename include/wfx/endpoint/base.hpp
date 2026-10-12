@@ -325,6 +325,7 @@ using EndpointDesc = Shared::EndpointDesc;
 //   .reconnectBackoffMax    backoff cap in seconds
 //   .tlsConfig              EpTlsAuto / EpTlsRequire / EpTlsInsecure
 //   .prewarm                slots to connect eagerly on startup
+//   .alpnProtocols          ALPN to offer on TLS, most preferred first: "h2,http/1.1"; empty offers none
 // -----------------------------------------------------------------------
 using EndpointConfig = Shared::EndpointConfig;
 

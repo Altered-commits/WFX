@@ -215,6 +215,10 @@ struct HttpEndpointConfig {
     std::uint32_t maxBodyBytes = 16 * 1024 * 1024; // Response body size cap
     std::uint16_t maxHeaderCount = 100;            // Header-count cap (amplification defense)
 
+    // ALPN offered on TLS, most preferred first, separated by commas. This client speaks HTTP/1.1
+    // only, so offer another name only to a server that calls HTTP/1.1 something else
+    std::string_view alpn = "http/1.1";
+
     // Dedup key from req, or 0 to skip coalescing; cast reqVoid to `const HttpEndpointRequest*` yourself
     Shared::EndpointCoalesceKeyFn coalesceKey = nullptr;
 };
@@ -761,7 +765,7 @@ inline EndpointConfig BuildEndpointConfig(const HttpEndpointConfig& cfg) noexcep
         .exactSlots = true,
         .prewarm = cfg.prewarm,
         .maxConcurrentStreams = 0,
-        .alpnProtocols = {},
+        .alpnProtocols = {cfg.alpn.data(), cfg.alpn.size()},
     };
 }
 

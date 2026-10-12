@@ -163,6 +163,10 @@ struct PostgresConfig {
     PgEncryption encryption = PgEncryption::REQUIRED;
     PgAuthPolicy authPolicy = PgAuthPolicy::NO_PLAINTEXT;
 
+    // ALPN offered on TLS, separated by commas. PostgreSQL 17 refuses a handshake offering any
+    // name but its own, and older servers ignore ALPN altogether
+    std::string_view alpn = "postgresql";
+
     // vvv Session settings, sent as startup parameters vvv
     std::string_view searchPath{};
     std::string_view timeZone{};
@@ -448,7 +452,7 @@ public: // Constructors
                   .exactSlots = true,
                   .prewarm = config.prewarm,
                   .maxConcurrentStreams = 0,
-                  .alpnProtocols = {},
+                  .alpnProtocols = {config.alpn.data(), config.alpn.size()},
               })
     {
         // Set here rather than in BuildOptions, which has no address to give

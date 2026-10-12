@@ -35,8 +35,7 @@ struct HttpWFXSSL {
     // Wrap a socket and return opaque handle
     virtual void* Wrap(SSLSocket fd) = 0;
 
-    // alpnList is a wire-encoded ALPN protocol list (same encoding as the engine's hardcoded
-    // default); empty = offer hardcoded default (http/1.1 only).
+    // alpnList is a wire-encoded ALPN protocol list (RFC 7301); empty offers no ALPN at all.
     //
     // sessionSlot: caller-owned opaque per-endpoint storage for TLS session resumption
     // May be read (offer for reuse) and/or written (store newly negotiated session)

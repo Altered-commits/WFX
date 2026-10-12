@@ -67,6 +67,18 @@ EP_SERIALIZE         = 11
 EP_HANDSHAKE_TIMEOUT = 13
 EP_REQ_TIMEOUT       = 14
 
+# What every TLS mock advertises, in its own order of preference, so the protocol it selects
+# names exactly what the client offered: postgresql or x-wfx-probe when it offered that,
+# http/1.1 when it offered only that, nothing when it offered none of them
+ALPN_PROBE = "postgresql|x-wfx-probe|http/1.1"
+
+# What the custom-ALPN endpoints in app/src/main.cpp are configured to offer instead of their
+# protocol's own
+ALPN_CUSTOM = "x-wfx-probe"
+
+# The HTTP mock's TLS listener, compiled into app/src/main.cpp's UPSTREAM_TLS
+HTTP_TLS_PORT = 8092
+
 # EpDefault's connLimit in app/src/main.cpp, compiled in rather than passed on the
 # command line. HttpEndpointConfig allocates slots exactly, so this is the real
 # ceiling on how many requests can be in flight to that endpoint at once
@@ -81,8 +93,10 @@ _stage_ids = itertools.count(1)
 SMTP_CONTROL_PORT = 8199
 
 SMTP_PERSONAS = [
-    # Happy paths
-    ("good",                8100, "good",       {},                                       "accept"),
+    # Happy paths. Both TLS listeners here record the ALPN the client offered: good is driven
+    # by an endpoint left at SMTP's own, alpn_custom by one configured with ALPN_CUSTOM
+    ("good",                8100, "good",       {"alpn": ALPN_PROBE},                     "accept"),
+    ("alpn_custom",         8122, "good",       {"alpn": ALPN_PROBE},                     "accept"),
     ("auth_login_only",     8101, "good",       {"auth_mechanisms": "LOGIN"},             "accept"),
     # CVE-2011-0411 / CVE-2026-41319 class: plaintext spliced in right after the STARTTLS
     # go-ahead. A correct client discards whatever is already buffered before the TLS wrap,
@@ -115,9 +129,10 @@ SMTP_PERSONAS = [
 ]
 
 # One persona per fixed port, same shape as SMTP_PERSONAS but without a cert column:
-# no Postgres persona needs one, every SSL-verdict fault is refused by the client
-# before a TLS handshake would start. Ports and names are compiled into
-# app/src/main.cpp's Pg_* endpoints and PgEndpointOf(), keep the two in sync.
+# every SSL-verdict fault is refused by the client before a TLS handshake would start,
+# so only the ALPN personas complete one, and they name their cert in a "tls" option
+# instead. Ports and names are compiled into app/src/main.cpp's Pg_* endpoints and
+# PgEndpointOf(), keep the two in sync.
 PG_CONTROL_PORT = 8198
 
 PG_PERSONAS = [
@@ -192,6 +207,10 @@ PG_PERSONAS = [
     # CVE-2024-10977 class: a full ErrorResponse mid-handshake carrying
     # attacker-shaped content (ANSI escapes, CR/LF), from a peer not yet trusted
     ("error_at_handshake",    8166, {"error_at": "auth_challenge"}, "refuse"),
+    # A full TLS handshake recording the ALPN the client offered: alpn_default is driven by
+    # an endpoint left at Postgres's own, alpn_custom by one configured with ALPN_CUSTOM
+    ("alpn_default",          8167, {"tls": "good", "alpn": ALPN_PROBE}, "accept"),
+    ("alpn_custom",           8168, {"tls": "good", "alpn": ALPN_PROBE}, "accept"),
 ]
 
 # Mocks
@@ -204,7 +223,10 @@ class HttpMock:
 
     def start(self):
         cmd = [sys.executable, os.path.join(HERE, "http_upstream.py"),
-               "--host", self.cfg.host, "--port", str(self.cfg.http_port)]
+               "--host", self.cfg.host, "--port", str(self.cfg.http_port),
+               "--tls-port", str(HTTP_TLS_PORT), "--alpn", ALPN_PROBE,
+               "--cert", os.path.join(self.cfg.cert_dir, "good.pem"),
+               "--key", os.path.join(self.cfg.cert_dir, "good-key.pem")]
         term.log("http-mock", "starting: %s" % " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
@@ -247,6 +269,10 @@ class HttpMock:
     def idle_conns(self):
         """Accepted connections minus served requests, so connections opened and never used."""
         return self._count("/ctl/idleconns")
+
+    def alpn(self):
+        """What the TLS listener selected from the last client's ALPN offer, "" for none."""
+        return self._ctl("/ctl/alpn").decode("latin-1")
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -352,7 +378,11 @@ class PgMock:
         for name, port, opts, expect in PG_PERSONAS:
             spec = "name=%s,port=%d" % (name, port)
             for key, value in opts.items():
-                spec += ",%s=%s" % (key, value)
+                if key == "tls":
+                    spec += ",cert=%s,key=%s" % (os.path.join(self.cfg.cert_dir, value + ".pem"),
+                                                 os.path.join(self.cfg.cert_dir, value + "-key.pem"))
+                else:
+                    spec += ",%s=%s" % (key, value)
             cmd += ["--listen", spec]
 
         term.log("pg-mock", "starting %d Postgres listeners" % len(self.ports))
@@ -2372,6 +2402,38 @@ def phase_pg_reconnect(ctx):
             "and one accepted",
             stats.get("connect_attempts") == 2, "stats=%r" % stats)
 
+# PHASE: alpn
+#
+# Each client offers its own protocol's ALPN and nothing else, and an endpoint configured with
+# its own offers that instead. PostgreSQL 17 aborts a handshake offering anything but
+# "postgresql", so a Postgres client offering http/1.1 cannot reach any current server
+def phase_alpn(ctx):
+    cfg, pg, smtp, http = ctx.cfg, ctx.pg_mock, ctx.smtp_mock, ctx.http_mock
+    p = ctx.phase("alpn")
+
+    for persona, want, label in (("alpn_default", "postgresql", "Postgres offers postgresql"),
+                                 ("alpn_custom", ALPN_CUSTOM, "Postgres offers the ALPN it was configured with")):
+        pg.reset(persona)
+        r = pg_query(cfg, persona=persona)
+        offered = pg.stats(persona).get("alpn")
+        p.check(label, is_ok(r) and not r.get("failed") and offered == want,
+                "offered %r, wanted %r, r=%r" % (offered, want, r), security=True)
+
+    for persona, want, label in (("good", "", "SMTP offers no ALPN"),
+                                 ("alpn_custom", ALPN_CUSTOM, "SMTP offers the ALPN it was configured with")):
+        smtp.reset(persona)
+        r = smtp_send(cfg, persona)
+        offered = smtp.stats(persona).get("alpn")
+        p.check(label, is_ok(r) and offered == want, "offered %r, wanted %r, r=%r" % (offered, want, r),
+                security=True)
+
+    for ep, want, label in (("tls_default", "http/1.1", "HTTP offers http/1.1"),
+                            ("tls_custom", ALPN_CUSTOM, "HTTP offers the ALPN it was configured with")):
+        r = http_call(cfg, "/ok", ep=ep)
+        offered = http.alpn()
+        p.check(label, is_ok(r, 200, "hello") and offered == want,
+                "offered %r, wanted %r, r=%r" % (offered, want, r), security=True)
+
 class ClientAudit(common.Suite):
     name = "client_audit"
     description = "WFX HttpEndpoint, SmtpEndpoint and PostgresEndpoint audit"
@@ -2413,6 +2475,7 @@ class ClientAudit(common.Suite):
         "pg_savepoint":       phase_pg_savepoint,
         "pg_startup":         phase_pg_startup,
         "pg_reconnect":       phase_pg_reconnect,
+        "alpn":               phase_alpn,
     }
 
     def add_arguments(self, parser):

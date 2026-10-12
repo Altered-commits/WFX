@@ -188,6 +188,9 @@ struct SmtpEndpointConfig {
     std::string_view username; // e.g. WFX::GetEnvString("SMTP_USERNAME") (never logged)
     std::string_view password; // e.g. WFX::GetEnvString("SMTP_PASSWORD") (never logged)
     std::string_view heloName; // EHLO identity, e.g. "mail.example.com"
+
+    // ALPN offered on STARTTLS, separated by commas. SMTP has no name of its own, so none
+    std::string_view alpn{};
 };
 
 // -----------------------------------------------------------------------
@@ -912,7 +915,7 @@ public:
                   .exactSlots = true,
                   .prewarm = config.prewarm,
                   .maxConcurrentStreams = 0,
-                  .alpnProtocols = {},
+                  .alpnProtocols = {config.alpn.data(), config.alpn.size()},
               })
     {}
 

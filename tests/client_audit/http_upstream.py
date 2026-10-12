@@ -29,6 +29,7 @@
 
 import argparse
 import socket
+import ssl
 import struct
 import threading
 import time
@@ -38,6 +39,7 @@ _coalesce_hits = 0          # backend hits on /coalesce* since last reset
 _total_requests = 0         # every request the mock has served
 _total_connections = 0      # every TCP connection the mock has accepted (prewarm proof)
 _staged = {}                # id -> (raw_bytes, keep_alive, mode, arg)
+_tls_alpn = ""              # what the TLS listener selected from the last client's ALPN offer
 
 def _int(s, default):
     try:
@@ -149,6 +151,9 @@ def handle(method, path, headers, body, conn):
     if path == "/ctl/conns":
         with _lock:
             return _cl(str(_total_connections))
+    if path == "/ctl/alpn":
+        with _lock:
+            return _cl(_tls_alpn)
 
     # Accepted-connections minus served-requests, computed atomically under one lock
     # in a SINGLE request (this request itself counts as +1 conn and +1 req, netting
@@ -349,30 +354,67 @@ def _hard_reset(sock):
     except OSError:
         pass
 
-# Main
-def main():
-    ap = argparse.ArgumentParser(description="WFX client-audit hostile HTTP mock upstream")
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8091)
-    args = ap.parse_args()
+def serve_tls(raw, ctx):
+    """The same byte oracle behind TLS, recording which ALPN protocol it selected from the
+    client's offer, "" when the client offered none of the probe list."""
+    global _tls_alpn
+    try:
+        sock = ctx.wrap_socket(raw, server_side=True)
+    except (ssl.SSLError, OSError):
+        raw.close()
+        return
 
+    with _lock:
+        _tls_alpn = sock.selected_alpn_protocol() or ""
+
+    serve_conn(sock)
+
+def listen(host, port):
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((args.host, args.port))
+    srv.bind((host, port))
     srv.listen(256)
-    print("mock upstream on %s:%d" % (args.host, args.port), flush=True)
+    return srv
 
+def accept_loop(srv, handler, *extra):
     try:
         while True:
             try:
                 conn, _ = srv.accept()
             except OSError:
                 break
-            threading.Thread(target=serve_conn, args=(conn,), daemon=True).start()
-    except KeyboardInterrupt:
-        pass
+            threading.Thread(target=handler, args=(conn,) + extra, daemon=True).start()
     finally:
         srv.close()
+
+# Main
+def main():
+    ap = argparse.ArgumentParser(description="WFX client-audit hostile HTTP mock upstream")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8091)
+    ap.add_argument("--tls-port", type=int, default=0, help="also serve over TLS here, 0 for none")
+    ap.add_argument("--cert", default="")
+    ap.add_argument("--key", default="")
+    ap.add_argument("--alpn", default="", help="ALPN probe list the TLS listener selects from, '|' separated")
+    args = ap.parse_args()
+
+    srv = listen(args.host, args.port)
+    print("mock upstream on %s:%d" % (args.host, args.port), flush=True)
+
+    if args.tls_port:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)
+        if args.alpn:
+            ctx.set_alpn_protocols(args.alpn.split("|"))
+
+        tls_srv = listen(args.host, args.tls_port)
+        threading.Thread(target=accept_loop, args=(tls_srv, serve_tls, ctx), daemon=True).start()
+        print("mock upstream over TLS on %s:%d" % (args.host, args.tls_port), flush=True)
+
+    try:
+        accept_loop(srv, serve_conn)
+    except KeyboardInterrupt:
+        pass
 
 if __name__ == "__main__":
     main()
