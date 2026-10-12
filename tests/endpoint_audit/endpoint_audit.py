@@ -771,6 +771,23 @@ def phase_solo_abort(ctx):
     p.check("abort: the endpoint is still usable after that misuse",
             is_ok(solo_get(cfg, key="after-badclose", solo="abortbadclose")), "")
 
+    # The server closing a side connection (here right after the cancel, as a Postgres server
+    # does) must reach onAbort as a failed Receive. Its second cancel opens from inside that
+    # failure, and with exactly one aux slot it only connects if the first slot is already free
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    abandon_solo_get(cfg, {"X-Solo": "abortawaitclose", "X-Key": "slow:1.0"}, hold=0.1)
+    time.sleep(0.6)
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort: a side connection the server closed resumes onAbort with a failed Receive",
+            after.get("side_eofs", 0) - before.get("side_eofs", 0) == 2, "before=%r after=%r" % (before, after))
+    p.check("abort: a cancel opened from inside that failure gets its own connection", count == 2,
+            "count=%d" % count)
+    time.sleep(1.0)  # the abandoned primary's reply lands and its slot returns to the pool
+    p.check("abort: the endpoint is still usable after the server closed its side connections",
+            is_ok(solo_get(cfg, key="after-awaitclose", solo="abortawaitclose")), "")
+
     # Scope cut: once a request is already streaming, past its first chunk, a client
     # disconnect still force-closes. onAbort is defined for single-slot in-flight
     # requests only, never for a stream mid-delivery

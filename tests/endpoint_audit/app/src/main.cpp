@@ -455,6 +455,7 @@ std::uint64_t g_soloDisconnects = 0;
 std::uint64_t g_soloAbortRuns = 0;
 std::uint64_t g_soloAbortSideOpens = 0;
 std::uint64_t g_soloAbortSideFailures = 0;
+std::uint64_t g_soloAbortSideEofs = 0;
 
 void* SoloCreateSlotState(void* userCtx)
 {
@@ -629,6 +630,37 @@ WFX::EpAbortCoro SoloOnAbortDoubleClose(WFX::AbortSlotHandle h, void* slotStateV
     co_return;
 }
 
+// Reads each cancel connection until the server closes it, the way a Postgres client ends a
+// CancelRequest. That close has to come back as a failed Receive. The second round opens its
+// connection from inside the first one's failure, so it only gets one if that slot was already freed
+WFX::EpAbortCoro SoloOnAbortAwaitClose(WFX::AbortSlotHandle h, void* slotStateVoid)
+{
+    auto* st = static_cast<SoloSlotState*>(slotStateVoid);
+    g_soloAbortRuns++;
+
+    for(int round = 0; round < 2; round++) {
+        auto [status, side] = co_await h.OpenSideConnection();
+        if(status != WFX::EpSlotOk) {
+            g_soloAbortSideFailures++;
+            co_return;
+        }
+
+        g_soloAbortSideOpens++;
+
+        char buf[32];
+        const int n = std::snprintf(buf, sizeof(buf), "CANCEL %llu\n",
+                                    static_cast<unsigned long long>(st->connId));
+        if(n > 0)
+            co_await side.Send(buf, static_cast<std::uint32_t>(n));
+
+        auto closed = co_await side.Receive();
+        if(closed.status != WFX::EpSlotOk)
+            g_soloAbortSideEofs++;
+
+        side.Close();
+    }
+}
+
 WFX::Shared::SerializeResult SoloSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
                                            std::uint32_t bufLen, std::uint32_t* written,
                                            std::uint64_t* /*streamKey, not multiplexed*/)
@@ -753,6 +785,7 @@ WFX::EndpointDesc SoloDesc(const char* cfg)
 using SoloEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect>;
 using SoloAbortEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbort>;
 using SoloAbortBadCloseEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbortDoubleClose>;
+using SoloAbortAwaitCloseEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbortAwaitClose>;
 
 } // namespace
 
@@ -885,6 +918,22 @@ inline const SoloAbortBadCloseEp SoloAbortBadClose{
     }
 };
 
+// The server closes every cancel connection after reading it. exactSlots holds the aux pool to
+// one slot, so onAbort's second cancel needs the first connection's slot back
+inline const SoloAbortAwaitCloseEp SoloAbortAwaitClose{
+    SOLO_UPSTREAM, SoloDesc("abort:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .auxConnLimit          = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+        .exactSlots            = true,
+    }
+};
+
 namespace {
 
 const SoloEp* SoloEndpointOf(std::string_view name) noexcept
@@ -936,7 +985,7 @@ WFX_POST("/mux/disconnects/reset", [](WFX::Request, WFX::Response res) {
 
 // One call on a solo instance.
 //   X-Solo  good | downgrade | tlsgarbage | abort | abortnoaux | abortmidconnect |
-//           abortgated | abortbadclose                          (default good)
+//           abortgated | abortbadclose | abortawaitclose        (default good)
 //   X-Key   key to echo back; "slow:<secs>" delays the mock's reply
 //   X-Leak  1 tells onAbort, on the abort instances, to skip side.Close()
 WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
@@ -960,6 +1009,8 @@ WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
         std::tie(status, out) = co_await SoloAbortGated.SendPayload(sreq);
     else if(name == "abortbadclose")
         std::tie(status, out) = co_await SoloAbortBadClose.SendPayload(sreq);
+    else if(name == "abortawaitclose")
+        std::tie(status, out) = co_await SoloAbortAwaitClose.SendPayload(sreq);
     else
         std::tie(status, out) = co_await SoloEndpointOf(name)->SendPayload(sreq);
 
@@ -1192,12 +1243,14 @@ WFX_GET("/solo/abort", [](WFX::Request, WFX::Response res) {
     j.Write("runs", g_soloAbortRuns);
     j.Write("side_opens", g_soloAbortSideOpens);
     j.Write("side_failures", g_soloAbortSideFailures);
+    j.Write("side_eofs", g_soloAbortSideEofs);
 })
 
 WFX_POST("/solo/abort/reset", [](WFX::Request, WFX::Response res) {
     g_soloAbortRuns = 0;
     g_soloAbortSideOpens = 0;
     g_soloAbortSideFailures = 0;
+    g_soloAbortSideEofs = 0;
     res.Status(200).SendText("ok");
 })
 

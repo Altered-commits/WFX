@@ -260,8 +260,9 @@ private: // onAbort / side connections
     void FireOnAbort(EndpointCtx* ctx, EndpointEntry& entry);
     // Connected (+TLS'd if needed): fires the caller's asyncData with the aux ctx as result.data
     void CompleteAuxConnect(EndpointCtx* auxCtx);
-    // Connect/TLS failed, or the timer ended the side connection's usage window: tears down auxCtx
-    // and fires the caller's asyncData (a pending Send/Receive included) with the failure
+    // Every way a side connection ends besides the caller's Close(): connect/TLS failure, the peer
+    // closing it, a read/write error, or the timer ending its usage window. Frees auxCtx, then fires
+    // the caller's asyncData (a pending Send/Receive included) with the failure
     void FailAuxConnect(EndpointCtx* auxCtx, SlotStatus status);
 
 private: // Wrap / low-level

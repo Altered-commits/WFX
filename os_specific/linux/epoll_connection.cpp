@@ -483,9 +483,9 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
             else {
                 // connId is an absolute timer wheel index. auxPool has its own range
                 // (auxTimerBase onward), a side connection never reconnects/backs off.
-                // FailAuxConnect resumes a still-suspended caller (mid-connect, or the
-                // caller simply forgot to Close() after a successful handoff) before
-                // tearing down; safe even if nothing is pending (no-op resume then close).
+                // FailAuxConnect frees it, then resumes a still-suspended caller (mid-connect,
+                // or mid Send/Receive); with nothing pending, as when the caller never called
+                // Close(), it only frees it.
                 auto& entry = endpoints_[extra];
                 if(connId >= entry.meta.auxTimerBase) {
                     FailAuxConnect(entry.auxPool.GetPtr(connId - entry.meta.auxTimerBase), SlotStatus::IO_ERROR);
@@ -813,6 +813,14 @@ void EpollConnectionHandler::Close(ClientCtx* ctx, bool forceClose)
 void EpollConnectionHandler::Close(EndpointCtx* ctx, bool forceClose, DisconnectReason disconnectReason)
 {
     WFX_TRACE();
+
+    // A side connection owns no pool slot, metrics or slot state, so ReleaseEndpoint must never
+    // see it. It ends here and its caller gets the failure
+    if(ctx && ctx->isSideConnection) {
+        FailAuxConnect(ctx,
+                       disconnectReason == DisconnectReason::TLS_ERROR ? SlotStatus::TLS_ERROR : SlotStatus::IO_ERROR);
+        return;
+    }
 
     if(!CloseCommon(ctx, forceClose))
         return;
@@ -2722,11 +2730,7 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx)
         logger_.Error("[Epoll]: TLS handshake failed for endpoint '", meta.hostname,
                       "': ", sslHandler_->GetHandshakeFailure(ctx->sslConn));
 
-        if(ctx->isSideConnection)
-            FailAuxConnect(ctx, SlotStatus::TLS_ERROR);
-        else
-            HandleConnectFailure(ctx, entry, false, DisconnectReason::TLS_ERROR);
-
+        HandleConnectFailure(ctx, entry, false, DisconnectReason::TLS_ERROR);
         return;
     }
 
@@ -3021,11 +3025,7 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx)
             if(getsockopt(ctx->socket, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0) {
                 logger_.Error("[Epoll]: Connect failed for endpoint '", meta.hostname, "': ", strerror(err));
 
-                if(ctx->isSideConnection)
-                    FailAuxConnect(ctx, SlotStatus::IO_ERROR);
-                else
-                    HandleConnectFailure(ctx, ep, false);
-
+                HandleConnectFailure(ctx, ep, false);
                 break;
             }
 
@@ -3037,10 +3037,7 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx)
                     sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(), meta.alpnWire, &meta.cachedTlsSession);
 
                 if(!ctx->sslConn) {
-                    if(ctx->isSideConnection)
-                        FailAuxConnect(ctx, SlotStatus::TLS_ERROR);
-                    else
-                        HandleConnectFailure(ctx, ep, false, DisconnectReason::TLS_ERROR);
+                    HandleConnectFailure(ctx, ep, false, DisconnectReason::TLS_ERROR);
                     break;
                 }
 
@@ -4173,6 +4170,13 @@ void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntr
 {
     WFX_TRACE();
 
+    // A side connection never reconnects and isn't counted in the pool's metrics. It ends here
+    // and its caller gets the failure
+    if(ctx->isSideConnection) {
+        FailAuxConnect(ctx, reason == DisconnectReason::TLS_ERROR ? SlotStatus::TLS_ERROR : SlotStatus::IO_ERROR);
+        return;
+    }
+
     auto& meta = entry.meta;
 
     // Permanent teardown when: a client is actively waiting (fail it fast, it can retry at the app
@@ -4593,10 +4597,11 @@ void EpollConnectionHandler::CompleteAuxConnect(EndpointCtx* auxCtx)
 
 void EpollConnectionHandler::FailAuxConnect(EndpointCtx* auxCtx, SlotStatus status)
 {
-    const AsyncResult result{nullptr, 0, {.slotStatus = status}, AsyncStatus::IO_FAILURE};
-
-    HandleEndpointAsyncCallback(auxCtx, result, false);
+    // Free the slot before resuming the caller: from inside the resume it may Close() this
+    // connection or open another, and that one may be handed this very slot
+    AsyncData asyncData = auxCtx->asyncData;
     CloseSideConnection(auxCtx);
+    AsyncCallbackImpl(auxCtx, asyncData, {nullptr, 0, {.slotStatus = status}, AsyncStatus::IO_FAILURE}, false);
 }
 
 ssize_t EpollConnectionHandler::WrapRead(WFXSocket socket, void* sslConn, char* buf, std::size_t len)

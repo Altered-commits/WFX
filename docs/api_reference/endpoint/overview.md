@@ -875,11 +875,13 @@ WFX::EpAbortCoro CancelQuery(WFX::AbortSlotHandle h, void* state)
     handshake.
 
 `side.Close()` releases the throwaway connection as soon as you're done with
-it. If you don't call it, either because the coroutine forgot or because it
-never got the chance, `connectTimeoutSeconds` (the same setting your regular
-connects use) is the safety net: the connection is torn down once that
-budget elapses, and its capacity becomes available again. Nothing leaks
-either way.
+it. If the server closes it first, or a read or write fails, the pending
+`Send`/`Receive` returns `WFX::EpSlotIoError` with the connection already
+released, so a later `Close()` does nothing. If you never call `Close()`,
+either because the coroutine forgot or because it never got the chance,
+`connectTimeoutSeconds` (the same setting your regular connects use) is the
+safety net: the connection is torn down once that budget elapses, and its
+capacity becomes available again. Nothing leaks either way.
 
 ---
 
