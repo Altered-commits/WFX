@@ -45,7 +45,7 @@
 //
 //   onDisconnect reason (parameter to onDisconnect):
 //     WFX::EpIdleTimeout             timed out outside the connect phase: idle, or a request timeout
-//     WFX::EpHandshakeTimeoutReason  slot closed while still connecting / handshaking
+//     WFX::EpHandshakeTimeoutReason  slot closed while still connecting / handshaking / in onConnect
 //     WFX::EpDisconnectTlsError      TLS handshake failed, an in-band upgrade's included
 //     WFX::EpDisconnectError         everything else: I/O error, protocol error, peer closed, etc
 //

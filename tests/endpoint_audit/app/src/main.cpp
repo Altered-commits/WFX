@@ -45,6 +45,7 @@
 #include <wfx/utils/hash.hpp>
 #include <wfx/endpoint/base.hpp>
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <string_view>
@@ -91,6 +92,7 @@ std::uint32_t HeaderU32(WFX::Request& req, const char* name, std::uint32_t fallb
 // Line oriented, '\n' terminated, spoken to primitive_upstream.py's mux listener:
 //
 //   handshake -> "AUTH <token>\n"      <- "OK\n" | "ERR\n" | (drop, no reply) | (never, token "hang")
+//              -> "PAD <filler>\n"     <- nothing, ignored before AUTH
 //   request   -> "REQ <id> <key>\n"    <- "RES <id> <value>\n"
 //
 // The id is caller-assigned and travels back on the reply, which is what lets
@@ -101,6 +103,22 @@ namespace {
 
 // How many requests this protocol lets share one connection
 constexpr std::uint32_t MUX_MAX_IN_FLIGHT = 32;
+
+// One "PAD xxx...\n" line, half of send_buffer_max (16 KiB in this app's toml). The padded
+// handshake sends 3, more in total than the send buffer holds. The stalled one sends up to 32 MiB,
+// far more than any socket buffer when the peer stops reading
+constexpr std::uint32_t MUX_PAD_LINES_PADDED = 3;
+constexpr std::uint32_t MUX_PAD_LINES_STALL = 4096;
+constexpr auto MUX_PAD_LINE = [] {
+    std::array<char, 8192> line{};
+    line.fill('x');
+    line[0] = 'P';
+    line[1] = 'A';
+    line[2] = 'D';
+    line[3] = ' ';
+    line.back() = '\n';
+    return line;
+}();
 
 struct MuxReq {
     WFX::String key;
@@ -169,6 +187,53 @@ WFX::EpCoro MuxAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
 
     std::string_view reply{recv.buf, recv.len};
     co_return reply.starts_with("OK") ? WFX::EpReady : WFX::EpFatal;
+}
+
+// MuxAuthenticate, preceded by padding lines that together outgrow the send buffer. Each Send's
+// bytes are on the wire once it completes, so only one message at a time has to fit
+WFX::EpCoro MuxPaddedAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
+{
+    auto* state = static_cast<MuxSlotState*>(slotStateVoid);
+
+    for(std::uint32_t i = 0; i < MUX_PAD_LINES_PADDED; i++) {
+        if(co_await h.Send(MUX_PAD_LINE.data(), MUX_PAD_LINE.size()) != WFX::EpSlotOk)
+            co_return WFX::EpFatal;
+    }
+
+    WFX::String line = "AUTH ";
+    line += state->token;
+    line += "\n";
+
+    if(co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size())) != WFX::EpSlotOk)
+        co_return WFX::EpFatal;
+
+    auto recv = co_await h.Receive();
+    if(recv.status != WFX::EpSlotOk)
+        co_return WFX::EpFatal;
+
+    std::string_view reply{recv.buf, recv.len};
+    co_return reply.starts_with("OK") ? WFX::EpReady : WFX::EpFatal;
+}
+
+// The mock stops reading once it has this AUTH line, so the padding after it fills the socket and
+// leaves a Send pending. That is still the connect phase, which only connectTimeoutSeconds can end
+WFX::EpCoro MuxStallAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
+{
+    auto* state = static_cast<MuxSlotState*>(slotStateVoid);
+
+    WFX::String line = "AUTH ";
+    line += state->token;
+    line += "\n";
+
+    if(co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size())) != WFX::EpSlotOk)
+        co_return WFX::EpFatal;
+
+    for(std::uint32_t i = 0; i < MUX_PAD_LINES_STALL; i++) {
+        if(co_await h.Send(MUX_PAD_LINE.data(), MUX_PAD_LINE.size()) != WFX::EpSlotOk)
+            co_return WFX::EpFatal;
+    }
+
+    co_return WFX::EpFatal; // never reached while the mock stalls
 }
 
 WFX::Shared::SerializeResult MuxSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
@@ -287,6 +352,9 @@ WFX::EndpointDesc MuxDesc(const char* token)
 }
 
 using MuxEp = WFX::Endpoint<MuxReq, MuxRes, &MuxAuthenticate>;
+using MuxPaddedEp = WFX::Endpoint<MuxReq, MuxRes, &MuxPaddedAuthenticate>;
+using MuxStallEp = WFX::Endpoint<MuxReq, MuxRes, &MuxStallAuthenticate>;
+using MuxOpenEp = WFX::Endpoint<MuxReq, MuxRes>;
 
 } // namespace
 
@@ -369,6 +437,52 @@ inline const MuxEp MuxHang{
         .requestTimeoutSeconds = 3600,
         .idleTimeoutSeconds    = 5,
         .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// The padded handshake succeeds. requestTimeoutSeconds sits at the engine's 5s floor, so a
+// "sleep:<secs>" key past it also drives a multiplexed request into its request timeout.
+inline const MuxPaddedEp MuxPadded{
+    MUX_UPSTREAM, MuxDesc("good"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 5,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// onConnect is stuck in a Send when connectTimeoutSeconds fires. requestTimeoutSeconds outlasts
+// the wait, so a handshake timeout can only come from the connect phase being classified right.
+inline const MuxStallEp MuxStall{
+    MUX_UPSTREAM, MuxDesc("stall"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 30,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .reconnectBackoffBase  = 1,
+        .reconnectBackoffMax   = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// Multiplexed with no onConnect, pointed at the gate so the TCP connect can be held until it
+// times out. Its request waits as a pending stream rather than an attached caller.
+inline const MuxOpenEp MuxGated{
+    GATE_UPSTREAM, MuxDesc("gated"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 30,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .reconnectBackoffBase  = 1,
+        .reconnectBackoffMax   = 1,
         .tlsConfig             = WFX::EpTlsInsecure,
     }
 };
@@ -949,15 +1063,26 @@ const SoloEp* SoloEndpointOf(std::string_view name) noexcept
 WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 
 // One call on a mux instance.
-//   X-Mux  good | bad | slow | reset | hang        (default good)
+//   X-Mux  good | bad | slow | reset | hang | padded | stall | gated  (default good)
 //   X-Key  key to echo back; "sleep:<secs>:<value>" delays the mock's reply
 WFX_GET("/mux/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     std::string_view name = "good", key = "hello";
     req.GetHeader("X-Mux", name);
     req.GetHeader("X-Key", key);
 
-    const MuxEp* ep = MuxEndpointOf(name);
-    auto [status, out] = co_await ep->SendPayload(MuxReq{WFX::String(key.data(), key.size())});
+    const MuxReq mreq{WFX::String(key.data(), key.size())};
+
+    WFX::Shared::EndpointStatus status{};
+    WFX::EndpointOutput<MuxRes> out;
+
+    if(name == "padded")
+        std::tie(status, out) = co_await MuxPadded.SendPayload(mreq);
+    else if(name == "stall")
+        std::tie(status, out) = co_await MuxStall.SendPayload(mreq);
+    else if(name == "gated")
+        std::tie(status, out) = co_await MuxGated.SendPayload(mreq);
+    else
+        std::tie(status, out) = co_await MuxEndpointOf(name)->SendPayload(mreq);
 
     res.Status(200);
     auto j = WFX::ImJson(res);

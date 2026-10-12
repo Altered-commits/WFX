@@ -158,12 +158,15 @@ def _serve_control_conn(sock):
 # Newline-delimited ASCII. One connection is one handshake followed by any number of
 # requests:
 #
+#   Client -> "PAD <filler>\n"     any number before AUTH, ignored
 #   Client -> "AUTH <token>\n"      once, right after connecting
 #   Server -> "OK\n"                token "good", or "slow" after a long stall
 #          -> "ERR\n"               token "bad"; the connection stays open, the
 #                                   client's own onConnect decides what to do
 #          -> (closes, no reply)    token "reset"
 #          -> (never replies)       token "hang", held open until the client closes
+#          -> (stops reading)       token "stall", so whatever the client sends next
+#                                   piles up in the socket
 #
 #   Client -> "REQ <id> <key>\n"   any number of these, id is caller-assigned
 #   Server -> "RES <id> <value>\n"  value is the key, unless the key reads
@@ -216,6 +219,9 @@ def _serve_mux_conn(sock):
             buf = buf[nl + 1:]
 
             if not authed:
+                if line.startswith("PAD "):
+                    continue
+
                 parts = line.split(" ", 1)
                 token = parts[1] if len(parts) > 1 else ""
                 if token == "good":
@@ -230,6 +236,10 @@ def _serve_mux_conn(sock):
                     authed = True
                 elif token == "reset":
                     return  # drop mid-handshake, no reply
+                elif token == "stall":
+                    # Outlasts the client's connect timeout without reading another byte
+                    time.sleep(20.0)
+                    return
                 elif token == "hang":
                     # No timeout either, so only the client ends this, by giving up or exiting
                     sock.settimeout(None)

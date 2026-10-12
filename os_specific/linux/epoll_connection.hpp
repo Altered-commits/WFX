@@ -232,7 +232,10 @@ private: // Endpoint receive path
     void CompleteStreamInline(EndpointCtx* ctx, EndpointEntry& entry, ParseResult pr);
 
 private: // Endpoint failure / teardown
-    void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointMetadata& meta, bool success);
+    void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointMetadata& meta, bool success,
+                                 EndpointStatus failStatus = EndpointStatus::INTERNAL_ERROR);
+    // A socket error ends the connection: a connect failure while still connecting, else a Close
+    void FailEndpointIO(EndpointCtx* ctx);
     void TeardownSlotOnFailure(EndpointCtx* ctx, EndpointEntry& entry);
     void FailSlotOnParseError(EndpointCtx* ctx, EndpointEntry& entry);
     void ResolveMultiplexedStream(EndpointCtx* ctx, EndpointEntry& entry, std::uint64_t key);

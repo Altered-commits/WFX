@@ -126,11 +126,14 @@ constants is `WFX::EndpointStatus`, if you need to name it explicitly instead of
     - `WFX::EpHandshakeTimeout`, `WFX::EpRequestTimeout`, `WFX::EpSslFailure` and
       `WFX::EpInternalError`, returned after suspending, once the connection was
       already being established or already in flight:
-        - a timeout while still connecting or handshaking: `EpHandshakeTimeout`
+        - a timeout while still connecting, handshaking or inside `onConnect`: `EpHandshakeTimeout`
         - a timeout once the request was sent: `EpRequestTimeout`
         - a failed TLS handshake, an in-band `UpgradeToTLS` included: `EpSslFailure`
         - anything else (a refused connect, `onConnect` returning `EpFatal` or
-          `EpRetry`, a reset, a parse error, a coalesce primary dying): `EpInternalError`
+          `EpRetry`, a reset, a parse error): `EpInternalError`
+
+      Every stream on a multiplexed connection, and every caller coalesced onto a
+      request, gets the status its connection failed with.
 
     Write your `if(status != WFX::EpOk)` fallback to treat any status you
     don't explicitly handle the same way, rather than enumerating every value
@@ -457,7 +460,7 @@ protocol needs to remember between calls:
     | Reason | Meaning |
     |--------|---------|
     | `WFX::EpIdleTimeout` | A timeout outside the connect phase: idle past `idleTimeoutSeconds`, or a request past `requestTimeoutSeconds` |
-    | `WFX::EpHandshakeTimeoutReason` | The slot was closed while still connecting or handshaking, past `connectTimeoutSeconds` |
+    | `WFX::EpHandshakeTimeoutReason` | The slot was closed while still connecting, handshaking or inside `onConnect`, past `connectTimeoutSeconds` |
     | `WFX::EpDisconnectTlsError` | The TLS handshake failed, an in-band upgrade's (`UpgradeToTLS`) included: the peer's certificate was refused, or the handshake broke off. The worker log says why |
     | `WFX::EpDisconnectError` | Anything else: the peer closed the connection, a socket or protocol error, a forced close |
 

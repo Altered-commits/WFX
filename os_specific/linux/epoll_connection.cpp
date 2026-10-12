@@ -54,6 +54,21 @@ static constexpr EndpointStatus DisconnectReasonToStatus(DisconnectReason reason
     }
 }
 
+// A synchronous connect failure only has its status, where the async paths carry a reason
+static constexpr DisconnectReason StatusToDisconnectReason(EndpointStatus status)
+{
+    return status == EndpointStatus::SSL_FAILURE ? DisconnectReason::TLS_ERROR : DisconnectReason::ERROR;
+}
+
+// The TCP connect, the TLS handshake (an in-band upgrade included) and onConnect are all the
+// connect phase. onConnect passes through several eventTypes while it runs, so its own flag decides
+static bool IsConnecting(const EndpointCtx* ctx) noexcept
+{
+    const EventType et = ctx->eventType;
+    return et == EventType::EVENT_CONNECT || et == EventType::EVENT_ENDPOINT_HANDSHAKE ||
+           et == EventType::EVENT_ENDPOINT_ONCONNECT || ctx->inOnConnectPhase;
+}
+
 // Encodes "h2,http/1.1" into the length-prefixed list a ClientHello carries (RFC 7301), most
 // preferred first. False when a name is empty or longer than one length byte can say, or the
 // list is longer than the extension can carry. An empty list encodes to nothing, offering none
@@ -226,7 +241,11 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
             }
 
             // Fatal error
-            Close(ctx);
+            if constexpr(std::is_same_v<Ctx, EndpointCtx>)
+                FailEndpointIO(ctx);
+            else
+                Close(ctx);
+
             return false;
         }
     }
@@ -464,50 +483,48 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
         logger_.Fatal("[Epoll]: Failed to add listening socket to epoll: ", strerror(errno));
 
     // vvv Initialize timeout handler vvv
-    timerWheel_
-        .Init(connections_.GetSlots(), 4096, 1, TimeUnit::SECONDS, [this](std::uint32_t connId, std::uint32_t extra) {
-            // 'extra' contains a 16-bit value:
-            //   >= CLIENT_CONNECTION_TAG -> client connection
-            //   <  CLIENT_CONNECTION_TAG -> endpoint connection (index)
-            if(extra >= CLIENT_CONNECTION_TAG) {
-                ClientCtx* ctx = connections_.GetPtr(connId);
+    timerWheel_.Init(connections_.GetSlots(), 4096, 1, TimeUnit::SECONDS,
+                     [this](std::uint32_t connId, std::uint32_t extra) {
+                         // 'extra' contains a 16-bit value:
+                         //   >= CLIENT_CONNECTION_TAG -> client connection
+                         //   <  CLIENT_CONNECTION_TAG -> endpoint connection (index)
+                         if(extra >= CLIENT_CONNECTION_TAG) {
+                             ClientCtx* ctx = connections_.GetPtr(connId);
 
-                // So the logic behind the if condition is, in normal sync path, if a connection is marked
-                // 'close', it will trigger cleanup after it sent data so no need to clash with it. But on
-                // the other hand, in the async / endpoint path, if a connection is marked 'close' and the
-                // callback, for some odd reason, just hung up and isn't responding, we shouldn't care
-                // about connection atp. WE CLOSE IT OURSELVES.
-                if(ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE || ctx->IsAsyncOperation())
-                    Close(ctx, true);
-            }
-            else {
-                // connId is an absolute timer wheel index. auxPool has its own range
-                // (auxTimerBase onward), a side connection never reconnects/backs off.
-                // FailAuxConnect frees it, then resumes a still-suspended caller (mid-connect,
-                // or mid Send/Receive); with nothing pending, as when the caller never called
-                // Close(), it only frees it.
-                auto& entry = endpoints_[extra];
-                if(connId >= entry.meta.auxTimerBase) {
-                    FailAuxConnect(entry.auxPool.GetPtr(connId - entry.meta.auxTimerBase), SlotStatus::IO_ERROR);
-                    return;
-                }
+                             // So the logic behind the if condition is, in normal sync path, if a connection is marked
+                             // 'close', it will trigger cleanup after it sent data so no need to clash with it. But on
+                             // the other hand, in the async / endpoint path, if a connection is marked 'close' and the
+                             // callback, for some odd reason, just hung up and isn't responding, we shouldn't care
+                             // about connection atp. WE CLOSE IT OURSELVES.
+                             if(ctx->GetConnectionState() != ConnectionState::CONNECTION_CLOSE ||
+                                ctx->IsAsyncOperation())
+                                 Close(ctx, true);
+                         }
+                         else {
+                             // connId is an absolute timer wheel index. auxPool has its own range
+                             // (auxTimerBase onward), a side connection never reconnects/backs off.
+                             // FailAuxConnect frees it, then resumes a still-suspended caller (mid-connect,
+                             // or mid Send/Receive); with nothing pending, as when the caller never called
+                             // Close(), it only frees it.
+                             auto& entry = endpoints_[extra];
+                             if(connId >= entry.meta.auxTimerBase) {
+                                 FailAuxConnect(entry.auxPool.GetPtr(connId - entry.meta.auxTimerBase),
+                                                SlotStatus::IO_ERROR);
+                                 return;
+                             }
 
-                EndpointCtx* ctx = entry.pool.GetPtr(connId - entry.meta.timerBase);
+                             EndpointCtx* ctx = entry.pool.GetPtr(connId - entry.meta.timerBase);
 
-                // A timeout during the connect phase (TCP connect / TLS handshake /
-                // onConnect) is a transient connect failure: route it through the funnel
-                // so a background slot reconnects with backoff and a client-waiting slot
-                // fails fast. A timeout during request/idle just closes as before.
-                const EventType et = ctx->eventType;
-                const bool connectPhase = et == EventType::EVENT_CONNECT || et == EventType::EVENT_ENDPOINT_HANDSHAKE ||
-                                          et == EventType::EVENT_ENDPOINT_ONCONNECT;
-
-                if(connectPhase)
-                    HandleConnectFailure(ctx, entry, false, DisconnectReason::HANDSHAKE_TIMEOUT);
-                else
-                    Close(ctx, true, DisconnectReason::TIMEOUT);
-            }
-        });
+                             // A timeout during the connect phase (TCP connect / TLS handshake /
+                             // onConnect) is a transient connect failure: route it through the funnel
+                             // so a background slot reconnects with backoff and a client-waiting slot
+                             // fails fast. A timeout during request/idle just closes as before.
+                             if(IsConnecting(ctx))
+                                 HandleConnectFailure(ctx, entry, false, DisconnectReason::HANDSHAKE_TIMEOUT);
+                             else
+                                 Close(ctx, true, DisconnectReason::TIMEOUT);
+                         }
+                     });
 
     // Re-expand for any endpoints registered before Initialize was called
     for(auto& entry : endpoints_)
@@ -1143,7 +1160,7 @@ EndpointStatus EpollConnectionHandler::SendPayload(ClientCtx* clientCtx, std::ui
 
         RecordEndpointSendFailure(endpointIdx, result);
         FinalizeEndpointRequest(slotCtx, meta, false);
-        Close(slotCtx, true);
+        Close(slotCtx, true, StatusToDisconnectReason(result));
     }
     else
         em.requests++;
@@ -1265,14 +1282,15 @@ EndpointStatus EpollConnectionHandler::SendPayloadMultiplexed(ClientCtx* clientC
 
         // Deferred case: WrapConnect failed before serialize() ever ran, so the protocol never
         // saw this request at all. Nothing was registered in pendingStreams, just drop what
-        // was stashed on the slot and tear it down (freshSlot is always true here).
+        // was stashed on the slot and tear it down (freshSlot is always true here). Close, not
+        // ReleaseEndpoint, since a TLS session a failed immediate handshake left still needs freeing
         if(desc.onConnect && freshConnect) {
             slotCtx->pendingConnectReq = nullptr;
             slotCtx->clientCtx = nullptr;
             slotCtx->coalesceKey = 0;
             slotCtx->parseStateObj = nullptr;
             cleanupReqParseState();
-            ReleaseEndpoint(slotCtx);
+            Close(slotCtx, true, StatusToDisconnectReason(result));
         }
         else {
             slotCtx->pendingStreams->erase(streamKey);
@@ -1289,7 +1307,7 @@ EndpointStatus EpollConnectionHandler::SendPayloadMultiplexed(ClientCtx* clientC
             // it, tear it down entirely. A shared slot that merely failed to re-arm epoll for
             // THIS request stays alive for every other stream still in flight on it.
             if(freshSlot)
-                Close(slotCtx, true);
+                Close(slotCtx, true, StatusToDisconnectReason(result));
             // Erasing this stream may have emptied a reused slot, hand its lease back to idle
             else
                 MultiplexReleaseLeaseIfIdle(slotCtx);
@@ -1315,6 +1333,9 @@ void EpollConnectionHandler::SlotSend(EndpointCtx* slotCtx, const void* data, st
         fireFailure(SlotStatus::BUFFER_ERROR);
         return;
     }
+
+    // Every earlier Send already completed, so only this message has to fit, not the handshake so far
+    rwBuf.CompactWriteBuffer();
 
     if(!rwBuf.AppendWriteData(static_cast<const char*>(data), size, config_.networkConfig.sendBufferIncSize,
                               config_.networkConfig.maxSendBufferSize)) {
@@ -2038,7 +2059,7 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
         desc.onDisconnect(ctx->slotState, disconnectReason);
 
     // Per-request objects (parse state, output) are cleaned up first
-    FinalizeEndpointRequest(ctx, meta, false);
+    FinalizeEndpointRequest(ctx, meta, false, DisconnectReasonToStatus(disconnectReason));
 
     // Per-slot state is destroyed last
     if(ctx->slotState && desc.destroySlotState) {
@@ -2852,19 +2873,9 @@ void EpollConnectionHandler::HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t
         return;
     }
 
+    // An async ECONNREFUSED often arrives this way, not as a writable socket with SO_ERROR
     if(ev & (EPOLLERR | EPOLLHUP)) {
-        // An EPOLLERR in the connect phase (an async ECONNREFUSED often arrives this way, not as a
-        // writable socket with SO_ERROR) is a connect failure, so route it through the funnel to be
-        // counted and reconnected instead of a bare Close. Handshake errors are handled above, so
-        // only EVENT_CONNECT / onConnect reach here.
-        const bool connectPhase =
-            ctx->eventType == EventType::EVENT_CONNECT || ctx->eventType == EventType::EVENT_ENDPOINT_ONCONNECT;
-
-        if(connectPhase)
-            HandleConnectFailure(ctx, endpoints_[ctx->endpointIdx], false, DisconnectReason::ERROR);
-        else
-            Close(ctx);
-
+        FailEndpointIO(ctx);
         return;
     }
 
@@ -3037,6 +3048,7 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx)
                     sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(), meta.alpnWire, &meta.cachedTlsSession);
 
                 if(!ctx->sslConn) {
+                    logger_.Error("[Epoll]: Could not create a TLS session for endpoint '", meta.hostname, "'");
                     HandleConnectFailure(ctx, ep, false, DisconnectReason::TLS_ERROR);
                     break;
                 }
@@ -3194,7 +3206,8 @@ std::uint64_t EpollConnectionHandler::ComputeNextDnsRefresh(std::uint32_t minTtl
     return (NowMs() / 1000) + interval + jitter;
 }
 
-void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointMetadata& meta, bool success)
+void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointMetadata& meta, bool success,
+                                                     EndpointStatus failStatus)
 {
     auto& desc = meta.desc;
 
@@ -3215,9 +3228,10 @@ void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointM
         ctx->outputObj = nullptr;
     }
 
-    // Multiplexed slot: fail and tear down every stream still pending. Only reached from the
-    // slot-teardown paths (parse error, connection drop); HandleEndpointReceive already erases
-    // a stream's own map entry the moment that individual stream completes.
+    // Multiplexed slot: fail and tear down every stream still pending, each with failStatus, why
+    // the slot went down. Only reached from the slot-teardown paths (a failed connect, parse error,
+    // connection drop, timeout); HandleEndpointReceive already erases a stream's own map entry the
+    // moment that individual stream completes.
     //
     // Detach the map from ctx BEFORE touching any entry or firing any callback below. The
     // callbacks resume suspended client coroutines synchronously, and a completely ordinary
@@ -3246,7 +3260,7 @@ void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointM
                 if(it != meta.coalescePending.end()) {
                     std::vector<CoalesceWaiter> waiters = std::move(it->second.waiters);
                     meta.coalescePending.erase(it);
-                    FailCoalesceWaiters(waiters, EndpointStatus::INTERNAL_ERROR);
+                    FailCoalesceWaiters(waiters, failStatus);
                 }
             }
 
@@ -3267,7 +3281,7 @@ void EpollConnectionHandler::FinalizeEndpointRequest(EndpointCtx* ctx, EndpointM
                 result.data = nullptr;
                 result.dataLen = 0;
                 result.status = AsyncStatus::IO_FAILURE;
-                result.endpointStatus = EndpointStatus::INTERNAL_ERROR;
+                result.endpointStatus = failStatus;
                 HandleClientAsyncCallback(client, result, false);
             }
         }
@@ -3317,7 +3331,7 @@ void EpollConnectionHandler::Write(EndpointCtx* ctx)
 
         // Connection closed / Fatal error
         else {
-            Close(ctx);
+            FailEndpointIO(ctx);
             return;
         }
     }
@@ -3433,6 +3447,15 @@ void EpollConnectionHandler::TeardownSlotOnFailure(EndpointCtx* slotCtx, Endpoin
     endpointMetrics_[slotCtx->endpointIdx].otherErrors++;
     FinalizeEndpointRequest(slotCtx, entry.meta, false);
     Close(slotCtx, true);
+}
+
+void EpollConnectionHandler::FailEndpointIO(EndpointCtx* ctx)
+{
+    // Still connecting, the funnel counts it as a connect failure and a background slot reconnects
+    if(IsConnecting(ctx))
+        HandleConnectFailure(ctx, endpoints_[ctx->endpointIdx], false);
+    else
+        Close(ctx);
 }
 
 void EpollConnectionHandler::FailSlotOnParseError(EndpointCtx* slotCtx, EndpointEntry& entry)
@@ -4182,13 +4205,16 @@ void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntr
     // Permanent teardown when: a client is actively waiting (fail it fast, it can retry at the app
     // layer rather than block on backoff), the failure is fatal, or retries are exhausted. Close ->
     // ReleaseEndpoint fires onDisconnect once, notifies any waiting client (with reason so the
-    // status code is accurate), and frees the slot.
+    // status code is accurate), and frees the slot. A waiting client is clientCtx on a single-slot
+    // endpoint, a pending stream on a multiplexed one.
+    const bool clientWaiting = ctx->clientCtx || (ctx->pendingStreams && !ctx->pendingStreams->empty());
     const bool exhausted = ctx->reconnectAttempts >= meta.config.maxReconnectAttempts;
-    if(ctx->clientCtx || fatal || exhausted) {
+
+    if(clientWaiting || fatal || exhausted) {
         // A background slot (no waiting client) being permanently discarded is the operationally
         // significant event worth alerting on. Client-driven failures already surface to the caller
         // via the returned status, so they don't need an engine-level error here.
-        if(!ctx->clientCtx)
+        if(!clientWaiting)
             logger_.Error("[Epoll]: Endpoint '", meta.hostname, "' slot ", entry.pool.GetIndex(ctx),
                           " giving up after ", ctx->reconnectAttempts, "/", meta.config.maxReconnectAttempts,
                           " reconnect attempts, slot ejected");
@@ -4198,7 +4224,7 @@ void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntr
         else
             endpointMetrics_[ctx->endpointIdx].connectFailures++;
 
-        FinalizeEndpointRequest(ctx, meta, false);
+        FinalizeEndpointRequest(ctx, meta, false, DisconnectReasonToStatus(reason));
         Close(ctx, true, reason);
         return;
     }
@@ -4240,7 +4266,7 @@ void EpollConnectionHandler::HandleReconnects()
         // resolved IP. WrapConnect re-registers epoll and re-arms the connect timeout.
         const EndpointStatus s = WrapConnect(ctx, entry);
         if(s != EndpointStatus::PENDING)
-            HandleConnectFailure(ctx, entry, false); // immediate failure: reschedule or eject
+            HandleConnectFailure(ctx, entry, false, StatusToDisconnectReason(s)); // immediate: reschedule or eject
     }
 }
 
@@ -4268,7 +4294,7 @@ void EpollConnectionHandler::HandlePrewarm()
             // prewarm slot retries with backoff instead of being silently abandoned. The teardown
             // branch (retries off / exhausted) destroys slotState and frees the slot via Close
             if(result != EndpointStatus::PENDING)
-                HandleConnectFailure(slotCtx, entry, false);
+                HandleConnectFailure(slotCtx, entry, false, StatusToDisconnectReason(result));
         }
     }
 }
@@ -4525,14 +4551,19 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
         if(ctx->GetEndpointState() == EndpointState::ENDPOINT_SECURE) {
             ctx->sslConn =
                 sslHandler_->WrapClient(ctx->socket, meta.hostname.c_str(), meta.alpnWire, &meta.cachedTlsSession);
-            if(!ctx->sslConn)
+            if(!ctx->sslConn) {
+                logger_.Error("[Epoll]: Could not create a TLS session for endpoint '", meta.hostname, "'");
                 return EndpointStatus::SSL_FAILURE;
+            }
 
             const EventType onSuccess =
                 onConnectPath ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND;
 
-            if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE))
+            if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE)) {
+                logger_.Error("[Epoll]: TLS handshake failed for endpoint '", meta.hostname,
+                              "': ", sslHandler_->GetHandshakeFailure(ctx->sslConn));
                 return EndpointStatus::SSL_FAILURE;
+            }
         }
         else
             EnterState(ctx, onConnectPath ? EventType::EVENT_ENDPOINT_ONCONNECT : EventType::EVENT_ENDPOINT_SEND);

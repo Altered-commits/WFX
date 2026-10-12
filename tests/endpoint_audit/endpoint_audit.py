@@ -42,13 +42,14 @@ from common import net, term
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# EndpointStatus, mirrors shared/abis/types.hpp, keep in sync. Only the three this
+# EndpointStatus, mirrors shared/abis/types.hpp, keep in sync. Only the ones this
 # suite asserts on by name are listed; every other failure is checked as "not success"
 EP_SUCCESS           = 0
 EP_INTERNAL          = 10  # where a co_return EpFatal from onConnect lands: the coroutine
                            # only ever answers EpReady or EpFatal, so the engine's generic
                            # connect-failure funnel classifies it, not a per-cause status
 EP_HANDSHAKE_TIMEOUT = 13
+EP_REQUEST_TIMEOUT   = 14
 
 # Waits the engine's own budgets dictate. Its timeout timer ticks every 5s
 # (INVOKE_TIMEOUT_COOLDOWN), so an N-second budget can take up to N+5 to be noticed
@@ -305,6 +306,38 @@ def phase_mux_handshake(ctx):
     p.check("onDisconnect: the rejected and dropped handshakes are reported as errors",
             counters.get("error", 0) >= 2, "counters=%r" % counters)
 
+    # Each Send's bytes are on the wire once it completes, so a handshake sent as several
+    # messages may total more than send_buffer_max (16 KiB here)
+    r = mux_call(cfg, key="padded-ok", mux="padded")
+    p.check("onConnect: a handshake whose Sends total more than the send buffer still succeeds",
+            is_ok(r) and r.get("value") == "padded-ok", "r=%r" % r)
+
+    # The mock stops reading mid-handshake, so onConnect is stuck in a Send, not a Receive,
+    # when connectTimeoutSeconds fires. That is still the connect phase
+    before = mux_disconnects(cfg)
+    t0 = time.time()
+    r = mux_call(cfg, mux="stall", rtimeout=20.0)
+    elapsed = time.time() - t0
+    after = mux_disconnects(cfg)
+    p.check("onConnect stuck in a Send: surfaces as a handshake timeout, not a request timeout",
+            is_errc(r, EP_HANDSHAKE_TIMEOUT) and elapsed < 18.0, "elapsed %.1fs r=%r" % (elapsed, r))
+    p.check("onDisconnect: the stuck Send is reported as a handshake timeout",
+            after.get("handshake", 0) - before.get("handshake", 0) == 1, "before=%r after=%r" % (before, after))
+
+    # Without onConnect, a multiplexed request waits on its connecting slot as a pending
+    # stream rather than an attached caller. Its connect timing out still has to fail it as
+    # a handshake timeout and count as a connect failure, not a background reconnect
+    baseline = metrics(cfg)
+    mock.gate_close()
+    r = mux_call(cfg, mux="gated", rtimeout=20.0)
+    mock.gate_open()
+    after = metrics(cfg)
+    p.check("multiplexed, no onConnect: a connect timeout fails the waiting stream as a handshake timeout",
+            is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
+    moved = {name: metric(after, name) - metric(baseline, name) for name in ("connect_failures", "reconnects")}
+    p.check("multiplexed, no onConnect: that timeout counts as a connect failure, not a reconnect",
+            moved == {"connect_failures": 1, "reconnects": 0}, "moved=%r" % moved)
+
     # A rejected, dropped or timed-out handshake must not poison the pool for the
     # next legitimate connection attempt
     r = mux_call(cfg, key="still-good")
@@ -345,6 +378,12 @@ def phase_mux_multiplex(ctx):
     counters = mux_disconnects(cfg)
     p.check("onDisconnect: an idle connection is reported as an idle timeout",
             counters.get("idle", 0) >= 1, "counters=%r" % counters)
+
+    # A stream whose reply outlasts requestTimeoutSeconds (5s on this instance) fails as a
+    # request timeout, the same status a single-slot request gets
+    r = mux_call(cfg, key="sleep:15:late", mux="padded", rtimeout=20.0)
+    p.check("a multiplexed stream past requestTimeoutSeconds fails as a request timeout",
+            is_errc(r, EP_REQUEST_TIMEOUT), "r=%r" % r)
 
 # PHASE: mux_soak
 def phase_mux_soak(ctx):
