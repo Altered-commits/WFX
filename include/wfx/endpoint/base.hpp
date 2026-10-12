@@ -375,6 +375,7 @@ using DisconnectReason = Shared::DisconnectReason;
 inline constexpr auto EpIdleTimeout = Shared::DisconnectReason::TIMEOUT;
 inline constexpr auto EpHandshakeTimeoutReason = Shared::DisconnectReason::HANDSHAKE_TIMEOUT;
 inline constexpr auto EpDisconnectError = Shared::DisconnectReason::ERROR;
+inline constexpr auto EpDisconnectTlsError = Shared::DisconnectReason::TLS_ERROR;
 
 // -----------------------------------------------------------------------
 // In serialize() (return value)

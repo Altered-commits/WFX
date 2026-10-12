@@ -59,10 +59,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # EndpointStatus, mirrors shared/abis/types.hpp, keep in sync
 EP_SUCCESS           = 0
 EP_POOL_EXHAUSTED    = 6
-EP_INTERNAL          = 10  # where a co_return EpFatal from SmtpOnConnect lands for every
-                           # non-timeout handshake refusal, bad cert or wrong credentials
-                           # alike: the coroutine only ever answers EpReady or EpFatal, so
-                           # the engine's generic connect-failure funnel classifies it
+EP_SSL_FAILURE       = 9   # the TLS handshake failed, in-band upgrades included
+EP_INTERNAL          = 10  # where a co_return EpFatal from an onConnect coroutine lands for
+                           # every other non-timeout handshake refusal: the coroutine only
+                           # ever answers EpReady or EpFatal, so the engine's generic
+                           # connect-failure funnel classifies it
 EP_SERIALIZE         = 11
 EP_HANDSHAKE_TIMEOUT = 13
 EP_REQ_TIMEOUT       = 14
@@ -506,9 +507,8 @@ def ensure_smtp_certs(cfg):
         raise RuntimeError("could not generate the audit's 'good' STARTTLS cert")
 
 def patch_outbound_ca(cfg):
-    """Points outbound_ca_path at the throwaway CA, so the 'good' persona is trusted.
-
-    The HTTP mock is plaintext, so nothing else in this suite reads that setting.
+    """Points outbound_ca_path at the throwaway CA, so the 'good' cert is trusted, the one every
+    TLS persona serves and the HTTP mock's TLS listener too.
     """
     toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
     with open(toml) as f:
@@ -1851,7 +1851,7 @@ def phase_smtp_starttls(ctx):
     mock.reset("inject")
     r = smtp_send(cfg, "inject", body=b"still fine")
     p.check("inject: fails closed rather than falling back to plaintext",
-            is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+            is_errc(r, EP_SSL_FAILURE), "r=%r" % r, security=not is_err(r))
     stats = mock.stats("inject")
     p.check("inject: the pre-TLS plaintext never reaches an authenticated session",
             stats.get("auth_ok", 0) == 0 and not stats.get("bodies"), "stats=%r" % stats,
@@ -1881,9 +1881,12 @@ def phase_smtp_certs(ctx):
             p.check(labels[name] + " (skipped, cert unavailable)", True)
             continue
 
+        # Only accepting the cert is a security finding, refusing it under another status
+        # misreports why
         r = smtp_send(cfg, name)
-        p.check(labels[name], is_err(r), "the client ACCEPTED it (r=%r), a MitM is possible" % r,
-                security=True)
+        p.check(labels[name], is_errc(r, EP_SSL_FAILURE),
+                "r=%r, wanted SSL_FAILURE%s" % (r, "" if is_err(r) else ", a MitM is possible"),
+                security=not is_err(r))
 
         stats = mock.stats(name)
         p.check("%s: the client bailed at the TLS layer" % name, stats.get("hs_fail", 0) >= 1,
@@ -1920,10 +1923,12 @@ def phase_smtp_drops(ctx):
     cfg = ctx.cfg
     p = ctx.phase("smtp_drops")
 
-    for name in ("drop_greeting", "drop_pre_handshake", "drop_starttls", "drop_auth"):
+    # drop_pre_handshake closes where the TLS handshake should start, so TLS is what failed
+    for name, want in (("drop_greeting", EP_INTERNAL), ("drop_pre_handshake", EP_SSL_FAILURE),
+                       ("drop_starttls", EP_INTERNAL), ("drop_auth", EP_INTERNAL)):
         r = smtp_send(cfg, name)
         p.check("%s: an abrupt close during the handshake is refused cleanly" % name,
-                is_errc(r, EP_INTERNAL), "r=%r" % r)
+                is_errc(r, want), "r=%r" % r)
         p.check("%s: the refusal is reported at the mail stage" % name,
                 bool(r) and r.get("stage") == "mail", "r=%r" % r)
 

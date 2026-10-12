@@ -47,6 +47,8 @@ static constexpr EndpointStatus DisconnectReasonToStatus(DisconnectReason reason
             return EndpointStatus::HANDSHAKE_TIMEOUT;
         case DisconnectReason::TIMEOUT:
             return EndpointStatus::REQUEST_TIMEOUT;
+        case DisconnectReason::TLS_ERROR:
+            return EndpointStatus::SSL_FAILURE;
         default:
             return EndpointStatus::INTERNAL_ERROR;
     }
@@ -2701,12 +2703,13 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx)
                                                                                : EventType::EVENT_ENDPOINT_SEND;
 
     if(!TryHandshake(ctx, onSuccess, EventType::EVENT_ENDPOINT_HANDSHAKE)) {
-        logger_.Error("[Epoll]: TLS handshake failed for endpoint '", meta.hostname, "'");
+        logger_.Error("[Epoll]: TLS handshake failed for endpoint '", meta.hostname,
+                      "': ", sslHandler_->GetHandshakeFailure(ctx->sslConn));
 
         if(ctx->isSideConnection)
             FailAuxConnect(ctx, SlotStatus::TLS_ERROR);
         else
-            HandleConnectFailure(ctx, entry, false, DisconnectReason::ERROR, true);
+            HandleConnectFailure(ctx, entry, false, DisconnectReason::TLS_ERROR);
 
         return;
     }
@@ -3019,7 +3022,7 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx)
                     if(ctx->isSideConnection)
                         FailAuxConnect(ctx, SlotStatus::TLS_ERROR);
                     else
-                        HandleConnectFailure(ctx, ep, false, DisconnectReason::ERROR, true);
+                        HandleConnectFailure(ctx, ep, false, DisconnectReason::TLS_ERROR);
                     break;
                 }
 
@@ -4145,7 +4148,7 @@ void EpollConnectionHandler::ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& 
 }
 
 void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,
-                                                  DisconnectReason reason, bool tls)
+                                                  DisconnectReason reason)
 {
     WFX_TRACE();
 
@@ -4165,7 +4168,7 @@ void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntr
                           " giving up after ", ctx->reconnectAttempts, "/", meta.config.maxReconnectAttempts,
                           " reconnect attempts, slot ejected");
 
-        if(tls)
+        if(reason == DisconnectReason::TLS_ERROR)
             endpointMetrics_[ctx->endpointIdx].tlsFailures++;
         else
             endpointMetrics_[ctx->endpointIdx].connectFailures++;

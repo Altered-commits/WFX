@@ -22,7 +22,7 @@ using namespace WFX::Core;  // For 'Config'
 static constexpr unsigned char SERVER_PROTOS[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
 
 // vvv Helpers vvv
-static SSLReturn ClassifyFailure(SSL* ssl, int ret) noexcept
+static SSLReturn ClassifyFailure(SSL* ssl, int ret, std::uint64_t* queuedError = nullptr) noexcept
 {
     // Maps a failed (ret <= 0) TLS call to SSLReturn. The routine WANT case is read straight off this
     // connection: the same checks SSL_get_error makes, minus its first look at the thread-wide error
@@ -34,8 +34,12 @@ static SSLReturn ClassifyFailure(SSL* ssl, int ret) noexcept
     if(SSL_want_write(ssl) && BIO_should_write(SSL_get_wbio(ssl)))
         return SSLReturn::WANT_WRITE;
 
-    // A real failure: classify it, then drain the queue so nothing outlives the call that raised it
+    // A real failure: classify it, hand its queued error to a caller that reports it later, then drain
+    // the queue so nothing outlives the call that raised it
     const int err = SSL_get_error(ssl, ret);
+    if(queuedError)
+        *queuedError = ERR_peek_last_error();
+
     ERR_clear_error();
 
     switch(err) {
@@ -111,31 +115,31 @@ void HttpOpenSSL::InitServerContext()
             break;
     }
     if(SSL_CTX_set_min_proto_version(serverCtx_, protoVersion) != 1)
-        LogOpenSSLError("Failed to set minimum TLS protocol version for server ctx");
+        FatalOpenSSLError("Failed to set minimum TLS protocol version for server ctx");
 
     // Server cert and key. ONLY on serverCtx_, loading this on clientCtx_ would pollute the verify
     // store and break outbound client certificate verification.
     if(SSL_CTX_use_certificate_chain_file(serverCtx_, sslConfig.certPath.c_str()) <= 0)
-        LogOpenSSLError("Failed to load certificate chain file");
+        FatalOpenSSLError("Failed to load certificate chain file");
 
     if(SSL_CTX_use_PrivateKey_file(serverCtx_, sslConfig.keyPath.c_str(), SSL_FILETYPE_PEM) <= 0)
-        LogOpenSSLError("Failed to load private key");
+        FatalOpenSSLError("Failed to load private key");
 
     if(!SSL_CTX_check_private_key(serverCtx_))
-        LogOpenSSLError("Private key does not match certificate");
+        FatalOpenSSLError("Private key does not match certificate");
 
     // Inbound mTLS, active only when client_ca_path is configured: verifies inbound client certs
     // against that CA and requires one be presented.
     if(!sslConfig.clientCaPath.empty()) {
         if(SSL_CTX_load_verify_locations(serverCtx_, sslConfig.clientCaPath.c_str(), nullptr) != 1)
-            LogOpenSSLError("Failed to load client CA certificate for server ctx");
+            FatalOpenSSLError("Failed to load client CA certificate for server ctx");
 
         // Sent to the client in the handshake's CertificateRequest so it can pick a matching cert
         // when it holds more than one.
         if(STACK_OF(X509_NAME)* clientCaNames = SSL_load_client_CA_file(sslConfig.clientCaPath.c_str()))
             SSL_CTX_set_client_CA_list(serverCtx_, clientCaNames);
         else
-            LogOpenSSLError("Failed to build client CA name list for server ctx");
+            FatalOpenSSLError("Failed to build client CA name list for server ctx");
 
         SSL_CTX_set_verify(serverCtx_, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
     }
@@ -153,7 +157,7 @@ void HttpOpenSSL::InitServerContext()
     // Client just stores and presents it back. Client has no ticket key to configure
     auto& ticketKey = GetRandomPool().GetSSLKey();
     if(SSL_CTX_set_tlsext_ticket_keys(serverCtx_, ticketKey.data(), ticketKey.size()) != 1)
-        LogOpenSSLError("Failed to set session ticket keys");
+        FatalOpenSSLError("Failed to set session ticket keys");
 
     // Required for session resumption (any TLS version): lets OpenSSL tell apart sessions
     // established under a different security context. Value is arbitrary, just needs to be stable
@@ -163,10 +167,10 @@ void HttpOpenSSL::InitServerContext()
 
     // Cipher preferences
     if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(serverCtx_, sslConfig.tls13Ciphers.c_str()) != 1)
-        LogOpenSSLError("Failed to set TLSv1.3 ciphersuites for server ctx");
+        FatalOpenSSLError("Failed to set TLSv1.3 ciphersuites for server ctx");
 
     if(!sslConfig.tls12Ciphers.empty() && SSL_CTX_set_cipher_list(serverCtx_, sslConfig.tls12Ciphers.c_str()) != 1)
-        LogOpenSSLError("Failed to set TLSv1.2 cipher list for server ctx");
+        FatalOpenSSLError("Failed to set TLSv1.2 cipher list for server ctx");
 
     if(!sslConfig.curves.empty())
         SSL_CTX_set1_curves_list(serverCtx_, sslConfig.curves.c_str());
@@ -234,11 +238,11 @@ void HttpOpenSSL::InitClientContext()
     // If user also specifies outbound_ca_path (for internal/self-signed CAs like mkcert), it is
     // added on top.
     if(SSL_CTX_set_default_verify_paths(clientCtx_) != 1)
-        LogOpenSSLError("Failed to load default system CA certificates for client ctx");
+        FatalOpenSSLError("Failed to load default system CA certificates for client ctx");
 
     if(!sslConfig.outboundCaPath.empty()) {
         if(SSL_CTX_load_verify_locations(clientCtx_, sslConfig.outboundCaPath.c_str(), nullptr) != 1)
-            LogOpenSSLError("Failed to load configured CA certificate for client ctx");
+            FatalOpenSSLError("Failed to load configured CA certificate for client ctx");
     }
 
     // Minimum security version
@@ -261,7 +265,7 @@ void HttpOpenSSL::InitClientContext()
             break;
     }
     if(SSL_CTX_set_min_proto_version(clientCtx_, protoVersion) != 1)
-        LogOpenSSLError("Failed to set minimum TLS protocol version for client ctx");
+        FatalOpenSSLError("Failed to set minimum TLS protocol version for client ctx");
 
     // Client-side session cache. Unlike the server, SSL_SESS_CACHE_CLIENT alone doesn't reuse
     // anything, we drive resumption ourselves via NewClientSessionCallback + WrapClient's
@@ -279,10 +283,10 @@ void HttpOpenSSL::InitClientContext()
     // Server's SSL_OP_CIPHER_SERVER_PREFERENCE will override order on the server side, but we
     // still want to advertise only strong suites.
     if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(clientCtx_, sslConfig.tls13Ciphers.c_str()) != 1)
-        LogOpenSSLError("Failed to set TLSv1.3 ciphersuites for client ctx");
+        FatalOpenSSLError("Failed to set TLSv1.3 ciphersuites for client ctx");
 
     if(!sslConfig.tls12Ciphers.empty() && SSL_CTX_set_cipher_list(clientCtx_, sslConfig.tls12Ciphers.c_str()) != 1)
-        LogOpenSSLError("Failed to set TLSv1.2 cipher list for client ctx");
+        FatalOpenSSLError("Failed to set TLSv1.2 cipher list for client ctx");
 
     if(!sslConfig.curves.empty())
         SSL_CTX_set1_curves_list(clientCtx_, sslConfig.curves.c_str());
@@ -440,7 +444,24 @@ SSLReturn HttpOpenSSL::Handshake(void* conn)
     if(ret == 1)
         return SSLReturn::SUCCESS;
 
-    return ClassifyFailure(ssl, ret);
+    return ClassifyFailure(ssl, ret, &handshakeError_);
+}
+
+std::string_view HttpOpenSSL::GetHandshakeFailure(void* conn)
+{
+    // A refused peer certificate is the usual cause, and its verdict outlives the queue
+    // ClassifyFailure drained, so it comes first
+    const long verifyResult = SSL_get_verify_result(static_cast<SSL*>(conn));
+    if(verifyResult != X509_V_OK)
+        return X509_verify_cert_error_string(verifyResult);
+
+    if(handshakeError_ != 0) {
+        if(const char* reason = ERR_reason_error_string(static_cast<unsigned long>(handshakeError_)))
+            return reason;
+    }
+
+    // Nothing queued means the transport itself failed underneath the handshake
+    return "the connection closed or reset mid-handshake";
 }
 
 SSLResult HttpOpenSSL::Read(void* conn, char* buf, int len)
@@ -537,45 +558,15 @@ void HttpOpenSSL::GlobalOpenSSLInit()
     GlobalInitialized = true;
 }
 
-void HttpOpenSSL::LogOpenSSLError(const char* message, SSL* ssl, bool fatal)
+void HttpOpenSSL::FatalOpenSSLError(const char* message)
 {
-    std::string details;
+    // Only context setup lands here, where the queue holds why OpenSSL refused
+    const auto err = ERR_peek_last_error();
+    if(err == 0)
+        GetLogger().Fatal("[HttpOpenSSL]: ", message);
 
-    // Certificate verification failures are the most useful thing to report
-    if(ssl) {
-        const long verifyResult = SSL_get_verify_result(ssl);
-
-        if(verifyResult != X509_V_OK) {
-            const char* verifyReason = X509_verify_cert_error_string(verifyResult);
-            details = verifyReason ? verifyReason : "unknown certificate verification failure";
-        }
-    }
-
-    // Fall back to OpenSSL error queue if no verification issue exists
-    if(details.empty()) {
-        if(const unsigned long err = ERR_peek_last_error(); err != 0) {
-            if(const char* reason = ERR_reason_error_string(err))
-                details = reason;
-            else
-                details = "unknown OpenSSL error";
-        }
-    }
-
-    // Always clear the thread-local error queue
-    while(ERR_get_error() != 0) {
-    }
-
-    std::string fullMessage(message);
-
-    if(!details.empty()) {
-        fullMessage += ". ";
-        fullMessage += details;
-    }
-
-    if(fatal)
-        GetLogger().Fatal("[HttpOpenSSL]: ", fullMessage);
-    else
-        GetLogger().Error("[HttpOpenSSL]: ", fullMessage);
+    const char* reason = ERR_reason_error_string(err);
+    GetLogger().Fatal("[HttpOpenSSL]: ", message, ". ", reason ? reason : "unknown OpenSSL error");
 }
 
 } // namespace WFX::Http

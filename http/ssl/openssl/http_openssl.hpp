@@ -26,6 +26,7 @@ public: // Main functions
                      void** sessionSlot = nullptr) override;
     std::string_view NegotiatedProtocol(void* conn) override;
     SSLReturn Handshake(void* conn) override;
+    std::string_view GetHandshakeFailure(void* conn) override;
 
     SSLResult Read(void* conn, char* buf, int len) override;
     SSLResult Write(void* conn, const char* buf, int len) override;
@@ -40,7 +41,7 @@ private: // Helper functions
     void InitServerContext();
     void InitClientContext();
     void GlobalOpenSSLInit();
-    void LogOpenSSLError(const char* message, SSL* ssl = nullptr, bool fatal = true);
+    [[noreturn]] void FatalOpenSSLError(const char* message);
 
     // Client session resumption: fires when a session becomes available (during the handshake
     // for <=TLS1.2, or after it for TLS1.3's post-handshake ticket), see SSL_CTX_sess_set_new_cb(3).
@@ -50,6 +51,7 @@ private: // Helper functions
 private:
     SSL_CTX* serverCtx_ = nullptr;
     SSL_CTX* clientCtx_ = nullptr;
+    std::uint64_t handshakeError_ = 0; // The last failed Handshake()'s queued error, see GetHandshakeFailure
     bool useKtls_ = false;
     bool clientSessionCacheEnabled_ = false;
 };

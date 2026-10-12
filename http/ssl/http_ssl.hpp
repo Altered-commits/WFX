@@ -49,6 +49,10 @@ struct HttpWFXSSL {
     // Handshake; returns true if done
     virtual SSLReturn Handshake(void* conn) = 0;
 
+    // Why conn's Handshake() just failed, for logs: the peer certificate's verify error, else the
+    // TLS layer's own reason. Static text, valid only until this handler's next Handshake()
+    virtual std::string_view GetHandshakeFailure(void* conn) = 0;
+
     // Read/Write functions
     virtual SSLResult Read(void* conn, char* buf, int len) = 0;
     virtual SSLResult Write(void* conn, const char* buf, int len) = 0;

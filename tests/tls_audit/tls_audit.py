@@ -39,6 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Mirrors EndpointStatus in shared/abis/types.hpp, keep in sync
 EP_SUCCESS     = 0
+EP_SSL_FAILURE = 9
 EP_SERIALIZE   = 11
 EP_REQ_TIMEOUT = 14
 
@@ -380,6 +381,19 @@ def is_err(r):
 def is_errc(r, code):
     return bool(r) and r.get("ep") == code
 
+def check_tls_refusal(p, cfg, label, r, reason):
+    """The call fails as SSL_FAILURE and the worker logs OpenSSL's reason. Only accepting the peer
+    is a security finding, refusing it under another status misreports why."""
+    refused = is_err(r)
+    p.check(label, is_errc(r, EP_SSL_FAILURE),
+            "ep=%r, wanted %d (SSL_FAILURE)%s" % (r and r.get("ep"), EP_SSL_FAILURE,
+                                                 "" if refused else ", MitM possible"),
+            security=not refused)
+
+    line = "TLS handshake failed for endpoint '127.0.0.1': %s" % reason
+    p.check(label + ": the log says why", common.logs.worker_logs_contain(cfg.app_dir, line),
+            "no worker log line %r" % line)
+
 _sid = itertools.count(1)
 def _next_sid():
     return "s%d" % next(_sid)
@@ -406,20 +420,20 @@ def phase_handshake(ctx):
 def phase_verify(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("verify")
-    labels = {
-        "selfsigned": "untrusted self-signed cert refused",
-        "wronghost":  "hostname-mismatch cert refused",
-        "expired":    "expired cert refused",
+    # Label, and the verify error OpenSSL names for it
+    cases = {
+        "selfsigned": ("untrusted self-signed cert refused", "self-signed certificate"),
+        "wronghost":  ("hostname-mismatch cert refused",     "IP address mismatch"),
+        "expired":    ("expired cert refused",               "certificate has expired"),
     }
     for name, port, cert, opts, expect in PERSONAS:
-        if expect != "refuse" or name == "tls12":
+        if name not in cases:
             continue
+        label, reason = cases[name]
         if not persona_available(cfg, cert):
-            p.check(labels.get(name, name) + " (skipped, no cert)", True)
+            p.check(label + " (skipped, no cert)", True)
             continue
-        r = drive(cfg, "/ok", ep=name, rtimeout=12)
-        p.check(labels[name], is_err(r),
-              "client ACCEPTED it (ep=%r), MitM possible" % (r and r.get("ep")), security=True)
+        check_tls_refusal(p, cfg, label, drive(cfg, "/ok", ep=name, rtimeout=12), reason)
         hs, hf, rq, _ = mock.stats(name)
         # mock.stats() itself dials this same port with an UNVERIFIED TLS client to
         # fetch the counters, so `hs` always includes that one successful handshake
@@ -435,9 +449,9 @@ def phase_protocol(ctx):
     if not persona_available(cfg, "good"):
         p.check("TLS 1.2 downgrade refused (skipped)", True)
         return
-    r = drive(cfg, "/ok", ep="tls12", rtimeout=12)
-    p.check("TLS 1.2 downgrade refused", is_err(r),
-          "client accepted a TLS 1.2 downgrade (ep=%r)" % (r and r.get("ep")), security=True)
+    # No certificate is ever checked here, so the reason is the server's own alert
+    check_tls_refusal(p, cfg, "TLS 1.2 downgrade refused", drive(cfg, "/ok", ep="tls12", rtimeout=12),
+                      "tlsv1 alert protocol version")
 
 # PHASE: mtls
 def phase_mtls(ctx):

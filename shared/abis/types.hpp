@@ -190,7 +190,8 @@ enum class ConnectResult : std::uint8_t {
 enum class DisconnectReason : std::uint8_t {
     TIMEOUT,           // Idle or in-flight request timeout elapsed
     HANDSHAKE_TIMEOUT, // Timeout elapsed while still connecting (TCP connect / TLS handshake / onConnect)
-    ERROR              // I/O or protocol error, or any other close not covered above
+    ERROR,             // I/O or protocol error, or any other close not covered above
+    TLS_ERROR          // The TLS handshake failed, an in-band upgrade's included
 };
 
 enum class SerializeResult : std::uint8_t {

@@ -120,14 +120,15 @@ constants is `WFX::EndpointStatus`, if you need to name it explicitly instead of
       `WFX::EpSslFailure`, `WFX::EpBufferError`, `WFX::EpInsufficientBuffer`,
       `WFX::EpSerializeError`, `WFX::EpEpollError`, returned immediately,
       without suspending, when the request could not even be started.
-    - `WFX::EpHandshakeTimeout`, `WFX::EpRequestTimeout`, and
-      `WFX::EpInternalError`, returned after suspending, once the connection
-      was already being established or already in flight. A timeout while
-      still connecting or handshaking reports as `EpHandshakeTimeout`, a
-      timeout once a request was already sent reports as `EpRequestTimeout`,
-      and every other mid-flight failure (a reset, a parse error, a reconnect
-      budget running out, a coalesce primary dying) reports as
-      `EpInternalError`.
+    - `WFX::EpHandshakeTimeout`, `WFX::EpRequestTimeout`, `WFX::EpSslFailure`
+      and `WFX::EpInternalError`, returned after suspending, once the
+      connection was already being established or already in flight. A timeout
+      while still connecting or handshaking reports as `EpHandshakeTimeout`, a
+      timeout once a request was already sent reports as `EpRequestTimeout`, a
+      failed TLS handshake reports as `EpSslFailure`, an in-band upgrade's
+      (`UpgradeToTLS`) included, and every other mid-flight failure (a reset, a
+      parse error, a reconnect budget running out, a coalesce primary dying)
+      reports as `EpInternalError`.
     - `WFX::EpInvalidKey` exists for completeness but signals an engine
       registration bug, not something a caller can trigger.
 
@@ -447,6 +448,7 @@ protocol needs to remember between calls:
     |--------|---------|
     | `WFX::EpIdleTimeout` | The slot sat idle in the pool for `idleTimeoutSeconds` with nothing to do |
     | `WFX::EpHandshakeTimeoutReason` | The slot was closed while still connecting or handshaking, past `connectTimeoutSeconds` |
+    | `WFX::EpDisconnectTlsError` | The TLS handshake failed, an in-band upgrade's (`UpgradeToTLS`) included: the peer's certificate was refused, or the handshake broke off. The worker log says why |
     | `WFX::EpDisconnectError` | Anything else: the peer closed the connection, a socket or protocol error, a forced close, exhausted reconnect attempts |
 
     Use this for connection-scoped cleanup or logging, closing a file handle

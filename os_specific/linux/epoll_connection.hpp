@@ -243,7 +243,7 @@ private: // Endpoint failure / teardown
 private: // Prewarm / reconnect
     void HandlePrewarm();
     void HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,
-                              DisconnectReason reason = DisconnectReason::ERROR, bool tls = false);
+                              DisconnectReason reason = DisconnectReason::ERROR);
     void ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& entry);
     void HandleReconnects();
     std::uint32_t ComputeBackoffSeconds(const EndpointConfig& config, std::uint16_t attempt);

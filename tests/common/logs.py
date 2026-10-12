@@ -114,6 +114,25 @@ def forced_worker_kills(app_dir):
     except OSError:
         return []
 
+def worker_logs_contain(app_dir, text):
+    """Whether any worker's log, rotated ones included, holds text. Every log is opened fresh on
+    boot (CircularFileSink::OpenFresh), so a hit belongs to this run."""
+    root = os.path.join(app_dir, "logs", "default_logs")
+    try:
+        names = [name for name in os.listdir(root) if name.startswith("worker-")]
+    except OSError:
+        return False
+
+    for name in names:
+        try:
+            with open(os.path.join(root, name), "r", errors="replace") as handle:
+                if any(text in line for line in handle):
+                    return True
+        except OSError:
+            continue
+
+    return False
+
 class LogFollower(threading.Thread):
     """Tails the app's log directories and prints new lines as they appear, like `tail -F`."""
 
