@@ -145,6 +145,7 @@ content, or missing/wrong header = finding.
 | `MwBreak` | `/mw/blocked` → 403, handler never runs |
 | `MwSkipNext` | Second middleware skipped, handler runs |
 | Context storage | MW writes `uid=42`, handler echoes it |
+| Shared callable types | Two plain sync functions, two plain async functions and two closures from one middleware factory each run their own (`/fn/sync-a`, `/fn/sync-b`, `/fn/async-a`, `/fn/async-b`, `/mw/factory-a`, `/mw/factory-b`) |
 | Async handler | `/async/sleep` returns `slept`; 20 concurrent hits |
 | Inline async | Async middleware and routes that finish without suspending (`/mw/async-inline`, `/mw/async-inline-break`, `/async/inline`) |
 | Pipelining | A request sent while the previous one is still suspended is never answered |
@@ -269,8 +270,8 @@ Exit code 1 on any mismatch or connection failure.
 
 ### CHAOS
 
-6 scenarios. Each is followed by a recovery wait and the full `ROUTE_CHECKS` sweep (59 checks
-over 45 distinct paths). The master process is never targeted: only worker children.
+6 scenarios. Each is followed by a recovery wait and the full `ROUTE_CHECKS` sweep (65 checks
+over 51 distinct paths). The master process is never targeted: only worker children.
 
 | # | Scenario | What happens |
 |---|----------|-------------|
@@ -323,6 +324,7 @@ every user-facing feature.
 | `/api/v1/status` | Group-prefixed flat path |
 | `/api/v1/item/<id:uint>` | Group-prefixed path with dynamic segment |
 | `/mw/injected`, `/mw/blocked`, `/mw/skipnext`, `/ctx` | Middleware/context targets, see the FEATURES table above |
+| `/fn/sync-a`, `/fn/sync-b`, `/fn/async-a`, `/fn/async-b`, `/mw/factory-a`, `/mw/factory-b` | Callables sharing a type: plain functions of one signature, and closures from one middleware factory |
 | `/mw/async-inline`, `/mw/async-inline-break` | Async middleware that finishes without suspending, continuing or breaking with 403 |
 | `/async/inline` | Async route that responds without awaiting anything |
 | `/async/sleep` | Async coroutine + `WFX::SleepFor(25ms)` |

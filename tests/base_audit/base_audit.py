@@ -650,6 +650,13 @@ ROUTE_CHECKS = [
     ("GET",  "/mw/blocked",       None, b"", 403, b"blocked", None),
     # Middleware: MwSkipNext: second MW skipped, handler runs
     ("GET",  "/mw/skipnext",      None, b"", 200, b"handler-ran", None),
+    # Callables sharing a type (plain functions, one factory's closures) each run their own
+    ("GET",  "/fn/sync-a",        None, b"", 200, b"fn-sync-a", None),
+    ("GET",  "/fn/sync-b",        None, b"", 200, b"fn-sync-b", None),
+    ("GET",  "/fn/async-a",       None, b"", 200, b"fn-async-a", None),
+    ("GET",  "/fn/async-b",       None, b"", 200, b"fn-async-b", None),
+    ("GET",  "/mw/factory-a",     None, b"", 200, b"ok", ("X-Mw-Tag", b"a")),
+    ("GET",  "/mw/factory-b",     None, b"", 200, b"ok", ("X-Mw-Tag", b"b")),
     # Context storage: middleware sets uid=42, handler echoes it
     ("GET",  "/ctx",              None, b"", 200, b"42", None),
     # Async handler
@@ -751,17 +758,16 @@ def _verify_all_routes(host, port):
             if attempt < 2:
                 time.sleep(0.3)
         b = body_of(raw)
-        ok = (st == expect_st)
-        if ok and needle is not None:
-            ok = needle in b
+        ok, why = (st == expect_st), ""
+        if ok and needle is not None and needle not in b:
+            ok, why = False, ", body missing %r" % needle
         if ok and hdr_check is not None:
             _, hdrs_r, _ = parse_hdrs(raw)
             hname, hval = hdr_check
             vals = hdrs_r.get(hname.lower().encode(), [])
-            ok = bool(vals) and hval in vals[0]
-        detail = None if ok else "%s %s -> %s (expected %s%s)" % (
-            method, path, st, expect_st,
-            (", body missing %r" % needle) if needle and st == expect_st else "")
+            if not vals or hval not in vals[0]:
+                ok, why = False, ", %s %r, got %r" % (hname, hval, vals[:1])
+        detail = None if ok else "%s %s -> %s (expected %s%s)" % (method, path, st, expect_st, why)
         with lock:
             results.append((ok, detail))
 

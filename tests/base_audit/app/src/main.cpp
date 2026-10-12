@@ -4,7 +4,8 @@
 // Every route exists to give base_audit.py a surface to attack.
 // Covers every user-facing WFX feature: dynamic segments (uint/int/string/uuid),
 // per-route middleware (continue/break/skip-next, sync and async), context storage,
-// async handlers, JSON (immediate + retained + parsing + merge), chained headers,
+// async handlers, callables sharing a type (plain functions, one factory's closures),
+// JSON (immediate + retained + parsing + merge), chained headers,
 // group-prefixed paths, templates, forms, query params, CORS, Stream(), the Flush API,
 // SendFile downloads, deliberate contract violations, and metrics.
 
@@ -359,6 +360,48 @@ WFX_GET_EX("/mw/skipnext",
                            return WFX::MwContinue;
                        }),
            [](WFX::Request, WFX::Response res) { res.Status(200).SendText("handler-ran"); })
+
+// Callables that share a type: plain functions of one signature, and closures from one middleware
+// factory. Each route must still run its own
+static void FnSyncA(WFX::Request, WFX::Response res)
+{
+    res.Status(200).SendText("fn-sync-a");
+}
+
+static void FnSyncB(WFX::Request, WFX::Response res)
+{
+    res.Status(200).SendText("fn-sync-b");
+}
+
+static WFX::Coro FnAsyncA(WFX::Request, WFX::Response res)
+{
+    res.Status(200).SendText("fn-async-a");
+    co_return;
+}
+
+static WFX::Coro FnAsyncB(WFX::Request, WFX::Response res)
+{
+    res.Status(200).SendText("fn-async-b");
+    co_return;
+}
+
+static auto TagMw(const char* tag)
+{
+    return [tag](WFX::Request, WFX::Response res) {
+        res.Header("X-Mw-Tag", tag);
+        return WFX::MwContinue;
+    };
+}
+
+WFX_GET("/fn/sync-a", FnSyncA)
+WFX_GET("/fn/sync-b", FnSyncB)
+WFX_GET("/fn/async-a", FnAsyncA)
+WFX_GET("/fn/async-b", FnAsyncB)
+
+WFX_GET_EX("/mw/factory-a", WFX_MW_LIST(TagMw("a")),
+           [](WFX::Request, WFX::Response res) { res.Header("Content-Type", "text/plain").Write("ok").Commit(); })
+WFX_GET_EX("/mw/factory-b", WFX_MW_LIST(TagMw("b")),
+           [](WFX::Request, WFX::Response res) { res.Header("Content-Type", "text/plain").Write("ok").Commit(); })
 
 // Async middleware that finishes without ever suspending, the way an auth check deciding on what
 // the request already carries would. Its coroutine completes inside the call that starts it.
