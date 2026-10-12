@@ -166,6 +166,8 @@ public:
     // in-band (Postgres SSLRequest, SMTP STARTTLS). Probe with Send/Receive first, then call
     // this only if the server agreed. The endpoint must be configured plaintext, otherwise
     // the engine already wrapped it at connect time and this fails with EpSlotInvalidState.
+    // On onConnect's own slot a failed handshake never resumes this: the engine ends onConnect
+    // and a waiting caller gets EpSslFailure. Only a failure to wrap at all returns EpSlotTlsError.
     SlotUpgradeTlsAwaitable UpgradeToTLS() const noexcept
     {
         return SlotUpgradeTlsAwaitable{raw.impl};
@@ -216,7 +218,7 @@ inline SlotOpenSideConnectionAwaitable::Result SlotOpenSideConnectionAwaitable::
 }
 
 // Restricted handle passed into onAbort coroutines: OpenSideConnection + NegotiatedProtocol only
-// The primary slot is still mid-request (EVENT_ENDPOINT_RECV) when onAbort fires, so driving
+// The primary slot is still mid-request (sending or receiving) when onAbort fires, so driving
 // Send/Receive/UpgradeToTLS on it directly is illegal (crashes or corrupts the real response
 // in flight). This is a compile-time restriction, not a runtime guard, since there's no safe
 // general meaning for it. A protocol that needs to talk must go through OpenSideConnection()
@@ -420,7 +422,8 @@ template <UserOnAbortFn UserFn> constexpr EndpointOnAbortFn GetErasedOnAbort() n
 // One chunk of a streamed response. data borrows the engine's output object and stays valid
 // only until the next Next(), which is what keeps peak memory at one chunk instead of the
 // whole response. Copy anything you need to outlive the loop iteration
-// done marks the final delivery, at which point data is null and the slot is back in the pool
+// done marks the last result: data is null after a chunked stream, carries the whole response if
+// the protocol never returned a chunk, and a failure also sets done, with a non-EpOk status
 template <typename TRes> struct StreamChunk {
     EndpointStatus status = EndpointStatus::SUCCESS;
     const TRes* data = nullptr;

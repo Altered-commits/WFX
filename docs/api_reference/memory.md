@@ -53,7 +53,9 @@ p = WFX::Realloc(p, 256);
 WFX::Free(p);
 ```
 
-- `Alloc` returns `nullptr` on failure, same as `malloc`. Always check it.
+- `Alloc(0)` returns `nullptr`. Any other size either succeeds or, if the pool can't grow,
+  the worker logs a fatal error and exits (and is respawned): it never returns `nullptr` for
+  a non-zero size.
 - `Free` is a no-op on `nullptr`, safe to call unconditionally.
 - `Realloc` follows normal `realloc` semantics: it may return a different
   pointer, and the old one must not be used again after the call.
@@ -83,8 +85,8 @@ auto* p = WFX::New<MyType>(arg1, arg2);
 WFX::Delete(p);
 ```
 
-- `New` returns `nullptr` if the underlying allocation fails, it does not throw.
-  Check the result before dereferencing it.
+- `New` does not throw and never returns `nullptr`: an allocation the pool can't satisfy is
+  fatal for the worker, same as `Alloc`.
 - `Delete` is a no-op on `nullptr`, safe to call unconditionally.
 - Never mix allocators: an object obtained from `WFX::New` must be freed with
   `WFX::Delete`, never `delete` or `free`, and vice versa for objects you
@@ -108,7 +110,7 @@ auto* items = WFX::NewArray<SlotState>(16);
 WFX::DeleteArray(items, 16);
 ```
 
-- `NewArray` returns `nullptr` if the underlying allocation fails.
+- `NewArray` follows the same rule: allocation failure is fatal for the worker, not a `nullptr`.
 - You must pass the same count to `DeleteArray` that you passed to `NewArray`,
   the count is not tracked for you.
 - Same allocator-matching rule as `New`/`Delete`: never mix `NewArray`/`DeleteArray`
@@ -132,8 +134,9 @@ s += " there";
 ```
 
 They behave exactly like their `std::` counterparts in every other respect,
-iterators, growth behavior, exceptions on `allocate` failure (via
-`std::bad_alloc`), all of it. Only where the memory comes from changes.
+iterators, growth behavior, all of it. Only where the memory comes from changes,
+and with it what running out of memory does: the worker exits fatally instead of
+`allocate` throwing `std::bad_alloc`.
 
 Because `Allocator<T>` is stateless, any two `WFX::Allocator` instances compare
 equal, so containers built with it can be moved, swapped, and compared the same
@@ -148,17 +151,16 @@ buffer pool, not the global heap. This keeps user-space allocations on the
 same fast, pre-sized pool the engine itself relies on for request handling.
 
 !!! danger
-    The pool is initialized by the worker process at startup, **after** the
-    user library's static initializers have already run. If a namespace-scope
-    object built before `Run()` allocates through `WFX::Alloc` (directly, or
-    indirectly through `WFX::New`, `WFX::Vector`, or `WFX::String`) during
-    static initialization, it can end up allocating from a pool that doesn't
-    exist yet.
+    Your library reaches the allocator through the engine's API table, and that
+    table is only handed to it after the library's static initializers have run.
+    If a namespace-scope object allocates through `WFX::Alloc` (directly, or
+    indirectly through `WFX::New`, `WFX::Vector`, or `WFX::String`) during static
+    initialization, it dereferences a null table and crashes the worker.
 
     In practice this only bites values large enough to actually need a heap
     allocation. A `WFX::String` short enough to fit in its small-string buffer
-    never touches the pool and is completely safe to build at namespace scope,
-    a long one silently allocates against an uninitialized pool. If you need a
+    never touches the allocator and is completely safe to build at namespace
+    scope, a long one crashes the worker before it serves anything. If you need a
     long-lived string or buffer at namespace scope (a hostname, a config value,
     and similar), prefer a plain `std::string_view` over a static buffer, or a
     `const char*` literal, and only build `WFX::String`/`WFX::Vector` values

@@ -90,7 +90,7 @@ std::uint32_t HeaderU32(WFX::Request& req, const char* name, std::uint32_t fallb
 //
 // Line oriented, '\n' terminated, spoken to primitive_upstream.py's mux listener:
 //
-//   handshake -> "AUTH <token>\n"      <- "OK\n" | "ERR\n" | (drop, no reply)
+//   handshake -> "AUTH <token>\n"      <- "OK\n" | "ERR\n" | (drop, no reply) | (never, token "hang")
 //   request   -> "REQ <id> <key>\n"    <- "RES <id> <value>\n"
 //
 // The id is caller-assigned and travels back on the reply, which is what lets
@@ -325,12 +325,14 @@ inline const MuxEp MuxBad{
 
 // The mock stalls its AUTH reply well past connectTimeoutSeconds (the engine's 5s
 // floor), so the connect-phase timeout must surface as EpHandshakeTimeout.
+// requestTimeoutSeconds outlasts the stall, so only connectTimeoutSeconds can end it in
+// time: onConnect is part of the connect phase, not of the request it is holding.
 inline const MuxEp MuxSlow{
     MUX_UPSTREAM, MuxDesc("slow"),
     WFX::EndpointConfig{
         .connLimit             = 1,
         .connectTimeoutSeconds = 5,
-        .requestTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 30,
         .idleTimeoutSeconds    = 5,
         .maxReconnectAttempts  = 1,
         .reconnectBackoffBase  = 1,
@@ -355,6 +357,22 @@ inline const MuxEp MuxReset{
     }
 };
 
+// Only the audit's exit check calls this one, right before the stop. The mock never answers
+// its AUTH and neither timeout fires within any run, so the slot is still suspended inside
+// onConnect, the call parked on it, when the worker exits. The sanitizer scan after shutdown
+// fails if exit leaks that coroutine instead of destroying it.
+inline const MuxEp MuxHang{
+    MUX_UPSTREAM, MuxDesc("hang"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 3600,
+        .requestTimeoutSeconds = 3600,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
 namespace {
 
 const MuxEp* MuxEndpointOf(std::string_view name) noexcept
@@ -362,6 +380,7 @@ const MuxEp* MuxEndpointOf(std::string_view name) noexcept
     if(name == "bad")   return &MuxBad;
     if(name == "slow")  return &MuxSlow;
     if(name == "reset") return &MuxReset;
+    if(name == "hang")  return &MuxHang;
     return &MuxGood;
 }
 
@@ -881,7 +900,7 @@ const SoloEp* SoloEndpointOf(std::string_view name) noexcept
 WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 
 // One call on a mux instance.
-//   X-Mux  good | bad | slow | reset               (default good)
+//   X-Mux  good | bad | slow | reset | hang        (default good)
 //   X-Key  key to echo back; "sleep:<secs>:<value>" delays the mock's reply
 WFX_GET("/mux/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     std::string_view name = "good", key = "hello";

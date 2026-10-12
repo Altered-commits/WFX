@@ -13,8 +13,11 @@
 #
 # Exit codes:
 #   0   all phases passed
-#   1   crash / hang / correctness failure / server death
-#   2   security finding (traversal, response splitting, info leak)
+#   1   crash / hang / correctness failure / server death, a sanitizer report, or a worker
+#       force-killed at shutdown
+#   2   security finding (traversal, response splitting, info leak, form header injection or
+#       decode bypass, query value mangling, CORS origin leak)
+#   3   WFX never answered /health
 
 import concurrent.futures
 import json
@@ -598,7 +601,7 @@ VIOLATE_ROUTES = ["/violate/204body", "/violate/conn", "/violate/recommit",
 LIGHT_PATHS    = ["/health", "/text", "/api/v1/status", "/chain"]
 
 # Route correctness specification
-# Every route in main.cpp is listed here with exact expected behavior
+# Status/body/header spec for the routes re-verified after every chaos scenario
 ROUTE_CHECKS = [
     # (method, path, headers, body, expected_status, must_contain_in_body, must_have_header)
     # Basic routes
@@ -2242,7 +2245,7 @@ def phase_soak(ctx):
 #   - a per-phase timeout, because a phase that wedges under load would otherwise stall the run
 class BaseAudit(common.Suite):
     name = "base_audit"
-    description = "WFX server torture audit: security, protocol, features, forms, chaos"
+    description = "WFX server torture audit: security, protocol, features, forms, query, cors, metrics, soak, chaos"
     phases = {
         "security": phase_security,
         "protocol": phase_protocol,

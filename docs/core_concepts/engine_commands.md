@@ -95,7 +95,7 @@ wfx run <project_name> [options]
 
 #### Additional Information
 - **Default** specifies the value used by WFX when the option is not explicitly provided.
-- **Requires value?** indicates whether an option must be followed by a value (for example, `--port 3000`) or can be used as a standalone flag (for example, `--debug`).
+- **Requires value?** indicates whether an option must be followed by a value (for example, `--port 3000`) or can be used as a standalone flag (for example, `--detach`).
 - `--use-https` by default uses port 443.
 - `--https-port-override` overrides the HTTPS port using the value provided via `--port`.
 - `--use-prebuilt` skips compilation entirely, see [Running a prebuilt project](#running-a-prebuilt-project---use-prebuilt).

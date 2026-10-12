@@ -27,7 +27,7 @@ enum class CryptoStatus : std::uint8_t {
     OK = 0,
     INVALID_ARG,      // Null pointer, or key/nonce/output length doesn't match the algo
     BUFFER_TOO_SMALL, // Caller-provided output buffer is too small
-    AUTH_FAILED,      // AEAD tag verification failed on decrypt; out is left untouched
+    AUTH_FAILED,      // AEAD tag or signature check failed; on decrypt, out is wiped
     UNSUPPORTED,      // Backend doesn't provide this algorithm (e.g. Argon2 provider missing)
     INTERNAL_ERROR    // Underlying crypto library failure
 };
@@ -294,16 +294,20 @@ static std::pair<CryptoStatus, AsymKey> FromEcPublic(CryptoAsymKeyType curve, st
 
 **Example (generate once, cache, reuse across requests)**:
 ```cpp
-// Module-scope: paid once at process start, never inside a handler
-static WFX::AsymKey g_signingKey = []() {
+// Paid once per worker at startup, never inside a handler. It can't be built at namespace scope:
+// the engine's API isn't wired up during static initialization, so a constructor fills it in
+// (needs #include <wfx/app.hpp>)
+static WFX::AsymKey g_signingKey;
+
+WFX_CONSTRUCTOR([] {
     auto [status, key] = WFX::AsymKey::Generate(WFX::CryptoEd25519Key);
 
     // Fail fast at startup
     if(status != WFX::CryptoOk)
         WFX::LogFatal("generate failed");
 
-    return std::move(key);
-}();
+    g_signingKey = std::move(key);
+});
 
 WFX_POST("/tokens/issue", [](WFX::Request req, WFX::Response res) {
     auto [status, sig] = g_signingKey.Sign(WFX::CryptoEd25519, req.Body());
@@ -347,7 +351,7 @@ CryptoStatus Verify(CryptoAsymScheme scheme, std::string_view msg, std::string_v
 ```
 
 - **`Sign`**: one-shot only, no streaming variant, for any scheme. Ed25519 in particular cannot be streamed at all (RFC 8032 signs the whole message in a single call), so there's no incremental signing API here regardless of scheme. Requires a private key; `CryptoInvalidArg` if the key/scheme don't match.
-- **`Verify`**: `CryptoOk` if the signature verifies, `CryptoAuthFailed` if it's well-formed but cryptographically rejected (tampered message, wrong key, or a signature that just doesn't verify), `CryptoInvalidArg` for a key/scheme mismatch or a malformed signature length (e.g. an `ES256` signature that isn't exactly 64 bytes gets rejected before verification is even attempted).
+- **`Verify`**: `CryptoOk` if the signature verifies, `CryptoAuthFailed` if it's well-formed but cryptographically rejected (tampered message, wrong key, or a signature that just doesn't verify), `CryptoInvalidArg` for a key/scheme mismatch, an empty signature, or an `ES256`/`ES384` signature of the wrong length. A wrong-length RSA or Ed25519 signature is `CryptoAuthFailed`.
 
 **Example (verifying an externally-issued signature against a loaded public key)**:
 ```cpp
@@ -420,7 +424,8 @@ WFX_POST("/login", [](WFX::Request req, WFX::Response res) {
         return;
     }
 
-    auto provided = req.Header("X-Signature");
+    std::string_view provided;
+    req.GetHeader("X-Signature", provided);
 
     if(!WFX::ConstantTimeEquals(mac.View(), provided)) {
         res.Status(WFX::HttpStatus::UNAUTHORIZED).SendText("bad signature");
@@ -459,7 +464,7 @@ std::uint64_t Fnv1a(std::string_view data) noexcept;
 std::uint64_t Fnv1aCaseInsensitive(std::string_view data) noexcept;
 ```
 
-FNV-1a. Simpler and slower than `WyHash`, but constexpr-friendly for compile-time string hashing. `Fnv1aCaseInsensitive` folds ASCII case before hashing (`'A'-'Z'` to lowercase), useful for header names and other case-insensitive keys.
+FNV-1a. Simpler and slower than `WyHash`; for compile-time string hashing use the constexpr `WFX::Shared::Hasher::Fnv1a(ptr, len)`. `Fnv1aCaseInsensitive` folds ASCII case before hashing (`'A'-'Z'` to lowercase), useful for header names and other case-insensitive keys.
 
 ### `Xxh3`
 

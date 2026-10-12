@@ -16,12 +16,16 @@
 #
 # Exit codes:
 #   0   all phases passed
-#   1   correctness failure, or the worker died during the run
+#   1   a non-security check failed (sanitizer reports and workers force-killed at
+#       shutdown included), the worker was not answering at the end, or nothing was
+#       checked
 #   2   security finding: one caller receiving another's response, a refused
 #       handshake still being served, a pinned connection shared with anyone else,
 #       an unsolicited push desyncing the framing, a failed TLS upgrade leaving
-#       the endpoint usable in plaintext, or memory growing with the total
-#       response size rather than the chunk size
+#       the endpoint usable in plaintext, memory growing with the total response
+#       size rather than the chunk size, onAbort firing where it must not or its
+#       cancel naming the wrong connection, or an abandoned request reaching the
+#       backend
 #   3   WFX never answered /health, so nothing was exercised
 
 import os
@@ -93,6 +97,13 @@ class Mock:
         except ValueError:
             return -1
 
+    def mux_hanging(self):
+        """Handshakes the mock is still leaving unanswered, each one a slot suspended in onConnect."""
+        try:
+            return int(self._ctl("/ctl/mux/hanging"))
+        except ValueError:
+            return -1
+
     def cancels(self):
         """(cancels seen on solo side connections, the connId the last one named)."""
         try:
@@ -136,6 +147,12 @@ def _json(cfg, method, path, headers=None, rtimeout=15.0):
 
 def mux_call(cfg, key="hello", mux="good", rtimeout=8.0):
     return _json(cfg, "GET", "/mux/call", {"X-Mux": mux, "X-Key": key}, rtimeout)
+
+def hold_mux_call(cfg, key, mux="good"):
+    """Sends a mux call and returns its socket unread, so the call stays in flight until it closes."""
+    sock = net.connect(cfg.host, cfg.port)
+    sock.sendall(net.request("GET", "/mux/call", {"X-Mux": mux, "X-Key": key}))
+    return sock
 
 def mux_disconnects(cfg):
     return _json(cfg, "GET", "/mux/disconnects") or {}
@@ -963,7 +980,47 @@ class EndpointAudit(common.Suite):
                 "is MUX_UPSTREAM in app/src/main.cpp pointing at port %d?" % ctx.cfg.mux_port)
             return False
 
+    def before_stop(self, ctx):
+        # One coroutine suspended in each place only the worker's exit can reach. Each row
+        # proves its coroutine is really there, the sanitizer scan after the stop proves exit
+        # destroyed it rather than leaking it
+        cfg, mock = ctx.cfg, ctx.mock
+        p = ctx.phase("exit")
+        held = ctx.resources["exit_clients"] = []
+
+        # MuxHang (main.cpp) dials for this call, and the mock never answers its AUTH
+        held.append(hold_mux_call(cfg, "x", mux="hang"))
+        waited = common.server.poll(lambda: mock.mux_hanging() >= 1, 3.0)
+        p.check("a slot is suspended inside onConnect", waited is not None,
+                "hanging=%d" % mock.mux_hanging())
+
+        # The mock holds this reply for 30s, and the socket stays open through the stop, so
+        # the request handler is still awaiting its endpoint
+        sock = hold_mux_call(cfg, "sleep:30:x")
+        held.append(sock)
+        sock.settimeout(0.5)
+        try:
+            answered = bool(sock.recv(1))
+        except OSError:
+            answered = False
+        p.check("a request handler is suspended awaiting its endpoint", not answered)
+
+        # The gate drops the side connection's SYN and stays closed through the stop, so
+        # onAbort is still awaiting OpenSideConnection
+        warm = solo_get(cfg, key="exit-warm", solo="abortgated")
+        mock.gate_close()
+        before = abort_stats(cfg)
+        abandon_solo_get(cfg, {"X-Solo": "abortgated", "X-Key": "slow:5"}, hold=0.2)
+        time.sleep(0.3)
+        after = abort_stats(cfg)
+        delta = {k: after.get(k, 0) - before.get(k, 0) for k in ("runs", "side_opens", "side_failures")}
+        p.check("an onAbort is suspended on a side connection still connecting",
+                is_ok(warm) and delta == {"runs": 1, "side_opens": 0, "side_failures": 0},
+                "warm=%r delta=%r" % (warm, delta))
+
     def teardown(self, ctx):
+        for sock in ctx.resources.get("exit_clients", ()):
+            sock.close()
         if "mock" in ctx.resources:
             ctx.mock.stop()
 

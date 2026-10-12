@@ -48,7 +48,7 @@ Below are the primary members exposed by the `Request` structure.
     Represents HTTP headers. Headers are accessed via lookup functions. No direct container is exposed.
 
     ```cpp
-    // 'GetHeader' returns true if header exists and writes value to 'ua'
+    // 'GetHeader' returns true if the header exists with a non-empty value, written to 'ua'
     std::string_view ua;
     if(req.GetHeader("User-Agent", ua))
         printf("User-Agent: %.*s\n", (int)ua.size(), ua.data());
@@ -183,7 +183,8 @@ Below are the primary members exposed by the `Request` structure.
         std::pair<T*, bool>
         ```
 
-        Type mismatches result in failed retrieval.
+        On a type mismatch, trivially copyable types return `{T{}, false}`, while other types return
+        a null pointer with `true`, so always check the pointer.
 
     !!! note
         Small trivially copyable types may be stored inline internally without heap allocation.
@@ -266,7 +267,7 @@ Response operations write into the engine-managed response pipeline buffers and 
 
     ```cpp
     res.Write("Hello");
-    res.Status(HttpStatus::OK); // INVALID: status after a body operation
+    res.Status(WFX::HttpStatus::OK); // INVALID: status after a body operation
     ```
 
     ```cpp
@@ -312,13 +313,13 @@ Below are the primary methods exposed by `Response`.
 
     **Without chaining**:
     ```cpp
-    res.Status(HttpStatus::OK);
+    res.Status(WFX::HttpStatus::OK);
     res.Header("Location", "/users/42");
     ```
 
     **With chaining**:
     ```cpp
-    res.Status(HttpStatus::CREATED)
+    res.Status(WFX::HttpStatus::CREATED)
         .Header("Location", "/users/42");
     ```
 
@@ -326,7 +327,7 @@ Below are the primary methods exposed by `Response`.
     ```cpp
     res.Header("X-Request-Id", requestId); // the eventual status isn't known yet
     // ... later, once the real outcome is known:
-    res.Status(HttpStatus::NOT_FOUND).SendText("not found");
+    res.Status(WFX::HttpStatus::NOT_FOUND).SendText("not found");
     ```
 
 - **`Header(std::string_view key, std::string_view value)`**  
@@ -383,9 +384,10 @@ Below are the primary methods exposed by `Response`.
     });
 
     // Whichever status the handler ends up picking, the header above is still on the response,
-    // even if this route doesn't exist and the request ends in a 404
+    // even if it is rebuilt as an error. Middleware never runs for a path with no route, so
+    // that 404 won't carry it; the built-in CORS support does cover it
     WFX_GET("/users/<id:uint>", [](WFX::Request req, WFX::Response res) {
-        res.Status(HttpStatus::NOT_FOUND).SendText("no such user");
+        res.Status(WFX::HttpStatus::NOT_FOUND).SendText("no such user");
     });
     ```
 
@@ -544,7 +546,7 @@ Below are the primary methods exposed by `Response`.
 
         Example:
         ```cpp
-        res.SendTemplate("hello.html", ctx);
+        res.SendTemplate("hello.html", std::move(ctx));
         ```
 
         resolves internally against:
@@ -569,7 +571,7 @@ Below are the primary methods exposed by `Response`.
 
     **Streaming callback signature**:
     ```cpp
-    Shared::StreamResult(Shared::StreamBuffer)
+    WFX::Shared::StreamResult(WFX::Shared::StreamBuffer)
     ```
 
     **Definitions**:
@@ -606,14 +608,14 @@ Below are the primary methods exposed by `Response`.
 
     res.Stream([
         offset = std::size_t{0}
-    ](Shared::StreamBuffer buffer) mutable -> Shared::StreamResult {
+    ](WFX::Shared::StreamBuffer buffer) mutable -> WFX::Shared::StreamResult {
 
         std::size_t bytes = ReadFromSource(offset, buffer.buffer, buffer.size);
 
         if(bytes == 0) {
             return {
                 0,
-                Shared::StreamAction::STOP_AND_ALIVE_CONN
+                WFX::Shared::StreamAction::STOP_AND_ALIVE_CONN
             };
         }
 
@@ -621,7 +623,7 @@ Below are the primary methods exposed by `Response`.
 
         return {
             bytes,
-            Shared::StreamAction::CONTINUE
+            WFX::Shared::StreamAction::CONTINUE
         };
     }, false);
     ```
@@ -630,9 +632,10 @@ Below are the primary methods exposed by `Response`.
         Stream buffer capacity is controlled by the `[Network] send_buffer_max` configuration value in `wfx.toml`.
 
 - **`FlushStart()`**  
-    Opens the response body in awaitable outbound-flush mode. `Transfer-Encoding: chunked` is sent
-    right away, and every `Write(...)` call from here on only stages data locally until an
-    explicit `Flush()` actually sends it.
+    Opens the response body in awaitable outbound-flush mode. `Transfer-Encoding: chunked` is
+    committed right away and goes out with the first `Flush()` that has data, or with `FlushEnd()`.
+    Every `Write(...)` call from here on only stages data locally until an explicit `Flush()`
+    actually sends it.
 
     This is the awaitable counterpart to `Stream(...)`. Both send chunked data incrementally, but
     `Stream(...)` hands the engine a generator callback that it drives *after* the route handler

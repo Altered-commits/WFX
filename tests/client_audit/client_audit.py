@@ -16,8 +16,9 @@
 # SSLRequest, StartupMessage and SCRAM-SHA-256 handshake, with either the handshake
 # or one query's response turned hostile.
 #
-# The audit never talks to a mock's data port: it drives WFX, and WFX drives the
-# mock. See README.md for what each phase proves.
+# The audit never sends a vector to a mock itself: it drives WFX, and WFX drives the
+# mock. The HTTP mock's /ctl/* routes share its data port, the SMTP and Postgres mocks
+# have their own control ports. See README.md for what each phase proves.
 #
 # Usage:
 #   python3 client_audit.py                    # all phases
@@ -26,14 +27,20 @@
 #
 # Exit codes:
 #   0   all phases passed
-#   1   correctness failure, or the worker died during the run
+#   1   a non-security check failed (sanitizer reports and workers force-killed at
+#       shutdown included), the worker was not answering at the end, or nothing was
+#       checked
 #   2   security finding: a pooled connection poisoned or desynced, a smuggled
 #       request or response body delivered as real, a CR/LF/NUL reaching the wire
-#       through a path, a header, an SMTP field or a Postgres auth exchange, one
-#       request's headers or body surfacing in another's, coalesced waiters getting
-#       the wrong key's response, an SMTP session continuing in plaintext or
-#       trusting pre-TLS bytes, or a Postgres auth downgrade or forged SCRAM signature
-#       going unnoticed
+#       through a path, a header or an SMTP field, one request's headers or body
+#       surfacing in another's, coalesced waiters getting the wrong key's response,
+#       an SMTP session continuing in plaintext or trusting pre-TLS bytes, a bad
+#       STARTTLS cert accepted, a Postgres client trusting bytes spliced after the
+#       SSL verdict or falling back to plaintext, a Postgres auth downgrade, forged
+#       SCRAM signature or unauthenticated server error going unnoticed, a bound
+#       parameter reaching the SQL text, a hostile savepoint name reaching the wire,
+#       any client offering an ALPN other than its own or its configured one, or
+#       pg_startup's embedded NUL no longer reaching the wire
 #   3   WFX never answered /health, so nothing was exercised
 
 import itertools
@@ -120,13 +127,16 @@ SMTP_PERSONAS = [
     ("drop_data_prompt",    8121, "good",       {"drop_after": "data_prompt"},            "refuse"),
     # Hang-shaped personas: they never complete on their own, so only the client's own
     # timeout ends them. Driven against the short-budget endpoints in main.cpp, whose
-    # 5s budgets are the engine's floor, rather than the 8s every other persona gets
+    # 5s budgets are the engine's floor, rather than the 8s every other persona gets.
+    # silent_ehlo2 alone keeps a 30s request budget, so only its 5s connect budget can
+    # end its hang after the STARTTLS upgrade
     ("flood_greeting",      8110, "good",       {"flood_at": "greeting"},                 "hang"),
     ("flood_ehlo2",         8111, "good",       {"flood_at": "ehlo2"},                    "hang"),
     ("huge_line_greeting",  8112, "good",       {"huge_line_at": "greeting"},             "hang"),
     ("huge_line_ehlo2",     8113, "good",       {"huge_line_at": "ehlo2"},                "hang"),
     ("slow_trickle",        8114, "good",       {"slow_trickle": "0.05"},                 "hang"),
     ("silent_data",         8115, "good",       {"silent_after": "DATA"},                 "hang"),
+    ("silent_ehlo2",        8123, "good",       {"silent_after": "ehlo2"},                "hang"),
 ]
 
 # One persona per fixed port, same shape as SMTP_PERSONAS but without a cert column:
@@ -147,7 +157,7 @@ PG_PERSONAS = [
     ("drop_ready",            8135, {"drop_after": "ready"},            "refuse"),
     ("unknown_type_startup",  8136, {"unknown_type_at": "startup"},     "refuse"),
 
-    # Resource-shaped: a flood of ParameterStatus never lets the handshake finish, an
+    # Resource-shaped: a flood of NoticeResponse never lets the handshake finish, an
     # oversized NoticeResponse trips FrameMessage's declared-length bound instead
     ("flood_backendkeydata",  8137, {"flood_at": "backendkeydata"},                 "hang"),
     ("huge_ready",            8138, {"huge_at": "ready", "huge_bytes": "8192"},      "refuse"),
@@ -456,7 +466,8 @@ def ensure_smtp_certs(cfg):
 
     Plain openssl throughout, because STARTTLS trust needs a cert this suite's own CA
     signed, not a browser-trusted one. Every other persona reuses the 'good' cert,
-    since they exercise protocol behaviour rather than certificate trust.
+    since they exercise protocol behaviour rather than certificate trust, and so do
+    the HTTP mock's TLS listener and the Postgres ALPN personas.
     """
     os.makedirs(cfg.cert_dir, exist_ok=True)
 
@@ -1909,6 +1920,15 @@ def phase_smtp_resource(ctx):
         p.check("%s: the hostile handshake is refused rather than hanging forever" % name,
                 is_errc(r, EP_INTERNAL) or is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
 
+    # A hang right after the STARTTLS upgrade is still the connect phase: the upgrade must not
+    # restart the clock, and the 30s request budget main.cpp gives this persona never applies.
+    # The engine notices a 5s budget on its own 5s tick, so up to 10s, plus slack
+    t0 = time.time()
+    r = smtp_send(cfg, "silent_ehlo2", rtimeout=25.0)
+    elapsed = time.time() - t0
+    p.check("silent_ehlo2: a hang after the STARTTLS upgrade ends on the connect budget",
+            is_errc(r, EP_HANDSHAKE_TIMEOUT) and elapsed < 15.0, "elapsed %.1fs r=%r" % (elapsed, r))
+
     # Post-connect hang: the mock authenticates normally, then goes silent forever the
     # moment DATA arrives. requestTimeoutSeconds, not connectTimeoutSeconds, is what has
     # to catch this
@@ -2280,7 +2300,7 @@ def phase_pg_resource(ctx):
     p = ctx.phase("pg_resource")
 
     r = pg_query(cfg, persona="flood_backendkeydata", rtimeout=15.0)
-    p.check("flood_backendkeydata: a ParameterStatus flood never lets the handshake finish, so "
+    p.check("flood_backendkeydata: a NoticeResponse flood never lets the handshake finish, so "
             "the connect budget ends it",
             is_errc(r, EP_INTERNAL) or is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
 
@@ -2409,9 +2429,10 @@ def phase_pg_reconnect(ctx):
 
 # PHASE: alpn
 #
-# Each client offers its own protocol's ALPN and nothing else, and an endpoint configured with
-# its own offers that instead. PostgreSQL 17 aborts a handshake offering anything but
-# "postgresql", so a Postgres client offering http/1.1 cannot reach any current server
+# HTTP and Postgres offer their own protocol's ALPN and nothing else, SMTP offers none, and an
+# endpoint configured with its own offers that instead. PostgreSQL 17 aborts a handshake
+# offering anything but "postgresql", so a Postgres client offering http/1.1 cannot reach any
+# current server
 def phase_alpn(ctx):
     cfg, pg, smtp, http = ctx.cfg, ctx.pg_mock, ctx.smtp_mock, ctx.http_mock
     p = ctx.phase("alpn")

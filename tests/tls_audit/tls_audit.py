@@ -8,14 +8,16 @@
 # so the entire TLS client trust decision is untested. This drives WFX's
 # HttpEndpoint with EpTlsRequire against a small, hostile TLS mock: an untrusted
 # cert, a hostname-mismatched cert, an expired cert, and a downgraded server. Each
-# must be refused; a client that accepts any of them is a man-in-the-middle hole
-# Refusal is proven twice: the outbound call errors AND the mock recorded a FAILED
-# handshake (the client bailed at the TLS layer, never completing it). Plus: the
-# HTTP framing/desync/injection corpus replayed THROUGH TLS, request-timeout under
-# TLS, and a raw truncation attack (RST with no close_notify)
+# must be refused; a client that accepts any of them is a man-in-the-middle hole.
+# A refusal must surface as SSL_FAILURE with OpenSSL's reason in the worker log, and
+# the cert personas also need a mock-observed FAILED handshake (the client bailed at
+# the TLS layer, never completing it). Plus: inbound mTLS, cross-connection TLS error
+# isolation, the HTTP framing/desync/injection corpus replayed THROUGH TLS,
+# request-timeout under TLS, a raw truncation attack (RST with no close_notify),
+# session resumption, and the STARTTLS plaintext boundary
 #
 # Topology:  audit --(TLS)--> WFX(HTTPS) /call --(TLS)--> hostile mock personality
-# Exit codes: 0 pass  1 correctness fail / worker died  2 SECURITY finding  3 boot crash
+# Exit codes: 0 pass  1 correctness fail / worker dead at the end  2 SECURITY finding  3 boot crash
 
 import itertools
 import json

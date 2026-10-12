@@ -46,7 +46,7 @@ struct HttpWFXSSL {
     // Empty if the handshake hasn't completed or the peer didn't negotiate ALPN at all
     virtual std::string_view NegotiatedProtocol(void* conn) = 0;
 
-    // Handshake; returns true if done
+    // SUCCESS when done, WANT_READ/WANT_WRITE to wait, anything else failed (see GetHandshakeFailure)
     virtual SSLReturn Handshake(void* conn) = 0;
 
     // Why conn's Handshake() just failed, for logs: the peer certificate's verify error, else the

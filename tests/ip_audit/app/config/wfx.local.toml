@@ -23,9 +23,9 @@ max_connections              = 4096    # Total concurrent cap, well above anythi
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
-# Deliberately small and permanent (unlike base_audit's wide-open [IP]): this whole app exists
-# only to exercise real-IP resolution + ConnectionLimiter + RequestRateLimiter, so every phase
-# runs against the same tight config rather than patching wfx.toml and restarting mid-run.
+# Deliberately small (unlike base_audit's wide-open [IP]): this whole app exists only to exercise
+# real-IP resolution + ConnectionLimiter + RequestRateLimiter. trust_boundary and multiworker patch
+# this file and restart, and each restores the baseline afterwards.
 # max_tracked_identities is small on purpose, so the LRU eviction phase can fill it without
 # needing thousands of distinct identities
 [IP]

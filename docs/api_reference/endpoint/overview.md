@@ -38,7 +38,8 @@ An endpoint is declared once, at namespace scope, before `Run()`:
 inline const auto Api = WFX::Endpoint<ApiReq, ApiRes>{
     "api.example.com:80",
     WFX::EndpointDesc{ .serialize = Serialize, .parse = Parse },
-    WFX::EndpointConfig{ .connLimit = 4, .requestTimeoutSeconds = 10 }
+    WFX::EndpointConfig{ .connLimit = 4, .connectTimeoutSeconds = 10,
+                         .requestTimeoutSeconds = 10, .idleTimeoutSeconds = 60 }
 };
 ```
 
@@ -84,7 +85,7 @@ WFX_GET("/proxy", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 ```
 
 `out` is a `WFX::EndpointOutput<T>`. Access the underlying response with `*out`,
-`out->`, or `out.get()`. It stays valid for as long as the variable is in scope,
+`out->`, or `out.Get()`. It stays valid for as long as the variable is in scope,
 and frees the response automatically when it goes out of scope. Do not store the
 raw pointer past that point.
 
@@ -99,38 +100,37 @@ constants is `WFX::EndpointStatus`, if you need to name it explicitly instead of
 | `WFX::EpOk` | Success, `out` is valid |
 | `WFX::EpPoolExhausted` | All connections to this host are busy, try again later |
 | `WFX::EpSocketFailure` | Local socket creation or configuration failed, before ever reaching `connect()` |
-| `WFX::EpConnectFailure` | `connect()` itself failed |
+| `WFX::EpConnectFailure` | `connect()` failed immediately. A refusal reported later arrives as `EpInternalError` |
 | `WFX::EpSslFailure` | TLS handshake failed |
 | `WFX::EpHandshakeTimeout` | TCP connect, TLS handshake, or `onConnect` took too long |
 | `WFX::EpRequestTimeout` | No response within `requestTimeoutSeconds` |
 | `WFX::EpSerializeError` | Your `serialize()` returned an error |
 | `WFX::EpBufferError` | Internal buffer setup failed |
 | `WFX::EpInsufficientBuffer` | Request too large even after the engine grew the buffer |
-| `WFX::EpInvalidKey` | Endpoint index out of range (an engine bug, not a caller mistake) |
+| `WFX::EpInvalidKey` | The request had nowhere valid to go: a `ReservedSlot` whose connection died, or `Next()` on a stream that already ended |
 | `WFX::EpEpollError` | Re-arming epoll on a reused connection failed |
 | `WFX::EpInternalError` | Unclassified engine failure |
 
 !!! important "What you can actually expect back"
-    Not every value above arrives the same way. Two of them are only ever
-    produced through a specific path, worth knowing so you don't write handling
-    logic assuming a value can appear where it can't:
+    Not every value above arrives the same way, worth knowing so you don't write
+    handling logic assuming a value can appear where it can't:
 
     - `WFX::EpOk`, the happy path.
     - `WFX::EpPoolExhausted`, `WFX::EpSocketFailure`, `WFX::EpConnectFailure`,
       `WFX::EpSslFailure`, `WFX::EpBufferError`, `WFX::EpInsufficientBuffer`,
-      `WFX::EpSerializeError`, `WFX::EpEpollError`, returned immediately,
-      without suspending, when the request could not even be started.
-    - `WFX::EpHandshakeTimeout`, `WFX::EpRequestTimeout`, `WFX::EpSslFailure`
-      and `WFX::EpInternalError`, returned after suspending, once the
-      connection was already being established or already in flight. A timeout
-      while still connecting or handshaking reports as `EpHandshakeTimeout`, a
-      timeout once a request was already sent reports as `EpRequestTimeout`, a
-      failed TLS handshake reports as `EpSslFailure`, an in-band upgrade's
-      (`UpgradeToTLS`) included, and every other mid-flight failure (a reset, a
-      parse error, a reconnect budget running out, a coalesce primary dying)
-      reports as `EpInternalError`.
-    - `WFX::EpInvalidKey` exists for completeness but signals an engine
-      registration bug, not something a caller can trigger.
+      `WFX::EpSerializeError`, `WFX::EpEpollError`, `WFX::EpInvalidKey`, returned
+      immediately, without suspending, when the request could not even be started.
+      One exception: with `onConnect`, a request that opens a new connection is only
+      serialized once `onConnect` returns `EpReady`, so its serialize and buffer
+      errors arrive after suspending.
+    - `WFX::EpHandshakeTimeout`, `WFX::EpRequestTimeout`, `WFX::EpSslFailure` and
+      `WFX::EpInternalError`, returned after suspending, once the connection was
+      already being established or already in flight:
+        - a timeout while still connecting or handshaking: `EpHandshakeTimeout`
+        - a timeout once the request was sent: `EpRequestTimeout`
+        - a failed TLS handshake, an in-band `UpgradeToTLS` included: `EpSslFailure`
+        - anything else (a refused connect, `onConnect` returning `EpFatal` or
+          `EpRetry`, a reset, a parse error, a coalesce primary dying): `EpInternalError`
 
     Write your `if(status != WFX::EpOk)` fallback to treat any status you
     don't explicitly handle the same way, rather than enumerating every value
@@ -165,9 +165,10 @@ struct EndpointConfig {
     std::uint16_t reconnectBackoffBase;
     std::uint16_t reconnectBackoffMax;
     EndpointTLSConfig tlsConfig;
+    bool exactSlots;                    // allocate connLimit/auxConnLimit exactly
     std::uint32_t prewarm;
-    std::uint32_t maxConcurrentStreams; // multiplexing, see below. 0/1 = exclusive slot
-    StringView alpnProtocols;           // wire-encoded ALPN list, empty defaults to offering http/1.1 only
+    std::uint32_t maxConcurrentStreams; // not read by the engine, see below
+    StringView alpnProtocols;           // ALPN offered on TLS, "h2,http/1.1", most preferred first; empty offers none
 };
 ```
 
@@ -182,33 +183,37 @@ struct EndpointConfig {
 | `maxReconnectAttempts` | How many times a background connection retries before being ejected |
 | `reconnectBackoffBase` / `reconnectBackoffMax` | Backoff range (seconds) between reconnect attempts |
 | `tlsConfig` | TLS mode, see [below](#tls-mode) |
+| `exactSlots` | `true` allocates exactly `connLimit`/`auxConnLimit` slots; `false` (the default) rounds each up, see below |
 | `prewarm` | Connections to open eagerly on startup |
-| `maxConcurrentStreams` | Cap on requests sharing one slot, see [Multiplexing](#multiplexing-advanced) |
-| `alpnProtocols` | ALPN protocols to offer during the TLS handshake; empty defaults to offering `http/1.1` only |
+| `maxConcurrentStreams` | Not read by the engine. A multiplexed protocol caps its own concurrency through `hasCapacity`, see [Multiplexing](#multiplexing-advanced) |
+| `alpnProtocols` | ALPN protocol names to offer during the TLS handshake, separated by commas and most preferred first (`"h2,http/1.1"`); empty offers none. Each name must be 1 to 255 bytes, or the server refuses to start |
 
 !!! important
     - These are validated at startup and the server refuses to start if any are
       invalid: `connLimit` must be greater than zero, `prewarm` cannot exceed
-      `connLimit`, `reconnectBackoffBase` cannot exceed `reconnectBackoffMax`, and
-      every timeout must be at least as long as the engine's internal timer tick
-      (5 seconds). A shorter value would silently fire later than configured, so
-      WFX rejects it outright instead of lying to you.
-    - The effective `connLimit` and `auxConnLimit` are each the next multiple of 64
-      at or above the value you set, because both pools are bitmaps sized in whole
-      64-bit words. A value of 1 to 64 gives 64 slots, 65 to 128 gives 128, and so
-      on. This rounded capacity is the real ceiling on simultaneous connections, and
-      the point at which further requests are refused with `poolExhausted` (or, for
+      `connLimit`, `reconnectBackoffBase` cannot exceed `reconnectBackoffMax`
+      (checked only when `maxReconnectAttempts` is above zero), and every timeout
+      must be at least as long as the engine's internal timer tick (5 seconds). A
+      shorter value would silently fire later than configured, so WFX rejects it
+      outright instead of lying to you.
+    - Unless `exactSlots` is set, the effective `connLimit` and `auxConnLimit` are
+      each the next multiple of 64 at or above the value you set, because both pools
+      are bitmaps sized in whole 64-bit words. A value of 1 to 64 gives 64 slots, 65
+      to 128 gives 128, and so on. This rounded capacity is the real ceiling on
+      simultaneous connections, and the point at which further requests are refused
+      with `poolExhausted` (or, for
       `auxConnLimit`, the point at which `OpenSideConnection()` starts failing).
       `auxConnLimit = 0` is the one exception: it stays disabled, no pool allocated.
 
 ### Reconnects and backoff
 
-If a connection fails while nothing is waiting on it (a prewarmed or idle slot
-losing its socket, for example), WFX retries it in the background with
-exponential backoff plus jitter (`base * 2^attempt`, capped at
-`reconnectBackoffMax`, then randomized so a whole pool doesn't reconnect in
-lockstep). Once `maxReconnectAttempts` is exhausted, the slot is permanently
-ejected and freed.
+If opening a connection fails while nothing is waiting on it (a prewarmed slot,
+or one already reconnecting), WFX retries it in the background with exponential
+backoff plus jitter (`base * 2^attempt`, capped at `reconnectBackoffMax`, then
+randomized so a whole pool doesn't reconnect in lockstep). Once
+`maxReconnectAttempts` is exhausted, the slot is permanently ejected and freed.
+An idle pooled connection that the peer closes is dropped; the next
+request opens a fresh one.
 
 If a caller is actively waiting on that connection when it fails, WFX does not
 make it wait through a backoff delay. The failure is reported immediately
@@ -347,7 +352,8 @@ inline const auto Api = WFX::Endpoint<ApiReq, ApiRes>{
         .coalesceKey   = CoalesceByPath,
         .cloneOutput   = CloneApiRes,
     },
-    WFX::EndpointConfig{ .connLimit = 4, .requestTimeoutSeconds = 10 }
+    WFX::EndpointConfig{ .connLimit = 4, .connectTimeoutSeconds = 10,
+                         .requestTimeoutSeconds = 10, .idleTimeoutSeconds = 60 }
 };
 ```
 
@@ -388,15 +394,18 @@ most endpoints will leave most of this section untouched.
 These two are the only required fields, an endpoint can't do anything without
 them:
 
-- **`serialize(slotState, &req, buf, bufLen, &written)`**: write the wire
+- **`serialize(slotState, &req, buf, bufLen, &written, &streamKey)`**: write the wire
   encoding of `req` into `buf`, and set `*written` to how many bytes you wrote.
+  `*streamKey` stays 0 unless the protocol multiplexes, see
+  [Multiplexing (advanced)](#multiplexing-advanced).
   Return `WFX::EpSerOk` on success, `WFX::EpSerBufferTooSmall` if `buf` was too
   small (the engine grows the buffer and calls you again), or `WFX::EpSerError`
   on an unrecoverable failure.
-- **`parse(slotState, parseState, buf, len, &consumed, outObj, isEof)`**: read
-  bytes as they arrive off the wire and fill in `outObj` (a `TRes*`). Set
+- **`parse(slotState, parseState, buf, len, &consumed, outObj, isEof, &completedKey)`**:
+  read bytes as they arrive off the wire and fill in `outObj` (a `TRes*`). Set
   `*consumed` to how many bytes you actually read, the engine keeps whatever's
-  left for your next call.
+  left for your next call. `*completedKey` likewise stays 0 unless the protocol
+  multiplexes.
 
 The return value tells the engine what to do next:
 
@@ -441,15 +450,18 @@ protocol needs to remember between calls:
   below. Runs once per request, if the client disconnects before the backend
   replied.
 - **`onDisconnect(slotState, reason)`**: fires once, right before
-  `destroySlotState`, whenever a slot is torn down for any reason. `slotState`
-  is still valid when this runs, `reason` tells you why:
+  `destroySlotState`, whenever a slot that has a `slotState` is torn down. It
+  doesn't fire at worker exit, and never for side connections. `slotState` is
+  still valid when this runs, `reason` tells you why:
 
     | Reason | Meaning |
     |--------|---------|
-    | `WFX::EpIdleTimeout` | The slot sat idle in the pool for `idleTimeoutSeconds` with nothing to do |
+    | `WFX::EpIdleTimeout` | A timeout outside the connect phase: idle past `idleTimeoutSeconds`, or a request past `requestTimeoutSeconds` |
     | `WFX::EpHandshakeTimeoutReason` | The slot was closed while still connecting or handshaking, past `connectTimeoutSeconds` |
     | `WFX::EpDisconnectTlsError` | The TLS handshake failed, an in-band upgrade's (`UpgradeToTLS`) included: the peer's certificate was refused, or the handshake broke off. The worker log says why |
-    | `WFX::EpDisconnectError` | Anything else: the peer closed the connection, a socket or protocol error, a forced close, exhausted reconnect attempts |
+    | `WFX::EpDisconnectError` | Anything else: the peer closed the connection, a socket or protocol error, a forced close |
+
+    When reconnect attempts run out, the reason is the last attempt's.
 
     Use this for connection-scoped cleanup or logging, closing a file handle
     `createSlotState` opened, decrementing a metric, whatever your protocol's
@@ -488,6 +500,9 @@ worked example, in its own section:
 - **`onPush(slotState, buf, len, &consumed)`**: handle messages the server
   sends on its own, with no request outstanding, see
   [Server-initiated messages](#server-initiated-messages).
+- **`statusCode(outObj)`**: return the response's protocol status code so the
+  endpoint's `status1xx`-`status5xx` counters fill in, see
+  [Telemetry](../telemetry.md). Returning `0` counts nothing.
 
 !!! important
     WFX validates all of this at startup, before the server accepts a single
@@ -554,23 +569,24 @@ void DestroyOutput(void* outputPtr)
     WFX::Delete(static_cast<KvRes*>(outputPtr));
 }
 
-SerializeResult Serialize(void* slotStateVoid, const void* reqVoid, char* buf, std::uint32_t bufLen,
-                          std::uint32_t* written, std::uint64_t* /*streamKey, unused, no multiplexing*/)
+WFX::Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoid, char* buf, std::uint32_t bufLen,
+                                       std::uint32_t* written, std::uint64_t* /*streamKey, unused, no multiplexing*/)
 {
     auto* state = static_cast<KvSlotState*>(slotStateVoid);
     auto& req = *static_cast<const KvReq*>(reqVoid);
 
     int n = std::snprintf(buf, bufLen, "GET %s\n", req.key.c_str());
     if(n < 0 || static_cast<std::uint32_t>(n) >= bufLen)
-        return SerializeResult::BUFFER_TOO_SMALL;
+        return WFX::EpSerBufferTooSmall;
 
     *written = static_cast<std::uint32_t>(n);
     state->requestsServed++;
-    return SerializeResult::OK;
+    return WFX::EpSerOk;
 }
 
-ParseResult Parse(void* /*slotState*/, void* parseStateVoid, const char* buf, std::uint32_t len,
-                  std::uint32_t* consumed, void* outObjVoid, bool isEof, std::uint64_t* /*completedKey, unused*/)
+WFX::Shared::ParseResult Parse(void* /*slotState*/, void* parseStateVoid, const char* buf, std::uint32_t len,
+                               std::uint32_t* consumed, void* outObjVoid, bool isEof,
+                               std::uint64_t* /*completedKey, unused*/)
 {
     auto* parseState = static_cast<KvParseState*>(parseStateVoid);
     auto* out = static_cast<KvRes*>(outObjVoid);
@@ -580,7 +596,7 @@ ParseResult Parse(void* /*slotState*/, void* parseStateVoid, const char* buf, st
 
     auto pos = parseState->pending.find('\n');
     if(pos == WFX::String::npos)
-        return isEof ? ParseResult::ERROR : ParseResult::INCOMPLETE;
+        return isEof ? WFX::EpParseError : WFX::EpParseIncomplete;
 
     out->value = parseState->pending.substr(0, pos);
     return WFX::EpParseDone;
@@ -600,7 +616,8 @@ inline const auto Kv = WFX::Endpoint<KvReq, KvRes, &Authenticate>{ // Authentica
         .createOutput      = CreateOutput,
         .destroyOutput     = DestroyOutput,
     },
-    WFX::EndpointConfig{ .connLimit = 4, .requestTimeoutSeconds = 5 }
+    WFX::EndpointConfig{ .connLimit = 4, .connectTimeoutSeconds = 10,
+                         .requestTimeoutSeconds = 5, .idleTimeoutSeconds = 60 }
 };
 ```
 
@@ -608,18 +625,19 @@ Walking through what actually happens the first time a route handler does
 `co_await Kv.SendPayload({.key = "session:42"})`, assuming the pool is
 completely cold:
 
-1. No idle slot exists, so WFX opens a new TCP connection and calls
-   `CreateSlotState`, its return value becomes `slotState` for every other
-   callback on this connection from here on.
-2. `Authenticate` (the `onConnect` coroutine) runs once, sends the `AUTH` line,
-   waits for the reply. If it returns `WFX::EpReady`, the slot enters the pool.
-3. `CreateOutput` allocates the `KvRes` your route handler will eventually get.
-4. `CreateParseState` allocates a fresh `KvParseState`.
-5. `Serialize` writes `GET session:42\n` into the send buffer.
-6. As bytes come back, `Parse` is called repeatedly, appending to
+1. No idle slot exists, so WFX leases a fresh one and calls `CreateSlotState`,
+   its return value becomes `slotState` for every other callback on this
+   connection from here on.
+2. `CreateParseState` allocates a fresh `KvParseState`, and `CreateOutput`
+   allocates the `KvRes` your route handler will eventually get.
+3. WFX opens the TCP connection and runs `Authenticate` (the `onConnect`
+   coroutine) once: it sends the `AUTH` line and waits for the reply. If it
+   returns `WFX::EpReady`, the slot can serve the request.
+4. `Serialize` writes `GET session:42\n` into the send buffer.
+5. As bytes come back, `Parse` is called repeatedly, appending to
    `parseState->pending`, until it finds a `\n` and fills `out->value`,
    returning `WFX::EpParseDone`.
-7. Your route handler resumes, `out` is the populated `KvRes`.
+6. Your route handler resumes, `out` is the populated `KvRes`.
 
 If a second request comes in on the same keep-alive connection: `slotState`
 is reused as-is (still remembers `requestsServed`), `ResetParseState` clears
@@ -654,7 +672,8 @@ WFX::EpCoro Authenticate(WFX::SlotHandle h, void* /*state*/)
 inline const auto Redis = WFX::Endpoint<RedisGet, RedisVal, &Authenticate>{
     "redis.internal:6379",
     WFX::EndpointDesc{ .serialize = ..., .parse = ... },
-    WFX::EndpointConfig{ .connLimit = 8, .requestTimeoutSeconds = 5 }
+    WFX::EndpointConfig{ .connLimit = 8, .connectTimeoutSeconds = 10,
+                         .requestTimeoutSeconds = 5, .idleTimeoutSeconds = 60 }
 };
 ```
 
@@ -663,7 +682,9 @@ after the TCP (and TLS, if applicable) handshake finishes and before the slot
 is allowed to serve any request. `WFX::SlotHandle` gives you `co_await h.Send(...)`
 and `co_await h.Receive()` to drive the handshake yourself, plus
 `h.NegotiatedProtocol()` to read back the ALPN protocol chosen during the TLS
-handshake (empty if the connection isn't TLS, or the handshake hasn't finished).
+handshake. It's empty if the connection isn't TLS, the handshake hasn't finished,
+or no protocol was agreed, which is always the case when `alpnProtocols` is empty
+(the raw `Endpoint<>` default), since nothing is offered then.
 
 Every slot operation reports the same `WFX::SlotStatus`, and anything other
 than `WFX::EpSlotOk` is fatal for the slot:
@@ -674,7 +695,7 @@ than `WFX::EpSlotOk` is fatal for the slot:
 | `WFX::EpSlotBufferError` | Slot buffer couldn't be allocated or grown |
 | `WFX::EpSlotEpollError` | Re-arming the slot with epoll failed |
 | `WFX::EpSlotIoError` | Socket read/write failed |
-| `WFX::EpSlotTlsError` | TLS wrap or handshake failed |
+| `WFX::EpSlotTlsError` | `UpgradeToTLS` couldn't wrap the connection, or a side connection's TLS handshake failed |
 | `WFX::EpSlotInvalidState` | Not valid for this slot right now |
 
 ### In-band TLS upgrades
@@ -701,6 +722,11 @@ already wrapped the connection at connect time and the upgrade is refused with
 `WFX::EpSlotInvalidState`. Bytes buffered before the upgrade are discarded, so
 plaintext an attacker appended after the server's go-ahead can never be read
 back as though the authenticated peer had sent it.
+
+If the TLS handshake itself fails, `UpgradeToTLS()` never returns: the engine
+ends `onConnect` there, a waiting caller gets `WFX::EpSslFailure`, and
+`onDisconnect` gets `WFX::EpDisconnectTlsError`. Only a failure to wrap the
+connection at all comes back as `WFX::EpSlotTlsError`.
 
 Outbound TLS is independent of whether your own server serves HTTPS; the
 client-side TLS context is created on demand.
@@ -740,7 +766,8 @@ endpoint you'd have written with a real `EndpointDesc`:
 inline const auto Postgres = WFX::Endpoint<PgReq, PgRes, &Connect, &CancelQuery>{
     "postgres.internal:5432",
     WFX::EndpointDesc{ .serialize = ..., .parse = ... },
-    WFX::EndpointConfig{ .connLimit = 8, .auxConnLimit = 4, .requestTimeoutSeconds = 30 }
+    WFX::EndpointConfig{ .connLimit = 8, .auxConnLimit = 4, .connectTimeoutSeconds = 10,
+                         .requestTimeoutSeconds = 30, .idleTimeoutSeconds = 60 }
 };
 ```
 
@@ -776,6 +803,10 @@ hand the result to. Your protocol needs no special cleanup for this case.
       slow query your own timeout gives up on is torn down harder than one a
       client walked away from, not something this page is going to pretend
       around.
+
+    On a multiplexed endpoint (`hasCapacity` set) `onAbort` never runs either,
+    and nothing is force-closed: the client that left only drops its own
+    stream, and the shared connection and every other stream on it carry on.
 
     None of these are something you need to guard against, WFX picks the
     right behavior automatically. They're worth knowing so you don't expect
@@ -917,12 +948,16 @@ WFX_GET("/export", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 
     while(true) {
         auto chunk = co_await stream.Next();
-
-        if(chunk.status != WFX::EpOk || chunk.done)
+        if(chunk.status != WFX::EpOk)
             break;
 
-        // chunk.data is valid only until the next Next()
-        res.Write(chunk.data->rows);
+        // chunk.data is valid only until the next Next(). The last result can carry data too:
+        // a protocol that never returned a chunk delivers its whole response there
+        if(chunk.data)
+            res.Write(chunk.data->rows);
+
+        if(chunk.done)
+            break;
     }
 
     res.Commit();
@@ -1019,12 +1054,11 @@ matched to the right caller.
 
 To support that, `serialize()` assigns every outgoing request a `streamKey`
 (instead of leaving it at `0`, which means "this protocol doesn't multiplex"),
-and three `EndpointDesc` callbacks work together to track requests sharing one
+and two `EndpointDesc` callbacks work together to track requests sharing one
 connection:
 
-- **`hasCapacity(slotState)`**: does this slot have room to take on one more request right now?
+- **`hasCapacity(slotState)`**: does this slot have room to take on one more request right now? This is the only cap on how many requests share a slot; `EndpointConfig::maxConcurrentStreams` is not read by the engine.
 - **`takeStreamOutput(slotState, key)`**: hand over a finished stream's response, or `nullptr` if it isn't done yet.
-- **`EndpointConfig::maxConcurrentStreams`**: how many requests are allowed to share one slot (`0` or `1` keeps a slot exclusive, the default).
 
 Unlike the single-request-per-slot path, the engine never *calls*
 `createOutput` for a multiplexed request. The protocol owns each in-flight
@@ -1056,8 +1090,8 @@ struct MySlotState {
     std::uint32_t inFlight = 0;         // requests sent but not yet finished
 };
 
-SerializeResult Serialize(void* slotStateVoid, const void* req, char* buf, std::uint32_t bufLen,
-                          std::uint32_t* written, std::uint64_t* streamKey)
+WFX::Shared::SerializeResult Serialize(void* slotStateVoid, const void* req, char* buf, std::uint32_t bufLen,
+                                       std::uint32_t* written, std::uint64_t* streamKey)
 {
     auto* state = static_cast<MySlotState*>(slotStateVoid);
     std::uint32_t id = state->nextId++;
@@ -1066,12 +1100,12 @@ SerializeResult Serialize(void* slotStateVoid, const void* req, char* buf, std::
 
     *streamKey = id;   // tags this request so the matching reply can be found later
     state->inFlight++;
-    return SerializeResult::OK;
+    return WFX::EpSerOk;
 }
 
-ParseResult Parse(void* slotStateVoid, void* parseState, const char* buf, std::uint32_t len,
-                  std::uint32_t* consumed, void* /*outObj, unused here*/, bool isEof,
-                  std::uint64_t* completedKey)
+WFX::Shared::ParseResult Parse(void* slotStateVoid, void* parseState, const char* buf, std::uint32_t len,
+                               std::uint32_t* consumed, void* /*outObj, unused here*/, bool isEof,
+                               std::uint64_t* completedKey)
 {
     auto* state = static_cast<MySlotState*>(slotStateVoid);
 
@@ -1085,13 +1119,13 @@ ParseResult Parse(void* slotStateVoid, void* parseState, const char* buf, std::u
 
     // The connection itself stays open for other in-flight streams, so this
     // frame being done does not mean there is nothing left to read
-    return ParseResult::INCOMPLETE;
+    return WFX::EpParseIncomplete;
 }
 
 bool HasCapacity(void* slotStateVoid)
 {
     auto* state = static_cast<MySlotState*>(slotStateVoid);
-    return state->inFlight < 32; // matches EndpointConfig::maxConcurrentStreams below
+    return state->inFlight < 32; // the protocol's own cap on requests sharing this slot
 }
 
 void* TakeStreamOutput(void* slotStateVoid, std::uint64_t key)
@@ -1119,7 +1153,8 @@ inline const auto Api = WFX::Endpoint<MyReq, MyRes>{
         .hasCapacity      = HasCapacity,
         .takeStreamOutput = TakeStreamOutput,
     },
-    WFX::EndpointConfig{ .connLimit = 4, .maxConcurrentStreams = 32 }
+    WFX::EndpointConfig{ .connLimit = 4, .connectTimeoutSeconds = 10,
+                         .requestTimeoutSeconds = 10, .idleTimeoutSeconds = 60 }
 };
 ```
 

@@ -1,26 +1,28 @@
 # Constructor
 
-WFX constructors provide a simple way to run **one-time user code at engine startup**.
+WFX constructors provide a simple way to run **user code once as each worker starts**.
 
-A constructor is the **first user-level callback executed**, before any other user macros such as routes, middleware, or similar registrations.
+A constructor runs in the same deferred queue as routes, middleware and endpoints, in
+static-initialization order: declaration order within one file, unspecified across files. Don't
+rely on it running before a registration made in another file.
 
 !!! important
-    If no other `wfx/*` header has already been included, the following header must be included before using `Constructor`:
+    `WFX_CONSTRUCTOR` is only available through `<wfx/app.hpp>` (or `<wfx/all.hpp>`, which
+    includes it); no other `wfx/*` header pulls it in:
 
     ```cpp
     #include <wfx/app.hpp>
     ```
-
-    Most higher-level WFX headers already include this internally, so manual inclusion is typically only required when working directly with application-level functionality.
 ---
 
 ## What it does
 
-- Runs **at the very start of engine initialization**
+- Runs once per worker process, when the worker loads your library
 - Intended for small runtime setup tasks
 - Purely a convenience mechanism
 
-Do **not** expect it to run again.
+It doesn't run again within a worker, but every worker runs it, including one revived after a
+crash.
 
 ---
 

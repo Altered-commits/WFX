@@ -70,7 +70,10 @@ RFC 3986 percent-encoding. `UrlEncode` leaves the unreserved set (`A-Z a-z 0-9 -
 ```cpp
 auto encoded = WFX::UrlEncode("hello world/foo"); // "hello%20world%2Ffoo"
 
-auto [ok, decoded] = WFX::UrlDecode(req.Query("redirect"));
+std::string_view redirect;
+req.GetQueryParams().Get("redirect", redirect);
+
+auto [ok, decoded] = WFX::UrlDecode(redirect);
 if(!ok) {
     res.Status(WFX::HttpStatus::BAD_REQUEST).SendText("malformed redirect param");
     return;

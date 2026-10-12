@@ -2,10 +2,11 @@
 
 Adversarial coverage of real-IP resolution (`WFX::Http::IpUtils::ResolveClientIp`) and
 the two limiters it feeds, `ConnectionLimiter` and `RequestRateLimiter`, wired through
-`CoreEngine::AllowRequest`. `app/config/wfx.local.toml` keeps `[IP]` permanently small (connection
-cap 3, burst 5, refill 2/s, tracked-identity cap 64 - `BitmapPool`'s real minimum,
-regardless of the configured value) instead of patching config mid-run, so every phase
-but `dualstack` runs against the one server the whole time. Every phase's closing
+`CoreEngine::AllowRequest`. `app/config/wfx.local.toml` keeps `[IP]` small by default
+(connection cap 3, burst 5, refill 2/s, tracked-identity cap 64 - `BitmapPool`'s real
+minimum, regardless of the configured value). `trust_boundary` (its `trusted_proxies` and
+`real_ip_recursive` variants) and `multiworker` patch that config and restart, `dualstack`
+restarts with `--host ::`, and each restores the baseline afterwards. Every phase's closing
 liveness check uses a dedicated identity nothing else in the suite ever touches, so a
 phase correctly rate-limiting its own attack traffic can never be misread as the server
 having crashed.
@@ -14,9 +15,11 @@ having crashed.
 
 ## Requirements
 
-- `wfx` on `PATH` (or pass `--wfx /path/to/wfx`)
+- WFX installed with `./scripts/install.sh --local-debug` (puts `wfx` on `PATH`, its headers
+  under `~/.wfx/src`, which `app/CMakeLists.txt` builds against, and ASan/UBSan on), or run
+  through `tests/run_audits.sh` after that install
 - Python 3.8+, standard library only
-- Linux with `/proc` (for worker PID discovery) and IPv6 loopback support (for `dualstack`)
+- Linux, where any 127.0.0.0/8 address can be bound as a source, and IPv6 loopback support (for `dualstack`)
 
 ---
 
@@ -47,8 +50,8 @@ python3 ip_audit.py --ci
 | Code | Meaning |
 |------|---------|
 | `0` | All phases passed |
-| `1` | Correctness failure |
-| `2` | **Security**: a trust-boundary spoof, reconnect, or dual-stack collapse actually bypassed a limiter |
+| `1` | A check failed, a phase timed out or raised, a sanitizer report was written, a worker ignored SIGTERM at shutdown, or the worker was dead at the end |
+| `2` | **Security**: any limiter bypass or trust-boundary failure, a hostile header crashing or 500ing the server, or a resolution/limiter cost blowup |
 | `3` | Server never came up |
 
 ---
@@ -57,7 +60,7 @@ python3 ip_audit.py --ci
 
 | Phase | What it proves |
 |-------|-----------------|
-| **trust_boundary** | `X-Forwarded-For` spoofing buys an untrusted peer nothing; recursive proxy-chain walking, CIDR-block trust, non-recursive fallback, and a hostile/malformed-header corpus that must never crash or 500. Also times a worst-case 300-hop chain against a 300-entry trusted-proxies list (`IsTrustedProxy` re-scans the whole list per hop, unmemoized, so this is genuinely `O(hops x proxies)`) to confirm it stays fast rather than stalling the worker. |
+| **trust_boundary** | `X-Forwarded-For` spoofing buys an untrusted peer nothing, and rotating it mid-connection cannot escape the identity cached from the first request; recursive proxy-chain walking, CIDR-block trust, whitespace-trimmed `trusted_proxies` entries, non-recursive fallback, a v4-mapped XFF literal collapsing to plain IPv4, duplicate XFF headers, and a hostile/malformed-header corpus that must never crash or 500. Also times a worst-case 300-hop chain against a 300-entry trusted-proxies list (`IsTrustedProxy` re-scans the whole list per hop, unmemoized, so this is genuinely `O(hops x proxies)`) to confirm it stays fast rather than stalling the worker. |
 | **connection_cap** | `ConnectionLimiter` fill-refuse-release, per-identity isolation, spoofed-header evasion fails, and a real concurrent burst (not sequential) never lets more than the configured cap through. |
 | **rate_limit** | `RequestRateLimiter`'s token bucket on one held keep-alive connection: burst succeeds, next request throttles, the same socket recovers once the bucket refills (a 429 no longer force-closes), and an explicit `Connection: close` still closes while throttled. |
 | **eviction** | Fills the tracked-identity cap, confirms a new identity is denied while every slot is live, then frees one slot and confirms a previously-denied connection now succeeds on retry — the regression test for `ClientCtx`'s `rateLimiterAcquired` bit being decoupled from `ipAcquired`. |

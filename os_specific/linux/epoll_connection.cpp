@@ -308,6 +308,18 @@ bool EpollConnectionHandler::EnsureClientSSL()
 
 EpollConnectionHandler::~EpollConnectionHandler()
 {
+    // Nothing resumes a coroutine still suspended once the loop has stopped: a request handler
+    // awaiting its endpoint, an onConnect mid-handshake, an onAbort on its side connection.
+    // Destroy each one first, while the requests, slot states and buffers its frame may still
+    // touch are alive. A free slot's asyncData is empty, which makes this a no-op there
+    for(std::uint32_t i = 0; i < connections_.GetSlots(); i++)
+        HandleClientAsyncCallback(connections_.GetPtr(i), {}, true);
+
+    for(auto& entry : endpoints_)
+        for(EndpointPool* pool : {&entry.pool, &entry.auxPool})
+            for(std::uint32_t i = 0; i < pool->GetSlots(); i++)
+                HandleEndpointAsyncCallback(pool->GetPtr(i), {}, true);
+
     // Free all endpoint slot allocations before fds close and before BufferPool
     // potentially destructs ahead of us. void* fields have no destructors so we
     // must call the user-supplied hooks explicitly.
@@ -319,35 +331,38 @@ EpollConnectionHandler::~EpollConnectionHandler()
             entry.meta.cachedTlsSession = nullptr;
         }
 
-        for(std::uint32_t i = 0; i < entry.pool.GetSlots(); i++) {
-            EndpointCtx* ctx = entry.pool.GetPtr(i);
-            ctx->rwBuffer.ResetBuffer();
+        // A side connection only ever holds a buffer and TLS state, the rest stays null on it
+        for(EndpointPool* pool : {&entry.pool, &entry.auxPool}) {
+            for(std::uint32_t i = 0; i < pool->GetSlots(); i++) {
+                EndpointCtx* ctx = pool->GetPtr(i);
+                ctx->rwBuffer.ResetBuffer();
 
-            // A pooled TLS connection still open at exit holds a reference on the client SSL_CTX,
-            // which would otherwise never drop to zero
-            if(ctx->sslConn && sslHandler_) {
-                sslHandler_->ForceShutdown(ctx->sslConn);
-                ctx->sslConn = nullptr;
-            }
-            if(ctx->parseStateObj && desc.destroyParseState) {
-                desc.destroyParseState(ctx->parseStateObj);
-                ctx->parseStateObj = nullptr;
-            }
-            if(ctx->outputObj && desc.destroyOutput) {
-                desc.destroyOutput(ctx->outputObj);
-                ctx->outputObj = nullptr;
-            }
-            if(ctx->pendingStreams) {
-                for(auto& [key, stream] : *ctx->pendingStreams)
-                    if(stream.parseState && desc.destroyParseState)
-                        desc.destroyParseState(stream.parseState);
+                // A TLS connection still open at exit holds a reference on the client SSL_CTX,
+                // which would otherwise never drop to zero
+                if(ctx->sslConn && sslHandler_) {
+                    sslHandler_->ForceShutdown(ctx->sslConn);
+                    ctx->sslConn = nullptr;
+                }
+                if(ctx->parseStateObj && desc.destroyParseState) {
+                    desc.destroyParseState(ctx->parseStateObj);
+                    ctx->parseStateObj = nullptr;
+                }
+                if(ctx->outputObj && desc.destroyOutput) {
+                    desc.destroyOutput(ctx->outputObj);
+                    ctx->outputObj = nullptr;
+                }
+                if(ctx->pendingStreams) {
+                    for(auto& [key, stream] : *ctx->pendingStreams)
+                        if(stream.parseState && desc.destroyParseState)
+                            desc.destroyParseState(stream.parseState);
 
-                Shared::Delete(ctx->pendingStreams);
-                ctx->pendingStreams = nullptr;
-            }
-            if(ctx->slotState && desc.destroySlotState) {
-                desc.destroySlotState(ctx->slotState);
-                ctx->slotState = nullptr;
+                    Shared::Delete(ctx->pendingStreams);
+                    ctx->pendingStreams = nullptr;
+                }
+                if(ctx->slotState && desc.destroySlotState) {
+                    desc.destroySlotState(ctx->slotState);
+                    ctx->slotState = nullptr;
+                }
             }
         }
     }
@@ -2146,7 +2161,8 @@ void EpollConnectionHandler::RecordEndpointCompletion(std::uint16_t endpointIdx,
     EndpointMetrics& em = endpointMetrics_[endpointIdx];
     em.completed++;
 
-    // Sampled here, at the one place completed is bumped, so avg = sumUs / completed stays exact
+    // Sampled here, where completed is bumped. A request whose client already left has no start
+    // time and records no sample, so the mean is sumUs over the samples, not over completed
     RecordEndpointLatency(endpointIdx, startUs);
 
     if(!desc.statusCode || !outputObj)
@@ -2722,16 +2738,16 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx)
     // - Frankenstein
     ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
 
-    // TLS handshake done, connectTimeoutSeconds phase is over. What happens next
-    // depends on whether onConnect exists and whether a client is waiting:
-    //   - onConnect hook exists -> FireOnConnect drives the handshake protocol,
-    //     requestTimeoutSeconds covers onConnect + the eventual send/receive
-    //   - no onConnect, but a client is waiting -> Write the already-serialized
-    //     request, requestTimeoutSeconds covers the round trip
-    //   - no onConnect, no client (prewarm) -> nothing to send, the refresh
-    //     below is immediately superseded by ReturnEndpointToPool's idle timeout
-    RefreshExpiry(ctx, entry.meta.config.requestTimeoutSeconds);
-
+    // TLS handshake done. What happens next depends on whether onConnect exists and whether a
+    // client is waiting, and so does the timer:
+    //   - onConnect starts, or resumes after an in-band upgrade -> it is still the connect
+    //     phase, so connectTimeoutSeconds keeps running, OnSlotConnected arms the request
+    //   - side connection -> CompleteAuxConnect re-arms it for the caller's usage window
+    //   - no onConnect, but a client is waiting -> Write the already-serialized request,
+    //     requestTimeoutSeconds covers the round trip
+    //   - no onConnect, no client (prewarm) -> nothing to send, ReturnEndpointToPool arms
+    //     the idle timeout
+    //
     // Already inside onConnect/side-connect means this handshake was an in-band upgrade
     // (SlotUpgradeTls), not the initial one: resume the suspended caller where it awaited
     // instead of starting onConnect/CompleteAuxConnect over from the top.
@@ -2741,8 +2757,10 @@ void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx)
         CompleteAuxConnect(ctx);
     else if(ctx->eventType == EventType::EVENT_ENDPOINT_ONCONNECT)
         FireOnConnect(ctx, entry);
-    else if(ctx->clientCtx)
+    else if(ctx->clientCtx) {
+        RefreshExpiry(ctx, entry.meta.config.requestTimeoutSeconds);
         Write(ctx);
+    }
     else {
         ReturnEndpointToPool(ctx);
 
@@ -3037,15 +3055,16 @@ void EpollConnectionHandler::HandleEndpointWriteReady(EndpointCtx* ctx)
                 break;
             }
 
-            // Plain TCP, no handshake needed. Connection phase is fully complete
-            // Switch to request timeout now since onConnect / Write starts immediately
-            RefreshExpiry(ctx, meta.config.requestTimeoutSeconds);
-
-            // Plain TCP, check for onConnect hook before writing
+            // Plain TCP, no handshake needed. onConnect is still the connect phase, so the
+            // connectTimeoutSeconds armed at connect start keeps running through it
             if(meta.desc.onConnect) {
                 FireOnConnect(ctx, endpoints_[ctx->endpointIdx]);
                 break;
             }
+
+            // No onConnect, so the connect phase is over and Write starts immediately. A prewarm
+            // slot heading to the idle pool has this superseded by ReturnEndpointToPool's timeout
+            RefreshExpiry(ctx, meta.config.requestTimeoutSeconds);
 
             // No onConnect hook. Only Write if a client request is actually
             // waiting in the buffer. A prewarm slot with no client has nothing
@@ -4057,10 +4076,12 @@ void EpollConnectionHandler::OnSlotConnected(void* ud, AsyncResult result)
     // (multiplexed, see SendPayloadMultiplexed). Either way the write buffer already has
     // serialized bytes queued. Prewarm sets neither.
     if(slotCtx->clientCtx || (slotCtx->pendingStreams && !slotCtx->pendingStreams->empty())) {
-        // Non-prewarm: SendPayload already serialized a request into the write buffer
+        // Non-prewarm: SendPayload already serialized a request into the write buffer. The
+        // connect phase ends here, so the request gets its own full requestTimeoutSeconds.
         // Drive the write directly instead of calling RegisterEpoll(MOD) and waiting
         // for EPOLLOUT, because in ET mode the EPOLLOUT edge was consumed when EVENT_CONNECT
         // fired and a MOD on an already-writable fd does not generate a new edge.
+        GlobalInstance->RefreshExpiry(slotCtx, entry.meta.config.requestTimeoutSeconds);
         GlobalInstance->EnterState(slotCtx, EventType::EVENT_ENDPOINT_SEND);
         GlobalInstance->Write(slotCtx);
     }
@@ -4527,12 +4548,13 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
     }
 
     // Four possible states after the connect/handshake attempt above:
-    //   - still mid-TCP-connect or mid-TLS-handshake (async, EPOLLOUT pending)
-    //     -> arm connectTimeoutSeconds, the in-progress connection must finish in time
+    //   - still mid-TCP-connect or mid-TLS-handshake (async, EPOLLOUT pending), or about to
+    //     run onConnect, which is still the connect phase
+    //     -> arm connectTimeoutSeconds, the connection and its handshake must finish in time
     //   - a side connection, connected (and handshake done, if any)
     //     -> arm connectTimeoutSeconds, waiting for CompleteAuxConnect to hand it to the caller
-    //   - connected (and handshake done, if any) AND a client is waiting
-    //     -> arm requestTimeoutSeconds, onConnect/Write is about to run for that client
+    //   - connected (and handshake done, if any), no onConnect, AND a client is waiting
+    //     -> arm requestTimeoutSeconds, Write is about to run for that client
     //   - connected with no client waiting (prewarm, no onConnect hook)
     //     -> nothing to do or send, park the slot straight in the idle pool
     //
@@ -4542,8 +4564,9 @@ EndpointStatus EpollConnectionHandler::WrapConnect(EndpointCtx* ctx, EndpointEnt
     // letting a concurrent SendPayload lease the same slot out from under it.
     const bool hasWaitingClient = ctx->clientCtx || (ctx->pendingStreams && !ctx->pendingStreams->empty());
 
-    if(ctx->eventType == EventType::EVENT_CONNECT || ctx->eventType == EventType::EVENT_ENDPOINT_HANDSHAKE ||
-       ctx->isSideConnection)
+    const EventType et = ctx->eventType;
+    if(et == EventType::EVENT_CONNECT || et == EventType::EVENT_ENDPOINT_HANDSHAKE ||
+       et == EventType::EVENT_ENDPOINT_ONCONNECT || ctx->isSideConnection)
         RefreshExpiry(ctx, meta.config.connectTimeoutSeconds);
     else if(hasWaitingClient)
         RefreshExpiry(ctx, meta.config.requestTimeoutSeconds);

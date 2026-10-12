@@ -63,8 +63,8 @@ struct AsyncResult {
     union {
         MiddlewareAction action;       // CONTINUE for non-middleware
         ConnectResult connectResult;   // Set by Promise<ConnectResult> on final_suspend
-        EndpointStatus endpointStatus; // Set by ReleaseEndpoint and HandleEndpointReceive on client failure
-        SlotStatus slotStatus;         // Set by SlotSend/SlotReceive/SlotUpgradeTls on failure
+        EndpointStatus endpointStatus; // Set wherever the engine completes or fails an endpoint request
+        SlotStatus slotStatus;         // Set by the slot operations (Send/Receive/UpgradeToTLS/OpenSideConnection)
         FlushStatus flushStatus;       // Set by the async completion of Response::Flush()/FlushEnd()
         std::uint8_t unused;           // Filler when none of the above apply (e.g. endpoint success)
     };
@@ -308,7 +308,7 @@ static_assert(std::is_standard_layout_v<EndpointDesc>, "'EndpointDesc' must be s
 struct EndpointConfig {
     std::uint32_t connLimit;             // Max simultaneous connections in the slot pool (see exactSlots)
     std::uint32_t auxConnLimit;          // Max simultaneous side connections; 0 = disabled (see exactSlots)
-    std::uint32_t dnsRefreshSeconds;     // 0 = respect actual DNS TTL, N = override with N seconds
+    std::uint32_t dnsRefreshSeconds;     // 0 = respect actual DNS TTL, N = refresh at most every N seconds
     std::uint16_t connectTimeoutSeconds; // TCP+TLS+onConnect must complete within this window
     std::uint16_t requestTimeoutSeconds; // Send+receive cycle must complete within this window
     std::uint32_t idleTimeoutSeconds;    // Idle slots are closed after this many seconds

@@ -5,16 +5,20 @@
 // (EpTlsRequire) against a small, hostile TLS mock — the surface the plaintext
 // endpoint audit never exercises.
 //
-// Five endpoints, ports fixed to match tls_audit.py:
+// Six HttpEndpoints, ports fixed to match tls_audit.py:
 //   good        8443  valid, mkcert-trusted cert   -> must succeed
 //   selfsigned  8444  untrusted self-signed cert   -> must refuse
 //   wronghost   8445  trusted CA, SAN=evil.example  -> must refuse (hostname)
 //   expired     8446  trusted CA, expired           -> must refuse
 //   tls12       8447  valid cert, server capped 1.2  -> must refuse (client requires 1.3)
 //   fast        8443  same as 'good', 5s budget      -> timeout tests
+// plus two raw Endpoint<>s for /upgrade:
+//   upgrade         8448  plaintext, then STARTTLS     -> must accept, discard pre-upgrade bytes
+//   upgrade_double  8443  already TLS (Require)        -> UpgradeToTLS must refuse
 //
-// /call   X-Ep=<persona> X-Path=<p>  -> Ep.Get(p), reflects { ep,status,bodylen,body }
-// /inject X-Inject=path|header, body -> feeds the serializer hostile CR/LF/NUL bytes
+// /call    X-Ep=<persona> X-Path=<p>      -> Ep.Get(p), reflects { ep,status,bodylen,body }
+// /inject  X-Inject=path|header, body     -> feeds the serializer hostile CR/LF/NUL bytes
+// /upgrade X-Mode=normal|double X-Key=<k> -> drives UpgradeToTLS through onConnect
 
 #include <wfx/http.hpp>
 #include <wfx/memory.hpp>

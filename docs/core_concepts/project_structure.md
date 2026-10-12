@@ -12,10 +12,11 @@ Understanding this structure will help you know where files live, what each dire
 
 ## Directory Overview
 
-`wfx new` itself only creates `public/`, `src/`, `templates/`, `config/`, `.gitignore`,
-`CMakeLists.txt`, and `config/wfx.local.toml`. `build/` and `intermediate/` appear after your first
-`wfx build`/`wfx run`, and `logs/` appears after your first `wfx run`. This is the full layout
-you'll have once you've run the project at least once:
+`wfx new` itself only creates `.gitignore`, `CMakeLists.txt`, `config/wfx.local.toml`,
+`src/main.cpp`, `src/api_entry.cpp`, `templates/index.html`, `public/style.css` and
+`public/script.js`. `build/` and `intermediate/` appear after your first `wfx build`/`wfx run`,
+and `logs/` appears after your first `wfx run`. This is the full layout you'll have once you've
+run the project at least once:
 
 ```text
 <your_workspace>/

@@ -190,12 +190,8 @@ This allows the route handler itself to `co_await` builtins such as `SleepFor`, 
 The signature is identical to a normal route, except the lambda returns an async coroutine type:
 
 ```cpp
-/*
- * NOTE: This header is mandatory when using any builtin async utilities such as
- * functions like 'SleepFor'. It also brings in the core async machinery,
- * including 'WFX::Coro' and related types.
- */
-#include <wfx/async.hpp>
+// <wfx/http.hpp> already includes <wfx/async.hpp>, which provides SleepFor, WFX::Coro and
+// the rest of the async machinery
 #include <wfx/http.hpp>
 
 WFX_GET("/async", [](WFX::Request req, WFX::Response res) -> WFX::Coro {

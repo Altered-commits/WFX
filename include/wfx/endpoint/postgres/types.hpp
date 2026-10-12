@@ -8,8 +8,8 @@
 // Postgres type OIDs and their binary wire codecs.
 //
 // Every codec is a specialization of PgCodec<T>, so which codec runs is
-// settled at compile time. Decoders take a view aimed at the receive buffer
-// and return by value, so decoding a row allocates nothing.
+// settled at compile time. Decoders take a view into the PgResult's own copy
+// of the row and return by value, so decoding a row allocates nothing.
 // -----------------------------------------------------------------------
 
 #include "protocol.hpp"
@@ -445,8 +445,8 @@ public: // Wire
 };
 
 // vvv Text vvv
-// The view aims into the receive buffer and dies with it, so results borrow
-// rather than own
+// The view aims into the PgResult's own copy of the row and dies with it, so
+// results borrow rather than own
 template <> struct PgCodec<std::string_view> {
     static constexpr std::uint32_t OID = OID_TEXT;
 

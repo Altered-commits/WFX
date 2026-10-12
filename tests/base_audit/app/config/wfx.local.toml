@@ -6,7 +6,7 @@ dir_name            = "build"          # Build directory used by CMake
 preferred_config    = "Debug"          # Active build configuration (must match CMake: Debug / Release)
 preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure the build directory
 
-# TUNED FOR TORTURE (see ../README.md). Big send buffer so /big buffers ~1 MiB and applies real
+# TUNED FOR TORTURE (see ../../README.md). Big send buffer so /big buffers ~1 MiB and applies real
 # memory pressure under a RAM cap; recv buffer >= max_body_size so a full body fits then overflows
 # cleanly; tight timeouts so slowloris/slow-body/idle get reaped within a short run
 [Network]
@@ -34,15 +34,15 @@ max_connections              = 100000     # Total concurrent cap (reachable -> e
 [ENV]
 env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
 
-# Per-IP cap and rate limiter cranked wide open because ALL siege traffic is from 127.0.0.1 and
+# Per-IP cap and rate limiter cranked wide open because ALL audit traffic is from 127.0.0.1 and
 # would otherwise be throttled before it ever stressed the server (the limiter itself wants a
 # separate, dedicated run)
 [IP]
-max_connections_per_ip       = 100000     # = max_connections: single-IP siege must use every slot
-max_request_burst_per_ip     = 100000000  # Effectively off for localhost siege
-max_requests_per_ip_per_sec  = 100000000  # Effectively off for localhost siege
+max_connections_per_ip       = 100000     # = max_connections: single-IP audit traffic must use every slot
+max_request_burst_per_ip     = 100000000  # Effectively off for localhost audit traffic
+max_requests_per_ip_per_sec  = 100000000  # Effectively off for localhost audit traffic
 
-# One origin plus credentials so the credentials-header and origin-echo paths are both live;
+# Two origins plus credentials so the credentials-header and origin-echo paths are both live;
 # allowed_headers empty so the reflect-Access-Control-Request-Headers branch runs; exposed_headers
 # non-empty so the static-list branch runs too. Between this and query params, the two config
 # fields never exercised here (wildcardOrigin, "*" + allow_credentials rejection) are load-time-
@@ -79,7 +79,7 @@ connection_threads = "auto"  # IOCP worker thread count
 request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
-worker_processes        = 2      # Max simultaneous worker connections
+worker_processes        = 2      # Number of worker processes to fork
 worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
 backlog                 = 1024   # Max pending connections in OS listen queue
 
@@ -94,7 +94,7 @@ max_events       = 1024   # How many events should epoll handle at a time
 
 [Logging]
 min_level         = 2          # info: surfaces "Server running", [ERR] contract-violations, [FTL] crashes
-enable_stdout     = false      # Write to stdout (siege.py scans this stream)
+enable_stdout     = false      # Off: the audit tails the logs/ files, stdout is discarded under --detach
 enable_colors     = false      # No ANSI codes -> clean log scanning by the harness
 enable_timestamps = true       # Prepend [HH:MM:SS.mmm] to each line
 enable_file       = true       # Write to log files

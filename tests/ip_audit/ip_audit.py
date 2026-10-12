@@ -7,9 +7,9 @@
 # Adversarial coverage of real-IP resolution (WFX::Http::IpUtils::ResolveClientIp,
 # http/limits/ip_utils.cpp) and the two limiters it feeds (ConnectionLimiter,
 # RequestRateLimiter, wired through CoreEngine::AllowRequest in engine/core_engine.cpp).
-# app/config/wfx.local.toml keeps [IP] permanently small (cap=3, burst=5, rate=2/s, tracked-identity
-# cap=64, BitmapPool's real minimum) instead of patching config mid-run, so every phase
-# but dualstack runs against the same server the whole time.
+# app/config/wfx.local.toml keeps [IP] small by default (cap=3, burst=5, rate=2/s, tracked-identity
+# cap=64, BitmapPool's real minimum). trust_boundary and multiworker patch it and restart,
+# dualstack restarts with --host ::, and each restores the baseline afterwards.
 #
 # See README.md for what each phase proves.
 #
@@ -38,7 +38,7 @@ RATE       = 2   # max_requests_per_ip_per_sec
 TRACK_CAP  = 64  # max_tracked_identities, rounded up to 64 by BitmapPool regardless of the
                  # configured value, so 64 is the real cap a phase has to actually fill
 
-TRUSTED    = "127.0.0.1"  # matches trusted_proxies in wfx.toml
+TRUSTED    = "127.0.0.1"  # matches trusted_proxies in app/config/wfx.local.toml
 # UNTRUSTED/UNTRUSTED2 deliberately differ from TRUSTED (and each other) in more than the
 # last octet: NormalizeIp's /24 mask would otherwise collapse "127.0.0.1" and "127.0.0.2"
 # into the same identity, and the suite's own startup wait_ready() probe (which hits
@@ -196,7 +196,7 @@ def phase_trust_boundary(ctx):
     p = ctx.phase("trust_boundary")
 
     # G1: untrusted peer - rotating a spoofed XFF buys nothing, the header is never
-    # honored for a peer outside trusted_proxies, so every attempt is billed to 127.0.0.2
+    # honored for a peer outside trusted_proxies, so every attempt is billed to UNTRUSTED
     hit, st, seen = None, None, []
     for i in range(BURST + 1):
         st = _send_from(host, port, UNTRUSTED, "GET", "/health", {"X-Forwarded-For": "10.10.0.%d" % i})
@@ -267,7 +267,7 @@ def phase_trust_boundary(ctx):
              st_untouched == 200, "status=%r, expected 200 (10.71.1.1 should be fresh)" % st_untouched)
 
     # G6b: trusted_proxies matches a whole CIDR block, not just the one /32 baked into
-    # wfx.toml - a source inside the block gets the header honored, a source just
+    # app/config/wfx.local.toml - a source inside the block gets the header honored, a source just
     # outside it (still loopback, still "close" numerically) does not
     original_cidr = _patch_toml(toml_path, r'(?m)^(\s*trusted_proxies\s*=\s*)\[.*\]',
                                 r'\g<1>["127.0.10.0/24"]')

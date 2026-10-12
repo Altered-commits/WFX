@@ -129,7 +129,7 @@ private: // TLS
 
 private: // Slot state
     // Single point every 'eventType' write goes through, table-driven against the exact
-    // transition graph (kLegalFrom in the .cpp), logger_.Fatal's on an illegal pair.
+    // transition graph (LEGAL_FROM in the .cpp), logger_.Fatal's on an illegal pair.
     void EnterState(ConnectionTag* ctx, EventType next);
 
 private: // Connection management
@@ -256,11 +256,12 @@ private: // onConnect
 
 private: // onAbort / side connections
     // Fires desc.onAbort. Unlike FireOnConnect, ctx does NOT transition eventType (still
-    // mid-request, EVENT_ENDPOINT_RECV); onAbort only ever drives a separate auxPool ctx.
+    // mid-request); onAbort only ever drives a separate auxPool ctx.
     void FireOnAbort(EndpointCtx* ctx, EndpointEntry& entry);
     // Connected (+TLS'd if needed): fires the caller's asyncData with the aux ctx as result.data
     void CompleteAuxConnect(EndpointCtx* auxCtx);
-    // Connect/TLS failed: tears down auxCtx and fires the caller's asyncData with the failure
+    // Connect/TLS failed, or the timer ended the side connection's usage window: tears down auxCtx
+    // and fires the caller's asyncData (a pending Send/Receive included) with the failure
     void FailAuxConnect(EndpointCtx* auxCtx, SlotStatus status);
 
 private: // Wrap / low-level

@@ -183,6 +183,12 @@ def serve_conn(raw_sock, name, opts):
         if not line.upper().startswith(b"EHLO"):
             return
 
+        if opts.get("silent_after") == "ehlo2":
+            # Goes quiet forever with the upgrade already done, leaving the client's own
+            # connectTimeoutSeconds to end it
+            time.sleep(3600)
+            return
+
         if opts.get("flood_at") == "ehlo2":
             while True:
                 _send(sock, b"250-flood\r\n", opts)
@@ -361,7 +367,7 @@ def coerce_opts(kv):
     return opts
 
 def main():
-    ap = argparse.ArgumentParser(description="WFX smtp_audit hostile SMTP mock")
+    ap = argparse.ArgumentParser(description="WFX client_audit hostile SMTP mock")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--control-port", type=int, required=True)
     ap.add_argument("--listen", action="append", required=True,

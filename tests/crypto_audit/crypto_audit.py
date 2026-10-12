@@ -20,7 +20,7 @@
 # vectors (Project Wycheproof's ed25519_test.json) for known-answer coverage a
 # self-consistent round-trip could never catch
 #
-# Exit codes: 0 all pass, 1 any failure
+# Exit codes: 0 all pass, 1 failure, 2 security finding, 3 server never came up
 
 import base64
 import hashlib

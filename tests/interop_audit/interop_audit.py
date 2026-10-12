@@ -65,7 +65,7 @@ def ensure_certs():
     instances and the HTTPS upstream. Idempotent, skipped once already generated.
 
     Postgres additionally gets its own copy, chowned to the postgres user's uid *inside the
-    postgres:16-alpine image* (looked up rather than hardcoded, in case it ever changes) and
+    postgres:17-alpine image* (looked up rather than hardcoded, in case it ever changes) and
     chmod 600, since it refuses to start otherwise. The chown needs root, which a throwaway
     container gives us without needing sudo on the host.
     """
@@ -92,11 +92,11 @@ def ensure_certs():
     shutil.copyfile(os.path.join(shared_dir, "server.key"), os.path.join(pg_dir, "server.key"))
     os.chmod(os.path.join(pg_dir, "server.key"), 0o600)
 
-    uid_probe = subprocess.run(["docker", "run", "--rm", "postgres:16-alpine", "id", "-u", "postgres"],
+    uid_probe = subprocess.run(["docker", "run", "--rm", "postgres:17-alpine", "id", "-u", "postgres"],
                                capture_output=True, text=True)
     uid = uid_probe.stdout.strip()
     if uid_probe.returncode != 0 or not uid.isdigit():
-        raise RuntimeError("could not look up postgres:16-alpine's postgres uid:\n%s" % uid_probe.stderr)
+        raise RuntimeError("could not look up postgres:17-alpine's postgres uid:\n%s" % uid_probe.stderr)
 
     chown = subprocess.run(["docker", "run", "--rm", "-v", "%s:/certs" % pg_dir, "alpine:3.20",
                             "chown", "%s:%s" % (uid, uid), "/certs/server.key"],

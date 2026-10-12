@@ -18,21 +18,23 @@
 //   WFX::EpAbortCoro                        : return type for onAbort functions
 //   WFX::EndpointDesc                       : describe the protocol (serialize / parse / ...)
 //   WFX::EndpointConfig                     : connection pool settings
-//   WFX::EndpointTLS                        : TLS mode type alias
+//   WFX::ReservedSlot<TReq, TRes>           : one pinned connection, from ep.Reserve()
+//   WFX::StreamHandle / StreamChunk         : chunked reads, from ep.Stream()
+//   WFX::DisconnectReason                   : type behind the onDisconnect reasons
 //   WFX::EndpointStatus                     : type behind the EpOk / EpXxx constants
 //
 //   SendPayload result codes (from co_await ep.SendPayload(req).first):
 //     WFX::EpOk                  success, output is valid
 //     WFX::EpPoolExhausted       all connections in use, try later
-//     WFX::EpConnectFailure      TCP handshake failed
+//     WFX::EpConnectFailure      connect() failed immediately (a later refusal is EpInternalError)
 //     WFX::EpSslFailure          TLS handshake failed
 //     WFX::EpHandshakeTimeout    TCP connect / TLS handshake / onConnect took too long
 //     WFX::EpRequestTimeout      no response within requestTimeoutSeconds
 //     WFX::EpSerializeError      your serialize() returned EpSerError
 //     WFX::EpSocketFailure       socket creation / options failed (before ever reaching connect())
 //     WFX::EpBufferError         internal buffer init failure
-//     WFX::EpInsufficientBuffer  buffer too small (engine retries once with a larger one)
-//     WFX::EpInvalidKey          endpoint index out of range (engine bug, not user error)
+//     WFX::EpInsufficientBuffer  request too large even after the engine grew the buffer to its maximum
+//     WFX::EpInvalidKey          nowhere valid to go: a dead ReservedSlot, or Next() on an ended stream
 //     WFX::EpEpollError          epoll re-arm failed on a reused slot (engine-internal)
 //     WFX::EpInternalError       unclassified engine failure
 //
@@ -42,12 +44,13 @@
 //     WFX::EpFatal               permanent failure, slot is discarded
 //
 //   onDisconnect reason (parameter to onDisconnect):
-//     WFX::EpIdleTimeout             slot closed after idleTimeoutSeconds with no activity
+//     WFX::EpIdleTimeout             timed out outside the connect phase: idle, or a request timeout
 //     WFX::EpHandshakeTimeoutReason  slot closed while still connecting / handshaking
+//     WFX::EpDisconnectTlsError      TLS handshake failed, an in-band upgrade's included
 //     WFX::EpDisconnectError         everything else: I/O error, protocol error, peer closed, etc
 //
 //   TLS config (set in EndpointConfig::tlsConfig):
-//     WFX::EpTlsAuto             TLS on by default for port 443/8443
+//     WFX::EpTlsAuto             TLS on for well-known TLS ports (443, 465, 993, 8443, ...)
 //     WFX::EpTlsRequire          TLS always, regardless of port
 //     WFX::EpTlsInsecure         plaintext always, even on port 443
 //
@@ -71,11 +74,12 @@
 //     WFX::EpSlotBufferError     slot buffer couldn't be allocated or grown
 //     WFX::EpSlotEpollError      re-arming the slot with epoll failed
 //     WFX::EpSlotIoError         socket read/write failed
-//     WFX::EpSlotTlsError        TLS wrap or handshake failed
+//     WFX::EpSlotTlsError        UpgradeToTLS couldn't wrap, or a side connection's handshake failed
 //     WFX::EpSlotInvalidState    invalid for this slot now (upgrading an already-secure one)
 //
 //   onAbort fires when a single-slot request's client disconnects before the backend replied,
-//   instead of force-closing the slot (multiplexed/mid-Stream() requests still force-close)
+//   instead of force-closing the slot (a multiplexed request just drops its stream, mid-Stream()
+//   and still-connecting requests force-close)
 //   The slot is left alone, its real response still arrives and completes normally.
 //   AbortSlotHandle only has OpenSideConnection()/NegotiatedProtocol(), since the slot is
 //   still mid-request:
@@ -90,8 +94,8 @@
 //   struct ApiReq { std::string_view path; };
 //   struct ApiRes { int status; std::string body; };
 //
-//   WFX::SerializeResult Serialize(void*, const void* req,
-//                                  char* buf, std::uint32_t len, std::uint32_t* written)
+//   WFX::Shared::SerializeResult Serialize(void*, const void* req, char* buf, std::uint32_t len,
+//                                          std::uint32_t* written, std::uint64_t* /*streamKey*/)
 //   {
 //       auto& r = *static_cast<const ApiReq*>(req);
 //       int n = snprintf(buf, len, "GET %s HTTP/1.0\r\nHost: api.example.com\r\n\r\n",
@@ -103,8 +107,8 @@
 //       return WFX::EpSerOk;
 //   }
 //
-//   WFX::ParseResult Parse(void*, void*, const char* buf, std::uint32_t len,
-//                          std::uint32_t* consumed, void* out, bool /*isEof*/)
+//   WFX::Shared::ParseResult Parse(void*, void*, const char* buf, std::uint32_t len, std::uint32_t* consumed,
+//                                  void* out, bool /*isEof*/, std::uint64_t* /*completedKey*/)
 //   {
 //       auto* res = static_cast<ApiRes*>(out);
 //       // ... fill res->status and res->body from buf ...
@@ -122,7 +126,9 @@
 //       },
 //       WFX::EndpointConfig{
 //           .connLimit             = 4,
+//           .connectTimeoutSeconds = 10,
 //           .requestTimeoutSeconds = 10,
+//           .idleTimeoutSeconds    = 60,
 //       }
 //   };
 //
@@ -153,7 +159,8 @@
 //   inline const auto Redis = WFX::Endpoint<RedisGet, RedisVal, &Authenticate>{
 //       "redis.internal:6379",
 //       WFX::EndpointDesc{ .serialize = ..., .parse = ... },
-//       WFX::EndpointConfig{ .connLimit = 8, .requestTimeoutSeconds = 5 }
+//       WFX::EndpointConfig{ .connLimit = 8, .connectTimeoutSeconds = 10, .requestTimeoutSeconds = 5,
+//                            .idleTimeoutSeconds = 60 }
 //   };
 //
 // -----------------------------------------------------------------------
@@ -176,7 +183,8 @@
 //   inline const auto Postgres = WFX::Endpoint<PgReq, PgRes, &Connect, &CancelQuery>{
 //       "postgres.internal:5432",
 //       WFX::EndpointDesc{ .serialize = ..., .parse = ... },
-//       WFX::EndpointConfig{ .connLimit = 8, .auxConnLimit = 4, .requestTimeoutSeconds = 30 }
+//       WFX::EndpointConfig{ .connLimit = 8, .auxConnLimit = 4, .connectTimeoutSeconds = 10,
+//                            .requestTimeoutSeconds = 30, .idleTimeoutSeconds = 60 }
 //   };
 //
 // -----------------------------------------------------------------------
@@ -194,8 +202,8 @@ namespace WFX {
 // -----------------------------------------------------------------------
 // Core endpoint template
 //
-// Declare at namespace scope, before Run(). Each declaration occupies one
-// slot in the connection pool described by EndpointConfig.
+// Declare at namespace scope, before Run(). Each declaration registers its own
+// endpoint, with its own connection pool described by EndpointConfig.
 //
 //   inline const auto MyEp = WFX::Endpoint<MyReq, MyRes>{ host, desc, cfg };
 //
@@ -212,7 +220,7 @@ using Endpoint = Async::Resolve<TReq, TRes, OnConnect, OnAbort>;
 // -----------------------------------------------------------------------
 // RAII owner for the response returned by co_await ep.SendPayload()
 //
-// Access the response with * or -> or .get().
+// Access the response with * or -> or .Get().
 // Valid until the variable goes out of scope. Do not store the raw pointer.
 // -----------------------------------------------------------------------
 template <typename T> using EndpointOutput = Async::EndpointOutput<T>;
@@ -282,17 +290,20 @@ using EpAbortCoro = Async::Task<void>;
 // rest null. serialize and parse are always required.
 //
 // Required:
-//   .serialize(slotState, &req, buf, bufLen, &written)
+//   .serialize(slotState, &req, buf, bufLen, &written, &streamKey)
 //       Write the wire encoding of req into buf. Return EpSerOk on
-//       success, EpSerBufferTooSmall if buf is too small (engine retries
-//       once with a larger buffer), EpSerError on unrecoverable failure.
+//       success, EpSerBufferTooSmall if buf is too small (engine grows
+//       the buffer and calls again, up to its configured maximum),
+//       EpSerError on unrecoverable failure. *streamKey stays 0 unless
+//       the protocol multiplexes.
 //
-//   .parse(slotState, parseState, buf, len, &consumed, outObj, isEof)
+//   .parse(slotState, parseState, buf, len, &consumed, outObj, isEof, &completedKey)
 //       Read arriving bytes and fill outObj. Set *consumed to the number
 //       of bytes you read. Return EpParseDone or EpParseClose on a
 //       complete message, EpParseIncomplete if you need more bytes,
 //       EpParseError on failure. When isEof is true you must not return
-//       EpParseIncomplete.
+//       EpParseIncomplete. *completedKey stays 0 unless the protocol
+//       multiplexes.
 //
 // Nullable (omit or set to nullptr if not needed):
 //   .onConnect                         -> set by Endpoint<> from the OnConnect template arg
@@ -307,6 +318,10 @@ using EpAbortCoro = Async::Task<void>;
 //   .destroyOutput(outputPtr)          -> free the TRes instance (called by EndpointOutput)
 //   .coalesceKey(&req)                 -> uint64_t  identical keys share one in-flight request
 //   .cloneOutput(slotState, srcOutput) -> void*  REQUIRED when coalesceKey is set
+//   .hasCapacity(slotState)            -> bool  multiplexing: room for one more request on this slot
+//   .takeStreamOutput(slotState, key)  -> void*  multiplexing: a finished stream's response, or nullptr
+//   .onPush(slotState, buf, len, &consumed) -> handle a message the server sends unprompted
+//   .statusCode(outObj)                -> the response's status code for the status1xx-5xx metrics
 //   .userCtx                           -> forwarded to createSlotState as its argument
 // -----------------------------------------------------------------------
 using EndpointDesc = Shared::EndpointDesc;
@@ -316,7 +331,7 @@ using EndpointDesc = Shared::EndpointDesc;
 //
 //   .connLimit              max simultaneous connections in the pool
 //   .auxConnLimit           max simultaneous OpenSideConnection()s; 0 = disabled (default)
-//   .dnsRefreshSeconds      0 = respect DNS TTL, N = hard override
+//   .dnsRefreshSeconds      0 = respect DNS TTL, N = refresh at most every N seconds (a shorter TTL wins)
 //   .connectTimeoutSeconds  TCP + TLS + onConnect must finish in this window
 //   .requestTimeoutSeconds  serialize + send + parse must finish in this window
 //   .idleTimeoutSeconds     idle slots are closed after this many seconds
@@ -324,8 +339,11 @@ using EndpointDesc = Shared::EndpointDesc;
 //   .reconnectBackoffBase   initial backoff in seconds
 //   .reconnectBackoffMax    backoff cap in seconds
 //   .tlsConfig              EpTlsAuto / EpTlsRequire / EpTlsInsecure
+//   .exactSlots             allocate connLimit/auxConnLimit exactly instead of rounding up to 64
 //   .prewarm                slots to connect eagerly on startup
-//   .alpnProtocols          ALPN to offer on TLS, most preferred first: "h2,http/1.1"; empty offers none
+//   .maxConcurrentStreams   not read by the engine; hasCapacity caps multiplexing
+//   .alpnProtocols          ALPN to offer on TLS, most preferred first: "h2,http/1.1"; empty offers none.
+//                           A list TLS can't carry is fatal at startup
 // -----------------------------------------------------------------------
 using EndpointConfig = Shared::EndpointConfig;
 

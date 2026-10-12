@@ -3,9 +3,10 @@
 //
 // Every route exists to give base_audit.py a surface to attack.
 // Covers every user-facing WFX feature: dynamic segments (uint/int/string/uuid),
-// per-route middleware (continue/break), context storage, async handlers,
-// JSON (immediate + retained + parsing), chained headers,
-// group-prefixed paths, deliberate contract violations, and metrics.
+// per-route middleware (continue/break/skip-next, sync and async), context storage,
+// async handlers, JSON (immediate + retained + parsing + merge), chained headers,
+// group-prefixed paths, templates, forms, query params, CORS, Stream(), the Flush API,
+// SendFile downloads, deliberate contract violations, and metrics.
 
 #include <wfx/http.hpp>
 #include <wfx/memory.hpp>

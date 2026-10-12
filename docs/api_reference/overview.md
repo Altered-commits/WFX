@@ -79,7 +79,7 @@ In future updates, tracking versions and updates will be easier, as automatic up
 
 ## Getting Started with the API Reference
 
-WFX API reference is organized into sections: Request & Response, Routing & Grouping, Middleware, and Constructors.
+WFX API reference is organized into sections: Request & Response, Routing, Middleware, Constructor, Async, Templates, Forms, Json, Telemetry, Memory, Environment, Endpoint (HTTP, SMTP, Postgres), and Utils (Crypto & Hash, Encoding, JWK, JWT).
 
 - If you are **new to WFX**, it is recommended to follow the sections **in order**, from Request & Response first, then Routing, and so on. This will give you a proper understanding of how the engine works and how components interact.  
 - If you are an **experienced user** or looking for a specific API, you can jump directly to the section of interest. All sections are self-contained, so you can refer to them independently.  

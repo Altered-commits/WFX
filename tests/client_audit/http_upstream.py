@@ -24,8 +24,9 @@
 # never hang past its timeout, never mis-frame one response into the next, and
 # never let a hostile upstream poison a pooled keep-alive connection.
 #
-# Stdlib only. One thread per connection. Pinned by default to 127.0.0.1:8091,
-# which app/src/main.cpp baked into every endpoint instance at compile time.
+# Stdlib only. One thread per connection. Pinned by default to 127.0.0.1:8091, the
+# UPSTREAM app/src/main.cpp bakes in at compile time. With --tls-port (8092 in the
+# audit, UPSTREAM_TLS) the same oracle also serves TLS and records the ALPN it picked.
 
 import argparse
 import socket

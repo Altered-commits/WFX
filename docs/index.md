@@ -5,7 +5,7 @@ hide:
 ---
 
 <div class="wfx-hero">
-<div class="wfx-badge">v0.1.0 - active development, Linux only</div>
+<div class="wfx-badge">v0.3.1 - active development, Linux only</div>
 <h1 class="wfx-title">WFX</h1>
 <p class="wfx-sub">An explicit, low-level C++ web engine for people who want control and performance without behavior hidden behind abstractions.</p>
 <div class="wfx-buttons">
@@ -27,7 +27,7 @@ hide:
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Outbound Endpoint client</p>
-<p class="wfx-card-body">Pooled outbound connections with DNS refresh, retry, coalescing, multiplexing, connection pinning, and chunked streaming. Ships with HTTP and SMTP clients; other protocols are a serialize/parse pair away.</p>
+<p class="wfx-card-body">Pooled outbound connections with DNS refresh, retry, coalescing, multiplexing, connection pinning, and chunked streaming. Ships with HTTP, SMTP and Postgres clients; other protocols are a serialize/parse pair away.</p>
 </div>
 <div class="wfx-card">
 <p class="wfx-card-title">Middleware</p>

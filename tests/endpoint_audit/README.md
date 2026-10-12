@@ -5,8 +5,9 @@ primitive (`include/wfx/endpoint/base.hpp`): the connection pool, the handshake,
 the serialize/parse loop, and everything layered on top of them.
 
 This is the layer *underneath* the shipped protocol clients. `tests/client_audit`
-attacks `HttpEndpoint` and `SmtpEndpoint` as protocols; this suite attacks the
-machinery both of them are built on, with two protocols written for the job.
+attacks `HttpEndpoint`, `SmtpEndpoint` and `PostgresEndpoint` as protocols; this
+suite attacks the machinery all three are built on, with two protocols written for
+the job.
 
 ---
 
@@ -49,12 +50,14 @@ Both protocols are line-oriented ASCII, written out above their listener in
 ## Scope: this suite vs the others
 
 **`tests/client_audit` owns the shipped protocol clients.** HTTP/1.1 framing,
-SMTP handshakes, request smuggling and certificate rejection at the SMTP layer
-all live there, none of it here.
+SMTP handshakes, request smuggling, certificate rejection at the SMTP layer, the
+Postgres SSLRequest/SCRAM/extended-query surface and per-protocol ALPN all live
+there, none of it here.
 
-**`tests/tls_audit` owns the certificate and trust surface.** Its endpoints are
-TLS from the first byte (`EpTlsRequire`) and it needs `mkcert` plus a CA-trust
-step. This suite stays plaintext and needs no certificates at all.
+**`tests/tls_audit` owns the certificate and trust surface.** Its `HttpEndpoint`s
+are TLS from the first byte (`EpTlsRequire`), its one in-band `UpgradeToTLS`
+endpoint starts plaintext and needs a working handshake, and it needs `mkcert`
+plus a CA-trust step. This suite stays plaintext and needs no certificates at all.
 
 `UpgradeToTLS` is split across this suite and `tls_audit`, because its vectors
 have different needs:
@@ -76,6 +79,7 @@ The rule of thumb: if a vector needs a handshake to *succeed*, it belongs in
 ```
 audit (endpoint_audit.py) --HTTP--> WFX app /mux/*   --mux protocol--> mock :8092
                           --HTTP--> WFX app /solo/*  --solo protocol-> mock :8093
+                                    (X-Solo: abortgated) ------------> mock :8094 (gate)
                           --HTTP-------------------------------------> mock :8091 (counters)
 ```
 
@@ -93,11 +97,14 @@ which is what separates "the callback never ran" from "it ran and its work
 failed". `/rss` reports worker resident memory, and that is what turns the
 bounded-memory guarantee into something assertable.
 
-**`primitive_upstream.py`** runs three listeners: the `mux` protocol, the `solo`
-protocol, and an HTTP control plane serving `/ctl/ping`, `/ctl/mux/conns`,
-`/ctl/solo/cancels` and `/ctl/solo/cancels/reset`. It is a fixture rather than a
-server, so every hostile thing it does is scripted by the handshake token or the
-request key the audit picked.
+**`primitive_upstream.py`** runs four listeners: the `mux` protocol, the `solo`
+protocol, `gate` (the solo protocol behind an accept queue the audit can fill, so a
+connect stays in flight until its SYN retry), and an HTTP control plane serving
+`/ctl/ping`, `/ctl/mux/conns`, `/ctl/mux/hanging`, `/ctl/solo/cancels`,
+`/ctl/solo/cancels/reset`, `/ctl/gate/close`, `/ctl/gate/open` and
+`/ctl/gate/requests`. It is a fixture rather than a server, so every hostile thing
+it does is scripted by the handshake token, the request key or a control-plane
+call the audit picked.
 
 ---
 
@@ -114,8 +121,8 @@ python3 endpoint_audit.py --ci                   # no colors, GitHub Actions gro
 ```
 
 The runner launches the mock, boots the app with `wfx run app --port 8080
---detach`, drives every vector through WFX, stops both, and prints a per-phase
-report.
+--detach`, drives every vector through WFX, leaves the `exit` checks' work in
+flight, stops both, and prints a per-phase report.
 
 ### Requirements
 
@@ -132,6 +139,7 @@ report.
 | `--control-port` | `8091` | Mock control plane, read by this suite only |
 | `--mux-port` | `8092` | Mock `mux` listener, must match `MUX_UPSTREAM` in `app/src/main.cpp` |
 | `--solo-port` | `8093` | Mock `solo` listener, must match `SOLO_UPSTREAM` in `app/src/main.cpp` |
+| `--gate-port` | `8094` | Mock `gate` listener, must match `GATE_UPSTREAM` in `app/src/main.cpp` |
 | `--wfx` | `wfx` | Path to the wfx binary |
 | `--app-dir` | `app` | App directory passed to `wfx run` |
 | `--ready-timeout` | `30` | Seconds to wait for `/health` |
@@ -140,20 +148,21 @@ report.
 | `--wfx-logs` | `important` | Stream WFX logs live: `off`, `crash`, `important`, `all` |
 | `--ci` | off | No colors, GitHub Actions `::group::` and `::error::` commands |
 
-> The two protocol ports are **compile-time baked** into the app (`#define
-> MUX_UPSTREAM "127.0.0.1:8092"` and `SOLO_UPSTREAM "127.0.0.1:8093"`). Passing a
-> different one on the command line without also editing those lines and
-> rebuilding leaves WFX unable to reach the mock. The runner warns about the
-> mismatch at startup, then its preflight call fails and names `MUX_UPSTREAM` as
-> the reason, so the run reports that once instead of every phase failing for it
-> separately.
+> The three mock ports are **compile-time baked** into the app (`#define
+> MUX_UPSTREAM "127.0.0.1:8092"`, `SOLO_UPSTREAM "127.0.0.1:8093"` and
+> `GATE_UPSTREAM "127.0.0.1:8094"`). Passing a different one on the command line
+> without also editing those lines and rebuilding leaves WFX unable to reach the
+> mock. The runner warns about any mismatch at startup. Only a `--mux-port`
+> mismatch is also caught by the preflight call, which names `MUX_UPSTREAM` so the
+> run reports it once; a wrong `--solo-port` or `--gate-port` shows up as failures
+> in the phases that use it.
 
 ### Exit codes
 
 | Code | Meaning |
 |------|---------|
 | `0` | All vectors passed |
-| `1` | Correctness failure, or the WFX worker died during the run |
+| `1` | A non-security check failed (a sanitizer report or a worker force-killed at shutdown included), the worker was not answering at the end of the run, or nothing was checked |
 | `2` | **Security** finding, listed under Phases below |
 | `3` | WFX never answered `/health`, so nothing was exercised |
 
@@ -173,14 +182,19 @@ script, and re-check it against the table whenever a phase is added or removed.
 | **solo_push** | `onPush` on an idle slot: an in-flight push is consumed by `parse` and never routed to `onPush`, a partial push parks instead of spinning, an undecodable one is rejected and recovered from, and a 2000-message flood drains incrementally rather than buffering |
 | **solo_streaming** | `Stream`/`StreamHandle`: both chunk families deliver identical bytes, an abandoned stream releases its slot, an empty stream terminates, four concurrent streams never cross-deliver, and peak memory tracks one chunk rather than the total across 200x more data |
 | **solo_upgrade** | In-band `UpgradeToTLS`: a refused upgrade fails closed instead of continuing in plaintext, a garbage ServerHello fails cleanly without hanging, and neither poisons the endpoint (the plaintext-discard half needs a real handshake, so it lives in `tls_audit`) |
-| **solo_abort** | `onAbort` graceful cancel: the cancel names the connection being aborted and leaves it open, an endpoint with no aux capacity fails gracefully, a leaked side connection is reclaimed by `connectTimeoutSeconds`, closing one three times never corrupts the aux pool, one endpoint's aux pool never blocks another's, and `onAbort` fires neither while `onConnect` is still running nor once a request is already streaming |
+| **solo_abort** | `onAbort` graceful cancel: the cancel names the connection being aborted and leaves it open, an endpoint with no aux capacity fails gracefully, a leaked side connection is reclaimed by `connectTimeoutSeconds`, closing one three times never corrupts the aux pool, one endpoint's aux pool never blocks another's, `onAbort` fires neither while the TCP connect or `onConnect` is still running nor once a request is already streaming, nothing of a request abandoned mid-connect reaches the backend, a 20-abort soak returns the in-use gauge to zero, and a silent backend still gets its cancel and is closed by `requestTimeoutSeconds` |
 | **metrics** | `/metrics` counters match what was driven: requests, completions, latency samples, bytes both ways, every failure landing in a bucket rather than being dropped, and the in-use slot gauge quiescent at rest and back to zero afterwards |
+| **exit** | Not a selectable phase: `before_stop` runs it right before the stop on every run. It leaves a coroutine suspended in each place only the worker's exit can reach (a slot inside `onConnect`, a handler awaiting its endpoint, an `onAbort` awaiting a side connection still connecting). The sanitizer scan after the stop proves exit destroyed them |
 
 A check that fails and is marked **security** forces exit code `2`. In this suite
 those are: one caller receiving another caller's response, a refused handshake
 still being served, a pinned connection shared with anyone else, an unsolicited
-push desyncing the framing, a failed TLS upgrade leaving the endpoint usable in
-plaintext, memory growing with the total response size rather than the chunk
-size, and `onAbort` firing where it must not. Read the assertions themselves in
-`endpoint_audit.py` (search for `def phase_<name>`) for the exact vectors. This
-table maps to the code, it does not replace reading it.
+push desyncing the framing or reaching `onPush`, a partial push spinning, the
+endpoint staying poisoned after a rejected push, an abandoned stream or a failed
+upgrade, a failed TLS upgrade leaving the endpoint usable in plaintext, memory
+growing with the total response size rather than the chunk size, `onAbort` firing
+where it must not, a cancel naming the wrong connection, an abandoned request or
+its answer reaching the backend or the next caller, a repeated `Close` crashing
+the worker, and one endpoint's aux slot blocking another's. Read the assertions
+themselves in `endpoint_audit.py` (search for `def phase_<name>`) for the exact
+vectors. This table maps to the code, it does not replace reading it.

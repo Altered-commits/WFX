@@ -40,7 +40,7 @@
 //   X-Fwd / X-Fwd2 / X-Fwd3   headers to forward upstream, "Name: Value"
 //   X-Want    upstream response header to echo back into "hdr"     (optional)
 //
-// The raw WFX::Endpoint<> primitive underneath both clients is audited separately,
+// The raw WFX::Endpoint<> primitive underneath all three clients is audited separately,
 // in tests/endpoint_audit.
 
 #include <wfx/http.hpp>
@@ -61,7 +61,7 @@
 
 // An endpoint bakes host:port into the instance, so the HTTP mock is pinned at
 // COMPILE time. The harness must launch http_upstream.py on this exact port; it is
-// mirrored in client_audit.py as HTTP_PORT.
+// mirrored as client_audit.py's --http-port default.
 #define UPSTREAM "127.0.0.1:8091"
 
 // The same mock behind TLS, recording the ALPN each client offers. Mirrored in
@@ -200,7 +200,8 @@ inline const auto EpTlsCustom = WFX::HttpEndpoint{UPSTREAM_TLS, WFX::HttpEndpoin
 //
 // Two budgets: SmtpCfg() gives 8s to personas that answer or refuse straight away,
 // and SmtpCfgFast() drops that to 5s, the engine's floor, for the ones that never
-// answer at all and can only be ended by the client's own timeout.
+// answer at all and can only be ended by the client's own timeout. silent_ehlo2
+// takes SmtpCfg(5, 30), so only its connect budget can end its post-STARTTLS hang.
 static WFX::SmtpEndpointConfig SmtpCfg(std::uint16_t connectTimeout = 8, std::uint16_t requestTimeout = 8) noexcept
 {
     return WFX::SmtpEndpointConfig{
@@ -255,6 +256,9 @@ inline const auto Smtp_huge_line_greeting = WFX::SmtpEndpoint{"127.0.0.1:8112", 
 inline const auto Smtp_huge_line_ehlo2    = WFX::SmtpEndpoint{"127.0.0.1:8113", SmtpCfgFast()};
 inline const auto Smtp_slow_trickle       = WFX::SmtpEndpoint{"127.0.0.1:8114", SmtpCfgFast()};
 inline const auto Smtp_silent_data        = WFX::SmtpEndpoint{"127.0.0.1:8115", SmtpCfgFast()};
+// Hangs right after the STARTTLS upgrade, still inside onConnect. The request budget outlasts
+// the audit's wait, so only connectTimeoutSeconds can end it in time
+inline const auto Smtp_silent_ehlo2       = WFX::SmtpEndpoint{"127.0.0.1:8123", SmtpCfg(5, 30)};
 
 // heloName itself carries a CRLF-injection attempt. Points at the 'good' mock port, but the
 // connection is never actually opened, SmtpOnConnect's HasInjectionBytes(opts->heloName) check
@@ -294,6 +298,7 @@ static const WFX::SmtpEndpoint* SmtpEndpointOf(std::string_view e) noexcept
     if(e == "huge_line_ehlo2")    return &Smtp_huge_line_ehlo2;
     if(e == "slow_trickle")       return &Smtp_slow_trickle;
     if(e == "silent_data")        return &Smtp_silent_data;
+    if(e == "silent_ehlo2")       return &Smtp_silent_ehlo2;
     if(e == "heloinject")         return &Smtp_heloinject;
     return &Smtp_good;
 }
@@ -301,10 +306,11 @@ static const WFX::SmtpEndpoint* SmtpEndpointOf(std::string_view e) noexcept
 // WFX::PostgresEndpoint instances
 //
 // One per postgres_upstream.py persona. Ports are compiled in here and mirrored in
-// client_audit.py's PG_PERSONAS table, keep the two in sync. None of these personas
-// needs a certificate: every SSL-verdict fault (garbage byte, plaintext splice,
-// plaintext-when-required) is refused by the client before a TLS handshake would
-// ever start, so postgres_upstream.py never wraps the socket for them.
+// client_audit.py's PG_PERSONAS table, keep the two in sync. Only the two alpn_*
+// personas complete a TLS handshake, on the good cert: every SSL-verdict fault
+// (garbage byte, plaintext splice, plaintext-when-required) is refused by the client
+// before a TLS handshake would ever start, so postgres_upstream.py never wraps the
+// socket for those.
 //
 // PgCfg's defaults match postgres_upstream.py's SCRAM_USER/SCRAM_PASSWORD and skip TLS
 // negotiation (PgEncryption::NONE) so most personas exercise only the StartupMessage

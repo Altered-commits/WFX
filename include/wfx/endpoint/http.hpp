@@ -16,7 +16,8 @@
 //   WFX::HttpEndpointResponseHeaders: dynamic response header list
 //   WFX::HttpEndpointConfig         : connection pool + protocol hardening knobs
 //
-// Speaks HTTP/1.1 only (no h2, no ALPN). Handles keep-alive,
+// Speaks HTTP/1.1 only (no h2), and offers "http/1.1" over ALPN on TLS
+// unless HttpEndpointConfig::alpn says otherwise. Handles keep-alive,
 // chunked-transfer-encoding, Content-Length and close-delimited bodies,
 // HEAD/204/304/1xx no-body responses, HTTP/1.0 default-close. Not
 // handled: CONNECT tunneling, protocol upgrades, trailer headers,

@@ -15,11 +15,15 @@
 // Provides:
 //   WFX::PostgresEndpoint       the endpoint, declared at namespace scope
 //   WFX::PostgresConfig         pool, identity and session settings
+//   WFX::PgSession              one pinned connection: transactions, savepoints
 //   WFX::PgResult / PgRow       result set and row cursors
+//   WFX::PgColumn               column metadata
+//   WFX::PgArrayView            decoded array, walked element by element
 //   WFX::PgError                SQLSTATE and the rest of the error fields
 //   WFX::PgNull                 binds SQL NULL
 //   WFX::PgBytes / PgUuid       bytea and uuid parameters
 //   WFX::PgTimestamp / PgDate / PgTime / PgInterval / PgNumeric
+//   WFX::PgEncryption / PgAuthPolicy / PgIsolation   config and transaction enums
 //
 // -----------------------------------------------------------------------
 // Usage

@@ -8,10 +8,11 @@ Everything is driven by explicit `co_await` suspension and resumption.
 !!! important
     All async functionality in WFX lives inside the `WFX::` namespace.
 
-    If you want to **directly use built-in async functions** such as `SleepFor`, you **must** include:
+    Built-in async functions such as `SleepFor` come from `<wfx/async.hpp>`, which
+    `<wfx/http.hpp>` already includes, so a handler file needs nothing extra:
 
     ```cpp
-    #include <wfx/async.hpp>
+    #include <wfx/http.hpp>
     ```
 ---
 
@@ -84,13 +85,13 @@ Suspends the current coroutine for `delayMs` milliseconds
 
 **Output**
 
-- Returns an `Async::Status` via `co_await`
+- Returns a `WFX::Shared::AsyncStatus` via `co_await`: `WFX::AsyncOk` once the delay has passed
 
 **Error handling**
 
 - If the timer cannot be scheduled:
-    - `Async::Status::TIMER_FAILURE` is returned
-    - The coroutine completes immediately
+    - `WFX::AsyncTimerFailure` is returned
+    - The coroutine does not suspend: `co_await` returns right away
 
 - The caller must check the returned status
 

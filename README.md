@@ -17,7 +17,7 @@ No logs, no confetti, just a binary sitting there opening its eyes for the first
 
 ## Architecture
 
-Everything runs on a single event loop (epoll / io_uring / IOCP).  
+Each worker process runs its own epoll event loop (Linux), all of them listening on one port.  
 Request flow:
 
 - socket read -> event loop
@@ -27,19 +27,24 @@ Request flow:
 
 ## Folder Structure
 
-**cli/** - command-line tools: build, new, dev, doctor  
+**cli/** - command-line tools: new, build, run, control, doctor  
+**cmake/** - build modules (OpenSSL, third-party dependencies)  
 **config/** - TOML loader  
+**docs/** - the documentation site's sources  
 **engine/** - runtime core, template execution  
 **http/** - routing, parser, serializer, response machinery, etc.  
-**os_specific/** - Linux and Windows platform code  
+**os_specific/** - Linux platform code (epoll)  
+**scripts/** - install, uninstall, format and tidy helpers  
 **shared/** - internal shared logic  
 **include/** - public headers for user extensions  
+**tests/** - the adversarial audit suites  
 **utils/** - logging, crypto, memory, file I/O, etc.  
 
 ## Getting Started
 
 > [!NOTE]
-> WFX requires a native build and is not distributed as a prebuilt binary.
+> Build from source with `scripts/install.sh`, or install a prebuilt Linux release with
+> `--prebuilt-interactive` / `--prebuilt-known`.
 
 All documentation is hosted and kept up to date here:
 

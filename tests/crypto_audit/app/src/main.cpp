@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 //
-// Every route exists to give crypto_audit.py a surface to check wfx/utils/crypto.hpp
-// against independently-computed (Python hashlib/hmac/AES-GCM) expected values.
+// Every route exists to give crypto_audit.py a surface to check wfx/utils/crypto.hpp, jwk.hpp,
+// jwt.hpp and encoding.hpp against independently-computed expected values: hashlib, hmac,
+// PBKDF2 and a hand-rolled HKDF, the cryptography package for asymmetric keys, JWK and JWT,
+// and Python's own codecs. AEAD and Argon2id have no oracle and are checked structurally.
 // Binary inputs travel as hex-encoded headers (key/nonce/aad/salt/ikm/info/password);
 // the primary data blob (hash/hmac input, AEAD plaintext/ciphertext) travels as the
 // raw POST body.
@@ -221,7 +223,7 @@ void RunHashStreamResponse(WFX::Response& res, std::uint32_t numChunks, std::uin
 
 } // namespace
 
-// Liveness probe: polled by crypto_audit.py's Server.wait_ready()/alive(), same as every
+// Liveness probe: polled by common.Server's wait_ready()/alive(), same as every
 // other audit app.
 WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 

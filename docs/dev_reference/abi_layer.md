@@ -21,7 +21,7 @@ These structs are grouped into six APIs:
 - **`AsyncAPIExt1`** -> async timer registration for coroutine-based handlers
 - **`MemoryAPIExt1`** -> `Alloc`, `Realloc`, `Free` backed by the engine's per-worker TLSF pool
 - **`UtilsAPIExt1`** -> logging and metrics
-- **`CryptoApiExt1`** -> hashing, HMAC, and asymmetric crypto primitives
+- **`CryptoApiExt1`** -> hashing, HMAC, AEAD, KDFs (PBKDF2, HKDF, Argon2id), random bytes, constant-time comparison, and asymmetric crypto primitives
 
 All six are bundled into a single **`MasterAPITable`**, which is one struct containing six function pointers, each returning a pointer to one of the six API structs above.
 
@@ -29,7 +29,7 @@ All six are bundled into a single **`MasterAPITable`**, which is one struct cont
 
 ## Injection flow
 
-When a worker loads the user library (`dlopen` on POSIX, `LoadLibrary` on Windows), it immediately calls `RegisterMasterAPI` which is the one exported symbol the user library must provide. The engine passes a pointer to its `MasterAPITable` into that function.
+When a worker loads the user library (`dlopen`), it immediately calls `RegisterMasterAPI` which is the one exported symbol the user library must provide. The engine passes a pointer to its `MasterAPITable` into that function.
 
 On the user side, `RegisterMasterAPI` stores the table pointer and calls any deferred initialization that was waiting for the API to be available. After this call returns, user code can call any engine function through the table.
 
@@ -63,7 +63,7 @@ These rules apply to every struct in `shared/abis/` and every API struct:
 - New fields are only ever appended at the end.
 - Every struct must be standard layout. The `static_assert` enforces this at compile time.
 - No STL types, no virtual functions, no templates cross the boundary.
-- Strings cross as `StringView` (a plain `data` pointer and a `size`), not `std::string` or `std::string_view`.
+- Strings cross as `StringView` (a plain `data` pointer and a `length`), not `std::string` or `std::string_view`.
 - Pointers to engine-internal types cross as `void*` and are cast on the engine side.
 
 The `Ext1` suffix stands for extension, not version. `HttpAPIExt1` is the first extension of the HTTP API. If new functionality is needed that cannot fit into an existing struct without breaking layout, a new `HttpAPIExt2` is added alongside it. `Ext1` is not replaced or copied into `Ext2`. Both exist independently and both remain in use. Individual functions or fields that become obsolete are marked with `[[deprecated]]` but never removed.
@@ -76,7 +76,7 @@ This is how backward compatibility is maintained. A user binary compiled against
 
 ```
 shared/abis/          ABI-stable types used by both engine and user code
-shared/apis/          The four API structs and their getter functions
+shared/apis/          The six API structs, MasterAPITable, and their getter functions
 include/core/core.hpp User-side table storage and accessor helpers
 ```
 

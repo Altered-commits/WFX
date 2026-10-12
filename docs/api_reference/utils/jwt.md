@@ -65,6 +65,8 @@ Verifies `parts.signingInput` against `parts.signature` using `key`, dispatching
 - **`CryptoOk`**: the signature is valid.
 - **`CryptoAuthFailed`**: `parts.alg` was recognized but the signature didn't verify under `key`.
 - **`CryptoUnsupported`**: `parts.alg` wasn't one of `RS256`/`RS384`/`RS512`/`PS256`/`PS384`/`PS512`/`ES256`/`ES384`/`EdDSA`. `key` is never touched in this case, an unrecognized `alg` (including `"none"` or `"HS256"`) is rejected before any crypto operation runs, not by chance.
+- **`CryptoInvalidArg`**: `key` doesn't match `parts.alg`, the signature is empty, or an `ES256`/`ES384` signature has the wrong length.
+- **`CryptoInternalError`**: the crypto library itself failed.
 
 !!! important "Every alg your issuer might use has to be checked for explicitly"
     `VerifyJwtSignature` only accepts the exact `alg` values listed above. If a token's issuer signs with something else, it fails closed with `CryptoUnsupported`, it will never fall back to a different scheme or guess based on the key type.

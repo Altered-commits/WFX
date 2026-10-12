@@ -236,7 +236,7 @@ min_proto_version           = 3               # Minimum TLS protocol version (1-
 security_level              = 2               # SSL security level (0-5)
 
 [Linux]
-worker_processes        = 2      # Max simultaneous worker connections
+worker_processes        = 2      # Number of worker processes to fork
 worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
 backlog                 = 1024   # Max pending connections in OS listen queue
 
