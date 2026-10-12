@@ -437,10 +437,10 @@ default), `REPEATABLE_READ`, or `SERIALIZABLE`. Pass it as the one argument,
     server-side backstop if you want one, not a substitute for finishing your
     own transactions.
 
-The pool stays correct either way: the next request to land on that
-connection sends a `ROLLBACK` ahead of its own statement before doing
-anything else, so an abandoned transaction doesn't leak into someone else's
-query. This happens automatically.
+The pool stays correct either way: whatever lands on that connection next,
+a pooled query or another session, sends a `ROLLBACK` ahead of its own
+statement, so an abandoned transaction never leaks into someone else's work
+and another session's `Commit()` never commits it. This happens automatically.
 
 ### Savepoints
 

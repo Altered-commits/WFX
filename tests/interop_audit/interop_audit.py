@@ -274,6 +274,14 @@ def phase_postgres(ctx):
         r = _json(cfg, "POST", "/pg/tx", {"X-Isolation": iso}, marker.encode())
         p.check("isolation level accepted: %s" % iso, r and r.get("begin_ep") == EP_SUCCESS, "got %r" % r)
 
+    marker = "abandon-%d" % time.time_ns()
+    r = _json(cfg, "POST", "/pg/tx/abandon", body=marker.encode())
+    p.check("abandoned tx: the next session runs on the same connection", r and r.get("same_conn") is True,
+           "got %r" % r)
+    p.check("abandoned tx: that session's commit does not commit the abandoned insert",
+           r and r.get("commit_ep") == EP_SUCCESS and r.get("rows") == 1 and r.get("first_val") == marker + "-kept",
+           "got %r" % r)
+
     marker = "sp-%d" % time.time_ns()
     r = _json(cfg, "POST", "/pg/savepoint", body=marker.encode())
     p.check("savepoint: begin/savepoint/rollback-to/commit",

@@ -103,6 +103,10 @@ struct SlotState {
     // any other connection
     PgStatementCache stmtCache;
 
+    // The session whose request last ran here, 0 after a pooled one. A transaction still open on
+    // the connection is only that session's to keep
+    std::uint64_t session = 0;
+
     // From BackendKeyData, the pair a CancelRequest has to quote
     std::int32_t backendPid = 0;
     std::int32_t secretKey = 0;
