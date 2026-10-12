@@ -103,7 +103,6 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Misc", "cache_chunk_size", miscConfig.cacheChunkSize);
         ExtractValue(tbl, "Misc", "template_chunk_size", miscConfig.templateChunkSize);
         ExtractValue(tbl, "Misc", "master_poll_interval", miscConfig.masterPollInterval);
-        ExtractValue(tbl, "Misc", "max_worker_restarts", miscConfig.maxWorkerRestarts);
         ExtractValue(tbl, "Misc", "worker_backoff_base", miscConfig.workerBackoffBase);
         ExtractValue(tbl, "Misc", "worker_backoff_max", miscConfig.workerBackoffMax);
 

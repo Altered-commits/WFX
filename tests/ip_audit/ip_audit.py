@@ -67,47 +67,6 @@ def _build(method, path, headers=None, close=True):
         lines.append("%s: %s" % (k, v))
     return ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1")
 
-def _read_http_response(sock, buf, rtimeout=4.0):
-    """Reads exactly one CL-framed response off 'sock'. Returns (status, leftover-buf),
-    or (None, buf) on a closed/dead socket - the caller decides what that means."""
-    sock.settimeout(rtimeout)
-
-    while b"\r\n\r\n" not in buf:
-        try:
-            d = sock.recv(65536)
-        except OSError:
-            return None, buf
-        if not d:
-            return None, buf
-        buf += d
-
-    head, _, rest = buf.partition(b"\r\n\r\n")
-    lines = head.split(b"\r\n")
-    try:
-        status = int(lines[0].split(b" ")[1])
-    except (IndexError, ValueError):
-        return None, rest
-
-    clen = 0
-    for line in lines[1:]:
-        if line.lower().startswith(b"content-length:"):
-            try:
-                clen = int(line.split(b":", 1)[1].strip())
-            except ValueError:
-                clen = 0
-            break
-
-    while len(rest) < clen:
-        try:
-            d = sock.recv(65536)
-        except OSError:
-            break
-        if not d:
-            break
-        rest += d
-
-    return status, rest[clen:]
-
 def _send_from(host, port, source_ip, method, path, headers=None, rtimeout=4.0):
     """One-shot Connection: close request from a bound source address - the only way to
     make WFX see a different peer IP without root (any 127.0.0.0/8 address is a distinct,
@@ -119,7 +78,7 @@ def _send_from(host, port, source_ip, method, path, headers=None, rtimeout=4.0):
         sock.settimeout(rtimeout)
         sock.connect((host, port))
         sock.sendall(_build(method, path, headers, close=True))
-        status, _ = _read_http_response(sock, b"", rtimeout)
+        status, _, _ = net.read_response(sock, b"", rtimeout)
         return status if status is not None else "CONN_ERR"
     except OSError:
         return "CONN_ERR"
@@ -140,7 +99,7 @@ def _open_held(host, port, source_ip, path="/health", headers=None, rtimeout=4.0
         sock.settimeout(rtimeout)
         sock.connect((host, port))
         sock.sendall(_build("GET", path, headers, close=False))
-        status, buf = _read_http_response(sock, b"", rtimeout)
+        status, _, buf = net.read_response(sock, b"", rtimeout)
         return status, sock, buf
     except OSError:
         try:
@@ -156,7 +115,8 @@ def _send_on(sock, buf, path="/health", headers=None, close=False, rtimeout=4.0)
         sock.sendall(_build("GET", path, headers, close=close))
     except OSError:
         return None, buf
-    return _read_http_response(sock, buf, rtimeout)
+    status, _, buf = net.read_response(sock, buf, rtimeout)
+    return status, buf
 
 def _open_held_v6(port, path="/health", headers=None, rtimeout=4.0):
     """Like _open_held(), but a genuine (non-mapped) native IPv6 loopback connection. ::1 is
@@ -168,7 +128,7 @@ def _open_held_v6(port, path="/health", headers=None, rtimeout=4.0):
         sock.settimeout(rtimeout)
         sock.connect(("::1", port))
         sock.sendall(_build("GET", path, headers, close=False))
-        status, buf = _read_http_response(sock, b"", rtimeout)
+        status, _, buf = net.read_response(sock, b"", rtimeout)
         return status, sock, buf
     except OSError:
         try:

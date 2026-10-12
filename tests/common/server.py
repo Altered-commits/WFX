@@ -131,6 +131,7 @@ class Server:
     def stop(self, confirm_exit=False):
         if not self._started:
             return
+        self._started = False
 
         term.log("server", "stopping %s ..." % self.app)
         result = subprocess.run([self.cfg.wfx, "control", "stop", self.app], cwd=self.cwd,

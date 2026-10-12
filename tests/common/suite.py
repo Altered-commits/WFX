@@ -165,12 +165,22 @@ class Suite:
             if self.before_phases(ctx) is not False:
                 self._run_phases(ctx)
 
+            # Liveness is read while the server still runs, then it is stopped before the scan:
+            # LeakSanitizer only writes its report when a worker exits
+            alive = server.alive()
+            server.stop(confirm_exit=self.confirm_exit)
+
             # A sanitizer report on disk is a memory-safety failure the phases' own checks
             # can miss entirely (a UAF that kills then revives a worker leaves /health
-            # answering). Fold it into the report before rendering so it fails the run
+            # answering, a leak only shows at exit). Fold it in before rendering so it fails the run
             self._check_sanitizer_reports(ctx)
 
-            return report.render(alive=server.alive())
+            # Every worker has to stop on the master's SIGTERM. One the master force-killed instead
+            # would cut off in-flight requests on every deploy, and no phase check sees it
+            for line in logs.forced_worker_kills(cfg.app_dir):
+                report.phase("shutdown").failed("worker ignored SIGTERM and was force-killed", line)
+
+            return report.render(alive=alive)
         finally:
             follower.stop()
             server.stop(confirm_exit=self.confirm_exit)

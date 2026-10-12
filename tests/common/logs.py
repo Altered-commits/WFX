@@ -104,6 +104,16 @@ def scan_crash_reports(app_dir):
 
     return out
 
+def forced_worker_kills(app_dir):
+    """master.log lines where a worker ignored SIGTERM at shutdown and the master had to SIGKILL it.
+    The master opens master.log fresh on every boot (CircularFileSink::OpenFresh), so it only ever
+    holds this run."""
+    try:
+        with open(os.path.join(app_dir, "logs", "default_logs", "master.log"), "r", errors="replace") as handle:
+            return [line.strip() for line in handle if "did not exit in time" in line]
+    except OSError:
+        return []
+
 class LogFollower(threading.Thread):
     """Tails the app's log directories and prints new lines as they appear, like `tail -F`."""
 

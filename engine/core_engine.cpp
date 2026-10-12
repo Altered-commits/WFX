@@ -313,14 +313,19 @@ void CoreEngine::HandleSuccess(ClientCtx* ctx)
         // And also erase it after callback is done, if the callback hasn't finished, the
         // scheduler will set the ptr later on when needed, no need to keep a dangling pointer.
         httpApi->setGlobalPtrData(static_cast<void*>(ctx));
+        ctx->SetAsyncCallState(AsyncCallState::INLINE_RUNNING);
 
         node->callback.async(userReq, userRes, CoreEngine::OnCoroutineComplete, ctx);
 
+        const bool doneInline = ctx->GetAsyncCallState() == AsyncCallState::INLINE_DONE;
+        ctx->SetAsyncCallState(doneInline ? AsyncCallState::IDLE : AsyncCallState::SUSPENDED);
         httpApi->setGlobalPtrData(nullptr);
 
-        // If the coroutine already completed synchronously ('final_suspend' already fired the callback),
-        // the response is already handled.
-        // If still suspended, it will fire later. Either way, we are done here.
+        // Finished without suspending, respond now the same way a sync route does
+        if(doneInline)
+            goto __HandleResponse;
+
+        // Still suspended, 'OnCoroutineComplete' responds when it resumes
         FinishRequest(ctx);
         return;
     }
@@ -335,6 +340,22 @@ void CoreEngine::OnCoroutineComplete(void* ud, AsyncResult result)
 {
     auto* ctx = static_cast<ClientCtx*>(ud);
     auto* engine = GetMasterState().enginePtr;
+
+    // Completed before the call that started it returned. Re-entering 'HandleSuccess' from here would
+    // run the chain again under that caller's frame, so record the outcome and let the caller go on.
+    if(ctx->GetAsyncCallState() == AsyncCallState::INLINE_RUNNING) {
+        ctx->SetAsyncCallState(AsyncCallState::INLINE_DONE);
+
+        if(result.status != AsyncStatus::COMPLETED) {
+            ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
+            engine->HandleError(ctx, HttpStatus::INTERNAL_SERVER_ERROR, "Inline Async Failure");
+            *ctx->trackAsync.GetMAction() = MiddlewareAction::BREAK;
+        }
+        else
+            *ctx->trackAsync.GetMAction() = result.action;
+
+        return;
+    }
 
     if(result.status != AsyncStatus::COMPLETED) {
         ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);

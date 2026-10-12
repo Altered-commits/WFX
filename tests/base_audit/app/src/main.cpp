@@ -359,6 +359,26 @@ WFX_GET_EX("/mw/skipnext",
                        }),
            [](WFX::Request, WFX::Response res) { res.Status(200).SendText("handler-ran"); })
 
+// Async middleware that finishes without ever suspending, the way an auth check deciding on what
+// the request already carries would. Its coroutine completes inside the call that starts it.
+WFX_GET_EX("/mw/async-inline", WFX_MW_LIST([](WFX::Request, WFX::Response res) -> WFX::MwCoro {
+               res.Header("X-Async-MW", "hit");
+               co_return WFX::MwContinue;
+           }),
+           [](WFX::Request, WFX::Response res) { res.Header("Content-Type", "text/plain").Write("async-mw-ok").Commit(); })
+
+// Same, but it rejects: sends 403 and breaks the chain before the handler
+WFX_GET_EX("/mw/async-inline-break", WFX_MW_LIST([](WFX::Request, WFX::Response res) -> WFX::MwCoro {
+               res.Status(403).SendText("async-blocked");
+               co_return WFX::MwBreak;
+           }),
+           [](WFX::Request, WFX::Response res) { res.Status(200).SendText("unreachable"); })
+
+// Async route that responds and returns without awaiting anything
+WFX_GET("/async/inline", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    res.Status(200).SendText("inline");
+    co_return;
+})
 
 // Async handler that exercises the coroutine + timer path under load
 WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
@@ -371,6 +391,41 @@ WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     co_return;
 })
 
+// Async handler that stays suspended long enough for a client to send its next request on the
+// same connection before this one is answered
+WFX_GET("/async/slow", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    auto s = co_await WFX::SleepFor(1000); // 1 s
+    if(s != WFX::AsyncOk) {
+        res.Status(500).SendText("timer failed");
+        co_return;
+    }
+    res.Status(200).SendText("slow-done");
+    co_return;
+})
+
+// Async middleware that stays suspended the same way, in front of a sync route
+WFX_GET_EX("/mw/async-slow", WFX_MW_LIST([](WFX::Request, WFX::Response res) -> WFX::MwCoro {
+               auto s = co_await WFX::SleepFor(1000); // 1 s
+               if(s != WFX::AsyncOk) {
+                   res.Status(500).SendText("timer failed");
+                   co_return WFX::MwBreak;
+               }
+               co_return WFX::MwContinue;
+           }),
+           [](WFX::Request, WFX::Response res) { res.Status(200).SendText("mw-slow-done"); })
+
+// A helper coroutine the route below awaits, so a suspended request is a two-frame chain: a client
+// that leaves mid-sleep has the engine kill the route's frame and this one together
+static WFX::Coro NestedSleep()
+{
+    co_await WFX::SleepFor(1000); // 1 s
+}
+
+WFX_GET("/async/nested-slow", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    co_await NestedSleep();
+    res.Status(200).SendText("nested-done");
+    co_return;
+})
 
 // JSON routes
 // Immediate-mode JSON (zero-heap streaming into response buffer)
@@ -393,6 +448,43 @@ WFX_GET("/json/rm", [](WFX::Request, WFX::Response res) {
     o["value"] = (std::uint64_t)5678;
     o["meta"]["version"] = (std::uint64_t)1;
     o["meta"]["ok"] = true;
+    o.Write(res);
+})
+
+// RmJson Merge and Set(key, JsonRef) taking values from another object. The source is destroyed
+// before the target is written, so anything the target still shares with it shows up as freed
+// memory or as the wrong bytes
+WFX_GET("/json/merge", [](WFX::Request, WFX::Response res) {
+    auto dst = WFX::RmJson();
+    dst["keep"] = (std::uint64_t)1;
+    {
+        auto src = WFX::RmJson();
+        src["name"] = std::string_view{"src-owned"};
+        src["nested"]["inner"] = std::string_view{"deep"};
+        src["list"].PushBack((std::uint64_t)7);
+        src["list"].PushBack(std::string_view{"eight"});
+
+        dst.Merge(src);
+        dst["root"].Set("alias", src["nested"]);
+    }
+
+    res.Status(200);
+    dst.Write(res);
+})
+
+// RmJson scalars assigned over an existing object or array. Each container's buffer has to be
+// freed rather than lost with the pointer to it, which the exit-time leak scan would catch
+WFX_GET("/json/overwrite", [](WFX::Request, WFX::Response res) {
+    auto o = WFX::RmJson();
+    o["num"]["a"] = (std::uint64_t)1;
+    o["str"].PushBack((std::uint64_t)2);
+    o["nil"]["b"]["c"] = true;
+
+    o["num"] = (std::uint64_t)5;
+    o["str"] = std::string_view{"text"};
+    o["nil"] = nullptr;
+
+    res.Status(200);
     o.Write(res);
 })
 

@@ -153,6 +153,11 @@ bool RandomPool::GetBytes(std::uint8_t* out, std::size_t len)
     return true;
 }
 
+bool RandomPool::Reseed()
+{
+    return RefillBytes();
+}
+
 // Main shit
 bool RandomPool::RefillBytes()
 {

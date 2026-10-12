@@ -133,6 +133,7 @@ void ClientCtx::Clear()
         responseInfo->Reset();
 
     CleanupStreamGenerator();
+    SetAsyncCallState(AsyncCallState::IDLE);
 
     isFileOperation = 0;
     isStreamOperation = 0;
@@ -166,6 +167,11 @@ void ClientCtx::SetConnectionState(ConnectionState newState)
     connectionState = static_cast<std::uint16_t>(newState);
 }
 
+void ClientCtx::SetAsyncCallState(AsyncCallState newState)
+{
+    asyncCallState = static_cast<std::uint16_t>(newState);
+}
+
 HttpParseState ClientCtx::GetParseState() const
 {
     return static_cast<HttpParseState>(parseState);
@@ -174,6 +180,11 @@ HttpParseState ClientCtx::GetParseState() const
 ConnectionState ClientCtx::GetConnectionState() const
 {
     return static_cast<ConnectionState>(connectionState);
+}
+
+AsyncCallState ClientCtx::GetAsyncCallState() const
+{
+    return static_cast<AsyncCallState>(asyncCallState);
 }
 
 bool ClientCtx::IsAsyncOperation() const

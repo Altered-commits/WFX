@@ -80,7 +80,8 @@ template <typename Ctx> bool EpollConnectionHandler::RegisterEpoll(Ctx* ctx, int
     epoll_event* evPtr = nullptr;
 
     if(op != EPOLL_CTL_DEL) {
-        ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
+        // RDHUP reports a peer FIN without a read, which a client suspended in async never gets
+        ev.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLET;
         ev.data.u64 = PackEpollData(ctx);
         evPtr = &ev;
     }
@@ -288,6 +289,13 @@ EpollConnectionHandler::~EpollConnectionHandler()
         for(std::uint32_t i = 0; i < entry.pool.GetSlots(); i++) {
             EndpointCtx* ctx = entry.pool.GetPtr(i);
             ctx->rwBuffer.ResetBuffer();
+
+            // A pooled TLS connection still open at exit holds a reference on the client SSL_CTX,
+            // which would otherwise never drop to zero
+            if(ctx->sslConn && sslHandler_) {
+                sslHandler_->ForceShutdown(ctx->sslConn);
+                ctx->sslConn = nullptr;
+            }
             if(ctx->parseStateObj && desc.destroyParseState) {
                 desc.destroyParseState(ctx->parseStateObj);
                 ctx->parseStateObj = nullptr;
@@ -295,6 +303,14 @@ EpollConnectionHandler::~EpollConnectionHandler()
             if(ctx->outputObj && desc.destroyOutput) {
                 desc.destroyOutput(ctx->outputObj);
                 ctx->outputObj = nullptr;
+            }
+            if(ctx->pendingStreams) {
+                for(auto& [key, stream] : *ctx->pendingStreams)
+                    if(stream.parseState && desc.destroyParseState)
+                        desc.destroyParseState(stream.parseState);
+
+                Shared::Delete(ctx->pendingStreams);
+                ctx->pendingStreams = nullptr;
             }
             if(ctx->slotState && desc.destroySlotState) {
                 desc.destroySlotState(ctx->slotState);
@@ -1833,20 +1849,22 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
                     desc.destroyOutput(abandoned);
             }
         }
-        // Non-multiplexed: let onAbort try a graceful cancel if the protocol defines one, the
-        // request isn't already streaming (DeliverStreamChunk isn't taught to tolerate an
-        // orphaned-by-abort stream yet, a separate change), and onConnect isn't still running
-        // on this same ctx. inOnConnectPhase matters: onConnect's coroutine may be suspended
-        // mid-Send/Receive/UpgradeToTLS, owning slotCtx->asyncData for its own resume. FireOnAbort
-        // unconditionally overwrites that same field, so firing it here would strand the
-        // onConnect coroutine forever (its completion never arrives) while a second coroutine
-        // starts on the same slot. Nothing meaningful is lost falling back to force-close: no
-        // request has reached the backend yet at this point anyway.
+        // Non-multiplexed, or a multiplexed request still parked before serialize (streamKey 0).
+        // onAbort tries a graceful cancel only for a request that actually reached the backend
+        // and isn't streaming (DeliverStreamChunk can't take an orphaned-by-abort stream yet).
+        // Otherwise force-close, which loses nothing since the backend never saw the request:
+        //  - pendingConnectReq: still parked for the connect/onConnect, and it points into the
+        //    coroutine frame destroyed above, so it is dropped here before anything flushes it
+        //  - inOnConnectPhase: onConnect's coroutine owns slotCtx->asyncData mid-await, and
+        //    FireOnAbort would overwrite it, stranding that coroutine forever
         else {
             epCtx->clientCtx = nullptr;
 
+            const bool parked = epCtx->pendingConnectReq != nullptr;
+            epCtx->pendingConnectReq = nullptr;
+
             auto& epEntry = endpoints_[epCtx->endpointIdx];
-            if(epEntry.meta.desc.onAbort && !epCtx->isStreaming && !epCtx->inOnConnectPhase) {
+            if(epEntry.meta.desc.onAbort && !parked && !epCtx->isStreaming && !epCtx->inOnConnectPhase) {
                 epCtx->isAborted = 1;
                 FireOnAbort(epCtx, epEntry);
             }
@@ -2371,10 +2389,9 @@ void EpollConnectionHandler::ResumeStream(ClientCtx* ctx)
             return;
         }
 
-        if(isTerminal)
-            ctx->SetConnectionState(result.action == StreamAction::STOP_AND_ALIVE_CONN
-                                        ? ConnectionState::CONNECTION_ALIVE
-                                        : ConnectionState::CONNECTION_CLOSE);
+        // The generator may end the connection early, never revive one the client asked to close
+        if(isTerminal && result.action == StreamAction::STOP_AND_CLOSE_CONN)
+            ctx->SetConnectionState(ConnectionState::CONNECTION_CLOSE);
 
         if(result.writtenBytes > 0) {
             // Non-chunked: raw bytes go out as-is. Chunked: wrap them in "<size-hex>\r\n<data>\r\n"
@@ -2631,7 +2648,7 @@ void EpollConnectionHandler::HandleClientHandshake(ClientCtx* ctx, std::uint32_t
 
     // Handshake done, if data already arrived, process it immediately
     if(ev & EPOLLIN)
-        HandleClientEpollIn(ctx);
+        HandleClientEpollIn(ctx, ev);
 }
 
 void EpollConnectionHandler::HandleEndpointHandshake(EndpointCtx* ctx)
@@ -2738,7 +2755,7 @@ void EpollConnectionHandler::HandleClientEvent(ClientCtx* ctx, std::uint32_t ev,
     }
 
     if(ev & EPOLLIN)
-        HandleClientEpollIn(ctx);
+        HandleClientEpollIn(ctx, ev);
 
     // Re-check: HandleClientEpollIn may have closed this slot
     if((ev & EPOLLOUT) && ctx->generationId == gen)
@@ -2800,12 +2817,22 @@ void EpollConnectionHandler::HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t
 }
 
 // Single EPOLLIN dispatch point for clients, routes by eventType
-void EpollConnectionHandler::HandleClientEpollIn(ClientCtx* ctx)
+void EpollConnectionHandler::HandleClientEpollIn(ClientCtx* ctx, std::uint32_t ev)
 {
     WFX_TRACE();
 
     switch(ctx->eventType) {
         case EventType::EVENT_RECV:
+            // A suspended async handler still owns this client's request and response. Pipelining
+            // isn't supported, so nothing the client sends is read, but its FIN still aborts the
+            // request the way the read hitting EOF used to.
+            if(ctx->GetAsyncCallState() == AsyncCallState::SUSPENDED) {
+                if(ev & EPOLLRDHUP)
+                    Close(ctx);
+
+                return;
+            }
+
             // Read whatever is currently available on the socket
             if(Receive(ctx))
                 onReceive_(ctx);

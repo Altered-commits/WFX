@@ -79,6 +79,14 @@ void* BufferPool::Alloc(std::size_t size)
     if(size == 0)
         return nullptr;
 
+#ifdef WFX_ASAN_BUILD
+    // ASan only tracks malloc/free. TLSF recycles freed blocks inside its own segments, so a
+    // read through a dangling pointer would find stale bytes and never be reported. Alloc,
+    // Realloc and Free all switch together, so every block is freed by what allocated it.
+    ++stats_.totalAllocations;
+    return std::malloc(size);
+#endif
+
     void* ptr = AllocateFromShard(size);
 
     if(ptr)
@@ -99,6 +107,11 @@ void* BufferPool::Realloc(void* rawBlock, std::size_t newSize)
         Free(rawBlock);
         return nullptr;
     }
+
+#ifdef WFX_ASAN_BUILD
+    ++stats_.totalReallocs;
+    return std::realloc(rawBlock, newSize);
+#endif
 
     const std::size_t oldSize = tlsf_block_size(rawBlock);
 
@@ -131,6 +144,12 @@ void BufferPool::Free(void* rawBlock)
 {
     if(!rawBlock)
         return;
+
+#ifdef WFX_ASAN_BUILD
+    ++stats_.totalFrees;
+    std::free(rawBlock);
+    return;
+#endif
 
     tlsf_free(shard_.tlsfAllocator, rawBlock);
     ++stats_.totalFrees;

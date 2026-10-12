@@ -27,6 +27,7 @@ import hashlib
 import hmac
 import json
 import os
+import signal
 import sys
 import time
 
@@ -90,6 +91,23 @@ def kdf_call(cfg, path, headers):
 
 def hex_of(b):
     return b.hex() if isinstance(b, (bytes, bytearray)) else b
+
+# Worker PIDs are the master's children, read off /proc like base_audit does
+def _workers(mpid):
+    out = []
+    for e in os.listdir("/proc"):
+        if not e.isdigit():
+            continue
+        try:
+            with open("/proc/%s/status" % e) as f:
+                for line in f:
+                    if line.startswith("PPid:"):
+                        if int(line.split()[1]) == mpid:
+                            out.append(int(e))
+                        break
+        except (OSError, ValueError):
+            pass
+    return out
 
 # RFC 5869 HKDF-SHA256, hand-rolled oracle (Python stdlib has no HKDF)
 def hkdf_sha256(ikm, salt, info, length):
@@ -318,6 +336,27 @@ def phase_misc(ctx):
           bool(r1) and bool(r2) and r1.get("hex") != r2.get("hex"), "r1=%r r2=%r" % (r1, r2))
     p.check("random bytes not all-zero",
           bool(r1) and r1.get("hex") != "00" * 64, "got %r" % r1)
+
+    # Every worker is forked from the master's random pool, so two respawned workers drawing at the
+    # same offset hand out the same bytes unless each reseeds after fork
+    first = []
+    for _ in range(2):
+        mpid = ctx.server.pid()
+        workers = _workers(mpid) if mpid else []
+        if not workers:
+            break
+
+        for w in workers:
+            os.kill(w, signal.SIGKILL)
+
+        if ctx.server.await_revival() is None:
+            break
+
+        r = kdf_call(cfg, "/crypto/random", {"X-Len": "32"})
+        first.append(r.get("hex") if r else None)
+
+    p.check("random bytes differ across respawned workers",
+          len(first) == 2 and None not in first and first[0] != first[1], "got %r" % first)
 
     a = os.urandom(32)
     r = kdf_call(cfg, "/crypto/consttime", {"X-A": a.hex(), "X-B": a.hex()})
@@ -941,8 +980,9 @@ def phase_encoding(ctx):
     # "====" is not on this list - an all-padding string legitimately decodes to empty bytes
     # (confirmed against Python's own base64.b64decode, not a WFX-specific leniency). '=' in a
     # non-trailing position is the genuinely invalid shape: only a *trailing* run of '=' is
-    # stripped as padding, so an embedded one is just an unrecognized character
-    for bad in ("!!!!", "abc def", "a\x00bc=", "AB=A"):
+    # stripped as padding, so an embedded one is just an unrecognized character. The bytes
+    # vector covers both ends of 0xF0-0xFF, the top of the decoders' shared char table
+    for bad in ("!!!!", "abc def", "a\x00bc=", "AB=A", b"\xf0\xff\xf0\xff"):
         rd = b64_decode(bad)
         p.check("base64 decode rejects invalid input: %r" % bad, bool(rd) and rd.get("ok") is False,
               "got %r" % rd)
@@ -973,7 +1013,7 @@ def phase_encoding(ctx):
         p.check("hex decode round-trip (upper) len=%d" % n,
               bool(r) and r.get("ok") and r.get("hex") == data.hex(), "got %r" % r)
 
-    for bad in ("0", "zz", "gg", "12345", "  "):
+    for bad in ("0", "zz", "gg", "12345", "  ", b"\xf0\xff"):
         r = hex_decode(bad)
         p.check("hex decode rejects invalid input: %r" % bad, bool(r) and r.get("ok") is False, "got %r" % r)
 
@@ -990,7 +1030,7 @@ def phase_encoding(ctx):
     p.check("url decode '+' tolerated as space",
           bool(r) and r.get("ok") and bytes.fromhex(r.get("hex", "")) == b"a b", "got %r" % r)
 
-    for bad in ("%", "%4", "%zz", "100%"):
+    for bad in ("%", "%4", "%zz", "100%", b"%\xf0\xff"):
         r = url_decode(bad)
         p.check("url decode rejects truncated/invalid escape: %r" % bad,
               bool(r) and r.get("ok") is False, "got %r" % r)

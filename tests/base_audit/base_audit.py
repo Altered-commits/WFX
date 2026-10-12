@@ -651,6 +651,11 @@ ROUTE_CHECKS = [
     ("GET",  "/ctx",              None, b"", 200, b"42", None),
     # Async handler
     ("GET",  "/async/sleep",      None, b"", 200, b"slept", None),
+    ("GET",  "/async/nested-slow", None, b"", 200, b"nested-done", None),
+    # Async middleware and route that complete without ever suspending
+    ("GET",  "/mw/async-inline",  None, b"", 200, b"async-mw-ok", ("X-Async-MW", b"hit")),
+    ("GET",  "/mw/async-inline-break", None, b"", 403, b"async-blocked", None),
+    ("GET",  "/async/inline",     None, b"", 200, b"inline", None),
     # JSON: immediate mode
     ("GET",  "/json/im",          None, b"", 200, b'"immediate"', None),
     ("GET",  "/json/im",          None, b"", 200, b'"meta"', None),
@@ -668,6 +673,12 @@ ROUTE_CHECKS = [
              b'{"broken":', 400, None, None),
     ("POST", "/parse-json",       {"Content-Type": "application/json"},
              b"",            400, None, None),
+    # JSON: duplicate keys are rejected. A repeated container key would leak the first one's
+    # buffer, and a repeated scalar reads differently to parsers that keep the first value
+    ("POST", "/parse-json",       {"Content-Type": "application/json"},
+             b'{"name":"wfx","meta":{"a":1},"meta":{"b":2},"version":7}', 400, None, None),
+    ("POST", "/parse-json",       {"Content-Type": "application/json"},
+             b'{"name":"a","name":"b","version":7}', 400, None, None),
     # Chained headers
     ("GET",  "/chain",            None, b"", 200, b"chain", None),
     # Templates: static
@@ -1036,6 +1047,79 @@ def phase_features(ctx):
                 else:
                     pr.ok()
 
+        # Pipelining isn't supported: a request sent while the previous one on the same connection is
+        # still suspended is never answered, and the suspended one comes back intact. One path
+        # suspends in the route, the other in middleware.
+        with term.progress("features", "async:next-request-while-suspended") as pr:
+            for path, want in [(b"/async/slow", b"slow-done"), (b"/mw/async-slow", b"mw-slow-done")]:
+                try:
+                    sock = socket.create_connection((host, port), timeout=5.0)
+                    try:
+                        sock.sendall(b"GET " + path + b" HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n")
+                        time.sleep(0.2)  # the first request is now suspended in its 1 s sleep
+                        sock.sendall(b"GET /text HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n")
+
+                        st1, b1, buf = net.read_response(sock, b"", 5.0)
+                        st2, _, _ = net.read_response(sock, buf, 1.0)
+                        got = (st1, b1, st2)
+                    finally:
+                        sock.close()
+                except OSError as e:
+                    got = ("connect/send failed", str(e))
+
+                expected = (200, want, None)
+                if got == expected:
+                    pr.ok()
+                else:
+                    pr.bad()
+                    findings.append(("ASYNC_INTERLEAVE", "%s then /text on one connection: got %r, expected %r"
+                                     % (path.decode(), got, expected)))
+
+        # A client that leaves mid-sleep makes the engine kill the whole suspended chain, the route's
+        # frame and the helper it awaits. The worker must survive that, and a frame left behind fails
+        # the run in the exit-time leak scan
+        with term.progress("features", "async:abandon-nested") as pr:
+            net.send_and_abandon(host, port, net.request("GET", "/async/nested-slow"), hold=0.3)
+            time.sleep(1.2)  # past the helper's 1 s sleep, so a surviving frame would have resumed by now
+            st = net.status(net.send(host, port, net.request("GET", "/health"), rtimeout=3.0))
+            if st == 200:
+                pr.ok()
+            else:
+                pr.bad()
+                findings.append(("ASYNC_ABANDON", "/health after abandoning /async/nested-slow: status=%r" % st))
+
+        # RmJson values taken from another object (Merge, Set(key, JsonRef)) must be copies: the
+        # source object is already destroyed when /json/merge writes its response
+        with term.progress("features", "json:merge-across-objects") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/json/merge"), rtimeout=5.0)
+            try:
+                got = json.loads(body_of(raw)) if st == 200 else None
+            except ValueError:
+                got = None
+            expected = {"keep": 1, "name": "src-owned", "nested": {"inner": "deep"}, "list": [7, "eight"],
+                        "root": {"alias": {"inner": "deep"}}}
+            if got == expected:
+                pr.ok()
+            else:
+                pr.bad()
+                findings.append(("JSON_MERGE", "/json/merge: status=%r body=%r" % (st, body_of(raw)[:200] if raw else None)))
+
+        # A scalar assigned over an existing object or array replaces it, and the container's buffer
+        # has to be freed with it: the exit-time leak scan catches one that's dropped instead
+        with term.progress("features", "json:overwrite-container") as pr:
+            st, raw = raw_send(host, port, _build("GET", "/json/overwrite"), rtimeout=5.0)
+            try:
+                got = json.loads(body_of(raw)) if st == 200 else None
+            except ValueError:
+                got = None
+            expected = {"num": 5, "str": "text", "nil": None}
+            if got == expected:
+                pr.ok()
+            else:
+                pr.bad()
+                findings.append(("JSON_OVERWRITE", "/json/overwrite: status=%r body=%r"
+                                 % (st, body_of(raw)[:200] if raw else None)))
+
         # template/cond: branch isolation: wrong branches must not appear
         with term.progress("features", "tmpl:cond-isolation") as pr:
             for n, expected, forbidden in [
@@ -1205,11 +1289,13 @@ def phase_features(ctx):
             else:
                 pr.ok()
 
-        # /stream: chunked streaming response via res.Stream() (512 chunks x 256 'S'
-        # bytes). This whole response-streaming path had no coverage: no ROUTE_CHECK
-        # ever requested it. Drive it and verify the full 131072-byte body reassembles
+        # /stream: chunked streaming response via res.Stream() (512 chunks x 256 'S' bytes). Verify
+        # the full 131072-byte body reassembles, and that the request's Connection: close still
+        # holds: the server closes once the last chunk is out, rather than at its idle timeout
         with term.progress("features", "stream:chunked") as pr:
+            t0 = time.time()
             st, raw = raw_send(host, port, _build("GET", "/stream"), rtimeout=8.0, rmax=1 << 20)
+            elapsed = time.time() - t0
             sbody = net.dechunk(body_of(raw)) if raw else b""
             expected = b"S" * (512 * 256)
             if st != 200 or sbody != expected:
@@ -1217,6 +1303,10 @@ def phase_features(ctx):
                 findings.append(("STREAM_FAIL",
                                   "/stream: status=%s len=%d (expected 200, %d bytes of 'S')"
                                   % (st, len(sbody), len(expected))))
+            elif elapsed >= 2.0:
+                pr.bad()
+                findings.append(("STREAM_KEEPALIVE", "/stream with Connection: close: the server closed after "
+                                 "%.1fs, expected right after the last chunk" % elapsed))
             else:
                 pr.ok()
 
@@ -2079,44 +2169,6 @@ def phase_chaos(ctx):
 
     ctx.phase("chaos").record(findings, vectors=stats.get("kills", 0) + stats.get("stops", 0))
 
-def _read_http_response(sock, buf):
-    """Read exactly one CL-framed HTTP response off `sock`. Returns (status, body, leftover)."""
-    while b"\r\n\r\n" not in buf:
-        try:
-            d = sock.recv(65536)
-        except OSError:
-            return None, b"", buf
-        if not d:
-            return None, b"", buf
-        buf += d
-
-    head, _, rest = buf.partition(b"\r\n\r\n")
-    lines = head.split(b"\r\n")
-    try:
-        status = int(lines[0].split(b" ")[1])
-    except (IndexError, ValueError):
-        return None, b"", rest
-
-    clen = 0
-    for line in lines[1:]:
-        if line.lower().startswith(b"content-length:"):
-            try:
-                clen = int(line.split(b":", 1)[1].strip())
-            except ValueError:
-                clen = 0
-            break
-
-    while len(rest) < clen:
-        try:
-            d = sock.recv(65536)
-        except OSError:
-            break
-        if not d:
-            break
-        rest += d
-
-    return status, rest[:clen], rest[clen:]
-
 # PHASE: soak
 def phase_soak(ctx):
     cfg = ctx.cfg
@@ -2156,7 +2208,7 @@ def phase_soak(ctx):
                     pr.bad()
                     break
 
-                st, rbody, buf = _read_http_response(sock, buf)
+                st, rbody, buf = net.read_response(sock, buf)
                 if st != exp_st or rbody != exp_body:
                     findings.append(("SOAK_MISFRAME",
                                       "request #%d %s -> status=%r body=%r (expected %d / %r)"
