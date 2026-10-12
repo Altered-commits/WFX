@@ -6,7 +6,7 @@
 
 #include "task.hpp" // EraseOnConnectImpl needs the complete Async::Task<T>, not just the fwd-decl awaitable.hpp gets from promise.hpp
 #include "awaitable.hpp"
-#include "core/core.hpp"    
+#include "core/core.hpp"
 #include "core/deferred_init_vector.hpp"
 #include "shared/abis/types.hpp"
 
@@ -433,7 +433,6 @@ template <typename TRes> struct StreamChunk {
 template <typename TReq, typename TRes>
 struct StreamNextAwaitable : public AwaitableBase<StreamNextAwaitable<TReq, TRes>> {
     const TReq* req;
-    
     std::uint64_t pinnedSlot;
     void** owned; // The handle's slot for a final output handed over owned, see await_resume
     std::uint16_t endpointIdx;
