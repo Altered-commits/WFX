@@ -51,11 +51,12 @@
 #include <tuple>
 #include <utility>
 
-// An endpoint bakes host:port into the instance, so both upstreams are pinned at
-// COMPILE time. The harness must launch primitive_upstream.py on these exact
-// ports; they are mirrored in endpoint_audit.py as MUX_PORT and SOLO_PORT.
+// An endpoint bakes host:port into the instance, so every upstream is pinned at
+// COMPILE time. The harness must launch primitive_upstream.py on these exact ports;
+// they are mirrored in endpoint_audit.py as its --mux/--solo/--gate-port defaults.
 #define MUX_UPSTREAM  "127.0.0.1:8092"
 #define SOLO_UPSTREAM "127.0.0.1:8093"
+#define GATE_UPSTREAM "127.0.0.1:8094"
 
 // Shared helpers
 namespace {
@@ -833,6 +834,22 @@ inline const SoloAbortEp SoloAbortMidConnect{
     }
 };
 
+// The same race one step earlier. The mock's gate holds the TCP connect itself, so the
+// audit can abandon the client before onConnect has even started, while its request is
+// still parked on the slot waiting for that connect.
+inline const SoloAbortEp SoloAbortGated{
+    GATE_UPSTREAM, SoloDesc("abort:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 2,
+        .auxConnLimit          = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
 // Deliberately hostile onAbort. Its own endpoint rather than a slot-state flag,
 // because the point is exercising the ABI's close path directly instead of layering
 // it onto SoloAbort's config.
@@ -900,7 +917,7 @@ WFX_POST("/mux/disconnects/reset", [](WFX::Request, WFX::Response res) {
 
 // One call on a solo instance.
 //   X-Solo  good | downgrade | tlsgarbage | abort | abortnoaux | abortmidconnect |
-//           abortbadclose                                       (default good)
+//           abortgated | abortbadclose                          (default good)
 //   X-Key   key to echo back; "slow:<secs>" delays the mock's reply
 //   X-Leak  1 tells onAbort, on the abort instances, to skip side.Close()
 WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
@@ -920,6 +937,8 @@ WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
         std::tie(status, out) = co_await SoloAbortNoAux.SendPayload(sreq);
     else if(name == "abortmidconnect")
         std::tie(status, out) = co_await SoloAbortMidConnect.SendPayload(sreq);
+    else if(name == "abortgated")
+        std::tie(status, out) = co_await SoloAbortGated.SendPayload(sreq);
     else if(name == "abortbadclose")
         std::tie(status, out) = co_await SoloAbortBadClose.SendPayload(sreq);
     else

@@ -28,6 +28,7 @@ public:
 
 public:
     bool GenerateSSLKey(); // Call once in master before fork
+    bool Reseed();         // Call in every worker right after fork, a child inherits the pool byte for byte
 
     SSLKey& GetSSLKey();
     bool GetBytes(std::uint8_t* out, std::size_t len);

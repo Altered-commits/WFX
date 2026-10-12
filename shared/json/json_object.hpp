@@ -180,6 +180,13 @@ inline std::uint32_t ObjBufSize(std::uint32_t kvCap, std::uint32_t htCap) noexce
     return 2 + kvCap + htCap;
 }
 
+// HT capacity for 'count' keys: a power of two kept at most half full, never under 8
+inline std::uint32_t ObjHtCapFor(std::uint32_t count) noexcept
+{
+    const std::uint32_t cap = std::bit_ceil(count * 2u);
+    return cap < 8 ? 8 : cap;
+}
+
 // vvv Main storage unit vvv
 struct JsonStore {
     JsonNode* nodes = nullptr;
@@ -226,6 +233,18 @@ public:
         }
 
         return true;
+    }
+
+    // Room for this many more nodes, keys and string bytes in at most one realloc each. Growth is
+    // at least 2x, so appends after it stay amortized
+    bool ReserveMore(std::uint32_t nodeMore, std::uint32_t kvMore, std::uint32_t strMore) noexcept
+    {
+        const auto grow = [](std::uint32_t len, std::uint32_t more, std::uint32_t cap) noexcept {
+            const std::uint32_t need = len + more;
+            return need <= cap ? cap : (need > cap * 2 ? need : cap * 2);
+        };
+
+        return Reserve(grow(nodeLen, nodeMore, nodeCap), grow(kvLen, kvMore, kvCap), grow(strLen, strMore, strCap));
     }
 
     std::uint32_t AllocNode() noexcept
@@ -565,11 +584,17 @@ public:
         return Set(key, static_cast<double>(v));
     }
 
-    // Set with JsonRef value, aliases by node index, no node copy, no new allocation
+    // Set with JsonRef value. From this store it aliases v's node by index, no copy, no allocation.
+    // From another store it is a deep copy, since that store's indices and offsets mean nothing here
     JsonRef Set(std::string_view key, JsonRef v) noexcept
     {
         if(!Valid() || !v.Valid())
             return Dead();
+
+        if(v.s_ != s_) {
+            auto r = GetOrCreate(key.data(), static_cast<std::uint32_t>(key.size()));
+            return r.Valid() && r.CopyFrom(v.s_, v.idx_) ? r : Dead();
+        }
 
         const char* kptr = key.data();
         const std::uint32_t klen = static_cast<std::uint32_t>(key.size());
@@ -718,11 +743,16 @@ public:
     }
 
 public:
+    // Every assignment below runs DropBuffer first: a node that held an object or array would
+    // otherwise lose the only pointer to that container's buffer
     JsonRef& operator=(std::nullptr_t) noexcept
     {
-        if(Valid())
-            NMut().tag = JsonTag::EMPTY;
+        if(!Valid())
+            return *this;
 
+        auto& n = NMut();
+        DropBuffer(n);
+        n.tag = JsonTag::EMPTY;
         return *this;
     }
 
@@ -732,6 +762,7 @@ public:
             return *this;
 
         auto& n = NMut();
+        DropBuffer(n);
         n.tag = JsonTag::BOOL;
         n.u64a = v ? 1u : 0u;
         return *this;
@@ -743,6 +774,7 @@ public:
             return *this;
 
         auto& n = NMut();
+        DropBuffer(n);
         n.tag = JsonTag::INT64;
         std::memcpy(&n.u64a, &v, 8);
         return *this;
@@ -754,6 +786,7 @@ public:
             return *this;
 
         auto& n = NMut();
+        DropBuffer(n);
         n.tag = JsonTag::UINT64;
         std::memcpy(&n.u64a, &v, 8);
         return *this;
@@ -765,6 +798,7 @@ public:
             return *this;
 
         auto& n = NMut();
+        DropBuffer(n);
         n.tag = JsonTag::DOUBLE;
         std::memcpy(&n.u64a, &v, 8);
         return *this;
@@ -777,6 +811,7 @@ public:
             return *this;
 
         auto& n = NMut();
+        DropBuffer(n);
         n.tag = JsonTag::STR_VIEW;
         n.u64b = 0;
 
@@ -796,6 +831,7 @@ public:
             return *this;
 
         auto& n = NMut();
+        DropBuffer(n);
         n.tag = JsonTag::STR_OWN;
         n.u64b = 0;
 
@@ -895,43 +931,29 @@ private:
     // JsonNode's u64b is updated on success
     std::uint32_t* RebuildHT(JsonNode& n, std::uint32_t newHtCap) noexcept
     {
-        const std::uint32_t kvCap = n.U32b();
+        return RebuildHT(n, newHtCap, n.U32b());
+    }
+
+    // Same, also resizing kvList's capacity to newKvCap (never below the live count). kvList sits
+    // right after the 2-word header, inside the prefix realloc preserves, so it needs no copying
+    std::uint32_t* RebuildHT(JsonNode& n, std::uint32_t newHtCap, std::uint32_t newKvCap) noexcept
+    {
         const std::uint32_t count = n.U32a();
         auto* oldBuf = n.BufAs<std::uint32_t>();
 
-        // Safe-copy kvList before any realloc
-        std::uint32_t* tmp = nullptr;
-        if(count > 0) {
-            tmp = static_cast<std::uint32_t*>(Alloc(count * sizeof(std::uint32_t)));
-            if(!tmp)
-                return nullptr;
-
-            std::memcpy(tmp, ObjKVList(oldBuf), count * sizeof(std::uint32_t));
-        }
-
-        const std::uint32_t total = ObjBufSize(kvCap, newHtCap);
+        const std::uint32_t total = ObjBufSize(newKvCap, newHtCap);
         auto* newBuf = static_cast<std::uint32_t*>(oldBuf ? Realloc(oldBuf, total * sizeof(std::uint32_t))
                                                           : Alloc(total * sizeof(std::uint32_t)));
 
-        if(!newBuf) {
-            if(tmp)
-                Free(tmp);
-
+        if(!newBuf)
             return nullptr;
-        }
 
         // Write new htCap at buf[0]
         newBuf[0] = newHtCap;
         newBuf[1] = 0; // pad
 
-        // Restore kvList (may have moved)
-        if(tmp) {
-            std::memcpy(ObjKVList(newBuf), tmp, count * sizeof(std::uint32_t));
-            Free(tmp);
-        }
-
         // Zero the HT slots region
-        std::uint32_t* slots = ObjHTSlot(newBuf, kvCap);
+        std::uint32_t* slots = ObjHTSlot(newBuf, newKvCap);
         std::memset(slots, 0xFF, newHtCap * sizeof(std::uint32_t));
 
         // Re-insert all live KVs
@@ -947,6 +969,7 @@ private:
             slots[h] = ki;
         }
 
+        n.U32b() = newKvCap;
         n.BufSet(newBuf);
         return newBuf;
     }
@@ -992,12 +1015,8 @@ private:
 
         // Build / rebuild when htCap is 0 or load would exceed 50%
         if(htCap == 0 || count > htCap / 2) {
-            std::uint32_t newHtCap = std::bit_ceil(count * 2u);
-            if(newHtCap < 8)
-                newHtCap = 8;
-
             // RebuildHT updates n.u64b internally
-            return RebuildHT(n, newHtCap) != nullptr;
+            return RebuildHT(n, ObjHtCapFor(count)) != nullptr;
         }
 
         // Direct insert into existing HT
@@ -1078,7 +1097,14 @@ private:
         if(existing != JSON_NIL)
             return JsonRef{s_, s_->kvs[existing].valIdx};
 
-        // New key: allocate string, value node, JsonKV
+        return AppendKey(key, klen);
+    }
+
+    // Adds a key this object is known not to have yet: copies the key into the store, allocates its
+    // value node and links both. GetOrCreate is HTFind plus this, a copy skips the find because the
+    // source's keys are already unique. key must not point into this store's strs (AllocStr may move it)
+    JsonRef AppendKey(const char* key, std::uint32_t klen) noexcept
+    {
         const std::uint32_t keyOff = s_->AllocStr(key, klen);
         if(keyOff == JSON_NIL)
             return Dead();
@@ -1091,14 +1117,13 @@ private:
         if(kvIdx == JSON_NIL)
             return Dead();
 
-        // Re-fetch node after potential reallocs
-        auto& n2 = NMut();
         JsonKV& kv = s_->kvs[kvIdx];
         kv.keyOff = keyOff;
         kv.keyLen = klen;
         kv.valIdx = valIdx;
 
-        if(!ObjAppendKV(n2, kvIdx, klen))
+        // Re-fetch node after potential reallocs
+        if(!ObjAppendKV(NMut(), kvIdx, klen))
             return Dead();
 
         return JsonRef{s_, valIdx};
@@ -1242,6 +1267,179 @@ private:
         return true;
     }
 
+    // A node taking a new value frees the container buffer it held, or the only pointer to that
+    // buffer is lost. Child nodes stay in the store and are freed with it
+    static void DropBuffer(JsonNode& n) noexcept
+    {
+        if(n.tag == JsonTag::ARRAY || n.tag == JsonTag::OBJECT) {
+            Free(n.BufAs<std::uint32_t>());
+            n.u64b = 0;
+        }
+    }
+
+    // Sizes this object for 'count' keys in one go, key list plus a HT kept under half full, so
+    // appends up to that never grow or rehash it
+    bool ObjReserve(std::uint32_t count) noexcept
+    {
+        auto& n = NMut();
+        if(n.tag == JsonTag::EMPTY) {
+            n.tag = JsonTag::OBJECT;
+            n.u64a = 0;
+            n.u64b = 0;
+        }
+
+        if(n.tag != JsonTag::OBJECT)
+            return false;
+
+        const auto* buf = n.BufAs<std::uint32_t>();
+        const std::uint32_t kvCap = n.U32b();
+        const std::uint32_t htCap = buf ? ObjHtCap(buf) : 0;
+        const std::uint32_t wantHt = ObjHtCapFor(count);
+
+        if(count <= kvCap && wantHt <= htCap)
+            return true;
+
+        return RebuildHT(n, wantHt > htCap ? wantHt : htCap, count > kvCap ? count : kvCap) != nullptr;
+    }
+
+    // What a deep copy of src's node adds to a store: nodes, keys, and string bytes (an owned string
+    // or a key takes its length plus a NUL). The node copied into already exists and isn't counted
+    static void MeasureCopy(const JsonStore* src, std::uint32_t idx, std::uint32_t& nodes, std::uint32_t& kvs,
+                            std::uint32_t& bytes) noexcept
+    {
+        const JsonNode& n = src->nodes[idx];
+        switch(n.tag) {
+            case JsonTag::STR_OWN:
+                bytes += n.U32c() + 1;
+                return;
+
+            case JsonTag::ARRAY: {
+                const auto* elems = n.BufAs<std::uint32_t>();
+                nodes += n.U32a();
+                for(std::uint32_t i = 0; i < n.U32a(); ++i)
+                    MeasureCopy(src, elems[i], nodes, kvs, bytes);
+
+                return;
+            }
+
+            case JsonTag::OBJECT: {
+                const auto* buf = n.BufAs<std::uint32_t>();
+                if(!buf)
+                    return;
+
+                const std::uint32_t* list = ObjKVList(buf);
+                nodes += n.U32a();
+                kvs += n.U32a();
+
+                for(std::uint32_t i = 0; i < n.U32a(); ++i) {
+                    const JsonKV& kv = src->kvs[list[i]];
+                    bytes += kv.keyLen + 1;
+                    MeasureCopy(src, kv.valIdx, nodes, kvs, bytes);
+                }
+
+                return;
+            }
+
+            default:
+                return;
+        }
+    }
+
+    // Deep copy of another store's node into this one, the store already sized by MeasureCopy. A raw
+    // node copy would share that store's container buffers (both free them) and read its string
+    // offsets and child indices against this store, so strings and containers are rebuilt: every
+    // container buffer allocated once at its final size, every key hashed once with no lookup, since
+    // the source's keys are already unique. The rest carries nothing store-relative, copied as is
+    bool CopyNode(const JsonStore* src, std::uint32_t srcIdx) noexcept
+    {
+        const JsonNode from = src->nodes[srcIdx];
+
+        auto& n = NMut();
+        DropBuffer(n);
+        n.tag = JsonTag::EMPTY;
+        n.u64a = 0;
+        n.u64b = 0;
+
+        switch(from.tag) {
+            case JsonTag::STR_OWN: {
+                // AllocStr only ever moves strs, so n stays valid
+                const std::uint32_t off = s_->AllocStr(src->strs + from.U32a(), from.U32c());
+                if(off == JSON_NIL)
+                    return false;
+
+                n.tag = JsonTag::STR_OWN;
+                n.U32a() = off;
+                n.U32c() = from.U32c();
+                return true;
+            }
+
+            case JsonTag::ARRAY: {
+                const std::uint32_t count = from.U32a();
+                n.tag = JsonTag::ARRAY;
+                if(count == 0)
+                    return true;
+
+                auto* buf = static_cast<std::uint32_t*>(Alloc(count * sizeof(std::uint32_t)));
+                if(!buf)
+                    return false;
+
+                n.U32b() = count;
+                n.BufSet(buf);
+
+                const auto* elems = from.BufAs<std::uint32_t>();
+                for(std::uint32_t i = 0; i < count; ++i) {
+                    const std::uint32_t elem = s_->AllocNode();
+                    if(elem == JSON_NIL)
+                        return false;
+
+                    // Counted as soon as it's linked, so a failure below leaves a consistent array
+                    buf[i] = elem;
+                    NMut().U32a() = i + 1;
+
+                    if(!JsonRef{s_, elem}.CopyNode(src, elems[i]))
+                        return false;
+                }
+
+                return true;
+            }
+
+            case JsonTag::OBJECT: {
+                const std::uint32_t count = from.U32a();
+                n.tag = JsonTag::OBJECT;
+
+                if(count == 0)
+                    return true;
+
+                if(!ObjReserve(count))
+                    return false;
+
+                const std::uint32_t* list = ObjKVList(from.BufAs<std::uint32_t>());
+                for(std::uint32_t i = 0; i < count; ++i) {
+                    const JsonKV& kv = src->kvs[list[i]];
+                    JsonRef val = AppendKey(src->strs + kv.keyOff, kv.keyLen);
+                    if(!val.Valid() || !val.CopyNode(src, kv.valIdx))
+                        return false;
+                }
+
+                return true;
+            }
+
+            default:
+                n = from;
+                return true;
+        }
+    }
+
+    // Deep copy of another store's node (src is never this store): sizes the store once for the
+    // whole subtree, then copies it
+    bool CopyFrom(const JsonStore* src, std::uint32_t srcIdx) noexcept
+    {
+        std::uint32_t nodes = 0, kvs = 0, bytes = 0;
+        MeasureCopy(src, srcIdx, nodes, kvs, bytes);
+
+        return Valid() && s_->ReserveMore(nodes, kvs, bytes) && CopyNode(src, srcIdx);
+    }
+
 private:
     friend class JsonObject;
     friend class JsonParser;
@@ -1353,10 +1551,12 @@ public:
         return JsonRef{s_, 0}.Erase(key);
     }
 
-    // Shallow merge, copies top-level keys from other into this
+    // Copies other's top-level keys into this, replacing any it already has. Values are deep copies,
+    // so other may be changed or destroyed afterwards. Merging an object into itself does nothing.
+    // Sized up front: the store once for all of other, this root for both key sets
     void Merge(const JsonObject& other) noexcept
     {
-        if(!s_ || !other.s_)
+        if(!s_ || !other.s_ || other.s_ == s_)
             return;
 
         const JsonNode& root = other.s_->nodes[0];
@@ -1367,17 +1567,22 @@ public:
         if(!buf)
             return;
 
+        const std::uint32_t count = root.U32a();
+
+        std::uint32_t addNodes = 0, addKvs = 0, addBytes = 0;
+        JsonRef::MeasureCopy(other.s_, 0, addNodes, addKvs, addBytes);
+
+        JsonRef dstRoot{s_, 0};
+        if(!s_->ReserveMore(addNodes, addKvs, addBytes) || !dstRoot.ObjReserve(s_->nodes[0].U32a() + count))
+            return;
+
         const std::uint32_t* list = ObjKVList(buf);
-        const JsonKV* kvs = other.s_->kvs;
-        const char* strs = other.s_->strs;
+        for(std::uint32_t i = 0; i < count; ++i) {
+            const JsonKV& kv = other.s_->kvs[list[i]];
 
-        for(std::uint32_t i = 0; i < root.U32a(); ++i) {
-            const JsonKV& kv = kvs[list[i]];
-            const char* key = strs + kv.keyOff;
-
-            JsonRef dst = JsonRef{s_, 0}.GetOrCreate(key, kv.keyLen);
+            JsonRef dst = dstRoot.GetOrCreate(other.s_->strs + kv.keyOff, kv.keyLen);
             if(dst.Valid())
-                dst.NMut() = other.s_->nodes[kv.valIdx];
+                dst.CopyNode(other.s_, kv.valIdx);
         }
     }
 

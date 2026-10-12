@@ -36,9 +36,8 @@ def _close(sock):
         except OSError:
             pass
 
-def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=False, sni="localhost",
-        certfile=None, keyfile=None):
-    """Write payload, read until close or timeout. Returns raw bytes, or None if it never landed.
+def connect(host, port, ctimeout=5.0, tls=False, sni="localhost", certfile=None, keyfile=None):
+    """Opens a connection, TLS when asked, handshake done. Returns the socket, or None. Never raises.
 
     certfile/keyfile present a client certificate during the handshake, for suites driving mTLS.
     """
@@ -50,11 +49,20 @@ def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=Fals
             if certfile:
                 ctx.load_cert_chain(certfile, keyfile)
             sock = ctx.wrap_socket(sock, server_hostname=sni)
+        return sock
     except (OSError, ssl.SSLError):
         _close(sock)
         return None
 
+def send(host, port, payload, rtimeout=8.0, ctimeout=5.0, rmax=8 << 20, tls=False, sni="localhost",
+        certfile=None, keyfile=None):
+    """Write payload, read until close or timeout. Returns raw bytes, or None if it never landed."""
+    sock = connect(host, port, ctimeout, tls, sni, certfile, keyfile)
+    if sock is None:
+        return None
+
     try:
+        sock.settimeout(rtimeout)
         sock.sendall(payload)
         return _drain(sock, rtimeout, rmax)
     except (OSError, ssl.SSLError):
@@ -141,6 +149,49 @@ def send_and_abandon(host, port, payload, ctimeout=5.0, hold=0.0):
         pass
     finally:
         _close(sock)
+
+def read_response(sock, buf, rtimeout=None):
+    """Reads exactly one CL-framed response off an open keep-alive socket. Returns (status, body,
+    leftover), or (None, b"", buf) on a closed, dead or timed out socket. rtimeout None keeps the
+    socket's own timeout. Never raises."""
+    try:
+        if rtimeout is not None:
+            sock.settimeout(rtimeout)
+
+        while b"\r\n\r\n" not in buf:
+            data = sock.recv(65536)
+            if not data:
+                return None, b"", buf
+            buf += data
+    except OSError:
+        return None, b"", buf
+
+    head, _, rest = buf.partition(b"\r\n\r\n")
+    lines = head.split(b"\r\n")
+    try:
+        code = int(lines[0].split(b" ")[1])
+    except (IndexError, ValueError):
+        return None, b"", rest
+
+    clen = 0
+    for line in lines[1:]:
+        if line.lower().startswith(b"content-length:"):
+            try:
+                clen = int(line.split(b":", 1)[1].strip())
+            except ValueError:
+                clen = 0
+            break
+
+    try:
+        while len(rest) < clen:
+            data = sock.recv(65536)
+            if not data:
+                break
+            rest += data
+    except OSError:
+        pass
+
+    return code, rest[:clen], rest[clen:]
 
 def request(method, path, headers=None, body=b""):
     """Builds a well-formed request. Suites testing malformed framing build their own bytes."""

@@ -99,13 +99,10 @@ jobs:
             wfx-${{ matrix.target }}.sha256
           retention-days: 1
 
-  # include/ and shared/ are plain headers, identical for every target, so this
-  # packages them once instead of duplicating the same archive four times over
-  # in the build matrix above. This is what a prebuilt-binary user needs
-  # alongside the binary itself to build their own project against WFX
-  # without cloning the repo: extracting it into the same directory the
-  # binary's PATH wrapper expects (~/.wfx/src, see scripts/install.sh) drops
-  # in include/ and shared/ directly, no wrapper folder to strip.
+  # Plain files, identical for every target, packaged once instead of
+  # duplicated across the build matrix above. Extracts straight into
+  # ~/.wfx/src (see scripts/install.sh), so prebuilt installs get a working
+  # uninstall.sh too without ever cloning the repo.
   headers:
     name: Package headers
     needs: guard
@@ -117,7 +114,7 @@ jobs:
       - name: Package
         run: |
           ASSET="wfx-headers"
-          tar -czf "$ASSET.tar.gz" include shared
+          tar -czf "$ASSET.tar.gz" include shared scripts/uninstall.sh
           sha256sum "$ASSET.tar.gz" > "$ASSET.tar.gz.sha256"
 
       - name: Upload build output

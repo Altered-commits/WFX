@@ -54,7 +54,7 @@ REQUEST_TIMEOUT_WAIT = 17.0  # requestTimeoutSeconds 10, plus a tick, plus slack
 
 # The mock upstream
 class Mock:
-    """primitive_upstream.py: the mux and solo listeners plus an HTTP counter plane."""
+    """primitive_upstream.py: the mux, solo and gate listeners plus an HTTP counter plane."""
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -65,7 +65,8 @@ class Mock:
                "--host", self.cfg.host,
                "--control-port", str(self.cfg.control_port),
                "--mux-port", str(self.cfg.mux_port),
-               "--solo-port", str(self.cfg.solo_port)]
+               "--solo-port", str(self.cfg.solo_port),
+               "--gate-port", str(self.cfg.gate_port)]
         term.log("mock", "starting: %s" % " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
@@ -102,6 +103,20 @@ class Mock:
 
     def cancels_reset(self):
         self._ctl("/ctl/solo/cancels/reset")
+
+    def gate_close(self):
+        """Connects to the gate listener stay in flight until it reopens and the SYN is retried."""
+        self._ctl("/ctl/gate/close")
+
+    def gate_open(self):
+        self._ctl("/ctl/gate/open")
+
+    def gate_requests(self):
+        """Lines gated connections sent after AUTH, i.e. requests that reached the backend."""
+        try:
+            return int(self._ctl("/ctl/gate/requests"))
+        except ValueError:
+            return -1
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -699,6 +714,31 @@ def phase_solo_abort(ctx):
             is_ok(solo_get(cfg, key="after-midconnect", solo="abortmidconnect")), "")
     p.check("worker healthy after the mid-connect abort race", wfx_healthy(cfg) and mock.ping())
 
+    # The same race one step earlier: the client disconnects while the slot's TCP connect is
+    # still in flight, before onConnect has even started, so its request is still parked on
+    # the slot. The mock's gate drops the SYN until the kernel retries it a second later.
+    # Once the connect lands nothing may reach the backend: the request died with its
+    # client, and nothing was sent yet that a cancel could refer to
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    requests = mock.gate_requests()
+    mock.gate_close()
+    abandon_solo_get(cfg, {"X-Solo": "abortgated", "X-Key": "x"}, hold=0.3)
+    mock.gate_open()
+    time.sleep(2.0)  # the SYN retry lands about 1s after the first try, then AUTH and OK
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    sent = mock.gate_requests() - requests
+    p.check("abort: onAbort never fires while the TCP connect is still in flight",
+            after.get("runs", 0) == before.get("runs", 0), "before=%r after=%r" % (before, after),
+            security=True)
+    p.check("abort: nothing of an abandoned request reaches the backend once its connect lands",
+            sent == 0 and count == 0, "requests=%d cancels=%d" % (sent, count), security=True)
+    r = solo_get(cfg, key="after-tcpconnect", solo="abortgated")
+    p.check("abort: the next request on that endpoint gets its own answer, not the abandoned one's",
+            is_ok(r) and r.get("value") == "%s:after-tcpconnect" % r.get("conn"), "r=%r" % r,
+            security=True)
+
     # Hostile onAbort: closes its side connection three times and keeps the handle
     # afterwards. A real protocol author will get this wrong at least once, so the
     # engine must survive it rather than double-free the aux slot or corrupt whichever
@@ -892,16 +932,20 @@ class EndpointAudit(common.Suite):
                             help="mock mux port, MUST match MUX_UPSTREAM in app/src/main.cpp")
         parser.add_argument("--solo-port", type=int, default=8093,
                             help="mock solo port, MUST match SOLO_UPSTREAM in app/src/main.cpp")
+        parser.add_argument("--gate-port", type=int, default=8094,
+                            help="mock gate port, MUST match GATE_UPSTREAM in app/src/main.cpp")
 
     def configure(self, cfg):
         cfg.control_port = cfg.args.control_port
         cfg.mux_port = cfg.args.mux_port
         cfg.solo_port = cfg.args.solo_port
+        cfg.gate_port = cfg.args.gate_port
 
-        # The two protocol ports are compiled into the app, so a mismatch means the
-        # audit drives an endpoint that can never reach the mock
+        # The protocol ports are compiled into the app, so a mismatch means the audit
+        # drives an endpoint that can never reach the mock
         for flag, port, default, source in (("--mux-port", cfg.mux_port, 8092, "MUX_UPSTREAM"),
-                                            ("--solo-port", cfg.solo_port, 8093, "SOLO_UPSTREAM")):
+                                            ("--solo-port", cfg.solo_port, 8093, "SOLO_UPSTREAM"),
+                                            ("--gate-port", cfg.gate_port, 8094, "GATE_UPSTREAM")):
             if port != default:
                 term.log("runner", term.yellow(
                     "NOTE: %s=%d must match %s in app/src/main.cpp (default %d), the port is baked "

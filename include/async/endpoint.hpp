@@ -433,14 +433,16 @@ template <typename TRes> struct StreamChunk {
 template <typename TReq, typename TRes>
 struct StreamNextAwaitable : public AwaitableBase<StreamNextAwaitable<TReq, TRes>> {
     const TReq* req;
-    bool first;
-    std::uint16_t endpointIdx;
     std::uint64_t pinnedSlot;
+    void** owned; // The handle's slot for a final output handed over owned, see await_resume
+    std::uint16_t endpointIdx;
+    bool first;
     EndpointStatus syncStatus{EndpointStatus::PENDING};
 
 public:
-    StreamNextAwaitable(std::uint16_t idx, const TReq* r, bool isFirst, std::uint64_t pinned) noexcept
-        : AwaitableBase<StreamNextAwaitable<TReq, TRes>>{}, req(r), first(isFirst), endpointIdx(idx), pinnedSlot(pinned)
+    StreamNextAwaitable(std::uint16_t idx, const TReq* r, bool isFirst, std::uint64_t pinned, void** ownedOut) noexcept
+        : AwaitableBase<StreamNextAwaitable<TReq, TRes>>{}, req(r), pinnedSlot(pinned), owned(ownedOut),
+          endpointIdx(idx), first(isFirst)
     {}
 
     // NOLINTNEXTLINE(readability-identifier-naming): C++20 coroutine protocol name, fixed spelling.
@@ -497,6 +499,11 @@ public:
         const auto* chunk = static_cast<const TRes*>(this->result.data);
         const bool isFinal = this->result.endpointStatus != EndpointStatus::PENDING || chunk == nullptr;
 
+        // A stream that ended on its first response completed as an ordinary send, which hands the
+        // output over owned (a streamed final carries no data), so the handle frees it later
+        if(isFinal && chunk)
+            *owned = this->result.data;
+
         return {EndpointStatus::SUCCESS, chunk, isFinal};
     }
 };
@@ -512,28 +519,67 @@ public:
 //   }
 template <typename TReq, typename TRes> class StreamHandle {
 public:
-    StreamHandle(std::uint16_t idx, TReq r, std::uint64_t pinned) noexcept
-        : req_(std::move(r)), endpointIdx_(idx), pinnedSlot_(pinned)
+    StreamHandle(std::uint16_t idx, TReq r, std::uint64_t pinned, EndpointDestroyStateFn destroyOutput) noexcept
+        : req_(std::move(r)), pinnedSlot_(pinned), destroyOutput_(destroyOutput), endpointIdx_(idx)
     {}
 
-    StreamHandle(StreamHandle&&) = default;
-    StreamHandle& operator=(StreamHandle&&) = default;
+    ~StreamHandle()
+    {
+        FreeOwned();
+    }
+
+    // Move-only: two owners would free the same final output twice
+    StreamHandle(StreamHandle&& o) noexcept
+        : req_(std::move(o.req_)), pinnedSlot_(o.pinnedSlot_), destroyOutput_(o.destroyOutput_), owned_(o.owned_),
+          endpointIdx_(o.endpointIdx_), first_(o.first_)
+    {
+        o.owned_ = nullptr;
+    }
+    StreamHandle& operator=(StreamHandle&& o) noexcept
+    {
+        if(this != &o) {
+            FreeOwned();
+            req_ = std::move(o.req_);
+            endpointIdx_ = o.endpointIdx_;
+            pinnedSlot_ = o.pinnedSlot_;
+            destroyOutput_ = o.destroyOutput_;
+            owned_ = o.owned_;
+            first_ = o.first_;
+            o.owned_ = nullptr;
+        }
+
+        return *this;
+    }
     StreamHandle(const StreamHandle&) = delete;
     StreamHandle& operator=(const StreamHandle&) = delete;
 
 public:
     StreamNextAwaitable<TReq, TRes> Next() noexcept
     {
+        // Whatever the previous Next() returned is only valid until now
+        FreeOwned();
+
         const bool isFirst = first_;
         first_ = false;
 
-        return {endpointIdx_, &req_, isFirst, pinnedSlot_};
+        return {endpointIdx_, &req_, isFirst, pinnedSlot_, &owned_};
+    }
+
+private:
+    void FreeOwned() noexcept
+    {
+        if(owned_ && destroyOutput_)
+            destroyOutput_(owned_);
+
+        owned_ = nullptr;
     }
 
 private: // Storage
     TReq req_;
-    std::uint16_t endpointIdx_ = 0;
     std::uint64_t pinnedSlot_ = 0;
+    EndpointDestroyStateFn destroyOutput_ = nullptr;
+    void* owned_ = nullptr; // A final output handed over owned, freed by the next Next() or destruction
+    std::uint16_t endpointIdx_ = 0;
     bool first_ = true;
 };
 
@@ -592,7 +638,7 @@ public:
     // Same chunked consumption as Resolve::Stream(), pinned to this reservation
     StreamHandle<TReq, TRes> Stream(TReq req) const noexcept
     {
-        return {endpointIdx_, std::move(req), handle_};
+        return {endpointIdx_, std::move(req), handle_, destroyOutput_};
     }
 
     // Idempotent, also runs on destruction. Safe to call mid-request: the engine hands the
@@ -668,7 +714,7 @@ public:
     // this behaves like an ordinary SendPayload that completes on the first Next()
     StreamHandle<TReq, TRes> Stream(TReq req) const noexcept
     {
-        return {endpointIdx_, std::move(req), 0};
+        return {endpointIdx_, std::move(req), 0, destroyOutput_};
     }
 
 private:

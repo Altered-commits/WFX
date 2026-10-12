@@ -47,17 +47,16 @@ set -e
 #   --prebuilt-interactive: fully interactive. Walks through picking a
 #   version, then a CPU target, from whatever that release actually
 #   published, nothing pre-selected for you, every step needs an explicit
-#   confirm. See run_prebuilt_install() below.
+#   confirm, including whether to install a missing compiler/CMake. See
+#   run_prebuilt_install() below.
 #
-#   --prebuilt-known <version> <target> [--yes] [--skip-prereqs]: the
-#   scripted twin, for anywhere a human isn't watching (provisioning
-#   scripts, EC2 user-data, Dockerfiles). No prompts at all. <version> is a
-#   tag (e.g. v1.2.3) or the literal word 'latest'; <target> is the name
-#   from release_build.yml's matrix without the 'wfx-' prefix, e.g.
-#   linux-x86_64-v3 or linux-arm64-neoverse-n1. --yes auto-confirms any
-#   missing-prerequisite installs instead of just warning about them;
-#   --skip-prereqs skips that check entirely (e.g. a container image that
-#   already has its own toolchain baked in elsewhere).
+#   --prebuilt-known <version> <target>: the scripted twin, for anywhere a
+#   human isn't watching (provisioning scripts, EC2 user-data, Dockerfiles).
+#   No prompts, no prerequisite checking or suggestions either: whoever's
+#   scripting this is assumed to already own their own toolchain setup.
+#   <version> is a tag (e.g. v1.2.3) or the literal word 'latest'; <target>
+#   is the name from release_build.yml's matrix without the 'wfx-' prefix,
+#   e.g. linux-x86_64-v3 or linux-arm64-neoverse-n1.
 #
 # A machine is locked to whichever mode FAMILY it first installed with
 # (recorded in ~/.wfx/.install_type) - re-running install.sh under a
@@ -75,9 +74,10 @@ set -e
 #
 # Final folder structure (prebuilt mode):
 #   ~/.wfx/
-#   ~/.wfx/bin/wfx               (downloaded binary)
-#   ~/.wfx/src/include/          (downloaded headers)
-#   ~/.wfx/src/shared/           (downloaded headers)
+#   ~/.wfx/bin/wfx                     (downloaded binary)
+#   ~/.wfx/src/include/                (downloaded headers)
+#   ~/.wfx/src/shared/                 (downloaded headers)
+#   ~/.wfx/src/scripts/uninstall.sh    (downloaded, rides along with headers)
 #   ~/.wfx/daemons/
 # ---------------------------------------------------------------
 
@@ -113,8 +113,6 @@ LOCAL_MODE=""
 PREBUILT_MODE=""
 PREBUILT_VERSION=""
 PREBUILT_TARGET=""
-PREBUILT_AUTO_YES=""
-PREBUILT_SKIP_PREREQS=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -139,14 +137,6 @@ while [ $# -gt 0 ]; do
             PREBUILT_VERSION="$1"
             PREBUILT_TARGET="$2"
             shift 2
-            ;;
-        --yes|-y)
-            PREBUILT_AUTO_YES=1
-            shift
-            ;;
-        --skip-prereqs)
-            PREBUILT_SKIP_PREREQS=1
-            shift
             ;;
         *)
             fatal "Unknown argument: $1"
@@ -248,10 +238,10 @@ if [ -n "$PREBUILT_MODE" ]; then
     # directly instead of stdin/stdout, so this still works when the script
     # itself arrived over a pipe (curl ... | sh -s -- --prebuilt-interactive),
     # the same trick rustup's installer uses. If there's no controlling
-    # terminal at all, falls back to the first option (always the one
-    # labeled recommended) instead of hanging on a read that can never
-    # receive input - --prebuilt-known exists precisely so a fully
-    # non-interactive caller never needs this fallback in the first place.
+    # terminal at all, falls back to whichever option the caller passed
+    # first instead of hanging on a read that can never receive input -
+    # --prebuilt-known exists precisely so a fully non-interactive caller
+    # never needs this fallback in the first place.
     #
     # Usage: interactive_select "Prompt text" "Label 1" "Label 2" ...
     # Result lands in $SELECT_RESULT (0-based index into the labels given).
@@ -328,8 +318,7 @@ if [ -n "$PREBUILT_MODE" ]; then
         if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
             # No human to actually answer this, so always decline rather than
             # trust $default, which exists for the Enter-key case below, not
-            # this one. Matters for anything sudo-backed: --skip-prereqs or
-            # --yes are the real opt-ins for a non-interactive run.
+            # this one
             return 1
         fi
 
@@ -466,12 +455,10 @@ if [ -n "$PREBUILT_MODE" ]; then
         esac
     }
 
+    # Only ever called for --prebuilt-interactive: --prebuilt-known callers are
+    # scripting their own provisioning and are assumed to already own their
+    # toolchain setup, so nothing here checks, suggests, or installs for them
     check_and_offer_prereqs() {
-        if [ -n "$PREBUILT_SKIP_PREREQS" ]; then
-            info "Skipping prerequisite check (--skip-prereqs)."
-            return
-        fi
-
         local missing=""
         command -v cc > /dev/null 2>&1 || command -v gcc > /dev/null 2>&1 || command -v clang > /dev/null 2>&1 || missing="$missing compiler"
         command -v cmake > /dev/null 2>&1 || missing="$missing cmake"
@@ -501,10 +488,7 @@ if [ -n "$PREBUILT_MODE" ]; then
             cmd=$(pkg_install_cmd "$pm" "$item")
             [ -z "$cmd" ] && continue
 
-            if [ -n "$PREBUILT_AUTO_YES" ]; then
-                info "Installing $item: $cmd"
-                eval "$cmd" || warn "Failed to install $item, install it manually: $cmd"
-            elif prompt_yes_no "Install $item now? ($cmd)" "y"; then
+            if prompt_yes_no "Install $item now? ($cmd)" "y"; then
                 eval "$cmd" || warn "Failed to install $item, install it manually: $cmd"
             else
                 warn "Skipped $item, install it yourself later: $cmd"
@@ -574,19 +558,14 @@ TAGS
         local host_arch
         host_arch=$(uname -m)
 
-        local tlabels=() ttargets=() t desc note
+        local tlabels=() ttargets=() t desc
         while IFS= read -r t; do
             [ -z "$t" ] && continue
             desc=$(target_description "$t")
-            note=""
-            case "$host_arch:$t" in
-                x86_64:linux-x86_64-v2)          note=" (recommended, safest)" ;;
-                aarch64:linux-arm64-neoverse-n1) note=" (recommended, safest)" ;;
-            esac
             if [ -n "$desc" ]; then
-                tlabels+=("$t - $desc$note")
+                tlabels+=("$t - $desc")
             else
-                tlabels+=("$t$note")
+                tlabels+=("$t")
             fi
             ttargets+=("$t")
         done <<TARGETS
@@ -667,14 +646,16 @@ TARGETS
         mv "$tmpdir/wfx-$target" "$WFX_BINARY" || fatal "Failed to move binary to $WFX_BIN."
         chmod +x "$WFX_BINARY"
 
-        # include/ and shared/ replace cleanly on a re-run (e.g. moving to a
-        # newer version), everything else under $WFX_SRC is left alone
-        rm -rf "$WFX_SRC/include" "$WFX_SRC/shared"
+        # include/, shared/ and scripts/uninstall.sh replace cleanly on a
+        # re-run (e.g. moving to a newer version), everything else under
+        # $WFX_SRC is left alone
+        rm -rf "$WFX_SRC/include" "$WFX_SRC/shared" "$WFX_SRC/scripts"
         tar -xzf "$tmpdir/wfx-headers.tar.gz" -C "$WFX_SRC" || fatal "Failed to extract headers into $WFX_SRC."
 
         echo "$REQUESTED_TYPE" > "$WFX_INSTALL_TYPE_FILE"
 
-        check_and_offer_prereqs
+        # --prebuilt-known callers own their own provisioning, nothing to check or offer here
+        [ "$PREBUILT_MODE" = "interactive" ] && check_and_offer_prereqs
         setup_path
         print_success
     }

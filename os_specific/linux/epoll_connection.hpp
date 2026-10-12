@@ -167,7 +167,7 @@ private: // Write paths (private, public Write is client-only)
 private: // Epoll dispatch
     void HandleClientEvent(ClientCtx* ctx, std::uint32_t ev, std::uint16_t gen);
     void HandleEndpointEvent(EndpointCtx* ctx, std::uint32_t ev, std::uint16_t gen);
-    void HandleClientEpollIn(ClientCtx* ctx);
+    void HandleClientEpollIn(ClientCtx* ctx, std::uint32_t ev);
     void HandleEndpointEpollIn(EndpointCtx* ctx);
     void HandleClientWriteReady(ClientCtx* ctx);
     void HandleEndpointWriteReady(EndpointCtx* ctx);

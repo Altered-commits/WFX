@@ -83,6 +83,14 @@ void HttpMiddleware::LoadMiddlewareFromConfig(MiddlewareConfigOrder order)
                          "' was listed in config but has not been registered."
                          " This may be a typo or missing registration");
     }
+
+    // Every registered middleware must be accounted for in config, otherwise it's dead
+    // code that silently never runs.
+    for(const auto& [name, cb] : middlewareFactories_) {
+        if(!loadedNames.contains(name))
+            logger.Fatal("[HttpMiddleware]: Middleware '", name,
+                         "' was registered but is missing from config's 'middleware_list'");
+    }
 }
 
 void HttpMiddleware::DiscardFactoryMap()
@@ -165,9 +173,17 @@ MiddlewareFunctionResult HttpMiddleware::ExecuteFunction(ClientCtx* ctx, Request
 
     // Engine passes its own callback into the async middleware
     // The middleware coroutine's 'final_suspend' will fire this when done
+    ctx->SetAsyncCallState(AsyncCallState::INLINE_RUNNING);
+
     mw.async(req, res, WFX::Core::CoreEngine::OnCoroutineComplete, ctx);
 
+    const bool doneInline = ctx->GetAsyncCallState() == AsyncCallState::INLINE_DONE;
+    ctx->SetAsyncCallState(doneInline ? AsyncCallState::IDLE : AsyncCallState::SUSPENDED);
     httpApi->setGlobalPtrData(nullptr);
+
+    // Finished without suspending, its action is already recorded, so the chain goes on as if sync
+    if(doneInline)
+        return {*ctx->trackAsync.GetMAction(), false};
 
     return {MiddlewareAction::CONTINUE, true};
 }

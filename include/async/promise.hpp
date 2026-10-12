@@ -30,6 +30,17 @@ struct BasePromise {
     std::coroutine_handle<> continuation = nullptr;
 
 public:
+    // The engine kills a suspended chain by destroying its innermost frame, the one parked on an
+    // awaitable. That frame takes its awaiting parent down with it, and so on up to the root, which
+    // has no continuation. A child that completed normally has its continuation cleared first by
+    // Task<T>::await_resume, so only a killed chain ever cascades
+    ~BasePromise()
+    {
+        if(continuation)
+            continuation.destroy();
+    }
+
+public:
     void* operator new(std::size_t size)
     {
         return Shared::Alloc(size);

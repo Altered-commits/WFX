@@ -240,7 +240,7 @@ base.Merge(extra);
 base.Write(res);   // {"type":"user","role":"admin"}
 ```
 
-Merge is shallow. Nested objects inside the source are aliased, not deep-copied.
+Merge copies values, nested objects and arrays included, so the source can be changed or destroyed afterwards. It is shallow only in that a key both objects have is replaced, not merged recursively. The same goes for `Set(key, ref)` when `ref` belongs to another object; a `ref` from the same object is aliased instead.
 
 ### Capacity hints
 
@@ -280,6 +280,8 @@ WFX_GET("/order", [](WFX::Request req, WFX::Response res) {
 ## Parsing request bodies
 
 `ParseJson` parses a JSON string into an `RmJson` compatible object that you can read using the same `Get`, `IsX`, and `AsX` methods described above.
+
+An object that repeats a key is rejected with the error `duplicate key`. Parsers disagree on which of two duplicates wins, so a body like `{"role":"user","role":"admin"}` could mean one thing to a proxy or validator in front and another to your handler.
 
 ```cpp
 inline Shared::JsonParseResult ParseJson(

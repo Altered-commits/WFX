@@ -157,13 +157,11 @@ struct MiscConfig {
     std::uint16_t cacheChunkSize = 2 * 1024;
     std::uint32_t templateChunkSize = 16 * 1024;
     std::uint16_t masterPollInterval = 2; // In seconds
-    std::uint16_t maxWorkerRestarts = 5;
-    std::uint16_t workerBackoffBase = 1; // In seconds
-    std::uint16_t workerBackoffMax = 16; // In seconds
+    std::uint16_t workerBackoffBase = 1;  // In seconds
+    std::uint16_t workerBackoffMax = 16;  // In seconds
 };
 
 // Main Config loader
-// TODO: Add checks for maxReadBufferSize >= maxHeaderTotalSize + maxBodyTotalSize
 class Config final {
 public: // Load from TOML
     void LoadCoreSettings(std::string_view path);
@@ -181,6 +179,9 @@ public: // Main storage space for configurations
     LoggingConfig loggingConfig;
     MiscConfig miscConfig;
     MetricsConfig metricsConfig;
+
+private: // Cross-field validation, called at the end of LoadCoreSettings
+    void ValidateSettings();
 };
 
 // Free function declaration (defined in 'config.cpp')

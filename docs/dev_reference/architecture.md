@@ -77,7 +77,7 @@ flowchart TD
     subgraph ML[Master wait loop]
         direction TB
         M1[nanosleep masterPollInterval\nwakes early on any signal, incl. SIGCHLD]
-        M1 --> M2[ReapDeadWorkers\nwaitpid WNOHANG loop\nincrement crashes\ncompute backoff\nmark SLOT_PENDING or SLOT_DEAD]
+        M1 --> M2[ReapDeadWorkers\nwaitpid WNOHANG loop\nincrement crashes\ncompute backoff\nmark SLOT_PENDING]
         M2 --> M3[RevivePendingWorkers\ncheck nextRetryAt per slot\nSpawnWorker if window expired\nincrement restarts and backoffAttempts]
         M3 --> M4[PollWorkerMetrics\nopen /proc/pid/status per live slot\nparse VmRSS and VmSize\nwrite rssBytes and vmBytes into slot]
         M4 --> M1

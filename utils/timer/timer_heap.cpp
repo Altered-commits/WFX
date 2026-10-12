@@ -2,15 +2,20 @@
 // Copyright (c) 2025-2026 Altered-commits
 
 #include "timer_heap.hpp"
+#include "utils/diagnostics/logger.hpp"
 
 namespace WFX::Utils {
+
+TimerHeap::TimerHeap()
+{
+    idMap_.Init(64);
+}
 
 // vvv Main Functions vvv
 bool TimerHeap::Insert(std::uint64_t data, std::uint64_t delay, std::uint64_t delta) noexcept
 {
     // Does data already exist? If so gg, we don't really want duplicate entries
-    auto it = idMap_.find(data);
-    if(it != idMap_.end())
+    if(idMap_.Get(data) != nullptr)
         return false;
 
     // Bucket coalesce
@@ -19,8 +24,10 @@ bool TimerHeap::Insert(std::uint64_t data, std::uint64_t delay, std::uint64_t de
     const std::size_t idx = heap_.size();
     heap_.emplace_back(TimerNode{data, delay, idx});
 
-    // Insert into map, rollback if fails
-    idMap_.emplace(data, idx);
+    // idMap_ is Init()'d in the constructor and 'data' was just confirmed absent above, so this
+    // can only fail if that invariant is somehow broken, leaving heap_ and idMap_ out of sync
+    if(!idMap_.Insert(data, idx))
+        GetLogger().Fatal("[TimerHeap]: idMap_ insert unexpectedly failed for a key just confirmed absent");
 
     FixHeap(idx);
     return true;
@@ -28,21 +35,21 @@ bool TimerHeap::Insert(std::uint64_t data, std::uint64_t delay, std::uint64_t de
 
 bool TimerHeap::Remove(std::uint64_t data) noexcept
 {
-    auto it = idMap_.find(data);
-    if(it == idMap_.end())
+    std::size_t* idxPtr = idMap_.Get(data);
+    if(!idxPtr)
         return false;
 
-    const std::size_t idx = it->second;
+    const std::size_t idx = *idxPtr;
     const std::size_t lastIdx = heap_.size() - 1;
 
-    idMap_.erase(data);
+    idMap_.Erase(data);
 
     if(idx != lastIdx) {
         heap_[idx] = heap_[lastIdx];
         heap_[idx].heapIdx = idx;
 
-        if(auto it = idMap_.find(heap_[idx].data); it != idMap_.end())
-            it->second = idx;
+        if(auto* p = idMap_.Get(heap_[idx].data))
+            *p = idx;
     }
 
     heap_.pop_back();
@@ -84,6 +91,7 @@ void TimerHeap::FixHeap(std::size_t idx) noexcept
         const std::size_t parent = (idx - 1) / 2;
         if(heap_[idx].delay >= heap_[parent].delay)
             break;
+
         SwapNodes(heap_[idx], heap_[parent]);
         idx = parent;
     }
@@ -114,11 +122,11 @@ void TimerHeap::SwapNodes(TimerNode& lhs, TimerNode& rhs) noexcept
     lhs.heapIdx = &lhs - &heap_[0];
     rhs.heapIdx = &rhs - &heap_[0];
 
-    if(auto it = idMap_.find(lhs.data); it != idMap_.end())
-        it->second = lhs.heapIdx;
+    if(auto* p = idMap_.Get(lhs.data))
+        *p = lhs.heapIdx;
 
-    if(auto it = idMap_.find(rhs.data); it != idMap_.end())
-        it->second = rhs.heapIdx;
+    if(auto* p = idMap_.Get(rhs.data))
+        *p = rhs.heapIdx;
 }
 
 std::uint64_t TimerHeap::RoundToBucket(std::uint64_t expire, std::uint64_t delta) noexcept

@@ -11,7 +11,9 @@ using namespace WFX::Core; // For 'Config'
 
 RequestRateLimiter::RequestRateLimiter() : pool_(GetConfig().ipConfig.maxTrackedIdentities)
 {
-    index_.Init(512);
+    // index_ can never hold more than maxTrackedIdentities entries (FindOrCreate evicts before
+    // the pool overflows), so this pre-sizes to that real ceiling instead of guessing
+    index_.Init(GetConfig().ipConfig.maxTrackedIdentities, true);
 }
 
 void RequestRateLimiter::Unlink(std::uint32_t idx)
