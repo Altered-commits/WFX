@@ -125,6 +125,7 @@ SMTP_PERSONAS = [
     ("drop_starttls",       8119, "good",       {"drop_after": "starttls"},               "refuse"),
     ("drop_auth",           8120, "good",       {"drop_after": "auth"},                   "refuse"),
     ("drop_data_prompt",    8121, "good",       {"drop_after": "data_prompt"},            "refuse"),
+    ("data_250",            8124, "good",       {"data_reply": "250"},                    "refuse"),
     # Hang-shaped personas: they never complete on their own, so only the client's own
     # timeout ends them. Driven against the short-budget endpoints in main.cpp, whose
     # 5s budgets are the engine's floor, rather than the 8s every other persona gets.
@@ -1958,6 +1959,17 @@ def phase_smtp_drops(ctx):
     r = smtp_send(cfg, "drop_data_prompt")
     p.check("drop_data_prompt: an abrupt close after the DATA prompt is refused, not hung",
             is_err(r), "r=%r" % r)
+
+    # DATA answered with a 2xx instead of its 354 go-ahead: the body must not go out, and
+    # SendMail must not call a message the server never took sent
+    mock = ctx.smtp_mock
+    mock.reset("data_250")
+    r = smtp_send_mail(cfg, "data_250", body=b"never sent")
+    p.check("data_250: SendMail does not report success when DATA never got its go-ahead",
+            bool(r) and r.get("success") is False, "r=%r" % r)
+    stats = mock.stats("data_250")
+    p.check("data_250: no body is sent without the go-ahead", stats.get("bodies", []) == [],
+            "stats=%r" % stats)
 
 # PHASE: smtp_inject
 def phase_smtp_inject(ctx):

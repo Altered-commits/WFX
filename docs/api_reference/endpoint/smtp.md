@@ -130,11 +130,15 @@ WFX_POST("/contact", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 ```cpp
 struct SmtpSendOutcome {
     Shared::EndpointStatus status; // the last step's status, EpOk whenever it got a reply
+    bool accepted;                 // the server accepted the message body
     EndpointOutput<SmtpResponse> response; // the last step's reply, empty if it got none
 
-    bool Success() const noexcept; // status == EpOk && response && response->Success()
+    bool Success() const noexcept; // accepted
 };
 ```
+
+`SendMail` resets the whole outcome first, so reusing one across calls never
+carries an earlier send's result over.
 
 - **`status`** is the status of the last step attempted, and tells you whether
   a real SMTP conversation happened there. It's `WFX::EpOk` whenever that step
@@ -153,7 +157,9 @@ struct SmtpSendOutcome {
   below. It's empty (`bool(outcome.response) == false`) when that step got no
   reply.
 - **`Success()`** is the one thing most callers need: true only if the whole
-  four-step exchange completed and the server accepted it.
+  four-step exchange completed and the server accepted it. A `2xx` to `DATA`
+  in place of its `354` go-ahead stops the exchange before the body is sent,
+  so it is not a success, even though that reply is a `2xx`.
 
 If you need to know exactly which step failed (bad sender vs. bad recipient
 vs. the message itself getting rejected), `SendMail` won't tell you that on

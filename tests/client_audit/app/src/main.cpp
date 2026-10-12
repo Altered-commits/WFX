@@ -249,6 +249,7 @@ inline const auto Smtp_drop_pre_handshake = WFX::SmtpEndpoint{"127.0.0.1:8118", 
 inline const auto Smtp_drop_starttls      = WFX::SmtpEndpoint{"127.0.0.1:8119", SmtpCfg()};
 inline const auto Smtp_drop_auth          = WFX::SmtpEndpoint{"127.0.0.1:8120", SmtpCfg()};
 inline const auto Smtp_drop_data_prompt   = WFX::SmtpEndpoint{"127.0.0.1:8121", SmtpCfg()};
+inline const auto Smtp_data_250           = WFX::SmtpEndpoint{"127.0.0.1:8124", SmtpCfg()};
 
 inline const auto Smtp_flood_greeting     = WFX::SmtpEndpoint{"127.0.0.1:8110", SmtpCfgFast()};
 inline const auto Smtp_flood_ehlo2        = WFX::SmtpEndpoint{"127.0.0.1:8111", SmtpCfgFast()};
@@ -292,6 +293,7 @@ static const WFX::SmtpEndpoint* SmtpEndpointOf(std::string_view e) noexcept
     if(e == "drop_starttls")      return &Smtp_drop_starttls;
     if(e == "drop_auth")          return &Smtp_drop_auth;
     if(e == "drop_data_prompt")   return &Smtp_drop_data_prompt;
+    if(e == "data_250")           return &Smtp_data_250;
     if(e == "flood_greeting")     return &Smtp_flood_greeting;
     if(e == "flood_ehlo2")        return &Smtp_flood_ehlo2;
     if(e == "huge_line_greeting") return &Smtp_huge_line_greeting;

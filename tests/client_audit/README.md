@@ -142,7 +142,8 @@ client's offer. The vectors live in the audit, not in the mock.
 in `client_audit.py`, each wired to its own `SmtpEndpoint` in
 `app/src/main.cpp`), each running the real handshake state machine with exactly
 one thing flipped: refuse STARTTLS, inject plaintext, present a bad cert, fail
-AUTH, hang, or drop at a named stage. A control listener on port 8199 answers
+AUTH, hang, drop at a named stage, or answer `DATA` with a `2xx` instead of its
+`354` go-ahead. A control listener on port 8199 answers
 `STATS <persona>` and `RESET <persona>` with per-persona counters. Each listener
 also records in `STATS` (`alpn`) which ALPN protocol it picked; `good` and
 `alpn_custom` advertise a probe list, so that pick shows what the client offered.
@@ -266,7 +267,7 @@ script, and re-check it against the table whenever a phase is added or removed.
 | **smtp_starttls** | STARTTLS enforcement, the CVE-2011-0411 / CVE-2026-41319 plaintext-injection persona, a spliced continuation code, and a banner that is not SMTP at all |
 | **smtp_certs** | STARTTLS certificate rejection. Untrusted, hostname-mismatched and expired certs are all refused, and each refusal is proven twice over: the outbound call fails with `SSL_FAILURE` (accepting the cert is a security finding, refusing it under another status a correctness failure), and the mock recorded a *failed* TLS handshake rather than a completed one |
 | **smtp_resource** | Handshake and mid-transaction hangs resolve through the line caps or the connect/request budget, never block forever, and a hang right after the STARTTLS upgrade ends on the 5s connect budget (`HANDSHAKE_TIMEOUT`), not the persona's 30s request budget |
-| **smtp_drops** | An abrupt disconnect at every handshake stage is refused at the `mail` stage (`SSL_FAILURE` where the TLS handshake should start, `INTERNAL_ERROR` elsewhere), and a drop after the DATA prompt is refused rather than hung |
+| **smtp_drops** | An abrupt disconnect at every handshake stage is refused at the `mail` stage (`SSL_FAILURE` where the TLS handshake should start, `INTERNAL_ERROR` elsewhere), a drop after the DATA prompt is refused rather than hung, and a `2xx` to `DATA` in place of its `354` sends no body and is not reported as sent by `SendMail` |
 | **smtp_inject** | CR/LF/NUL injection through every caller-supplied field, and through `heloName`, screened before a byte reaches the wire |
 
 ### Postgres

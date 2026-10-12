@@ -882,14 +882,17 @@ private:
 //   status   the last step's status: EpOk whenever it got a reply, accepted or not, otherwise
 //            whatever stopped it below the SMTP layer (pool exhausted, a refused or failed
 //            handshake, a timeout)
+//   accepted set only once the server accepted the message body, which is what Success() reports.
+//            A 2xx to MAIL, RCPT or DATA alone never sets it
 //   response the last step's reply, empty when it got none
 struct SmtpSendOutcome {
     Shared::EndpointStatus status = EpInternalError;
+    bool accepted = false;
     EndpointOutput<SmtpResponse> response;
 
     bool Success() const noexcept
     {
-        return status == EpOk && response && response->Success();
+        return accepted;
     }
 };
 
@@ -944,6 +947,9 @@ public:
                        std::string_view toName, std::string_view subject, std::string_view body, SmtpSendOutcome& out,
                        std::string_view replyTo = {}) const
     {
+        // A reused outcome must not carry an earlier send's result into this one
+        out = SmtpSendOutcome{};
+
         auto tx = Begin();
         if(!tx.IsValid()) {
             out.status = EpPoolExhausted;
@@ -971,7 +977,7 @@ public:
             co_return;
 
         auto [s4, r4] = co_await tx.DataBody(fromAddr, fromName, toAddr, toName, subject, body, replyTo);
-        record(s4, r4, r4 && r4->Success());
+        out.accepted = record(s4, r4, r4 && r4->Success());
     }
 
 private:

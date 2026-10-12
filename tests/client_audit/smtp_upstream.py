@@ -262,6 +262,12 @@ def serve_conn(raw_sock, name, opts):
             elif upper.startswith(b"RCPT TO"):
                 _send(sock, b"250 2.1.5 OK\r\n", opts)
             elif upper.startswith(b"DATA"):
+                # A 2xx in place of the 354 go-ahead: the client must not send a body, or call
+                # the message sent
+                if opts.get("data_reply"):
+                    _send(sock, b"%s 2.0.0 OK\r\n" % opts["data_reply"].encode(), opts)
+                    continue
+
                 _send(sock, b"354 Start mail input; end with <CRLF>.<CRLF>\r\n", opts)
                 if opts.get("drop_after") == "data_prompt":
                     sock.close()
