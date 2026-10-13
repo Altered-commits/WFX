@@ -31,6 +31,7 @@ python3 base_audit.py --phase features
 python3 base_audit.py --phase forms
 python3 base_audit.py --phase query
 python3 base_audit.py --phase cors
+python3 base_audit.py --phase groups
 python3 base_audit.py --phase metrics
 python3 base_audit.py --phase soak
 python3 base_audit.py --phase chaos
@@ -51,7 +52,7 @@ python3 base_audit.py --ci
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `query`, `cors`, `metrics`, `soak`, `chaos` |
+| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `query`, `cors`, `groups`, `metrics`, `soak`, `chaos` |
 | `--host HOST` | `127.0.0.1` | Server hostname |
 | `--port N` | `8080` | HTTP port |
 | `--wfx PATH` | `wfx` | Path to the wfx binary |
@@ -150,7 +151,7 @@ content, or missing/wrong header = finding.
 | Inline async | Async middleware and routes that finish without suspending (`/mw/async-inline`, `/mw/async-inline-break`, `/async/inline`) |
 | Pipelining | A request sent while the previous one is still suspended is never answered |
 | Abandoned coroutines | The worker survives a client leaving mid-sleep on a nested coroutine |
-| `ImJson` | `/json/im` body contains `"immediate"` and `"meta"` |
+| `ImJson` | `/json/im` body contains `"immediate"`, `"meta"` and a pushed string literal (`"tags":["admin"]`, not `true`) |
 | `RmJson` | `/json/rm` body contains `"retained"` |
 | JSON merge and overwrite | `/json/merge` and `/json/overwrite` produce the right bytes after their sources are gone |
 | JSON parsing | Valid bodies → 200; invalid, truncated, empty or duplicate-key bodies → 400 |
@@ -245,6 +246,22 @@ failures.
 
 ---
 
+### GROUPS
+
+Route groups that don't pair up must stop the server from starting. Each case in
+`GROUP_CASES` is the `wfx new` template, scaffolded into a temp dir, with its routes
+replaced and a `/health` added, then run on the next port up from the app under test:
+
+| Case | Must log, and never answer `/health` |
+|------|--------------------------------------|
+| `WFX_GROUP_START` with no `WFX_GROUP_END` | `WFX_GROUP_START() without a matching WFX_GROUP_END()` |
+| `WFX_GROUP_END` with no `WFX_GROUP_START` | `WFX_GROUP_END() without a matching WFX_GROUP_START()` |
+
+An open group would otherwise prefix every route registered after it. Exit code 1 on
+any failure.
+
+---
+
 ### METRICS
 
 Drives known request counts through `/status/<code:uint>` (one status class each)
@@ -270,7 +287,7 @@ Exit code 1 on any mismatch or connection failure.
 
 ### CHAOS
 
-6 scenarios. Each is followed by a recovery wait and the full `ROUTE_CHECKS` sweep (65 checks
+6 scenarios. Each is followed by a recovery wait and the full `ROUTE_CHECKS` sweep (66 checks
 over 51 distinct paths). The master process is never targeted: only worker children.
 
 | # | Scenario | What happens |

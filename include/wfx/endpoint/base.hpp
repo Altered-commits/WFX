@@ -34,7 +34,7 @@
 //     WFX::EpSocketFailure       socket creation / options failed (before ever reaching connect())
 //     WFX::EpBufferError         internal buffer init failure
 //     WFX::EpInsufficientBuffer  request too large even after the engine grew the buffer to its maximum
-//     WFX::EpInvalidKey          nowhere valid to go: a dead ReservedSlot, or Next() on an ended stream
+//     WFX::EpInvalidKey          nowhere valid to go: an empty or dead ReservedSlot, or Next() on an ended stream
 //     WFX::EpEpollError          epoll re-arm failed on a reused slot (engine-internal)
 //     WFX::EpInternalError       unclassified engine failure
 //

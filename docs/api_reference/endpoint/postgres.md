@@ -417,7 +417,9 @@ WFX_POST("/transfer", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 
 `Query` on a `PgSession` has the same signature and return shape as
 `PostgresEndpoint::Query`, just running on the one pinned connection instead
-of whichever one the pool would have picked.
+of whichever one the pool would have picked. On a session that isn't valid,
+every statement fails with `WFX::EpInvalidKey` rather than running on a pooled
+connection.
 
 A transaction is one use of a session, not what a session is for: prepared
 statements, `SET SESSION`, advisory locks, and anything else that's

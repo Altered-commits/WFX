@@ -22,6 +22,9 @@ import ssl
 import threading
 import time
 
+_BOOL_KEYS = ("starttls", "mismatched_code", "malformed_greeting", "auth_fail")
+_FLOAT_KEYS = ("slow_trickle", "timeout")
+
 _lock = threading.Lock()
 _stats = {}  # name -> {"handshakes", "hs_fail", "auth_ok", "auth_fail", "alpn", "bodies": [...]}
 
@@ -356,9 +359,6 @@ def parse_listen(spec):
             k, v = part.split("=", 1)
             kv[k.strip()] = v.strip()
     return kv
-
-_BOOL_KEYS = ("starttls", "mismatched_code", "malformed_greeting", "auth_fail")
-_FLOAT_KEYS = ("slow_trickle", "timeout")
 
 def coerce_opts(kv):
     opts = dict(kv)

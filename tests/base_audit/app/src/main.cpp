@@ -482,6 +482,9 @@ WFX_GET("/json/im", [](WFX::Request, WFX::Response res) {
     w.Write("version", (std::uint64_t)1);
     w.Write("ok", true);
     w.End();
+    w.Arr("tags");
+    w.Push("admin"); // a string literal, which has to stay a string rather than turn into a bool
+    w.End();
 })
 
 // Retained-mode JSON (DOM, then serialized in one shot)

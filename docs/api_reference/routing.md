@@ -149,7 +149,7 @@ Groups may be nested to form hierarchical route structures.
 
 !!! warning
     Each `WFX_GROUP_START` must be paired with a corresponding `WFX_GROUP_END`.  
-    If the number of start and end macros does not match, the server will fail to start and terminate with an error.
+    If they don't pair up, the server never starts serving: each worker exits at startup with an error naming the unmatched macro.
 
 ---
 

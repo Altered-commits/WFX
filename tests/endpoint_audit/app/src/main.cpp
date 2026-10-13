@@ -1300,7 +1300,13 @@ WFX_GET("/solo/reserve", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     else if(releaseMode == "early")
         slot.Release();
 
-    // "late" leaves it to the destructor, the path an early co_return would take
+    // A released reservation is empty, so a send through it has to fail rather than run on
+    // whichever connection the pool hands out. "late" leaves the release to the destructor,
+    // the path an early co_return would take
+    if(releaseMode != "late") {
+        auto [afterStatus, afterOut] = co_await slot.SendPayload(SoloReq{SoloMode::GET, "after-release", 0, 0});
+        j.Write("after_release", EpJ(afterStatus));
+    }
 
     co_return;
 })

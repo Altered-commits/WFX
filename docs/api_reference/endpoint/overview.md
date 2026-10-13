@@ -107,7 +107,7 @@ constants is `WFX::EndpointStatus`, if you need to name it explicitly instead of
 | `WFX::EpSerializeError` | Your `serialize()` returned an error |
 | `WFX::EpBufferError` | Internal buffer setup failed |
 | `WFX::EpInsufficientBuffer` | Request too large even after the engine grew the buffer |
-| `WFX::EpInvalidKey` | The request had nowhere valid to go: a `ReservedSlot` whose connection died, or `Next()` on a stream that already ended |
+| `WFX::EpInvalidKey` | The request had nowhere valid to go: a `ReservedSlot` that is empty or whose connection died, or `Next()` on a stream that already ended |
 | `WFX::EpEpollError` | Re-arming epoll on a reused connection failed |
 | `WFX::EpInternalError` | Unclassified engine failure |
 
@@ -929,7 +929,9 @@ want it back sooner.
     Always check `IsValid()`. A reservation takes a slot out of the pool for
     its whole lifetime, so `Reserve()` returns an empty handle rather than
     waiting when every connection is busy. Holding reservations longer than
-    `connLimit` allows will starve the pool.
+    `connLimit` allows will starve the pool. A send through an empty handle,
+    or through one after `.Release()`, fails with `WFX::EpInvalidKey` rather
+    than running unpinned on whatever connection the pool hands out.
 
 Two things the engine guarantees for you:
 

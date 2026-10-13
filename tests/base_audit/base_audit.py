@@ -20,12 +20,16 @@
 #   3   WFX never answered /health
 
 import concurrent.futures
+import copy
 import json
 import os
 import random
+import shutil
 import signal
 import socket
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -115,64 +119,9 @@ def _build_at_header_size(total, method="GET", path="/health"):
 def req(host, port, method, path, headers=None, body=b"", **kw):
     return raw_send(host, port, _build(method, path, headers, body), **kw)
 
-# Process inspection
+# Server context
 _HAS_PROC = os.path.isdir("/proc")
 
-def children(ppid):
-    if not _HAS_PROC:
-        return []
-    out = []
-    try:
-        for e in os.listdir("/proc"):
-            if not e.isdigit():
-                continue
-            try:
-                with open("/proc/%s/status" % e) as f:
-                    for line in f:
-                        if line.startswith("PPid:"):
-                            if int(line.split()[1]) == ppid:
-                                out.append(int(e))
-                            break
-            except (OSError, ValueError):
-                pass
-    except OSError:
-        pass
-    return out
-
-def rss_mb(pids):
-    if not _HAS_PROC:
-        return 0.0
-    total = 0
-    for p in pids:
-        try:
-            with open("/proc/%d/status" % p) as f:
-                for line in f:
-                    if line.startswith("VmRSS:"):
-                        total += int(line.split()[1])
-                        break
-        except (OSError, ValueError):
-            pass
-    return total / 1024.0
-
-def fd_count(pids):
-    if not _HAS_PROC:
-        return 0
-    total = 0
-    for p in pids:
-        try:
-            total += len(os.listdir("/proc/%d/fd" % p))
-        except OSError:
-            pass
-    return total
-
-def proc_alive(pid):
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
-
-# Server context
 # Payload corpora
 # Leak markers: any of these in a response = information leakage finding
 # Pairs: (must_contain_a, must_contain_b_or_None)
@@ -669,6 +618,7 @@ ROUTE_CHECKS = [
     # JSON: immediate mode
     ("GET",  "/json/im",          None, b"", 200, b'"immediate"', None),
     ("GET",  "/json/im",          None, b"", 200, b'"meta"', None),
+    ("GET",  "/json/im",          None, b"", 200, b'"tags":["admin"]', None),
     # JSON: retained mode
     ("GET",  "/json/rm",          None, b"", 200, b'"retained"', None),
     # JSON: parse valid
@@ -711,6 +661,72 @@ ROUTE_CHECKS = [
     ("GET",  "/template/inherit", None, b"", 200, b"My Page",      None),
     ("GET",  "/template/inherit", None, b"", 200, b"Child Content", None),
 ]
+
+# Route groups that don't pair up, each run as the `wfx new` template with these routes in place of
+# its own: (label, src/main.cpp body, the fatal that must stop it from starting)
+GROUP_HEALTH = 'WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.SendText("ok"); })\n'
+GROUP_ROUTE  = 'WFX_GET("/x", [](WFX::Request, WFX::Response res) { res.SendText("x"); })\n'
+GROUP_CASES = [
+    ("an unclosed WFX_GROUP_START", GROUP_HEALTH + 'WFX_GROUP_START("/api")\n' + GROUP_ROUTE,
+     "WFX_GROUP_START() without a matching WFX_GROUP_END()"),
+    ("a stray WFX_GROUP_END", GROUP_HEALTH + GROUP_ROUTE + "WFX_GROUP_END()\n",
+     "WFX_GROUP_END() without a matching WFX_GROUP_START()"),
+]
+
+# Process inspection
+def children(ppid):
+    if not _HAS_PROC:
+        return []
+    out = []
+    try:
+        for e in os.listdir("/proc"):
+            if not e.isdigit():
+                continue
+            try:
+                with open("/proc/%s/status" % e) as f:
+                    for line in f:
+                        if line.startswith("PPid:"):
+                            if int(line.split()[1]) == ppid:
+                                out.append(int(e))
+                            break
+            except (OSError, ValueError):
+                pass
+    except OSError:
+        pass
+    return out
+
+def rss_mb(pids):
+    if not _HAS_PROC:
+        return 0.0
+    total = 0
+    for p in pids:
+        try:
+            with open("/proc/%d/status" % p) as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        total += int(line.split()[1])
+                        break
+        except (OSError, ValueError):
+            pass
+    return total / 1024.0
+
+def fd_count(pids):
+    if not _HAS_PROC:
+        return 0
+    total = 0
+    for p in pids:
+        try:
+            total += len(os.listdir("/proc/%d/fd" % p))
+        except OSError:
+            pass
+    return total
+
+def proc_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 # Helpers
 def _probe(host, port, payload, retries=3, delay=0.3):
@@ -1927,6 +1943,55 @@ def _route_exact(method, path):
 def _route_prefix(method, prefix):
     return lambda r: r.get("method") == method and (r.get("path") or "").startswith(prefix)
 
+# PHASE: groups
+# Route groups that don't pair up must stop the server from starting, both ways round: a
+# WFX_GROUP_START left open would prefix every route registered after it, and a stray
+# WFX_GROUP_END has nothing to close. Each GROUP_CASES project runs on its own port next to the
+# app under test
+def phase_groups(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("groups")
+    root = tempfile.mkdtemp(prefix="wfx-groups-")
+
+    try:
+        made = subprocess.run([cfg.wfx, "new", "groups"], cwd=root, capture_output=True, text=True)
+        if made.returncode != 0:
+            p.check("groups: wfx new scaffolds the test project", False, (made.stderr or made.stdout).strip())
+            return
+
+        project = os.path.join(root, "groups")
+
+        # The template logs to stdout only, which a detached run discards
+        toml = os.path.join(project, "config", "wfx.local.toml")
+        with open(toml) as handle:
+            text = handle.read()
+        with open(toml, "w") as handle:
+            handle.write(text.replace("enable_file       = false", "enable_file       = true"))
+
+        gcfg = copy.copy(cfg)
+        gcfg.app_dir = project
+        gcfg.port = cfg.port + 1
+
+        for label, routes, fatal in GROUP_CASES:
+            with open(os.path.join(project, "src", "main.cpp"), "w") as handle:
+                handle.write("#include <wfx/http.hpp>\n\n" + routes)
+
+            srv = common.Server(gcfg)
+            try:
+                srv.start()
+            except RuntimeError as err:
+                p.check("groups: %s still builds" % label, False, str(err))
+                continue
+
+            refused = common.server.poll(lambda: common.logs.worker_logs_contain(project, fatal), 30) is not None
+            served = common.server.health(cfg.host, gcfg.port, 1.5)
+            srv.stop()
+
+            p.check("groups: %s stops the server from starting" % label, refused and not served,
+                    "fatal logged=%s, /health answered=%s" % (refused, served))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
 # PHASE: metrics
 def phase_metrics(ctx):
     cfg = ctx.cfg
@@ -2251,7 +2316,7 @@ def phase_soak(ctx):
 #   - a per-phase timeout, because a phase that wedges under load would otherwise stall the run
 class BaseAudit(common.Suite):
     name = "base_audit"
-    description = "WFX server torture audit: security, protocol, features, forms, query, cors, metrics, soak, chaos"
+    description = "WFX server torture audit: security, protocol, features, forms, query, cors, groups, metrics, soak, chaos"
     phases = {
         "security": phase_security,
         "protocol": phase_protocol,
@@ -2259,6 +2324,7 @@ class BaseAudit(common.Suite):
         "forms":    phase_forms,
         "query":    phase_query,
         "cors":     phase_cors,
+        "groups":   phase_groups,
         "metrics":  phase_metrics,
         "soak":     phase_soak,
         "chaos":    phase_chaos,

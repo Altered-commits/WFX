@@ -592,7 +592,8 @@ private: // Storage
 //
 // Releases on destruction, so an early co_return or a thrown exception can't leak the pin. The
 // underlying slot can still die on its own (server hangup, idle timeout); the handle detects
-// that and later sends fail with EpInvalidKey rather than landing on an unrelated connection
+// that and later sends fail with EpInvalidKey rather than landing on an unrelated connection.
+// A send through an empty handle (a refused Reserve, or after Release) fails the same way
 template <typename TReq, typename TRes> class ReservedSlot {
 public:
     ReservedSlot(std::uint16_t idx, std::uint64_t handle, EndpointDestroyStateFn destroy) noexcept
@@ -627,7 +628,8 @@ public:
     ReservedSlot& operator=(const ReservedSlot&) = delete;
 
 public:
-    // False when the reservation failed (pool exhausted) or was already released
+    // False when the reservation failed (pool exhausted, or a multiplexed endpoint) or was
+    // already released
     bool IsValid() const noexcept
     {
         return handle_ != 0;
@@ -635,13 +637,13 @@ public:
 
     SendPayloadAwaitable<TReq, TRes> SendPayload(TReq req) const noexcept
     {
-        return {endpointIdx_, std::move(req), destroyOutput_, handle_};
+        return {endpointIdx_, std::move(req), destroyOutput_, PinnedHandle()};
     }
 
     // Same chunked consumption as Resolve::Stream(), pinned to this reservation
     StreamHandle<TReq, TRes> Stream(TReq req) const noexcept
     {
-        return {endpointIdx_, std::move(req), handle_, destroyOutput_};
+        return {endpointIdx_, std::move(req), PinnedHandle(), destroyOutput_};
     }
 
     // Idempotent, also runs on destruction. Safe to call mid-request: the engine hands the
@@ -654,6 +656,18 @@ public:
         Core::EndpointApiExt1()->releaseSlot(handle_);
         handle_ = 0;
     }
+
+private: // Helpers
+    // 0 would route the send through the pool, quietly spreading what was meant for one connection
+    // across several, so an empty handle sends NO_SLOT_HANDLE and fails with EpInvalidKey instead
+    std::uint64_t PinnedHandle() const noexcept
+    {
+        return handle_ != 0 ? handle_ : NO_SLOT_HANDLE;
+    }
+
+private: // Constexprs
+    // No slot ever decodes from this: endpoint index 0xFFFF and generation 0 are both reserved
+    static constexpr std::uint64_t NO_SLOT_HANDLE = ~0xFFFFULL;
 
 private: // Storage
     std::uint16_t endpointIdx_ = 0;

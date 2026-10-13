@@ -178,7 +178,7 @@ script, and re-check it against the table whenever a phase is added or removed.
 | **mux_handshake** | `onConnect` gates the connection: a rejected, dropped or stalled handshake fails cleanly and is never served, a stall surfaces as a handshake timeout rather than a hang (stuck in a `Receive` or in a `Send` the server stopped reading), `onDisconnect` reports the reason that actually happened, a handshake whose `Send`s total more than the send buffer still succeeds, a multiplexed connect without `onConnect` that times out fails its waiting stream as a handshake timeout and counts as a connect failure rather than a background reconnect, and none of it poisons the next connection |
 | **mux_multiplex** | Twelve concurrent requests answered deliberately out of order all share one physical connection, and each caller gets back its own value, matched by stream id and never by arrival order. Then, with the connection idle, `onDisconnect` reports an idle timeout, and a stream whose reply outlasts `requestTimeoutSeconds` fails as a request timeout, while `Reserve` there hands back an empty handle |
 | **mux_soak** | 2500 sequential requests, then 30 concurrent waves of 16, all matched, all on one pooled connection. Hammers the pending-stream map and the per-stream parse state, where a leak or a use-after-free on the completion path shows up |
-| **solo_pinning** | `Reserve`/`ReservedSlot`: every request on one reservation lands on the same connection, two live reservations never share one, byte-identical payloads on two pins still come back from those two connections, all three release patterns leave the pool usable, a run of reservations longer than the pool never starves it, and a stream through a pinned slot stays on that slot |
+| **solo_pinning** | `Reserve`/`ReservedSlot`: every request on one reservation lands on the same connection, two live reservations never share one, byte-identical payloads on two pins still come back from those two connections, all three release patterns leave the pool usable, a send through a released reservation fails with `EpInvalidKey` instead of using the pool, a run of reservations longer than the pool never starves it, and a stream through a pinned slot stays on that slot |
 | **solo_push** | `onPush` on an idle slot: an in-flight push is consumed by `parse` and never routed to `onPush`, a partial push parks instead of spinning, an undecodable one is rejected and recovered from, and a 2000-message flood drains incrementally rather than buffering |
 | **solo_streaming** | `Stream`/`StreamHandle`: both chunk families deliver identical bytes, an abandoned stream releases its slot, an empty stream terminates, four concurrent streams never cross-deliver, and peak memory tracks one chunk rather than the total across 200x more data |
 | **solo_upgrade** | In-band `UpgradeToTLS`: a refused upgrade fails closed instead of continuing in plaintext, a garbage ServerHello fails cleanly without hanging, and neither poisons the endpoint (the plaintext-discard half needs a real handshake, so it lives in `tls_audit`) |
@@ -188,11 +188,12 @@ script, and re-check it against the table whenever a phase is added or removed.
 
 A check that fails and is marked **security** forces exit code `2`. In this suite
 those are: one caller receiving another caller's response, a refused handshake
-still being served, a pinned connection shared with anyone else, an unsolicited
-push desyncing the framing or reaching `onPush`, a partial push spinning, the
-endpoint staying poisoned after a rejected push, an abandoned stream or a failed
-upgrade, a failed TLS upgrade leaving the endpoint usable in plaintext, memory
-growing with the total response size rather than the chunk size, `onAbort` firing
+still being served, a pinned connection shared with anyone else, a send through a
+released reservation running on a pooled connection, an unsolicited push
+desyncing the framing or reaching `onPush`, a partial push spinning, the endpoint
+staying poisoned after a rejected push, an abandoned stream or a failed upgrade,
+a failed TLS upgrade leaving the endpoint usable in plaintext, memory growing
+with the total response size rather than the chunk size, `onAbort` firing
 where it must not, a cancel naming the wrong connection, an abandoned request or
 its answer reaching the backend or the next caller, a repeated `Close` crashing
 the worker, and one endpoint's aux slot blocking another's. Read the assertions

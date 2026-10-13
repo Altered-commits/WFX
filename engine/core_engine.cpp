@@ -606,8 +606,9 @@ void CoreEngine::HandleUserDLLInjection(const char* dllPath)
 
     auto registerFn = reinterpret_cast<RegisterMasterAPIFn>(rawSym);
 
-    // Call into the user module to inject the API
+    // Call into the user module to inject the API, which also runs every registration it deferred
     registerFn(GetMasterAPI());
+    router_.EnsureGroupsClosed();
     logger_.Info("[CoreEngine]: Successfully injected API and initialized user module: ", dllPath);
 }
 

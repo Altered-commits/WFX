@@ -208,7 +208,8 @@ connections.
 Always check `IsValid()` before calling anything else on `tx`. It comes back
 false when every connection in the pool is already busy (bounded by
 `connLimit`, see [Tuning & limits](#tuning-limits) below), there simply
-wasn't a free connection to hand you.
+wasn't a free connection to hand you. A command sent through an invalid `tx`
+fails with `WFX::EpInvalidKey`.
 
 ### `MailFrom(addr)`
 

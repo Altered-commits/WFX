@@ -20,10 +20,11 @@
 #       shutdown included), the worker was not answering at the end, or nothing was
 #       checked
 #   2   security finding: one caller receiving another's response, a refused
-#       handshake still being served, a pinned connection shared with anyone else,
-#       an unsolicited push desyncing the framing, a failed TLS upgrade leaving
-#       the endpoint usable in plaintext, memory growing with the total response
-#       size rather than the chunk size, onAbort firing where it must not or its
+#       handshake still being served, a pinned connection shared with anyone else
+#       or a released one's send running on a pooled connection, an unsolicited
+#       push desyncing the framing, a failed TLS upgrade leaving the endpoint
+#       usable in plaintext, memory growing with the total response size rather
+#       than the chunk size, onAbort firing where it must not or its
 #       cancel naming the wrong connection, or an abandoned request reaching the
 #       backend
 #   3   WFX never answered /health, so nothing was exercised
@@ -45,6 +46,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # EndpointStatus, mirrors shared/abis/types.hpp, keep in sync. Only the ones this
 # suite asserts on by name are listed; every other failure is checked as "not success"
 EP_SUCCESS           = 0
+EP_INVALID_KEY       = 5
 EP_INTERNAL          = 10  # where a co_return EpFatal from onConnect lands: the coroutine
                            # only ever answers EpReady or EpFatal, so the engine's generic
                            # connect-failure funnel classifies it, not a per-cause status
@@ -471,6 +473,12 @@ def phase_solo_pinning(ctx):
         r = solo_reserve(cfg, n=2, release=mode)
         p.check("reserve: release=%s completes cleanly" % mode,
                 bool(r) and r.get("reserved") == 1 and r.get("same") == 1, "r=%r" % r)
+
+    # A send through a released reservation must not quietly run on a pooled connection:
+    # the sequence it belongs to would be split across connections
+    r = solo_reserve(cfg, n=1, release="early")
+    p.check("reserve: a send through a released reservation fails instead of using the pool",
+            bool(r) and r.get("after_release") == EP_INVALID_KEY, "r=%r" % r, security=True)
 
     p.check("reserve: the pool is still healthy after every release pattern",
             is_ok(solo_get(cfg, key="after-release")), "")
