@@ -61,18 +61,26 @@ class Server:
         self._started = False
         self._pid = None
 
-    def start(self):
+    def start(self, wipe_crash_logs=True):
         cmd = [self.cfg.wfx, "run", self.app, "--port", str(self.cfg.port), *self.flags, "--detach"]
         term.log("server", "starting%s: %s" % ((" (cwd=%s)" % self.cwd) if self.cwd else "", " ".join(cmd)))
 
         result = subprocess.run(cmd, cwd=self.cwd, capture_output=True, text=True,
-                                env=launch_env(self.cfg.app_dir))
+                                env=launch_env(self.cfg.app_dir, wipe=wipe_crash_logs))
         if result.returncode != 0:
             raise RuntimeError("wfx run failed (rc=%d): %s %s"
                                % (result.returncode, result.stdout.strip(), result.stderr.strip()))
 
         self._started = True
+        self._pid = None  # A new master, the cached PID was the previous one's
         term.log("server", term.green("detached OK"))
+
+    def restart(self):
+        """Stops and boots again, for a phase that changed the config. Whether it answered again.
+        Keeps crash_logs, so the end-of-run sanitizer scan still sees what earlier phases left."""
+        self.stop(confirm_exit=True)
+        self.start(wipe_crash_logs=False)
+        return self.wait_ready() is not None
 
     def wait_ready(self):
         """Seconds taken to answer, or None if it never did within ready_timeout."""

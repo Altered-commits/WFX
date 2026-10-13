@@ -14,7 +14,7 @@
 #include <arpa/inet.h>  // inet_ntop, inet_pton
 #include <functional>
 
-using WFXSocket = int; // On Linux/Unix, sockets are file descriptors (ints)
+using WFXSocket = int; // A socket is a file descriptor
 constexpr WFXSocket WFX_INVALID_SOCKET = -1;
 
 namespace WFX::Http {
@@ -23,7 +23,7 @@ namespace WFX::Http {
 struct HttpRequest;
 struct HttpResponse;
 
-// Cross-Platform compatible Ip Struct
+// An IPv4 or IPv6 address
 struct WFXIpAddress {
     union {
         in_addr v4;
@@ -215,7 +215,7 @@ struct EndpointCtx : public ConnectionTag {
     Utils::RWBuffer rwBuffer;         // 16 bytes
     Shared::AsyncData asyncData = {}; // 24 bytes
 
-    WFXSocket socket = WFX_INVALID_SOCKET; // 4 or 8 bytes depending on OS
+    WFXSocket socket = WFX_INVALID_SOCKET; // 4 bytes
 
 public:
     void Reset();
@@ -282,7 +282,7 @@ struct ClientCtx : public ConnectionTag {
     Shared::StreamGenerator streamGenerator = {}; // 24 bytes
 
     WFXIpAddress connInfo = {};            // 20 bytes, wire IP until ipAcquired, then the resolved IP for both limiters
-    WFXSocket socket = WFX_INVALID_SOCKET; // 4 | 8 bytes depending on OS
+    WFXSocket socket = WFX_INVALID_SOCKET; // 4 bytes
 
 public:
     void Reset();

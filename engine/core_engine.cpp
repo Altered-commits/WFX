@@ -15,12 +15,9 @@
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/diagnostics/crash_tracer.hpp"
-#include "shared/utils/detection_macro.hpp"
 #include "shared/utils/memory.hpp"
 
-#ifdef WFX_PLATFORM_POSIX
 #include <dlfcn.h>
-#endif
 
 #include <chrono>
 

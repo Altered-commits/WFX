@@ -235,9 +235,9 @@ struct EndpointMetrics {
     std::uint64_t status5xx;       // completed responses with 5xx status
     std::uint64_t connectFailures; // refused, timed out (onConnect included), or rejected by onConnect
     std::uint64_t tlsFailures;     // TLS wrap or handshake failures that ended the slot, in-band upgrades included
-    std::uint64_t requestTimeouts; // requests that exceeded the request timeout
+    std::uint64_t requestTimeouts; // requests still in flight when the request timeout fired
     std::uint64_t poolExhausted;   // sends refused because the connection pool was full
-    std::uint64_t otherErrors;     // everything else not split out above
+    std::uint64_t otherErrors;     // requests lost to anything else: a socket error or hangup, a bad response
     std::uint64_t reconnects;      // background reconnects scheduled after a failed connect
     std::uint64_t coalesceHits;    // requests merged into an in-flight identical request
     std::uint64_t bytesOut;        // total request bytes written to this endpoint
@@ -250,7 +250,9 @@ struct EndpointMetrics {
 `coalesceHits`, a refused one only in `poolExhausted`. `completed` counts only the ones that
 produced a full response. A request that was coalesced, timed out, or failed contributes no
 latency sample, and neither does one whose client left before its response arrived, though that
-one still counts in `completed`. `slotsInUse` is a live gauge, not a monotonic counter.
+one still counts in `completed`. A connection that times out or drops with no request on it, idle in
+the pool or reserved between requests, counts in neither `requestTimeouts` nor `otherErrors`.
+`slotsInUse` is a live gauge, not a monotonic counter.
 
 The status counters are filled from the endpoint's `statusCode` hook, so they stay zero
 for protocols that have no such concept.

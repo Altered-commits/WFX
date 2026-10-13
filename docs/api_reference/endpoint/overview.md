@@ -170,7 +170,7 @@ struct EndpointConfig {
     EndpointTLSConfig tlsConfig;
     bool exactSlots;                    // allocate connLimit/auxConnLimit exactly
     std::uint32_t prewarm;
-    std::uint32_t maxConcurrentStreams; // not read by the engine, see below
+    std::uint32_t maxConcurrentStreams; // cap on requests in flight on one multiplexed slot
     StringView alpnProtocols;           // ALPN offered on TLS, "h2,http/1.1", most preferred first; empty offers none
 };
 ```
@@ -188,7 +188,7 @@ struct EndpointConfig {
 | `tlsConfig` | TLS mode, see [below](#tls-mode) |
 | `exactSlots` | `true` allocates exactly `connLimit`/`auxConnLimit` slots; `false` (the default) rounds each up, see below |
 | `prewarm` | Connections to open eagerly on startup |
-| `maxConcurrentStreams` | Not read by the engine. A multiplexed protocol caps its own concurrency through `hasCapacity`, see [Multiplexing](#multiplexing-advanced) |
+| `maxConcurrentStreams` | Most requests one multiplexed connection carries at once; a request finding every connection at the cap opens another, up to `connLimit`. `0` sets no cap here, leaving it to the protocol's `hasCapacity`, see [Multiplexing](#multiplexing-advanced). Ignored by an endpoint that doesn't multiplex |
 | `alpnProtocols` | ALPN protocol names to offer during the TLS handshake, separated by commas and most preferred first (`"h2,http/1.1"`); empty offers none. Each name must be 1 to 255 bytes, or the server refuses to start |
 
 !!! important
@@ -1066,7 +1066,7 @@ To support that, `serialize()` assigns every outgoing request a `streamKey`
 and two `EndpointDesc` callbacks work together to track requests sharing one
 connection:
 
-- **`hasCapacity(slotState)`**: does this slot have room to take on one more request right now? This is the only cap on how many requests share a slot; `EndpointConfig::maxConcurrentStreams` is not read by the engine.
+- **`hasCapacity(slotState)`**: does this slot have room to take on one more request right now? Checked only once the slot is under `EndpointConfig::maxConcurrentStreams` (when that is non-zero), so the config sets a ceiling and the protocol decides within it, for example from a limit the server announced.
 - **`takeStreamOutput(slotState, key)`**: hand over a finished stream's response, or `nullptr` if it isn't done yet.
 
 Unlike the single-request-per-slot path, the engine never *calls*

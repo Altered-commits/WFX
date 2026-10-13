@@ -1687,25 +1687,25 @@ def phase_query(ctx):
         check("dot-segment path still resolves with a query attached", st == 200 and b == b"42",
               "status=%s body=%r" % (st, b))
 
-    # Buffer growth/relocation: header_reserve_hint is 512 bytes, recv_buffer_incr is 8192, so a
-    # query value comfortably past 512 but under max_header_size (8192) forces at least one grow
-    # cycle. This is what actually exercises the parser fix's memmove reassembly, not just the
-    # split-then-normalize logic on a small request that never needed to grow
-    with term.progress("query", "buffer growth") as pr:
+    # Large query values. The receive buffer starts at recv_buffer_incr (8192), which already holds
+    # any header block max_header_size (8192) allows, so only a body makes it grow. The second
+    # request sends one big enough to, moving the buffer under the already-parsed path and query:
+    # that is what exercises the parser fix's memmove reassembly
+    with term.progress("query", "large values") as pr:
         big_value = "x" * 4000
         st, j = _query_json(host, port, "/query/echo?pad=" + ("p" * 1000) + "&v=" + big_value)
-        check("large query value survives buffer growth", st == 200 and j and j.get("present") is True
+        check("a 4000-byte query value parses intact", st == 200 and j and j.get("present") is True
               and j.get("len") == 4000 and j.get("value") == big_value,
               "st=%s len=%s" % (st, j and j.get("len")))
 
-        # Same growth scenario, checked through the full raw path this time (not just the parsed
-        # value), via the existing /echo-full route's X-Echo-Path header
+        # Checked through the full raw path this time (not just the parsed value), via the
+        # existing /echo-full route's X-Echo-Path header
         traversal_value = "/a/../b" * 200  # ~1400 bytes, still traversal-shaped, still must survive
         st, raw = req(host, port, "POST", "/echo-full?v=" + traversal_value,
-                      headers={"X-Marker": "grow"}, body=b"body", rtimeout=5.0)
+                      headers={"X-Marker": "grow"}, body=b"b" * 20000, rtimeout=5.0)
         _, hdrs, _ = parse_hdrs(raw)
         echoed_path = b"".join(hdrs.get(b"x-echo-path", [b""])).decode(errors="replace")
-        check("full path+query survives growth via X-Echo-Path",
+        check("full path+query survives a body growing the buffer under it (X-Echo-Path)",
               st == 200 and echoed_path == "/echo-full?v=" + traversal_value,
               "status=%s echoed_path=%r" % (st, echoed_path[:120]))
 

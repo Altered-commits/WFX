@@ -59,6 +59,14 @@ IDLE_RECYCLE_WAIT    = 11.0  # idleTimeoutSeconds 5, plus a tick, plus slack
 AUX_RECLAIM_WAIT     = 5.5   # connectTimeoutSeconds 5 reclaiming a leaked side connection
 REQUEST_TIMEOUT_WAIT = 17.0  # requestTimeoutSeconds 10, plus a tick, plus slack
 
+# MuxCapped's maxConcurrentStreams in app/src/main.cpp, and a burst well past it
+MUX_STREAM_CAP = 2
+CAPPED_BURST   = 6
+
+# An outbound_ca_path that can't load, and what the worker logs when it tries
+MISSING_CA     = "/nonexistent/wfx-endpoint-audit-ca.pem"
+CA_LOAD_FAILED = "Failed to load configured CA certificate for client ctx"
+
 # The mock upstream
 class Mock:
     """primitive_upstream.py: the mux, solo and gate listeners plus an HTTP counter plane."""
@@ -104,6 +112,13 @@ class Mock:
         """Handshakes the mock is still leaving unanswered, each one a slot suspended in onConnect."""
         try:
             return int(self._ctl("/ctl/mux/hanging"))
+        except ValueError:
+            return -1
+
+    def capped_peak(self):
+        """Most requests one token "capped" connection had outstanding at once."""
+        try:
+            return int(self._ctl("/ctl/mux/capped/peak"))
         except ValueError:
             return -1
 
@@ -174,8 +189,11 @@ def solo_stream(cfg, count=10, size=64, mode="server", stop=0, rtimeout=60.0):
                  {"X-Mode": mode, "X-Count": str(count), "X-Size": str(size), "X-Stop": str(stop)},
                  rtimeout)
 
-def solo_reserve(cfg, n=3, release="late", rtimeout=20.0):
-    return _json(cfg, "GET", "/solo/reserve", {"X-N": str(n), "X-Release": release}, rtimeout)
+def solo_reserve(cfg, n=3, release="late", hold=0.0, rtimeout=20.0):
+    headers = {"X-N": str(n), "X-Release": release}
+    if hold:
+        headers["X-Hold"] = str(int(hold * 1000))
+    return _json(cfg, "GET", "/solo/reserve", headers, rtimeout)
 
 def solo_reserve_pair(cfg, rtimeout=20.0):
     return _json(cfg, "GET", "/solo/reserve/pair", rtimeout=rtimeout)
@@ -377,6 +395,19 @@ def phase_mux_multiplex(ctx):
             conns_after - conns_before <= 1,
             "mux connections before=%d after=%d, expected at most one more"
             % (conns_before, conns_after))
+
+    # MuxCapped's maxConcurrentStreams sits far under what MuxHasCapacity allows. The warm-up
+    # leaves one connection idle and ready, so the burst's first two land on it together and the
+    # rest have to open more connections rather than pile onto it
+    warm = mux_call(cfg, key="warm", mux="capped")
+    burst = in_parallel(lambda i: mux_call(cfg, key="sleep:1.0:cap%d" % i, mux="capped", rtimeout=10.0),
+                        CAPPED_BURST)
+    p.check("maxConcurrentStreams: requests past the cap are still served, on more connections",
+            is_ok(warm) and all(is_ok(r) for r in burst), "warm=%r burst=%r" % (warm, burst))
+
+    peak = mock.capped_peak()
+    p.check("maxConcurrentStreams: a connection carries exactly its cap at once, never more",
+            peak == MUX_STREAM_CAP, "peak %d outstanding on one connection, cap %d" % (peak, MUX_STREAM_CAP))
 
     # Nothing rides the connection from here on, so the idle timer is free to fire
     time.sleep(IDLE_RECYCLE_WAIT)
@@ -687,6 +718,28 @@ def phase_solo_upgrade(ctx):
     # A failed upgrade must not poison the endpoint for unrelated traffic
     p.check("upgrade: the plaintext endpoint is unaffected by the failed upgrades",
             is_ok(solo_get(cfg, key="after-upgrade-failures")), "", security=True)
+
+    # The outbound TLS context is built on demand by the first upgrade, so a CA that can't load
+    # surfaces inside a running worker. It has to fail that upgrade, not the worker, and stay
+    # failed rather than being rebuilt by every later one
+    toml_path = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
+    common.toml.patch(toml_path, "outbound_ca_path", MISSING_CA)
+    try:
+        if not ctx.server.restart():
+            p.failed("bad CA: the server boots with an outbound_ca_path that can't load", "no /health")
+        else:
+            first = solo_get(cfg, key="x", solo="tlsgarbage", rtimeout=20.0)
+            second = solo_get(cfg, key="x", solo="tlsgarbage", rtimeout=20.0)
+            p.check("bad CA: the upgrade fails cleanly instead of taking the worker down",
+                    is_err(first) and is_err(second), "first=%r second=%r" % (first, second))
+
+            loads = common.logs.worker_logs_count(cfg.app_dir, CA_LOAD_FAILED)
+            p.check("bad CA: the broken context is built once, not again by every upgrade",
+                    loads == 1, "'%s' logged %d times" % (CA_LOAD_FAILED, loads))
+    finally:
+        common.toml.restore(toml_path)
+        if not ctx.server.restart():
+            p.failed("bad CA: the server comes back on the baseline config", "no /health")
 
     p.check("worker healthy after the upgrade phase", wfx_healthy(cfg) and mock.ping())
 
@@ -1006,6 +1059,23 @@ def phase_metrics(ctx):
     p.check("metrics: a garbage TLS handshake is never served", is_err(r), "r=%r" % r)
     p.check("metrics: a failed TLS handshake lands in a failure bucket", sum(moved.values()) >= 1,
             "no failure bucket moved: %r" % moved)
+
+    # The backend resets the connection mid-request instead of answering. That socket error
+    # fails the request, so it counts in other_errors, and only once
+    before = metrics(cfg)
+    r = solo_get(cfg, key="reset")
+    moved = metric(metrics(cfg), "other_errors") - metric(before, "other_errors")
+    p.check("metrics: a connection reset mid-request counts once in other_errors",
+            is_err(r) and moved == 1, "r=%r other_errors +%d" % (r, moved))
+
+    # A reservation idle past idleTimeoutSeconds has its connection closed with nothing in
+    # flight. after_hold proves the close happened; it is no request timeout
+    before = metrics(cfg)
+    r = solo_reserve(cfg, n=1, hold=IDLE_RECYCLE_WAIT, rtimeout=IDLE_RECYCLE_WAIT + 10.0)
+    moved = metric(metrics(cfg), "request_timeouts") - metric(before, "request_timeouts")
+    p.check("metrics: an idle reservation timing out is not counted as a request timeout",
+            bool(r) and r.get("after_hold") == EP_INVALID_KEY and moved == 0,
+            "r=%r request_timeouts +%d" % (r, moved))
 
     # Gauge invariant: every lease taken above has since been returned, which is what
     # catches an unbalanced increment and decrement

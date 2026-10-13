@@ -9,11 +9,8 @@
 #include "utils/fileops/filesystem.hpp"
 #include "utils/process/process.hpp"
 #include "utils/string/string.hpp"
-#include "shared/utils/detection_macro.hpp"
 
-#ifdef WFX_PLATFORM_LINUX
 #include <wait.h>
-#endif
 
 namespace WFX::CLI {
 

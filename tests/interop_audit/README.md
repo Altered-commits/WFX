@@ -102,11 +102,11 @@ doesn't want to pay image-pull/`initdb` cost again on the next run.
 `--no-docker` (assumes Docker's already up) leaves teardown alone too, since
 that flag means you're managing the containers yourself.
 
-> The config-patching step edits `app/config/wfx.local.toml` and
-> `upstream/config/wfx.local.toml` in place, the same way `client_audit` edits
-> its own `outbound_ca_path`. Don't commit those lines with a real path in
-> them: checked in, they point every other checkout at a cert that isn't
-> there. Leave `cert_path` / `key_path` / `outbound_ca_path` as `"..."` / `""`.
+> The config-patching step goes through `common.toml`, which puts
+> `app/config/wfx.local.toml` and `upstream/config/wfx.local.toml` back the way
+> it found them when the run ends, so no real path reaches git. A run killed with
+> SIGKILL skips that restore; `git checkout` on the two files brings the
+> placeholders back.
 
 ### Requirements
 

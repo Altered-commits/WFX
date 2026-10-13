@@ -22,7 +22,6 @@
 import itertools
 import json
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -241,19 +240,14 @@ def patch_ssl_paths(cfg):
     the dedicated chain-test root when that vector is available), which is why tls_send() defaults
     to presenting a client cert - see CLIENT_CERT above."""
     toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
-    with open(toml) as f:
-        s = f.read()
     good, key = os.path.join(cfg.cert_dir, "good.pem"), os.path.join(cfg.cert_dir, "good-key.pem")
     ca = getattr(cfg, "ca_path", "")
-    s = re.sub(r'(?m)^(\s*cert_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % good, s)
-    s = re.sub(r'(?m)^(\s*key_path\s*=\s*)"[^"]*"',  lambda m: m.group(1) + '"%s"' % key, s)
+    common.toml.patch(toml, "cert_path", good)
+    common.toml.patch(toml, "key_path", key)
     if ca:
-        s = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % ca, s)
+        common.toml.patch(toml, "outbound_ca_path", ca)
         if "client-good" in cfg.avail:
-            client_ca = getattr(cfg, "client_ca_bundle", "") or ca
-            s = re.sub(r'(?m)^(\s*client_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % client_ca, s)
-    with open(toml, "w") as f:
-        f.write(s)
+            common.toml.patch(toml, "client_ca_path", getattr(cfg, "client_ca_bundle", "") or ca)
     term.log("patch", "server cert -> %s | client CA trust -> %s | inbound mTLS -> %s"
             % (good, ca or "(system store)", "on" if "client-good" in cfg.avail else "off"))
 

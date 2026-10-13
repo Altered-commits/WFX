@@ -5,11 +5,8 @@ WFX is a C++ web framework focused on performance and simplicity. It handles con
 It is still in active development. Things will change.
 
 !!! important
-    WFX currently only supports Linux, and this section of the docs describes
-    that implementation, including OS-specific mechanisms where the current
-    backend relies on them. A future port to another OS is free to implement
-    the same architectural shape (a coordinating process, independent workers,
-    no shared hot-path state) with entirely different primitives underneath.
+    WFX runs on Linux only, and this section of the docs describes that
+    implementation, including the Linux mechanisms the backend relies on.
 
 ---
 

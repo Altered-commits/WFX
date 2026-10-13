@@ -138,31 +138,18 @@ def ensure_docker_up(cfg):
 
     term.log("docker", term.green("up: postgres :%d, smtp4dev :%d/:%d" % (PG_PORT, SMTP_PORT_PLAIN, SMTP_PORT_LOGIN)))
 
-# Config patching (cert_path/key_path/outbound_ca_path are "..." placeholders in git, the
-# harness fills in the real absolute paths, same pattern client_audit uses for its own certs)
-def patch_toml_value(toml_path, key, value):
-    import re
-    with open(toml_path) as f:
-        text = f.read()
-
-    pattern = r'(?m)^(\s*%s\s*=\s*)"[^"]*"' % re.escape(key)
-    text, n = re.subn(pattern, lambda m: m.group(1) + '"%s"' % value, text)
-    if n == 0:
-        raise RuntimeError("%s: no '%s = \"...\"' line to patch" % (toml_path, key))
-
-    with open(toml_path, "w") as f:
-        f.write(text)
-
+# Config patching: both tomls keep placeholders in git, the run fills in the real absolute cert
+# paths through common.toml, which puts the placeholders back when it ends
 def patch_configs():
     shared_crt = os.path.join(CERTS_DIR, "shared", "server.crt")
     shared_key = os.path.join(CERTS_DIR, "shared", "server.key")
 
     upstream_toml = os.path.join(HERE, "upstream", "config", "wfx.local.toml")
-    patch_toml_value(upstream_toml, "cert_path", shared_crt)
-    patch_toml_value(upstream_toml, "key_path", shared_key)
+    common.toml.patch(upstream_toml, "cert_path", shared_crt)
+    common.toml.patch(upstream_toml, "key_path", shared_key)
 
     app_toml = os.path.join(HERE, "app", "config", "wfx.local.toml")
-    patch_toml_value(app_toml, "outbound_ca_path", shared_crt)
+    common.toml.patch(app_toml, "outbound_ca_path", shared_crt)
 
     term.log("patch", "outbound TLS trust + HTTPS upstream cert -> %s" % shared_crt)
 

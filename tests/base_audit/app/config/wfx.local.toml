@@ -1,5 +1,5 @@
 [Project]
-middleware_list = []    # Order of middleware registered by either User or Engine
+middleware_list = []    # Execution order of the middleware registered with WFX_MIDDLEWARE
 
 [Build]
 dir_name            = "build"          # Build directory used by CMake
@@ -22,7 +22,6 @@ recv_buffer_max              = 73728   # max_body_size + max_header_size: a body
                                #          both, not just the body alone (see config.hpp's own TODO on
                                #          this exact invariant); bigger bodies still overflow cleanly
 recv_buffer_incr             = 8192    # Buffer growth step (in bytes)
-header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
 max_header_size              = 8192    # Max total size of all headers (header-bomb target)
 max_header_count             = 64      # Max number of headers allowed (header-count-bomb target)
 max_body_size                = 65536   # Max size of request body (body-bomb target)
@@ -32,7 +31,7 @@ idle_timeout                 = 10      # Max idle time before reap
 max_connections              = 100000     # Total concurrent cap (reachable -> exhaustion testable)
 
 [ENV]
-env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
+env_path = "..." # Path to .env file. IMPORTANT: chmod 600, the file is skipped if group or other can access it
 
 # Per-IP cap and rate limiter cranked wide open because ALL audit traffic is from 127.0.0.1 and
 # would otherwise be throttled before it ever stressed the server (the limiter itself wants a
@@ -68,15 +67,10 @@ curves                      = "X25519:P-256"  # Elliptic curves preference list 
 enable_server_session_cache = true            # Enable server side session cache
 enable_client_session_cache = true            # Enable client side session cache
 enable_ktls                 = false           # Enable Kernel TLS (KTLS) if supported
-server_session_cache_size   = 4096            # Size of server session cache (In bytes)
-client_session_cache_size   = 1024            # Size of client session cache (In bytes)
+server_session_cache_size   = 4096            # Max sessions in the server session cache
+client_session_cache_size   = 1024            # Max sessions in the client session cache
 min_proto_version           = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
 security_level              = 2               # SSL security level (0-5)
-
-[Windows]
-accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts
-connection_threads = "auto"  # IOCP worker thread count
-request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
 worker_processes        = 2      # Number of worker processes to fork
@@ -109,7 +103,6 @@ latency       = true   # AUDIT: on so the metrics phase can assert route latency
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)
 template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size     = 2048    # Max chunk size to read / write from template cache file (in bytes)
 master_poll_interval = 2       # Master wake interval in seconds: worker restart detection and metrics polling
 worker_backoff_base  = 1       # Base backoff in seconds (doubles each attempt)
 worker_backoff_max   = 2      # Max backoff cap in seconds

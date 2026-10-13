@@ -20,7 +20,6 @@
 
 import concurrent.futures
 import os
-import re
 import socket
 import sys
 import time
@@ -166,28 +165,9 @@ def _alive(host, port, rtimeout=4.0):
     a phase's own attack traffic against some OTHER identity can never cause a false reading"""
     return isinstance(_send_from(host, port, _ALIVE_PROBE, "GET", "/health"), int)
 
-# TOML patching, only used by phases that need a config variant other than
-# app/config/wfx.local.toml's permanent baseline
-def _patch_toml(path, pattern, replacement):
-    with open(path) as f:
-        original = f.read()
-    patched = re.sub(pattern, replacement, original, count=1)
-    with open(path, "w") as f:
-        f.write(patched)
-    return original
-
-def _restore_toml(path, original):
-    with open(path, "w") as f:
-        f.write(original)
-
-def _restart(ctx):
-    ctx.server.stop(confirm_exit=True)
-    ctx.server.start()
-    return ctx.server.wait_ready() is not None
-
 def _restart_with_flags(ctx, flags):
     ctx.server.flags = list(flags)
-    return _restart(ctx)
+    return ctx.server.restart()
 
 # PHASE: trust_boundary
 def phase_trust_boundary(ctx):
@@ -269,10 +249,9 @@ def phase_trust_boundary(ctx):
     # G6b: trusted_proxies matches a whole CIDR block, not just the one /32 baked into
     # app/config/wfx.local.toml - a source inside the block gets the header honored, a source just
     # outside it (still loopback, still "close" numerically) does not
-    original_cidr = _patch_toml(toml_path, r'(?m)^(\s*trusted_proxies\s*=\s*)\[.*\]',
-                                r'\g<1>["127.0.10.0/24"]')
+    common.toml.patch(toml_path, "trusted_proxies", ["127.0.10.0/24"])
     try:
-        if not _restart(ctx):
+        if not ctx.server.restart():
             p.failed("TRUST_CIDR_BOOT", "server never came back with a /24 trusted_proxies block")
         else:
             hit, st, seen = _drain_burst(host, port, "127.0.10.5", headers={"X-Forwarded-For": "10.90.1.1"})
@@ -286,8 +265,8 @@ def phase_trust_boundary(ctx):
                      "status=%r, expected 200 (127.0.11.5 is outside 127.0.10.0/24, spoofing 10.90.1.1 "
                      "which is already drained should not have worked)" % st_outside)
     finally:
-        _restore_toml(toml_path, original_cidr)
-        if not _restart(ctx):
+        common.toml.restore(toml_path)
+        if not ctx.server.restart():
             p.failed("TRUST_CIDR_RESTORE_BOOT", "server never came back after restoring trusted_proxies")
 
     # G6c: regression for a whitespace-trim bug found by code review, not by any test
@@ -297,10 +276,9 @@ def phase_trust_boundary(ctx):
     # that leftmost token made ParseIpAddress fail and silently fall back to the peer.
     # The HTTP parser already strips whitespace around the whole header value, so the
     # trigger has to be internal whitespace next to a comma inside a multi-hop chain.
-    original_ws = _patch_toml(toml_path, r'(?m)^(\s*trusted_proxies\s*=\s*)\[.*\]',
-                              r'\g<1>["127.0.0.1/32", "10.10.12.5/32"]')
+    common.toml.patch(toml_path, "trusted_proxies", ["127.0.0.1/32", "10.10.12.5/32"])
     try:
-        if not _restart(ctx):
+        if not ctx.server.restart():
             p.failed("TRUST_WS_BOOT", "server never came back with a second trusted_proxies entry")
         else:
             # Drain the peer's own bare identity first, so a silent fallback-to-peer is
@@ -319,22 +297,22 @@ def phase_trust_boundary(ctx):
                      st_ws == 200, "status=%r, expected 200 (10.10.12.5 should be fresh, not "
                      "the already-drained peer identity)" % st_ws)
     finally:
-        _restore_toml(toml_path, original_ws)
-        if not _restart(ctx):
+        common.toml.restore(toml_path)
+        if not ctx.server.restart():
             p.failed("TRUST_WS_RESTORE_BOOT", "server never came back after restoring trusted_proxies")
 
     # G7: non-recursive mode takes the header value as-is, no chain walking. A
     # multi-value chain fails to parse as one address and falls back to the peer IP
-    original = _patch_toml(toml_path, r'(?m)^(\s*real_ip_recursive\s*=\s*)true', r'\g<1>false')
+    common.toml.patch(toml_path, "real_ip_recursive", False)
     try:
-        if not _restart(ctx):
+        if not ctx.server.restart():
             p.failed("TRUST_NONRECURSIVE_BOOT", "server never came back with real_ip_recursive=false")
         else:
             hit, st, seen = _drain_burst(host, port, TRUSTED, headers={"X-Forwarded-For": "10.10.8.1"})
             p.check("non-recursive: a bare single value still resolves directly",
                     hit == BURST and st == 429, "got %r at #%r, sequence=%r" % (st, hit, seen))
 
-            # Not an exact-count check like the others: _restart() above just ran
+            # Not an exact-count check like the others: restart() above just ran
             # wait_ready(), which itself probes TRUSTED's bare identity (no XFF) once, so
             # this bucket can start already one token short. The property under test is
             # just "the bare peer identity is rate-limited at all in non-recursive mode",
@@ -348,8 +326,8 @@ def phase_trust_boundary(ctx):
             p.secure("non-recursive: a multi-value chain fails to parse and falls back to the peer",
                      st3 == 429, "status=%r, expected 429 (falls back to the already-drained peer)" % st3)
     finally:
-        _restore_toml(toml_path, original)
-        if not _restart(ctx):
+        common.toml.restore(toml_path)
+        if not ctx.server.restart():
             p.failed("TRUST_RESTORE_BOOT", "server never came back after restoring real_ip_recursive")
 
     # G8: malformed / hostile X-Forwarded-For values must never crash or 500-fault
@@ -399,18 +377,16 @@ def phase_trust_boundary(ctx):
     # against a long trusted_proxies list is O(hops * proxies) CIDR parses per request on
     # the single-threaded event loop every other client is also waiting on. Worst case:
     # every hop matches only the last entry in trusted_proxies, so nothing short-circuits
-    decoys = ['"127.200.%d.1/32"' % i for i in range(1, 300)]
+    decoys = ["127.200.%d.1/32" % i for i in range(1, 300)]
     matching_hop = "127.5.5.5"
-    proxies_toml = "[" + ", ".join(decoys + ['"%s/32"' % matching_hop]) + "]"
     # Real client goes leftmost (walked last): the walk starts at the rightmost hop and
     # moves left, so 300 trusted hops must sit to the right of it, or the walk stops
     # after one step
     chain = ", ".join(["10.10.11.1"] + [matching_hop] * 300)
 
-    original_scale = _patch_toml(toml_path, r'(?m)^(\s*trusted_proxies\s*=\s*)\[.*\]',
-                                 lambda m: m.group(1) + proxies_toml)
+    common.toml.patch(toml_path, "trusted_proxies", decoys + ["%s/32" % matching_hop])
     try:
-        if not _restart(ctx):
+        if not ctx.server.restart():
             p.failed("TRUST_CHAIN_COST_BOOT", "server never came back with a 300-entry trusted_proxies list")
         else:
             start = time.time()
@@ -422,8 +398,8 @@ def phase_trust_boundary(ctx):
             p.secure("worst-case recursive chain (300 hops x 300 trusted_proxies) stays fast",
                      elapsed < 2.0, "took %.3fs, status=%r (expected well under 2s)" % (elapsed, st_cost))
     finally:
-        _restore_toml(toml_path, original_scale)
-        if not _restart(ctx):
+        common.toml.restore(toml_path)
+        if not ctx.server.restart():
             p.failed("TRUST_CHAIN_COST_RESTORE_BOOT", "server never came back after restoring trusted_proxies")
 
     if not _alive(host, port):
@@ -767,9 +743,9 @@ def phase_multiworker(ctx):
     # configured cap alone. This demonstrates that directly instead of just asserting it
     workers = 4
     toml_path = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
-    original = _patch_toml(toml_path, r'(?m)^(\s*worker_processes\s*=\s*)\d+', r'\g<1>%d' % workers)
+    common.toml.patch(toml_path, "worker_processes", workers)
     try:
-        if not _restart(ctx):
+        if not ctx.server.restart():
             p.failed("MULTIWORKER_BOOT", "server never came back with worker_processes=%d" % workers)
             return
 
@@ -798,8 +774,8 @@ def phase_multiworker(ctx):
         if not _alive(host, port):
             p.failed("MULTIWORKER_SERVER_DEAD", "did not answer the dedicated liveness probe")
     finally:
-        _restore_toml(toml_path, original)
-        if not _restart(ctx):
+        common.toml.restore(toml_path)
+        if not ctx.server.restart():
             p.failed("MULTIWORKER_RESTORE_BOOT", "server never came back after restoring worker_processes")
 
 class IpAudit(common.Suite):

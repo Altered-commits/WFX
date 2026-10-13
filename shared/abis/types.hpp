@@ -318,7 +318,7 @@ struct EndpointConfig {
     EndpointTLSConfig tlsConfig;         // TLS mode for this endpoint
     bool exactSlots;                     // Allocate connLimit/auxConnLimit exactly, else round up to 64
     std::uint32_t prewarm;               // Slots to connect eagerly on first epoll loop iteration
-    std::uint32_t maxConcurrentStreams;  // Cap on requests sharing one slot; 0/1 = exclusive slot
+    std::uint32_t maxConcurrentStreams;  // Cap on in-flight requests per multiplexed slot; 0 = hasCapacity decides
     StringView alpnProtocols;            // ALPN offered on TLS, "h2,http/1.1", most preferred first; empty offers none
 };
 static_assert(sizeof(EndpointConfig) == 56, "'EndpointConfig' must be exactly 56 bytes.");

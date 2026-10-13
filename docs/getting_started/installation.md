@@ -1,12 +1,7 @@
 # Installation
 
 !!! important
-    WFX currently supports **Linux only**.
-
-    - Linux: Supported
-    - WSL: Supported
-    - Windows (native): Not supported
-    - macOS: Not supported
+    WFX runs on **Linux only**, WSL included.
 
 ---
 
@@ -181,7 +176,6 @@ After uninstalling, restart your terminal to apply the PATH changes.
 
 ## Notes
 
-- Windows and macOS support is planned for a future release.
 - The most recent code is on the `dev` branch; releases are cut from `main`, which is what the installer builds.
 - WFX is currently tested on Ubuntu and Debian-based distributions. Other Linux distributions should work but are untested.
 - Kernel TLS (used for HTTPS acceleration) requires a recent Linux kernel. Older kernels will compile but may not support all runtime features.

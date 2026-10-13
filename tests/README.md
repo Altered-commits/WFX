@@ -73,6 +73,7 @@ tests/
     net.py            raw HTTP over TCP/TLS, deliberately not a real client
     logs.py           tailing WFX logs, sanitizer wiring
     server.py         the WFX process under test
+    toml.py           per-run edits to an app's wfx.local.toml, restored when the run ends
     report.py         results, summary table, exit codes
     suite.py          config, lifecycle, run loop
   run_audits.sh       single entry point
@@ -162,7 +163,14 @@ ctx.phase("security").record(findings, security=("PATH_TRAVERSAL_URL", "RESPONSE
 | `teardown(ctx)` | stop them, always runs |
 
 The order is `setup`, boot, `before_phases`, the phases, `before_stop`, the liveness read, the
-stop, the sanitizer scan and the forced-kill check, then `teardown`.
+stop, the sanitizer scan and the forced-kill check, then `teardown`, then every toml patched
+through `common.toml` going back to what the run found.
+
+A suite that needs a config value other than its toml's baseline sets it with
+`common.toml.patch(path, key, value)`, never by writing the file itself: the tomls are tracked,
+and the runner's restore is what keeps an absolute cert path or a restart variant out of git. A
+phase that restarts into a variant calls `common.toml.restore(path)` and restarts again before
+it returns, so the next phase sees the baseline.
 
 And four switches:
 
@@ -187,7 +195,8 @@ def build_server(self, cfg):
 broke. The runner says so explicitly and waits for the master to revive it.
 
 **`[wfx-crash:*]` lines in red** are crash dumps or sanitizer reports from *this* run;
-`crash_logs` is wiped at startup so nothing stale replays. ASan and UBSan are pointed there
+`crash_logs` is wiped when the run first boots, so nothing stale replays, and kept across a
+mid-run `restart()`, so the final scan still sees every phase. ASan and UBSan are pointed there
 because `wfx run --detach` sends stderr to `/dev/null`, which would otherwise discard them.
 
 **Turn up the logs** with `--wfx-logs all` to see everything WFX printed, or `--wfx-logs crash` to

@@ -66,7 +66,6 @@ send_buffer_max              = 16384   # 32-bit Unsigned Integer (In bytes)
 send_buffer_incr             = 4096    # 32-bit Unsigned Integer (In bytes)
 recv_buffer_max              = 16384   # 32-bit Unsigned Integer (In bytes)
 recv_buffer_incr             = 4096    # 32-bit Unsigned Integer (In bytes)
-header_reserve_hint          = 512     # 16-bit Unsigned Integer (In bytes)
 max_header_size              = 8192    # 32-bit Unsigned Integer (In bytes)
 max_body_size                = 8192    # 32-bit Unsigned Integer (In bytes)
 max_header_count             = 64      # 16-bit Unsigned Integer
@@ -82,7 +81,6 @@ max_connections              = 2000    # 32-bit Unsigned Integer
 - `send_buffer_incr`: Growth increment when send buffer expands. **Validated: cannot exceed `send_buffer_max`.**
 - `recv_buffer_max`: Max total inbound buffer per connection. **Validated: must be at least `max_header_size + max_body_size`**, or a request maxed out on both could never fit and would always be rejected.
 - `recv_buffer_incr`: Growth increment when receive buffer expands. **Validated: cannot exceed `recv_buffer_max`.**
-- `header_reserve_hint`: Parsed but currently unused; the initial receive buffer is `recv_buffer_incr`
 
 ### Headers & Body
 
@@ -436,7 +434,6 @@ Miscellaneous engine-level settings covering caching, internal I/O, and worker p
 ```toml
 [Misc]
 file_cache_size      = 20    # 16-bit Unsigned Integer
-cache_chunk_size     = 2048  # 16-bit Unsigned Integer (In bytes)
 template_chunk_size  = 16384 # 32-bit Unsigned Integer (In bytes)
 master_poll_interval = 2     # 16-bit Unsigned Integer (In seconds)
 worker_backoff_base  = 1     # 16-bit Unsigned Integer (In seconds)
@@ -445,7 +442,6 @@ worker_backoff_max   = 16    # 16-bit Unsigned Integer (In seconds)
 
 - `file_cache_size`: Number of files cached in memory (LFU)
 - `template_chunk_size`: Max I/O chunk size during template compilation
-- `cache_chunk_size`: Parsed but currently unused
 - `master_poll_interval`: How often the master process wakes up to check for dead workers and poll memory metrics. Lower values mean faster crash detection at the cost of slightly more wakeups. **Validated: must be greater than 0**, or the master process busy-spins at 100% CPU instead of sleeping.
 - `worker_backoff_base`: Starting backoff delay in seconds before the first restart attempt. Doubles on each subsequent attempt.
 - `worker_backoff_max`: Maximum backoff delay cap in seconds. A crashed worker is always restarted, there is no restart limit: once the backoff reaches this cap, every further restart waits this long.

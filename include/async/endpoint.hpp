@@ -375,8 +375,10 @@ using UserOnConnectFn = Task<ConnectResult> (*)(SlotHandle, void*);
 // ABI signature EndpointOnConnectFn. Each distinct user function
 // gets its own instantiation with its own function pointer
 //
-// constexpr nullptr specialization: returns nullptr directly so
-// the engine skips the onConnect phase for simple protocols
+// The nullptr specialization returns nullptr directly so the engine
+// skips the onConnect phase for simple protocols. A specialization,
+// not if constexpr(UserFn == nullptr): GCC under -fsanitize=undefined
+// refuses that comparison as a constant expression
 template <UserOnConnectFn UserFn>
 void EraseOnConnectImpl(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd) noexcept
 {
@@ -388,10 +390,12 @@ void EraseOnConnectImpl(EndpointSlotHandle handle, void* slotState, AsyncComplet
 
 template <UserOnConnectFn UserFn> constexpr EndpointOnConnectFn GetErasedOnConnect() noexcept
 {
-    if constexpr(UserFn == nullptr)
-        return nullptr;
-    else
-        return &EraseOnConnectImpl<UserFn>;
+    return &EraseOnConnectImpl<UserFn>;
+}
+
+template <> constexpr EndpointOnConnectFn GetErasedOnConnect<nullptr>() noexcept
+{
+    return nullptr;
 }
 
 // User facing onAbort function pointer type
@@ -413,10 +417,12 @@ void EraseOnAbortImpl(EndpointSlotHandle handle, void* slotState, AsyncCompleteF
 
 template <UserOnAbortFn UserFn> constexpr EndpointOnAbortFn GetErasedOnAbort() noexcept
 {
-    if constexpr(UserFn == nullptr)
-        return nullptr;
-    else
-        return &EraseOnAbortImpl<UserFn>;
+    return &EraseOnAbortImpl<UserFn>;
+}
+
+template <> constexpr EndpointOnAbortFn GetErasedOnAbort<nullptr>() noexcept
+{
+    return nullptr;
 }
 
 // One chunk of a streamed response. data borrows the engine's output object and stays valid

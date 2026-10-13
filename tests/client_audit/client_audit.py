@@ -46,7 +46,6 @@
 import itertools
 import json
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -522,16 +521,8 @@ def patch_outbound_ca(cfg):
     """Points outbound_ca_path at the throwaway CA, so the 'good' cert is trusted, the one every
     TLS persona serves and the HTTP mock's TLS listener too.
     """
-    toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
-    with open(toml) as f:
-        text = f.read()
-
-    text = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"',
-                  lambda m: m.group(1) + '"%s"' % cfg.smtp_ca_path, text)
-
-    with open(toml, "w") as f:
-        f.write(text)
-
+    common.toml.patch(os.path.join(cfg.app_dir, "config", "wfx.local.toml"), "outbound_ca_path",
+                      cfg.smtp_ca_path)
     term.log("patch", "outbound TLS CA trust -> %s" % cfg.smtp_ca_path)
 
 # Driving WFX: HTTP

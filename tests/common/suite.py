@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import logs, term
+from . import logs, term, toml
 from .report import Report, EXIT_NO_BOOT
 from .server import Server
 
@@ -192,7 +192,10 @@ class Suite:
         finally:
             follower.stop()
             server.stop(confirm_exit=self.confirm_exit)
-            self.teardown(ctx)
+            try:
+                self.teardown(ctx)
+            finally:
+                toml.restore_all()
 
     def _check_sanitizer_reports(self, ctx):
         """Turn any ASan/UBSan report from this run into a failing check."""

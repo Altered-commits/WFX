@@ -206,8 +206,9 @@ got silently mangled by traversal-defense logic that was never meant to touch it
 parser now splits the query off before normalizing and reassembles it byte-for-byte
 untouched afterward, so a set of traversal-shaped query values is checked to survive
 completely unchanged. Also covered: no auto-decoding (`+` and `%20` stay literal,
-same as header values), path normalization still working with a query attached, and
-buffer growth past `header_reserve_hint` (512 B) with a large query value.
+same as header values), path normalization still working with a query attached, a
+4000-byte query value, and a long query surviving a body that grows the receive buffer
+under it.
 
 Exit code 2 if a traversal-shaped value gets mangled, 1 for other failures.
 

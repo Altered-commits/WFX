@@ -4,7 +4,6 @@
 #ifndef WFX_CONFIG_HPP
 #define WFX_CONFIG_HPP
 
-#include "shared/utils/detection_macro.hpp"
 #include <cstdint>
 #include <string>
 #include <unordered_set>
@@ -37,7 +36,6 @@ struct NetworkConfig {
     std::uint32_t maxHeaderTotalSize = 8 * 1024;
     std::uint32_t maxBodyTotalSize = 8 * 1024;
     std::uint16_t maxHeaderTotalCount = 64;
-    std::uint16_t headerReserveHintSize = 512;
 
     std::uint16_t headerTimeout = 15;
     std::uint16_t bodyTimeout = 20;
@@ -123,14 +121,10 @@ struct SSLConfig {
 };
 
 struct OSSpecificConfig {
-#ifdef WFX_PLATFORM_LINUX
     std::uint32_t workerProcesses = 4;
     std::uint32_t backlog = 1024;
     std::uint16_t workerShutdownTimeout = 5; // In seconds
     std::uint16_t maxEvents = 1 * 1024;
-#else
-#error "Unsupported platform - add a WFX_PLATFORM_<X> branch in config with its respective fields"
-#endif
 };
 
 struct LoggingConfig {
@@ -153,9 +147,8 @@ struct MetricsConfig {
 };
 
 struct MiscConfig {
-    std::uint16_t fileCacheSize = 20;
-    std::uint16_t cacheChunkSize = 2 * 1024;
     std::uint32_t templateChunkSize = 16 * 1024;
+    std::uint16_t fileCacheSize = 20;
     std::uint16_t masterPollInterval = 2; // In seconds
     std::uint16_t workerBackoffBase = 1;  // In seconds
     std::uint16_t workerBackoffMax = 16;  // In seconds

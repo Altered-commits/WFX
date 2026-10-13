@@ -187,10 +187,10 @@ The runner generates the SMTP certs into `certs/` (gitignored), points
 boots the app with `wfx run app --port 8080 --detach`, drives every vector,
 stops everything, and prints a per-phase report.
 
-> That CA rewrite edits `app/config/wfx.local.toml` in place, so a run leaves the
-> file holding an absolute path from *this* machine. Don't commit that line:
-> checked in, it points every other checkout (and CI) at a CA that isn't there,
-> and WFX refuses to build its outbound TLS context at all. Leave it as `""`.
+> That CA rewrite goes through `common.toml`, which puts `app/config/wfx.local.toml`
+> back the way it found it when the run ends, so the absolute path never reaches git.
+> A run killed with SIGKILL skips that restore; `git checkout app/config/wfx.local.toml`
+> brings the `""` back.
 
 ### Requirements
 

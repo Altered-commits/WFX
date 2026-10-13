@@ -1,5 +1,5 @@
 [Project]
-middleware_list = []    # Order of middleware registered by either User or Engine
+middleware_list = []    # Execution order of the middleware registered with WFX_MIDDLEWARE
 
 [Build]
 dir_name            = "build"          # Build directory used by CMake
@@ -11,7 +11,6 @@ send_buffer_max              = 16384   # Max total send buffer size per connecti
 send_buffer_incr             = 4096    # Buffer growth step (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
-header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
 max_header_size              = 8192    # Max total size of all headers (in bytes)
 max_header_count             = 64      # Max number of headers allowed
 max_body_size                = 8192    # Max size of request body (in bytes)
@@ -21,7 +20,7 @@ idle_timeout                 = 40      # Max time limit for a connection to stay
 max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
 
 [ENV]
-env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
+env_path = "..." # Path to .env file. IMPORTANT: chmod 600, the file is skipped if group or other can access it
 
 [IP]
 max_connections_per_ip       = 64      # INTEROP TEST: the harness drives every phase's calls
@@ -47,7 +46,7 @@ max_age           = 600     # Access-Control-Max-Age in seconds (browsers cap th
 [SSL]
 cert_path                   = "..."           # Path to the server certificate (PEM format)
 key_path                    = "..."           # Path to the private key corresponding to the certificate
-outbound_ca_path            = "/home/atomic/c_cpp_projects/WFX/tests/interop_audit/certs/shared/server.crt"              # Extra CA to trust for outbound TLS (PEM format) [Keep empty if not used]
+outbound_ca_path            = ""              # Extra CA to trust for outbound TLS (PEM format) [Keep empty if not used]
 client_ca_path              = ""              # CA for verifying inbound client certs (PEM format) [Empty disables mTLS]
 tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
                                            # ^^^ Colon-separated TLSv1.3 ciphers in preference order
@@ -57,8 +56,8 @@ curves                      = "X25519:P-256"  # Elliptic curves preference list 
 enable_server_session_cache = true            # Enable server side session cache
 enable_client_session_cache = true            # Enable client side session cache
 enable_ktls                 = false           # Enable Kernel TLS (KTLS) if supported
-server_session_cache_size   = 4096            # Size of server session cache (In bytes)
-client_session_cache_size   = 1024            # Size of client session cache (In bytes)
+server_session_cache_size   = 4096            # Max sessions in the server session cache
+client_session_cache_size   = 1024            # Max sessions in the client session cache
 min_proto_version           = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
 security_level              = 2               # SSL security level (0-5)
 
@@ -87,7 +86,6 @@ latency       = false  # Record per-route / per-endpoint latency histograms (cos
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)
 template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size     = 2048    # Max chunk size to read / write from template cache file (in bytes)
 master_poll_interval = 2       # Master wake interval in seconds: worker restart detection and metrics polling
 worker_backoff_base  = 1       # Base backoff in seconds (doubles each attempt)
 worker_backoff_max   = 16      # Max backoff cap in seconds

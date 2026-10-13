@@ -93,6 +93,8 @@ std::uint32_t HeaderU32(WFX::Request& req, const char* name, std::uint32_t fallb
 // Line oriented, '\n' terminated, spoken to primitive_upstream.py's mux listener:
 //
 //   handshake -> "AUTH <token>\n"      <- "OK\n" | "ERR\n" | (drop, no reply) | (never, token "hang")
+//                                         token "capped" is "good" with its peak per-connection
+//                                         concurrency recorded
 //              -> "PAD <filler>\n"     <- nothing, ignored before AUTH
 //   request   -> "REQ <id> <key>\n"    <- "RES <id> <value>\n"
 //
@@ -314,9 +316,8 @@ void MuxDestroyOutput(void* outputPtr)
     WFX::Delete(static_cast<MuxRes*>(outputPtr));
 }
 
-// The only cap on how many requests share one connection. EndpointConfig has a
-// maxConcurrentStreams field, but nothing in the engine reads it, so a protocol
-// that wants a limit has to enforce it here.
+// The protocol's own cap on how many requests share one connection. The engine asks this only
+// once the slot is under EndpointConfig::maxConcurrentStreams, see MuxCapped.
 bool MuxHasCapacity(void* slotStateVoid)
 {
     return static_cast<MuxSlotState*>(slotStateVoid)->inFlight < MUX_MAX_IN_FLIGHT;
@@ -472,6 +473,22 @@ inline const MuxStallEp MuxStall{
     }
 };
 
+// The handshake succeeds, under its own token so the mock can tell its connections apart.
+// maxConcurrentStreams sits far below MUX_MAX_IN_FLIGHT, so it is the engine's cap that keeps a
+// connection at two requests, not MuxHasCapacity.
+inline const MuxEp MuxCapped{
+    MUX_UPSTREAM, MuxDesc("capped"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+        .maxConcurrentStreams  = 2,
+    }
+};
+
 // Multiplexed with no onConnect, pointed at the gate so the TCP connect can be held until it
 // times out. Its request waits as a pending stream rather than an attached caller.
 inline const MuxOpenEp MuxGated{
@@ -492,10 +509,11 @@ namespace {
 
 const MuxEp* MuxEndpointOf(std::string_view name) noexcept
 {
-    if(name == "bad")   return &MuxBad;
-    if(name == "slow")  return &MuxSlow;
-    if(name == "reset") return &MuxReset;
-    if(name == "hang")  return &MuxHang;
+    if(name == "bad")    return &MuxBad;
+    if(name == "slow")   return &MuxSlow;
+    if(name == "reset")  return &MuxReset;
+    if(name == "hang")   return &MuxHang;
+    if(name == "capped") return &MuxCapped;
     return &MuxGood;
 }
 
@@ -1080,7 +1098,7 @@ const SoloEp* SoloEndpointOf(std::string_view name) noexcept
 WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 
 // One call on a mux instance.
-//   X-Mux  good | bad | slow | reset | hang | padded | stall | gated  (default good)
+//   X-Mux  good | bad | slow | reset | hang | capped | padded | stall | gated  (default good)
 //   X-Key  key to echo back; "sleep:<secs>:<value>" delays the mock's reply
 WFX_GET("/mux/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     std::string_view name = "good", key = "hello";
@@ -1256,11 +1274,13 @@ WFX_GET("/solo/stream", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 // give.
 //   X-N        requests to run on the reservation
 //   X-Release  early | late | double   which release pattern to take
+//   X-Hold     ms to leave the reservation idle after them, then report a send through it
 WFX_GET("/solo/reserve", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     std::string_view releaseMode = "late";
     req.GetHeader("X-Release", releaseMode);
 
     const std::uint32_t n = HeaderU32(req, "X-N", 3);
+    const std::uint32_t holdMs = HeaderU32(req, "X-Hold", 0);
 
     auto slot = SoloGood.Reserve();
 
@@ -1291,6 +1311,14 @@ WFX_GET("/solo/reserve", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     j.Write("conn", firstConn);
     j.Write("same", sameConn);
     j.Write("last", lastStatus);
+
+    // Idle past idleTimeoutSeconds, the reservation's connection is closed under it, so the
+    // send after fails rather than reaching it
+    if(holdMs > 0) {
+        co_await WFX::SleepFor(holdMs);
+        auto [holdStatus, holdOut] = co_await slot.SendPayload(SoloReq{SoloMode::GET, "after-hold", 0, 0});
+        j.Write("after_hold", EpJ(holdStatus));
+    }
 
     // Releasing twice must be harmless, the handle clears on the first call
     if(releaseMode == "double") {

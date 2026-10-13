@@ -56,6 +56,30 @@ static SSLReturn ClassifyFailure(SSL* ssl, int ret, std::uint64_t* queuedError =
     }
 }
 
+// min_proto_version is validated to 1-3 at config load: 1 -> TLSv1.1, 2 -> TLSv1.2, 3 -> TLSv1.3
+static int MinProtoVersion(std::uint8_t configured) noexcept
+{
+    switch(configured) {
+        case 1:
+            return TLS1_1_VERSION;
+        case 3:
+            return TLS1_3_VERSION;
+        default:
+            return TLS1_2_VERSION;
+    }
+}
+
+// Why OpenSSL refused the last context setup call, nullptr when it queued no error
+static const char* QueuedReason() noexcept
+{
+    const auto err = ERR_peek_last_error();
+    if(err == 0)
+        return nullptr;
+
+    const char* reason = ERR_reason_error_string(err);
+    return reason ? reason : "unknown OpenSSL error";
+}
+
 // vvv Constructors and Destructors vvv
 HttpOpenSSL::HttpOpenSSL(bool initServer)
 {
@@ -67,8 +91,10 @@ HttpOpenSSL::HttpOpenSSL(bool initServer)
 
 bool HttpOpenSSL::EnsureClientContext()
 {
-    if(!clientCtx_)
-        InitClientContext();
+    // A context that failed to build stays failed: its config can't change at runtime, so a retry
+    // would only redo the same file reads for every caller
+    if(!clientCtx_ && !clientCtxFailed_)
+        clientCtxFailed_ = !InitClientContext();
 
     return clientCtx_ != nullptr;
 }
@@ -99,22 +125,7 @@ void HttpOpenSSL::InitServerContext()
     SSL_CTX_set_security_level(serverCtx_, std::clamp(sslConfig.securityLevel, 0, 5));
 
     // Minimum protocol version
-    int protoVersion = TLS1_2_VERSION;
-    switch(sslConfig.minProtoVersion) {
-        case 1:
-            protoVersion = TLS1_VERSION;
-            break;
-        case 2:
-            protoVersion = TLS1_2_VERSION;
-            break;
-        case 3:
-            protoVersion = TLS1_3_VERSION;
-            break;
-        default:
-            protoVersion = TLS1_2_VERSION;
-            break;
-    }
-    if(SSL_CTX_set_min_proto_version(serverCtx_, protoVersion) != 1)
+    if(SSL_CTX_set_min_proto_version(serverCtx_, MinProtoVersion(sslConfig.minProtoVersion)) != 1)
         FatalOpenSSLError("Failed to set minimum TLS protocol version for server ctx");
 
     // Server cert and key. ONLY on serverCtx_, loading this on clientCtx_ would pollute the verify
@@ -225,47 +236,32 @@ void HttpOpenSSL::InitServerContext()
     logger.Info("[HttpOpenSSL]: Server SSL context initialized successfully");
 }
 
-void HttpOpenSSL::InitClientContext()
+bool HttpOpenSSL::InitClientContext()
 {
     auto& logger = GetLogger();
     auto& sslConfig = GetConfig().sslConfig;
 
     clientCtx_ = SSL_CTX_new(TLS_method());
     if(!clientCtx_)
-        logger.Fatal("[HttpOpenSSL]: Failed to create client SSL_CTX");
+        return FailClientContext("Failed to create client SSL_CTX");
 
     // Always load system CAs so public internet endpoints verify correctly
     // If user also specifies outbound_ca_path (for internal/self-signed CAs like mkcert), it is
     // added on top.
     if(SSL_CTX_set_default_verify_paths(clientCtx_) != 1)
-        FatalOpenSSLError("Failed to load default system CA certificates for client ctx");
+        return FailClientContext("Failed to load default system CA certificates for client ctx");
 
     if(!sslConfig.outboundCaPath.empty()) {
         if(SSL_CTX_load_verify_locations(clientCtx_, sslConfig.outboundCaPath.c_str(), nullptr) != 1)
-            FatalOpenSSLError("Failed to load configured CA certificate for client ctx");
+            return FailClientContext("Failed to load configured CA certificate for client ctx");
     }
 
     // Minimum security version
     SSL_CTX_set_security_level(clientCtx_, std::clamp(sslConfig.securityLevel, 0, 5));
 
     // Minimum protocol version
-    int protoVersion = TLS1_2_VERSION;
-    switch(sslConfig.minProtoVersion) {
-        case 1:
-            protoVersion = TLS1_VERSION;
-            break;
-        case 2:
-            protoVersion = TLS1_2_VERSION;
-            break;
-        case 3:
-            protoVersion = TLS1_3_VERSION;
-            break;
-        default:
-            protoVersion = TLS1_2_VERSION;
-            break;
-    }
-    if(SSL_CTX_set_min_proto_version(clientCtx_, protoVersion) != 1)
-        FatalOpenSSLError("Failed to set minimum TLS protocol version for client ctx");
+    if(SSL_CTX_set_min_proto_version(clientCtx_, MinProtoVersion(sslConfig.minProtoVersion)) != 1)
+        return FailClientContext("Failed to set minimum TLS protocol version for client ctx");
 
     // Client-side session cache. Unlike the server, SSL_SESS_CACHE_CLIENT alone doesn't reuse
     // anything, we drive resumption ourselves via NewClientSessionCallback + WrapClient's
@@ -283,10 +279,10 @@ void HttpOpenSSL::InitClientContext()
     // Server's SSL_OP_CIPHER_SERVER_PREFERENCE will override order on the server side, but we
     // still want to advertise only strong suites.
     if(!sslConfig.tls13Ciphers.empty() && SSL_CTX_set_ciphersuites(clientCtx_, sslConfig.tls13Ciphers.c_str()) != 1)
-        FatalOpenSSLError("Failed to set TLSv1.3 ciphersuites for client ctx");
+        return FailClientContext("Failed to set TLSv1.3 ciphersuites for client ctx");
 
     if(!sslConfig.tls12Ciphers.empty() && SSL_CTX_set_cipher_list(clientCtx_, sslConfig.tls12Ciphers.c_str()) != 1)
-        FatalOpenSSLError("Failed to set TLSv1.2 cipher list for client ctx");
+        return FailClientContext("Failed to set TLSv1.2 cipher list for client ctx");
 
     if(!sslConfig.curves.empty())
         SSL_CTX_set1_curves_list(clientCtx_, sslConfig.curves.c_str());
@@ -303,6 +299,7 @@ void HttpOpenSSL::InitClientContext()
     SSL_CTX_set_options(clientCtx_, SSL_OP_NO_COMPRESSION);
 
     logger.Info("[HttpOpenSSL]: Client SSL context initialized successfully");
+    return true;
 }
 
 // vvv Main Functions vvv
@@ -560,13 +557,32 @@ void HttpOpenSSL::GlobalOpenSSLInit()
 
 void HttpOpenSSL::FatalOpenSSLError(const char* message)
 {
-    // Only context setup lands here, where the queue holds why OpenSSL refused
-    const auto err = ERR_peek_last_error();
-    if(err == 0)
-        GetLogger().Fatal("[HttpOpenSSL]: ", message);
+    auto& logger = GetLogger();
 
-    const char* reason = ERR_reason_error_string(err);
-    GetLogger().Fatal("[HttpOpenSSL]: ", message, ". ", reason ? reason : "unknown OpenSSL error");
+    // Only context setup lands here, where the queue holds why OpenSSL refused
+    const char* reason = QueuedReason();
+    if(!reason)
+        logger.Fatal("[HttpOpenSSL]: ", message);
+
+    logger.Fatal("[HttpOpenSSL]: ", message, ". ", reason);
+}
+
+bool HttpOpenSSL::FailClientContext(const char* message)
+{
+    auto& logger = GetLogger();
+
+    // Unlike the server context, a running worker can build this one on demand (an in-band upgrade),
+    // so a broken outbound setup fails the caller rather than the process
+    const char* reason = QueuedReason();
+    if(reason)
+        logger.Error("[HttpOpenSSL]: ", message, ". ", reason);
+    else
+        logger.Error("[HttpOpenSSL]: ", message);
+
+    ERR_clear_error();
+    SSL_CTX_free(clientCtx_);
+    clientCtx_ = nullptr;
+    return false;
 }
 
 } // namespace WFX::Http

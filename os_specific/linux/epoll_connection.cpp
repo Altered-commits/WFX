@@ -69,6 +69,14 @@ static bool IsConnecting(const EndpointCtx* ctx) noexcept
            et == EventType::EVENT_ENDPOINT_ONCONNECT || ctx->inOnConnectPhase;
 }
 
+// A caller is owed a response on this slot: a single-slot request (streaming ones included, they
+// keep clientCtx between chunks), one whose client bailed while the real response is still
+// coming, or any stream on a multiplexed slot
+static bool HasRequestInFlight(const EndpointCtx* ctx) noexcept
+{
+    return ctx->clientCtx || ctx->isAborted || (ctx->pendingStreams && !ctx->pendingStreams->empty());
+}
+
 // Encodes "h2,http/1.1" into the length-prefixed list a ClientHello carries (RFC 7301), most
 // preferred first. False when a name is empty or longer than one length byte can say, or the
 // list is longer than the extension can carry. An empty list encodes to nothing, offering none
@@ -194,7 +202,12 @@ template <typename Ctx> bool EpollConnectionHandler::Receive(Ctx* ctx, bool* out
                 }
 
                 logger_.Warn("[Epoll]: Read buffer full, closing connection");
-                Close(ctx);
+
+                if constexpr(std::is_same_v<Ctx, EndpointCtx>)
+                    FailEndpointIO(ctx);
+                else
+                    Close(ctx);
+
                 return false;
             }
 
@@ -518,11 +531,17 @@ void EpollConnectionHandler::Initialize(const std::string& host, std::uint16_t p
                              // A timeout during the connect phase (TCP connect / TLS handshake /
                              // onConnect) is a transient connect failure: route it through the funnel
                              // so a background slot reconnects with backoff and a client-waiting slot
-                             // fails fast. A timeout during request/idle just closes as before.
+                             // fails fast. Any other timeout closes the slot, and counts as a request
+                             // timeout only with a request in flight: a slot idle in the pool, or
+                             // reserved between requests, just reached its idle timeout.
                              if(IsConnecting(ctx))
                                  HandleConnectFailure(ctx, entry, false, DisconnectReason::HANDSHAKE_TIMEOUT);
-                             else
+                             else {
+                                 if(HasRequestInFlight(ctx))
+                                     endpointMetrics_[ctx->endpointIdx].requestTimeouts++;
+
                                  Close(ctx, true, DisconnectReason::TIMEOUT);
+                             }
                          }
                      });
 
@@ -1824,6 +1843,10 @@ EndpointCtx* EpollConnectionHandler::FindMultiplexableSlot(std::uint16_t endpoin
     if(slots == 0)
         return nullptr;
 
+    // The config's cap on streams per slot, checked before the protocol's own hasCapacity.
+    // 0 leaves the decision to hasCapacity alone
+    const std::uint32_t streamCap = meta.config.maxConcurrentStreams;
+
     auto tryIdx = [&](std::uint32_t idx) -> EndpointCtx* {
         if(!pool.IsAllocated(idx))
             return nullptr;
@@ -1844,7 +1867,9 @@ EndpointCtx* EpollConnectionHandler::FindMultiplexableSlot(std::uint16_t endpoin
             !ctx->isShuttingDown && ctx->GetConnectionState() == ConnectionState::CONNECTION_ALIVE &&
             (ctx->eventType == EventType::EVENT_ENDPOINT_RECV || ctx->eventType == EventType::EVENT_ENDPOINT_SEND);
 
-        return (ready && meta.desc.hasCapacity(ctx->slotState)) ? ctx : nullptr;
+        const bool underCap = streamCap == 0 || !ctx->pendingStreams || ctx->pendingStreams->size() < streamCap;
+
+        return (ready && underCap && meta.desc.hasCapacity(ctx->slotState)) ? ctx : nullptr;
     };
 
     // Fast path: the slot we last multiplexed onto very likely still has room, avoids
@@ -2032,11 +2057,6 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
         return;
 
     auto& em = endpointMetrics_[ctx->endpointIdx];
-
-    // clientCtx is null for an idle slot AND for an aborted-but-still-in-flight one.
-    // isPooledIdle tells them apart; only the idle case should skip the count.
-    if(disconnectReason == DisconnectReason::TIMEOUT && !ctx->isPooledIdle)
-        em.requestTimeouts++;
 
     // If this slot was idle-pooled (returned via ReturnEndpointToPool and never
     // re-leased), activeEndpointConns was already decremented at that point. Decrementing
@@ -2944,7 +2964,7 @@ void EpollConnectionHandler::HandleEndpointEpollIn(EndpointCtx* ctx)
             // With none of those, the slot is idle-pooled or prewarmed and nothing is awaiting
             // these bytes. That's server-initiated data (Postgres NOTIFY, Redis pub/sub), handed
             // to desc.onPush if the protocol wants it, else the slot is released as before.
-            if(ctx->clientCtx || ctx->isAborted || (ctx->pendingStreams && !ctx->pendingStreams->empty()))
+            if(HasRequestInFlight(ctx))
                 HandleEndpointReceive(ctx, eof);
             else
                 HandleEndpointPush(ctx, eof);
@@ -3456,10 +3476,17 @@ void EpollConnectionHandler::TeardownSlotOnFailure(EndpointCtx* slotCtx, Endpoin
 void EpollConnectionHandler::FailEndpointIO(EndpointCtx* ctx)
 {
     // Still connecting, the funnel counts it as a connect failure and a background slot reconnects
-    if(IsConnecting(ctx))
+    if(IsConnecting(ctx)) {
         HandleConnectFailure(ctx, endpoints_[ctx->endpointIdx], false);
-    else
-        Close(ctx);
+        return;
+    }
+
+    // Connected: a socket error, a hangup or a response the read buffer can't hold. Nothing has
+    // counted the request it takes down, unlike TeardownSlotOnFailure's parse failures
+    if(HasRequestInFlight(ctx))
+        endpointMetrics_[ctx->endpointIdx].otherErrors++;
+
+    Close(ctx);
 }
 
 void EpollConnectionHandler::FailSlotOnParseError(EndpointCtx* slotCtx, EndpointEntry& entry)
@@ -3490,8 +3517,7 @@ bool EpollConnectionHandler::IsIncrementallyConsumed(EndpointCtx* slotCtx) const
         return true;
 
     // Same test HandleEndpointEpollIn routes on: nothing in flight means these are pushes
-    return !slotCtx->clientCtx && !slotCtx->isAborted &&
-           !(slotCtx->pendingStreams && !slotCtx->pendingStreams->empty());
+    return !HasRequestInFlight(slotCtx);
 }
 
 void EpollConnectionHandler::HandleEndpointPush(EndpointCtx* slotCtx, bool isEof)

@@ -43,7 +43,7 @@ API_KEY="abc123"
 
 ### Permissions
 
-On non-Windows systems, the `.env` file must be owned by the user running WFX and grant nothing to group or other (mode `600` or `400`, for example). A file failing either check is treated the same as a missing file: skipped, not fatal.
+The `.env` file must be owned by the user running WFX and grant nothing to group or other (mode `600` or `400`, for example). A file failing either check is treated the same as a missing file: skipped, not fatal.
 
 !!! note
     An existing process/shell environment variable is never overwritten by a `.env` value with the same key. Real environment (shell, systemd, Docker, k8s secrets, etc.) always wins over `.env` file contents.

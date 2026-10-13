@@ -39,7 +39,8 @@ adding or removing a phase never touches anything outside that one function and 
 
 !!! important
     They compile and run the actual `wfx` binary against a project under it, and some write to
-    the working tree (generated certs, patched `wfx.local.toml`, a cleared template cache) or
+    the working tree (generated certs, a cleared template cache, a `wfx.local.toml` patched for
+    the run and restored when it ends) or
     pull Docker images (interop). There's no mocked-out version of WFX being tested here, the
     audits drive the real engine.
 
@@ -54,9 +55,10 @@ is a proper Python package, not a single script, split by concern:
 |--------|----------|
 | `common/suite.py` | `Suite`, the base class every audit subclasses; `Config`/`Context`/`Heartbeat`; the `run(suite_cls)` entry point; argument parsing, phase dispatch, worker-death detection, and the overall lifecycle |
 | `common/report.py` | `Check`/`Phase`/`Report` - the bucketed pass/fail bookkeeping and the end-of-run summary table; the shared exit codes (see below) |
-| `common/server.py` | `Server`, the WFX process under test: boot, health polling, revival detection, teardown |
+| `common/server.py` | `Server`, the WFX process under test: boot, health polling, revival detection, restart, teardown |
+| `common/toml.py` | `patch` (sets one key in an app's `wfx.local.toml` for this run) and `restore`; the runner restores every patched file once the run ends, so an absolute cert path or a restart variant never reaches git |
 | `common/net.py` | Hand-rolled raw HTTP over plain TCP or TLS (`send`, `request`, `status`, `body`, `headers`, `dechunk`, ...) - deliberately not a real HTTP client, since these suites send malformed framing and forged headers on purpose, which a real client would normalize or reject |
-| `common/logs.py` | `LogFollower` (tails the running WFX project's worker/master/crash logs live), `scan_crash_reports` (folds any on-disk ASan/UBSan report into a failing check), `launch_env` (sanitizer env plus a wiped `crash_logs`), `forced_worker_kills` (workers SIGKILLed at shutdown) and `worker_logs_contain` (whether a worker logged a given line this run) |
+| `common/logs.py` | `LogFollower` (tails the running WFX project's worker/master/crash logs live), `scan_crash_reports` (folds any on-disk ASan/UBSan report into a failing check), `launch_env` (sanitizer env plus a `crash_logs` wiped at the run's first boot, kept across a mid-run restart), `forced_worker_kills` (workers SIGKILLed at shutdown), and `worker_logs_contain`/`worker_logs_count` (whether, and how often, a worker logged a given line since the last boot) |
 | `common/term.py` | Colored terminal output, progress ticks, and GitHub Actions `::group::`/`::error::`/`::warning::` commands under `--ci` |
 
 A suite file itself contains only phase functions and a small `Suite` subclass declaring `name`,

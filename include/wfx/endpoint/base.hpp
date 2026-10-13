@@ -342,7 +342,7 @@ using EndpointDesc = Shared::EndpointDesc;
 //   .tlsConfig              EpTlsAuto / EpTlsRequire / EpTlsInsecure
 //   .exactSlots             allocate connLimit/auxConnLimit exactly instead of rounding up to 64
 //   .prewarm                slots to connect eagerly on startup
-//   .maxConcurrentStreams   not read by the engine; hasCapacity caps multiplexing
+//   .maxConcurrentStreams   cap on in-flight requests per multiplexed slot; 0 = hasCapacity decides
 //   .alpnProtocols          ALPN to offer on TLS, most preferred first: "h2,http/1.1"; empty offers none.
 //                           A list TLS can't carry is fatal at startup
 // -----------------------------------------------------------------------
