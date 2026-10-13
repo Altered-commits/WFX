@@ -11,8 +11,8 @@
 //   mux   sets hasCapacity, which is what the engine reads to pick the
 //         multiplexed receive loop. Drives onConnect, onDisconnect, and several
 //         requests sharing one physical connection
-//   solo  leaves hasCapacity null. Reserve is refused outright on a multiplexed
-//         endpoint (INVALID_KEY), the multiplexed receive loop has no chunk case
+//   solo  leaves hasCapacity null. Reserve hands out an empty handle on a
+//         multiplexed endpoint, the multiplexed receive loop has no chunk case
 //         so Stream fails the slot there, and onAbort never runs for a
 //         multiplexed request (the abandoned stream is dropped and the shared
 //         connection carries on). onPush and UpgradeToTLS do reach both, and are
@@ -26,6 +26,7 @@
 //   GET  /health                  liveness
 //   GET  /mux/call                one call on a mux instance
 //   GET  /mux/disconnects         onDisconnect counters, by reason
+//   GET  /mux/reserve             whether Reserve() hands out a handle on a mux instance
 //   POST /mux/disconnects/reset   zero those counters
 //   GET  /solo/get                one call on a solo instance
 //   GET  /solo/stream             drain a stream, report counters only
@@ -900,6 +901,7 @@ using SoloEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect>;
 using SoloAbortEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbort>;
 using SoloAbortBadCloseEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbortDoubleClose>;
 using SoloAbortAwaitCloseEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbortAwaitClose>;
+using SoloAbortRawEp = WFX::Endpoint<SoloReq, SoloRes, nullptr, &SoloOnAbort>;
 
 } // namespace
 
@@ -1016,6 +1018,21 @@ inline const SoloAbortEp SoloAbortGated{
     }
 };
 
+// The same race without onConnect. Nothing parks the request, it is serialized before the
+// connect even starts, yet the backend still has not seen it while the gate holds the connect.
+inline const SoloAbortRawEp SoloAbortGatedRaw{
+    GATE_UPSTREAM, SoloDesc("abort:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 2,
+        .auxConnLimit          = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
 // Deliberately hostile onAbort. Its own endpoint rather than a slot-state flag,
 // because the point is exercising the ABI's close path directly instead of layering
 // it onto SoloAbort's config.
@@ -1108,9 +1125,19 @@ WFX_POST("/mux/disconnects/reset", [](WFX::Request, WFX::Response res) {
     res.Status(200).SendText("ok");
 })
 
+// Reserve on a multiplexed endpoint, which already shares its connection, so there is nothing
+// to pin and the handle must come back empty
+WFX_GET("/mux/reserve", [](WFX::Request, WFX::Response res) {
+    auto slot = MuxGood.Reserve();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("reserved", slot.IsValid());
+})
+
 // One call on a solo instance.
 //   X-Solo  good | downgrade | tlsgarbage | abort | abortnoaux | abortmidconnect |
-//           abortgated | abortbadclose | abortawaitclose        (default good)
+//           abortgated | abortgatedraw | abortbadclose | abortawaitclose  (default good)
 //   X-Key   key to echo back; "slow:<secs>" delays the mock's reply
 //   X-Leak  1 tells onAbort, on the abort instances, to skip side.Close()
 WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
@@ -1132,6 +1159,8 @@ WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
         std::tie(status, out) = co_await SoloAbortMidConnect.SendPayload(sreq);
     else if(name == "abortgated")
         std::tie(status, out) = co_await SoloAbortGated.SendPayload(sreq);
+    else if(name == "abortgatedraw")
+        std::tie(status, out) = co_await SoloAbortGatedRaw.SendPayload(sreq);
     else if(name == "abortbadclose")
         std::tie(status, out) = co_await SoloAbortBadClose.SendPayload(sreq);
     else if(name == "abortawaitclose")

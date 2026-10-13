@@ -158,6 +158,9 @@ def hold_mux_call(cfg, key, mux="good"):
 def mux_disconnects(cfg):
     return _json(cfg, "GET", "/mux/disconnects") or {}
 
+def mux_reserve(cfg):
+    return _json(cfg, "GET", "/mux/reserve")
+
 def mux_disconnects_reset(cfg):
     _json(cfg, "POST", "/mux/disconnects/reset")
 
@@ -384,6 +387,11 @@ def phase_mux_multiplex(ctx):
     r = mux_call(cfg, key="sleep:15:late", mux="padded", rtimeout=20.0)
     p.check("a multiplexed stream past requestTimeoutSeconds fails as a request timeout",
             is_errc(r, EP_REQUEST_TIMEOUT), "r=%r" % r)
+
+    # The connection is already shared between callers, so there is nothing to pin
+    r = mux_reserve(cfg)
+    p.check("Reserve on a multiplexed endpoint hands back an empty handle",
+            bool(r) and r.get("reserved") is False, "r=%r" % r)
 
 # PHASE: mux_soak
 def phase_mux_soak(ctx):
@@ -794,6 +802,23 @@ def phase_solo_abort(ctx):
     p.check("abort: the next request on that endpoint gets its own answer, not the abandoned one's",
             is_ok(r) and r.get("value") == "%s:after-tcpconnect" % r.get("conn"), "r=%r" % r,
             security=True)
+
+    # The same race without onConnect. Nothing parks the request, since it is serialized
+    # before the connect starts, but the backend still has not seen it: onAbort must not
+    # fire, and no cancel may go out for it
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    mock.gate_close()
+    abandon_solo_get(cfg, {"X-Solo": "abortgatedraw", "X-Key": "x"}, hold=0.3)
+    mock.gate_open()
+    time.sleep(2.0)  # the SYN retry lands about 1s after the first try
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort, no onConnect: onAbort never fires while the TCP connect is still in flight",
+            after.get("runs", 0) == before.get("runs", 0), "before=%r after=%r" % (before, after),
+            security=True)
+    p.check("abort, no onConnect: no cancel goes out for a request the backend never saw", count == 0,
+            "count=%d" % count, security=True)
 
     # Hostile onAbort: closes its side connection three times and keeps the handle
     # afterwards. A real protocol author will get this wrong at least once, so the

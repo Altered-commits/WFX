@@ -889,6 +889,11 @@ std::uint64_t EpollConnectionHandler::ReserveSlot(std::uint16_t endpointIdx)
     if(endpointIdx >= endpoints_.size())
         return 0;
 
+    // A multiplexed endpoint already shares its connections between callers, so there is nothing
+    // to pin: it gets an empty handle, same as an exhausted pool
+    if(endpoints_[endpointIdx].meta.desc.hasCapacity)
+        return 0;
+
     // Same allocation every request already uses; the only difference is that isReserved stops
     // the completion path from freeing the bitmap bit afterwards, so the pool can't hand this
     // slot to anyone else until ReleaseSlot.
@@ -1934,18 +1939,17 @@ void EpollConnectionHandler::ReleaseClient(ClientCtx* ctx)
         // onAbort tries a graceful cancel only for a request that actually reached the backend
         // and isn't streaming (DeliverStreamChunk can't take an orphaned-by-abort stream yet).
         // Otherwise force-close, which loses nothing since the backend never saw the request:
-        //  - pendingConnectReq: still parked for the connect/onConnect, and it points into the
-        //    coroutine frame destroyed above, so it is dropped here before anything flushes it
-        //  - inOnConnectPhase: onConnect's coroutine owns slotCtx->asyncData mid-await, and
-        //    FireOnAbort would overwrite it, stranding that coroutine forever
+        //  - still connecting (TCP, TLS or onConnect): nothing was written yet, even when the
+        //    request was serialized up front for lack of an onConnect. onConnect's coroutine
+        //    also owns slotCtx->asyncData mid-await, which FireOnAbort would overwrite
+        //  - pendingConnectReq points into the coroutine frame destroyed above, so it is dropped
+        //    here before anything flushes it
         else {
             epCtx->clientCtx = nullptr;
-
-            const bool parked = epCtx->pendingConnectReq != nullptr;
             epCtx->pendingConnectReq = nullptr;
 
             auto& epEntry = endpoints_[epCtx->endpointIdx];
-            if(epEntry.meta.desc.onAbort && !parked && !epCtx->isStreaming && !epCtx->inOnConnectPhase) {
+            if(epEntry.meta.desc.onAbort && !IsConnecting(epCtx) && !epCtx->isStreaming) {
                 epCtx->isAborted = 1;
                 FireOnAbort(epCtx, epEntry);
             }

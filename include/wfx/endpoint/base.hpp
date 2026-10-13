@@ -229,7 +229,8 @@ template <typename T> using EndpointOutput = Async::EndpointOutput<T>;
 // RAII owner of a connection pinned via ep.Reserve(), for protocols where
 // consecutive requests must share one connection (SQL transactions,
 // LISTEN/NOTIFY). Releases on destruction; check IsValid() first, since
-// Reserve() returns an empty one when the pool is exhausted.
+// Reserve() returns an empty one when the pool is exhausted or the endpoint
+// is multiplexed.
 // -----------------------------------------------------------------------
 template <typename TReq, typename TRes> using ReservedSlot = Async::ReservedSlot<TReq, TRes>;
 

@@ -785,12 +785,13 @@ hand the result to. Your protocol needs no special cleanup for this case.
     same reason: there is either nothing worth protecting yet, or nothing
     left that can safely run a graceful cancel.
 
-    - **Still connecting.** If the client disconnects while `onConnect` is
-      still running for that same connection, WFX force-closes it instead of
-      firing `onAbort`. No request has reached the backend yet at that point,
-      there's nothing to cancel, and `onConnect`'s own coroutine may still be
-      suspended waiting on that same connection, running `onAbort`
-      concurrently would corrupt it.
+    - **Still connecting.** If the client disconnects while the connection is
+      still being set up (the TCP connect, the TLS handshake or `onConnect`),
+      WFX force-closes it instead of firing `onAbort`. No request has reached
+      the backend yet at that point, even on an endpoint without `onConnect`
+      whose request was already serialized, so there's nothing to cancel. And
+      `onConnect`'s own coroutine may still be suspended waiting on that same
+      connection, which running `onAbort` concurrently would corrupt.
     - **Already streaming.** Once your protocol has delivered a request's
       first chunk through [`Stream()`](#streaming-large-responses)
       (`isStreaming` becomes true at that point), a later disconnect force-closes
@@ -936,7 +937,8 @@ Two things the engine guarantees for you:
   SQL must not share one execution, since each may observe different
   uncommitted state.
 - **Reserve is unavailable on multiplexed endpoints** (`hasCapacity` set), which
-  already share one connection between callers by design.
+  already share one connection between callers by design. `Reserve()` returns
+  an empty handle there.
 
 ---
 
