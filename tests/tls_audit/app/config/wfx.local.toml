@@ -1,5 +1,5 @@
 [Project]
-middleware_list = []    # Order of middleware registered by either User or Engine
+middleware_list = []    # Execution order of the middleware registered with WFX_MIDDLEWARE
 
 [Build]
 dir_name            = "build"          # Build directory used by CMake
@@ -11,7 +11,6 @@ send_buffer_max              = 16384   # Max total send buffer size per connecti
 send_buffer_incr             = 4096    # Buffer growth step (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
-header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
 max_header_size              = 8192    # Max total size of all headers (in bytes)
 max_header_count             = 64      # Max number of headers allowed
 max_body_size                = 8192    # Max size of request body (in bytes)
@@ -21,7 +20,7 @@ idle_timeout                 = 40      # Max time limit for a connection to stay
 max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
 
 [ENV]
-env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
+env_path = "..." # Path to .env file. IMPORTANT: chmod 600, the file is skipped if group or other can access it
 
 # Cranked wide open, same as the other three audits: every phase drives dozens of HTTPS
 # calls from the single test-runner IP (127.0.0.1), left at production-tight defaults this
@@ -29,14 +28,14 @@ env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 60
 # indistinguishable from a real bug (is_ok()/is_err() can't tell "rate-limited" from "call failed")
 [IP]
 max_connections_per_ip       = 512     # Single-IP (127.0.0.1) harness traffic must not be throttled
-max_request_burst_per_ip     = 512     # Initial request tokens per IP
-max_requests_per_ip_per_sec  = 512     # Refill rate (tokens per second per IP)
+max_request_burst_per_ip     = 512     # Initial request tokens per client subnet
+max_requests_per_ip_per_sec  = 512     # Refill rate (tokens per second per client subnet)
 
 [SSL]
-cert_path                   = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/good.pem"   # mkcert leaf cert (patched to absolute by the harness)
-key_path                    = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/good-key.pem"    # mkcert leaf key  (patched to absolute by the harness)
-outbound_ca_path            = "/home/atomic/.local/share/mkcert/rootCA.pem"              # Empty -> client verifies against the system trust store, where `mkcert -install` placed the root CA that signed the mock's cert
-client_ca_path               = "/home/atomic/c_cpp_projects/WFX/tests/tls_audit/certs/client-ca-bundle.pem"             # Inbound mTLS ON for this whole suite (patched by the harness) - every audit call presents a client cert, see tls_send() in tls_audit.py
+cert_path                   = "..."           # mkcert "good" leaf, filled in for the run by the harness
+key_path                    = "..."           # Its key, filled in for the run by the harness
+outbound_ca_path            = ""              # The mkcert root, filled in for the run when found. Empty -> the system trust store, where `mkcert -install` put that root
+client_ca_path              = ""              # Inbound mTLS, turned on for the whole run by the harness: every audit call presents a client cert, see tls_send() in tls_audit.py
 
 tls13_ciphers               = "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
                                            # ^^^ Colon-separated TLSv1.3 ciphers in preference order
@@ -46,15 +45,10 @@ curves                      = "X25519:P-256"  # Elliptic curves preference list 
 enable_server_session_cache = true            # Enable server side session cache
 enable_client_session_cache = true            # Enable client side session cache
 enable_ktls                 = false           # Enable Kernel TLS (KTLS) if supported
-server_session_cache_size   = 4096            # Size of server session cache (In bytes)
-client_session_cache_size   = 1024            # Size of client session cache (In bytes)
+server_session_cache_size   = 4096            # Max sessions in the server session cache
+client_session_cache_size   = 1024            # Max sessions in the client session cache
 min_proto_version           = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
 security_level              = 2               # SSL security level (0-5)
-
-[Windows]
-accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts
-connection_threads = "auto"  # IOCP worker thread count
-request_threads    = "all"   # Threads executing user handlers
 
 [Linux]
 worker_processes        = 1      # TLS AUDIT: single worker for deterministic reproduction
@@ -82,7 +76,6 @@ max_rotations     = 2          # Number of rotated files to keep (.1 .. .N)   [i
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)
 template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size     = 2048    # Max chunk size to read / write from template cache file (in bytes)
 master_poll_interval = 2       # Master wake interval in seconds: worker restart detection and metrics polling
 worker_backoff_base  = 1       # Base backoff in seconds (doubles each attempt)
 worker_backoff_max   = 16      # Max backoff cap in seconds

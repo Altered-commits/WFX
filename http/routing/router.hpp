@@ -45,6 +45,10 @@ public:
     void PushRouteGroup(std::string_view prefix);
     void PopRouteGroup();
 
+    // Fatal while a group is still open, once user code has registered everything: an unclosed
+    // WFX_GROUP_START would otherwise prefix every route registered after it
+    void EnsureGroupsClosed() const;
+
     // Number of registered routes, indexed dense from 0
     std::uint16_t RouteCount() const noexcept
     {

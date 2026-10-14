@@ -113,6 +113,10 @@ struct PgRequest {
     const std::uint32_t* paramOids = nullptr;
     WFX::String params; // each value already length-prefixed, as Bind wants
 
+    // The session that sent this, 0 for a pooled request. A transaction open on the connection is
+    // left alone only for the session that started it
+    std::uint64_t session = 0;
+
     // Rows one Execute may return, which is what makes this a stream. Zero
     // fetches the whole result in one round, as an ordinary query.
     std::uint32_t streamRows = 0;
@@ -125,10 +129,6 @@ struct PgRequest {
     // Cleared when the parameters were too large to encode, which makes
     // Serialize refuse the request rather than send it without its values
     bool encoded = true;
-
-    // Sent on a reserved connection, so an open transaction on it is the
-    // caller's and must be left alone
-    bool pinned = false;
 
     // For the savepoint kinds, sql carries the savepoint name instead of a
     // statement, and Serialize builds the statement around it
@@ -242,10 +242,11 @@ inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoi
 
     state->streamRowsStale = false;
 
-    // Only a slot taken from the pool gets cleaned. A pinned request may be
-    // deliberately mid-transaction, and rolling that back would end the very
-    // transaction the caller is running.
-    if(!req.pinned && state->txStatus != TX_IDLE) {
+    // An open transaction is kept only for the session that started it. Anyone else finds one
+    // because a session ended without Commit or Rollback, so it is rolled back first rather than
+    // run in, or committed along with this request's work
+    const bool leftover = state->txStatus != TX_IDLE && (req.session == 0 || req.session != state->session);
+    if(leftover) {
         w.Begin(FE_QUERY);
         w.CStr("ROLLBACK");
         w.End();
@@ -277,6 +278,9 @@ inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoi
         if(!w.Ok())
             return Shared::SerializeResult::BUFFER_TOO_SMALL;
 
+        // Recorded only once the request is built, since a run for a too-small buffer has to
+        // leave the next run seeing the same leftover
+        state->session = req.session;
         *written = w.Pos();
         return Shared::SerializeResult::OK;
     }
@@ -284,7 +288,7 @@ inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoi
     // Nothing outside a transaction holds a portal open past the Sync that ends
     // its round, so a stream that was not handed one already open starts its own
     if(state->streamRows != 0) {
-        state->streamOwnsTx = !req.pinned || state->txStatus == TX_IDLE;
+        state->streamOwnsTx = leftover || state->txStatus == TX_IDLE;
 
         if(state->streamOwnsTx) {
             w.Begin(FE_QUERY);
@@ -356,6 +360,7 @@ inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoi
     if(!w.Ok())
         return Shared::SerializeResult::BUFFER_TOO_SMALL;
 
+    state->session = req.session;
     *written = w.Pos();
     return Shared::SerializeResult::OK;
 }

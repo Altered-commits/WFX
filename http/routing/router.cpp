@@ -96,13 +96,21 @@ void Router::PushRouteGroup(std::string_view prefix)
 
 void Router::PopRouteGroup()
 {
-    if(!groupLenStack_.empty()) {
-        groupPrefix_.resize(groupLenStack_.back());
-        groupLenStack_.pop_back();
-    }
+    if(groupLenStack_.empty())
+        GetLogger().Fatal("[Router]: WFX_GROUP_END() without a matching WFX_GROUP_START()");
+
+    groupPrefix_.resize(groupLenStack_.back());
+    groupLenStack_.pop_back();
 
     for(auto& trie : routesByMethod_)
         trie.PopGroup();
+}
+
+void Router::EnsureGroupsClosed() const
+{
+    if(!groupLenStack_.empty())
+        GetLogger().Fatal("[Router]: WFX_GROUP_START() without a matching WFX_GROUP_END(), '", groupPrefix_,
+                          "' is still open");
 }
 
 } // namespace WFX::Http

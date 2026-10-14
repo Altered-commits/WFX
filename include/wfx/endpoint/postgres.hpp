@@ -15,11 +15,15 @@
 // Provides:
 //   WFX::PostgresEndpoint       the endpoint, declared at namespace scope
 //   WFX::PostgresConfig         pool, identity and session settings
+//   WFX::PgSession              one pinned connection: transactions, savepoints
 //   WFX::PgResult / PgRow       result set and row cursors
+//   WFX::PgColumn               column metadata
+//   WFX::PgArrayView            decoded array, walked element by element
 //   WFX::PgError                SQLSTATE and the rest of the error fields
 //   WFX::PgNull                 binds SQL NULL
 //   WFX::PgBytes / PgUuid       bytea and uuid parameters
 //   WFX::PgTimestamp / PgDate / PgTime / PgInterval / PgNumeric
+//   WFX::PgEncryption / PgAuthPolicy / PgIsolation   config and transaction enums
 //
 // -----------------------------------------------------------------------
 // Usage
@@ -163,6 +167,10 @@ struct PostgresConfig {
     PgEncryption encryption = PgEncryption::REQUIRED;
     PgAuthPolicy authPolicy = PgAuthPolicy::NO_PLAINTEXT;
 
+    // ALPN offered on TLS, separated by commas. PostgreSQL 17 refuses a handshake offering any
+    // name but its own, and older servers ignore ALPN altogether
+    std::string_view alpn = "postgresql";
+
     // vvv Session settings, sent as startup parameters vvv
     std::string_view searchPath{};
     std::string_view timeZone{};
@@ -264,33 +272,38 @@ template <typename... Ts> inline PgRequest MakeRequest(std::string_view sql, con
     return req;
 }
 
-// Same request, marked as running on a reserved connection so Serialize leaves
-// any open transaction on it alone
-template <typename... Ts> inline PgRequest MakePinnedRequest(std::string_view sql, const Ts&... params)
+// Numbers every PgSession, so a connection can tell the session that opened its transaction from
+// a later one. 0 is never handed out: it marks a pooled request
+inline std::uint64_t GlobalPgSessionCounter = 0;
+
+// Same request, sent from a session, so Serialize keeps that session's own open transaction
+template <typename... Ts>
+inline PgRequest MakeSessionRequest(std::uint64_t session, std::string_view sql, const Ts&... params)
 {
     PgRequest req = MakeRequest(sql, params...);
-    req.pinned = true;
+    req.session = session;
     return req;
 }
 
 // chunkRows is what makes it a stream, so zero runs as an ordinary query that
-// completes on the first Next()
+// completes on the first Next(). session is 0 for a pooled stream.
 template <typename... Ts>
-inline PgRequest MakeStreamRequest(std::uint32_t chunkRows, bool pinned, std::string_view sql, const Ts&... params)
+inline PgRequest MakeStreamRequest(std::uint32_t chunkRows, std::uint64_t session, std::string_view sql,
+                                   const Ts&... params)
 {
     PgRequest req = MakeRequest(sql, params...);
     req.streamRows = chunkRows;
-    req.pinned = pinned;
+    req.session = session;
     return req;
 }
 
 // sql carries the savepoint name here. A name that is not a plain identifier
 // would be composed straight into the statement, so it is rejected instead.
-inline PgRequest MakeSavepointRequest(PgStatementKind kind, std::string_view name)
+inline PgRequest MakeSavepointRequest(std::uint64_t session, PgStatementKind kind, std::string_view name)
 {
     PgRequest req;
     req.sql = name;
-    req.pinned = true;
+    req.session = session;
     req.kind = kind;
     req.encoded = IsValidIdentifier(name);
     return req;
@@ -336,8 +349,9 @@ inline PgOptions BuildOptions(const PostgresConfig& cfg) noexcept
 // locks and blocking VACUUM across the database. idleInTransactionTimeoutMs
 // bounds that server side if you want a backstop.
 //
-// The pool stays correct regardless: the next request on that slot sends a
-// rollback before its own statement, so nobody sees the unfinished work.
+// The pool stays correct regardless: whatever runs on that connection next,
+// a pooled request or another session, rolls the transaction back before its
+// own statement, so nobody runs inside the unfinished work or commits it.
 //
 //   auto tx = Db.Session();
 //   if(!tx.IsValid()) { ... pool exhausted ... }
@@ -350,7 +364,7 @@ inline PgOptions BuildOptions(const PostgresConfig& cfg) noexcept
 class PgSession {
 public: // Constructors
     explicit PgSession(Async::ReservedSlot<Postgres::Detail::PgRequest, PgResult>&& slot) noexcept
-        : slot_(std::move(slot))
+        : slot_(std::move(slot)), id_(++Postgres::Detail::GlobalPgSessionCounter)
     {}
 
 public: // State
@@ -363,29 +377,30 @@ public: // State
 public: // Statements
     auto Begin(PgIsolation isolation = PgIsolation::READ_COMMITTED) const
     {
-        return slot_.SendPayload(Postgres::Detail::MakePinnedRequest(Postgres::Detail::BeginStatement(isolation)));
+        return slot_.SendPayload(
+            Postgres::Detail::MakeSessionRequest(id_, Postgres::Detail::BeginStatement(isolation)));
     }
 
     template <typename... Ts> auto Query(std::string_view sql, const Ts&... params) const
     {
-        return slot_.SendPayload(Postgres::Detail::MakePinnedRequest(sql, params...));
+        return slot_.SendPayload(Postgres::Detail::MakeSessionRequest(id_, sql, params...));
     }
 
     // Same chunked read as PostgresEndpoint::Stream, on this connection. Runs
     // inside the session's transaction when it has one, else opens its own.
     template <typename... Ts> auto Stream(std::uint32_t chunkRows, std::string_view sql, const Ts&... params) const
     {
-        return slot_.Stream(Postgres::Detail::MakeStreamRequest(chunkRows, true, sql, params...));
+        return slot_.Stream(Postgres::Detail::MakeStreamRequest(chunkRows, id_, sql, params...));
     }
 
     auto Commit() const
     {
-        return slot_.SendPayload(Postgres::Detail::MakePinnedRequest(Postgres::Detail::SQL_COMMIT));
+        return slot_.SendPayload(Postgres::Detail::MakeSessionRequest(id_, Postgres::Detail::SQL_COMMIT));
     }
 
     auto Rollback() const
     {
-        return slot_.SendPayload(Postgres::Detail::MakePinnedRequest(Postgres::Detail::SQL_ROLLBACK));
+        return slot_.SendPayload(Postgres::Detail::MakeSessionRequest(id_, Postgres::Detail::SQL_ROLLBACK));
     }
 
 public: // Savepoints
@@ -395,7 +410,7 @@ public: // Savepoints
     auto Savepoint(std::string_view name) const
     {
         return slot_.SendPayload(
-            Postgres::Detail::MakeSavepointRequest(Postgres::Detail::PgStatementKind::SAVEPOINT, name));
+            Postgres::Detail::MakeSavepointRequest(id_, Postgres::Detail::PgStatementKind::SAVEPOINT, name));
     }
 
     // Undoes everything after the savepoint. The transaction stays open, and
@@ -403,18 +418,19 @@ public: // Savepoints
     auto RollbackTo(std::string_view name) const
     {
         return slot_.SendPayload(
-            Postgres::Detail::MakeSavepointRequest(Postgres::Detail::PgStatementKind::ROLLBACK_TO, name));
+            Postgres::Detail::MakeSavepointRequest(id_, Postgres::Detail::PgStatementKind::ROLLBACK_TO, name));
     }
 
     // Drops the savepoint, keeping the work done since it was taken
     auto ReleaseSavepoint(std::string_view name) const
     {
         return slot_.SendPayload(
-            Postgres::Detail::MakeSavepointRequest(Postgres::Detail::PgStatementKind::RELEASE_SAVEPOINT, name));
+            Postgres::Detail::MakeSavepointRequest(id_, Postgres::Detail::PgStatementKind::RELEASE_SAVEPOINT, name));
     }
 
 private:
     Async::ReservedSlot<Postgres::Detail::PgRequest, PgResult> slot_;
+    std::uint64_t id_;
 };
 
 // -----------------------------------------------------------------------
@@ -448,7 +464,7 @@ public: // Constructors
                   .exactSlots = true,
                   .prewarm = config.prewarm,
                   .maxConcurrentStreams = 0,
-                  .alpnProtocols = {},
+                  .alpnProtocols = {config.alpn.data(), config.alpn.size()},
               })
     {
         // Set here rather than in BuildOptions, which has no address to give
@@ -472,7 +488,7 @@ public: // Streaming
     // rather than the total. Holds the connection until the stream ends.
     template <typename... Ts> auto Stream(std::uint32_t chunkRows, std::string_view sql, const Ts&... params) const
     {
-        return ep_.Stream(Postgres::Detail::MakeStreamRequest(chunkRows, false, sql, params...));
+        return ep_.Stream(Postgres::Detail::MakeStreamRequest(chunkRows, 0, sql, params...));
     }
 
 public: // Sessions

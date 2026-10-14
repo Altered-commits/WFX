@@ -3,9 +3,11 @@
 //
 // Every route exists to give base_audit.py a surface to attack.
 // Covers every user-facing WFX feature: dynamic segments (uint/int/string/uuid),
-// per-route middleware (continue/break), context storage, async handlers,
-// JSON (immediate + retained + parsing), chained headers,
-// group-prefixed paths, deliberate contract violations, and metrics.
+// per-route middleware (continue/break/skip-next, sync and async), context storage,
+// async handlers, callables sharing a type (plain functions, one factory's closures),
+// JSON (immediate + retained + parsing + merge), chained headers,
+// group-prefixed paths, templates, forms, query params, CORS, Stream(), the Flush API,
+// SendFile downloads, deliberate contract violations, and metrics.
 
 #include <wfx/http.hpp>
 #include <wfx/memory.hpp>
@@ -15,6 +17,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -95,13 +98,13 @@ WFX_GET("/big", [](WFX::Request, WFX::Response res) {
 
 WFX_GET("/stream", [](WFX::Request, WFX::Response res) {
     int remaining = 512;
-    res.Status(200).Stream([remaining](WFX::Shared::StreamBuffer buf) mutable -> WFX::Shared::StreamResult {
+    res.Status(200).Stream([remaining](WFX::StreamBuffer buf) mutable -> WFX::StreamResult {
         if(remaining <= 0)
-            return {0, WFX::Shared::StreamAction::STOP_AND_ALIVE_CONN};
+            return {0, WFX::StreamDone};
         std::size_t n = std::min<std::size_t>(buf.size, 256);
         std::memset(buf.buffer, 'S', n);
         remaining--;
-        return {n, WFX::Shared::StreamAction::CONTINUE};
+        return {n, WFX::StreamContinue};
     });
 })
 
@@ -241,7 +244,7 @@ WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     j.End();
 
     // Per-route counters, summed across workers, each tagged with its own path and method.
-    // rv.path / HttpMethodToStringView return Shared::StringView, written directly via the
+    // rv.path / HttpMethodToStringView return WFX::StringView, written directly via the
     // JsonWriter StringView overload (no manual std::string_view wrapping).
     const bool latencyOn = WFX::MetricsLatencyEnabled();
     j.Write("latency_enabled", latencyOn);
@@ -251,7 +254,7 @@ WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
         const auto rv = WFX::GetRouteMetricsAt(r);
         j.Obj();
         j.Write("path", rv.path);
-        j.Write("method", WFX::Shared::HttpMethodToStringView(rv.method));
+        j.Write("method", WFX::HttpMethodToStringView(rv.method));
         j.Write("requests", rv.metrics.requests);
         j.Write("status_1xx", rv.metrics.status1xx);
         j.Write("status_2xx", rv.metrics.status2xx);
@@ -359,6 +362,48 @@ WFX_GET_EX("/mw/skipnext",
                        }),
            [](WFX::Request, WFX::Response res) { res.Status(200).SendText("handler-ran"); })
 
+// Callables that share a type: plain functions of one signature, and closures from one middleware
+// factory. Each route must still run its own
+static void FnSyncA(WFX::Request, WFX::Response res)
+{
+    res.Status(200).SendText("fn-sync-a");
+}
+
+static void FnSyncB(WFX::Request, WFX::Response res)
+{
+    res.Status(200).SendText("fn-sync-b");
+}
+
+static WFX::Coro FnAsyncA(WFX::Request, WFX::Response res)
+{
+    res.Status(200).SendText("fn-async-a");
+    co_return;
+}
+
+static WFX::Coro FnAsyncB(WFX::Request, WFX::Response res)
+{
+    res.Status(200).SendText("fn-async-b");
+    co_return;
+}
+
+static auto TagMw(const char* tag)
+{
+    return [tag](WFX::Request, WFX::Response res) {
+        res.Header("X-Mw-Tag", tag);
+        return WFX::MwContinue;
+    };
+}
+
+WFX_GET("/fn/sync-a", FnSyncA)
+WFX_GET("/fn/sync-b", FnSyncB)
+WFX_GET("/fn/async-a", FnAsyncA)
+WFX_GET("/fn/async-b", FnAsyncB)
+
+WFX_GET_EX("/mw/factory-a", WFX_MW_LIST(TagMw("a")),
+           [](WFX::Request, WFX::Response res) { res.Header("Content-Type", "text/plain").Write("ok").Commit(); })
+WFX_GET_EX("/mw/factory-b", WFX_MW_LIST(TagMw("b")),
+           [](WFX::Request, WFX::Response res) { res.Header("Content-Type", "text/plain").Write("ok").Commit(); })
+
 // Async middleware that finishes without ever suspending, the way an auth check deciding on what
 // the request already carries would. Its coroutine completes inside the call that starts it.
 WFX_GET_EX("/mw/async-inline", WFX_MW_LIST([](WFX::Request, WFX::Response res) -> WFX::MwCoro {
@@ -388,6 +433,39 @@ WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
         co_return;
     }
     res.Status(200).SendText("slept");
+    co_return;
+})
+
+// Child coroutines that throw before ever reaching co_return, so they have no value to hand back.
+// Their exception has to reach the co_awaiting parent as an exception, like any other call's
+static WFX::Task<WFX::String> ThrowingChild()
+{
+    throw std::runtime_error("child failed");
+    co_return WFX::String{"unreachable"};
+}
+
+static WFX::Task<> ThrowingVoidChild()
+{
+    throw std::runtime_error("void child failed");
+    co_return;
+}
+
+WFX_GET("/async/child-throws", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    try {
+        const WFX::String value = co_await ThrowingChild();
+        res.Status(200).SendText(std::string_view{value});
+    }
+    catch(const std::runtime_error&) {
+        res.Status(200).SendText("caught");
+    }
+    co_return;
+})
+
+// Nobody catches the child's exception here, so the handler fails as a whole (500) rather than
+// carrying on as if the child had succeeded
+WFX_GET("/async/void-child-throws", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    co_await ThrowingVoidChild();
+    res.Status(200).SendText("continued");
     co_return;
 })
 
@@ -437,6 +515,9 @@ WFX_GET("/json/im", [](WFX::Request, WFX::Response res) {
     w.Obj("meta");
     w.Write("version", (std::uint64_t)1);
     w.Write("ok", true);
+    w.End();
+    w.Arr("tags");
+    w.Push("admin"); // a string literal, which has to stay a string rather than turn into a bool
     w.End();
 })
 

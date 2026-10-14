@@ -12,7 +12,7 @@
 
 namespace WFX::Http {
 
-// Parses "key=value&key=value" once (built from Request::QueryParams() below, see Path() for
+// Parses "key=value&key=value" once (built from Request::GetQueryParams() below, see Path() for
 // where the raw text comes from) into pairs borrowed straight from that same buffer, no copying.
 // Get() is a plain linear scan rather than a hash map: a real query string almost never carries
 // more than a handful of params, and for that size a flat scan beats a hash map on every axis

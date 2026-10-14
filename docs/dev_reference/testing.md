@@ -16,11 +16,11 @@ rather than surviving hostile ones, and has no security exit code.
 
 | Audit | Drives | Covers |
 |-------|--------|--------|
-| `base_audit` | WFX as an HTTP server | path traversal, CRLF/response-splitting, request smuggling, header/body abuse, every user-facing route, and 6 chaos scenarios that SIGKILL/SIGSTOP workers under load and verify recovery |
-| `endpoint_audit` | the raw `WFX::Endpoint<>` primitive (outbound) | connection pooling and reservation, multiplexing several requests onto one connection, chunked streaming via a portal-style fetch, and graceful cancellation (`onAbort`), all against a hostile mock upstream it boots itself |
-| `client_audit` | `WFX::HttpEndpoint`, `WFX::SmtpEndpoint` and `WFX::PostgresEndpoint` (outbound clients built on the primitive) | HTTP/1.1 framing, smuggling and desync defenses; the full SMTP `STARTTLS`/`AUTH` handshake and CR/LF/NUL injection defenses; and the Postgres `SSLRequest`/SCRAM handshake, extended-query wire protocol, statement cache and SQL-injection defenses, each protocol against its own hostile mock upstream the audit boots itself |
-| `tls_audit` | the outbound client's TLS path | cert refusal (untrusted, hostname mismatch, expired, protocol downgrade), proven twice per persona: as a call error and as a mock-observed failed handshake, plus the framing/desync corpus replayed over TLS |
-| `crypto_audit` | `wfx/utils/crypto.hpp` (hashing, HMAC, AEAD, KDFs, CSPRNG) | correctness against Python stdlib oracles (`hashlib`, `hmac`, `pbkdf2_hmac`, a hand-rolled RFC 5869 HKDF) where one exists, plus AEAD tamper/cross-algo rejection, a `WFX::HashStream` driven from inside a real `res.Stream()` callback, and a 64 MiB+1 body to exercise the AEAD size cap |
+| `base_audit` | WFX as an HTTP server | path traversal, CRLF/response-splitting, request smuggling, header/body abuse, every user-facing route, route groups that don't pair up refusing to start, and 6 chaos scenarios that SIGKILL/SIGSTOP workers under load and verify recovery |
+| `endpoint_audit` | the raw `WFX::Endpoint<>` primitive (outbound) | connection pooling and reservation, `onConnect`/`onDisconnect` handshake outcomes, multiplexing several requests onto one connection, server-driven and cursor-driven chunked streaming, `onPush`, in-band `UpgradeToTLS` failure, graceful cancellation (`onAbort`), endpoint metrics, and coroutine teardown at worker exit, all against a hostile mock upstream it boots itself |
+| `client_audit` | `WFX::HttpEndpoint`, `WFX::SmtpEndpoint` and `WFX::PostgresEndpoint` (outbound clients built on the primitive) | HTTP/1.1 framing, smuggling and desync defenses; the full SMTP `STARTTLS`/`AUTH` handshake and CR/LF/NUL injection defenses; and the Postgres `SSLRequest`/SCRAM handshake, extended-query wire protocol, statement cache and SQL-injection defenses, each protocol against its own hostile mock upstream the audit boots itself; plus each client's ALPN offer |
+| `tls_audit` | both directions of TLS trust (outbound client and inbound mTLS) | cert and downgrade refusal, each required to fail as `SSL_FAILURE` with OpenSSL's reason in the worker log (cert personas also via a mock-observed failed handshake); inbound client-cert refusal and chain building; cross-connection TLS error isolation; the framing/desync/injection corpus, timeout and truncation over TLS; session resumption; and the STARTTLS plaintext boundary |
+| `crypto_audit` | `wfx/utils/crypto.hpp`, `jwk.hpp`, `jwt.hpp` and `encoding.hpp` (hashing, HMAC, AEAD, KDFs, CSPRNG, asymmetric keys, JWK, JWT, encoding) | correctness against Python stdlib oracles (`hashlib`, `hmac`, `pbkdf2_hmac`, a hand-rolled RFC 5869 HKDF) where one exists, plus AEAD tamper/cross-algo rejection, a `WFX::HashStream` driven from inside a real `res.Stream()` callback, and a 64 MiB+1 body to exercise the AEAD size cap |
 | `ip_audit` | real-IP resolution (`WFX::Http::IpUtils::ResolveClientIp`) and the `ConnectionLimiter`/`RequestRateLimiter` pair it feeds | `X-Forwarded-For` recursive-trust walking, connection/rate-limit caps and eviction, dual-stack (`::ffff:`-mapped) loopback handling, and hostile `X-Forwarded-For` corpora |
 | `interop_audit` | `WFX::PostgresEndpoint`, `WFX::SmtpEndpoint` and `WFX::HttpEndpoint` against real, spec-compliant upstreams | real Postgres and two `smtp4dev` instances in Docker (one PLAIN, one LOGIN-only), and a second real WFX server (`upstream/`) as the HTTP leg |
 
@@ -38,9 +38,11 @@ Every audit is a `common.Suite` subclass (see below) that declares an ordered `p
 adding or removing a phase never touches anything outside that one function and its registration.
 
 !!! important
-    These are read-only, non-network-touching from this repository's own tooling perspective:
-    they compile and run the actual `wfx` binary and a project under it. There's no mocked-out
-    version of WFX being tested here, the audits drive the real engine.
+    They compile and run the actual `wfx` binary against a project under it, and some write to
+    the working tree (generated certs, a cleared template cache, a `wfx.local.toml` patched for
+    the run and restored when it ends) or
+    pull Docker images (interop). There's no mocked-out version of WFX being tested here, the
+    audits drive the real engine.
 
 ---
 
@@ -53,9 +55,10 @@ is a proper Python package, not a single script, split by concern:
 |--------|----------|
 | `common/suite.py` | `Suite`, the base class every audit subclasses; `Config`/`Context`/`Heartbeat`; the `run(suite_cls)` entry point; argument parsing, phase dispatch, worker-death detection, and the overall lifecycle |
 | `common/report.py` | `Check`/`Phase`/`Report` - the bucketed pass/fail bookkeeping and the end-of-run summary table; the shared exit codes (see below) |
-| `common/server.py` | `Server`, the WFX process under test: boot, health polling, revival detection, teardown |
+| `common/server.py` | `Server`, the WFX process under test: boot, health polling, revival detection, restart, teardown |
+| `common/toml.py` | `patch` (sets one key in an app's `wfx.local.toml` for this run) and `restore`; the runner restores every patched file once the run ends, so an absolute cert path or a restart variant never reaches git |
 | `common/net.py` | Hand-rolled raw HTTP over plain TCP or TLS (`send`, `request`, `status`, `body`, `headers`, `dechunk`, ...) - deliberately not a real HTTP client, since these suites send malformed framing and forged headers on purpose, which a real client would normalize or reject |
-| `common/logs.py` | `LogFollower` (tails the running WFX project's worker/master/crash logs live) and `scan_crash_reports` (folds any on-disk ASan/UBSan report into a failing check) |
+| `common/logs.py` | `LogFollower` (tails the running WFX project's worker/master/crash logs live), `scan_crash_reports` (folds any on-disk ASan/UBSan report into a failing check), `launch_env` (sanitizer env plus a `crash_logs` wiped at the run's first boot, kept across a mid-run restart), `forced_worker_kills` (workers SIGKILLed at shutdown), and `worker_logs_contain`/`worker_logs_count` (whether, and how often, a worker logged a given line since the last boot) |
 | `common/term.py` | Colored terminal output, progress ticks, and GitHub Actions `::group::`/`::error::`/`::warning::` commands under `--ci` |
 
 A suite file itself contains only phase functions and a small `Suite` subclass declaring `name`,
@@ -92,7 +95,7 @@ caring which audit produced the result:
 | Code | Meaning |
 |------|---------|
 | `0` | everything passed |
-| `1` | a non-security check failed, or the worker was dead at the end |
+| `1` | a non-security check failed (a sanitizer report or a worker force-killed at shutdown included), no checks were recorded at all, or the worker was dead at the end |
 | `2` | a **security** finding: a vector whose failure is a vulnerability |
 | `3` | WFX never answered `/health`, so nothing was exercised |
 
@@ -138,7 +141,7 @@ it.
     Single entry point for running one or all audits, locally or from CI.
 
 - `tests/base_audit/`, `tests/endpoint_audit/`, `tests/client_audit/`, `tests/tls_audit/`, `tests/crypto_audit/`, `tests/ip_audit/`
-    One audit each: the harness script, its own `README.md`, its `app/` test project, and (for `endpoint_audit`/`client_audit`/`tls_audit`) one or more mock upstream scripts (`http_upstream.py` / `smtp_upstream.py` / `postgres_upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
+    One audit each: the harness script, its own `README.md`, its `app/` test project, and (for `endpoint_audit`/`client_audit`/`tls_audit`) one or more mock upstream scripts (`primitive_upstream.py` / `http_upstream.py` / `smtp_upstream.py` / `postgres_upstream.py` / `tls_upstream.py`) where the audit needs a hostile server on the other end.
 
 - `tests/interop_audit/`
     The harness script, its own `README.md`, `docker-compose.yml` for the real Postgres/`smtp4dev` containers, `app/` (the client under test) and `upstream/` (a second real WFX server, the HTTP leg).

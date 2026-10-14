@@ -8,8 +8,8 @@
 // Postgres type OIDs and their binary wire codecs.
 //
 // Every codec is a specialization of PgCodec<T>, so which codec runs is
-// settled at compile time. Decoders take a view aimed at the receive buffer
-// and return by value, so decoding a row allocates nothing.
+// settled at compile time. Decoders take a view into the PgResult's own copy
+// of the row and return by value, so decoding a row allocates nothing.
 // -----------------------------------------------------------------------
 
 #include "protocol.hpp"
@@ -231,7 +231,7 @@ struct PgArrayView {
 public: // Shape
     std::int32_t Count() const noexcept
     {
-        if(ndim <= 0)
+        if(ndim <= 0 || ndim > MAX_ARRAY_DIMS)
             return 0;
 
         std::int32_t n = 1;
@@ -271,38 +271,49 @@ public: // Walking
     }
 };
 
+// Built in a local and copied out only on success, so a rejected header leaves out untouched
 inline bool DecodeArray(std::string_view f, PgArrayView& out) noexcept
 {
     if(f.size() < 12)
         return false;
 
-    out.ndim = static_cast<std::int32_t>(LoadBe32(f.data()));
-    out.elementOid = LoadBe32(f.data() + 8);
+    PgArrayView v{};
+    v.ndim = static_cast<std::int32_t>(LoadBe32(f.data()));
+    v.elementOid = LoadBe32(f.data() + 8);
 
-    if(out.ndim < 0 || out.ndim > MAX_ARRAY_DIMS)
+    if(v.ndim < 0 || v.ndim > MAX_ARRAY_DIMS)
         return false;
 
     // An empty array carries no dimension headers
-    if(out.ndim == 0) {
-        out.elements = f.data() + 12;
-        out.bytes = 0;
+    if(v.ndim == 0) {
+        v.elements = f.data() + 12;
+        out = v;
         return true;
     }
 
-    const std::uint32_t headerBytes = 12 + static_cast<std::uint32_t>(out.ndim) * 8u;
+    const std::uint32_t headerBytes = 12 + static_cast<std::uint32_t>(v.ndim) * 8u;
     if(f.size() < headerBytes)
         return false;
 
-    for(std::int32_t i = 0; i < out.ndim; ++i) {
-        out.dimLengths[i] = static_cast<std::int32_t>(LoadBe32(f.data() + 12 + i * 8));
-        out.lowerBounds[i] = static_cast<std::int32_t>(LoadBe32(f.data() + 16 + i * 8));
+    v.elements = f.data() + headerBytes;
+    v.bytes = static_cast<std::uint32_t>(f.size()) - headerBytes;
 
-        if(out.dimLengths[i] < 0)
+    // Every element carries at least its 4 byte length, so more elements than the bytes can hold
+    // is malformed. Checked per dimension, the product stays well inside an int32 for Count()
+    std::uint64_t count = 1;
+    for(std::int32_t i = 0; i < v.ndim; ++i) {
+        v.dimLengths[i] = static_cast<std::int32_t>(LoadBe32(f.data() + 12 + i * 8));
+        v.lowerBounds[i] = static_cast<std::int32_t>(LoadBe32(f.data() + 16 + i * 8));
+
+        if(v.dimLengths[i] < 0)
+            return false;
+
+        count *= static_cast<std::uint64_t>(v.dimLengths[i]);
+        if(count > v.bytes / 4)
             return false;
     }
 
-    out.elements = f.data() + headerBytes;
-    out.bytes = static_cast<std::uint32_t>(f.size()) - headerBytes;
+    out = v;
     return true;
 }
 
@@ -445,8 +456,8 @@ public: // Wire
 };
 
 // vvv Text vvv
-// The view aims into the receive buffer and dies with it, so results borrow
-// rather than own
+// The view aims into the PgResult's own copy of the row and dies with it, so
+// results borrow rather than own
 template <> struct PgCodec<std::string_view> {
     static constexpr std::uint32_t OID = OID_TEXT;
 

@@ -4,7 +4,6 @@
 #ifndef WFX_SHARED_UTILS_HASH_HPP
 #define WFX_SHARED_UTILS_HASH_HPP
 
-#include "detection_macro.hpp"
 #include "shared/abis/string_view.hpp"
 #include <bit>
 #include <cstdint>
@@ -34,9 +33,9 @@ inline std::uint64_t Read64(const std::uint8_t* p) noexcept
     return v;
 }
 
-// Every mainstream compiler (GCC, Clang, MSVC, ICX) pattern-matches this exact shift-mask
-// sequence into a single native bswap instruction, so this costs nothing over a compiler-specific
-// builtin while staying portable to any standards-conforming compiler.
+// GCC, Clang and ICX all pattern-match this exact shift-mask sequence into a single native bswap
+// instruction, so this costs nothing over a compiler-specific builtin while staying portable to any
+// standards-conforming compiler.
 inline constexpr std::uint32_t ByteSwap32(std::uint32_t x) noexcept
 {
     return ((x & 0x000000FFu) << 24) | ((x & 0x0000FF00u) << 8) | ((x & 0x00FF0000u) >> 8) | ((x & 0xFF000000u) >> 24);
@@ -53,11 +52,7 @@ inline constexpr std::uint64_t ByteSwap64(std::uint64_t x) noexcept
 // 64x64->128 multiply, folded to 64 bits (low ^ high)
 inline std::uint64_t Mix(std::uint64_t a, std::uint64_t b) noexcept
 {
-#if defined(WFX_COMPILER_MSVC)
-    std::uint64_t hi;
-    std::uint64_t lo = _umul128(a, b, &hi);
-    return lo ^ hi;
-#elif defined(__SIZEOF_INT128__)
+#if defined(__SIZEOF_INT128__)
     const __uint128_t r = static_cast<__uint128_t>(a) * b;
     return static_cast<std::uint64_t>(r) ^ static_cast<std::uint64_t>(r >> 64);
 #else

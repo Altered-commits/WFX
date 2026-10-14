@@ -13,7 +13,7 @@ sanitizer output to tell "the test failed" apart from "the worker died".
 |-------|---------|-------|
 | `base_audit` | WFX as an inbound **server**: routing, forms, templates, CORS, worker chaos | none |
 | `endpoint_audit` | The raw `WFX::Endpoint<>` **primitive**: pooling, handshake, multiplexing, pinning, streaming, push, abort | two hand-rolled protocols |
-| `client_audit` | The shipped **protocol clients**, `HttpEndpoint` and `SmtpEndpoint` | hostile HTTP and SMTP |
+| `client_audit` | The shipped **protocol clients**, `HttpEndpoint`, `SmtpEndpoint` and `PostgresEndpoint` | hostile HTTP, SMTP and Postgres |
 | `tls_audit` | **TLS trust**, both directions: outbound cert verification and inbound mTLS | hostile TLS, one listener per persona |
 | `crypto_audit` | The **crypto surface**: hashing, HMAC, AEAD, KDFs, asymmetric keys, JWK, JWT, encoding | none |
 | `ip_audit` | **Client-identity** handling: real-IP extraction, trusted proxies, per-identity limits | none |
@@ -60,7 +60,7 @@ Identical for every suite, so CI can key on them.
 | Code | Meaning |
 |------|---------|
 | `0` | everything passed |
-| `1` | a non-security check failed, or the worker was dead at the end |
+| `1` | a non-security check failed (a sanitizer report or a worker force-killed at shutdown included), no checks were recorded at all, or the worker was dead at the end |
 | `2` | a **security** finding: a vector whose failure is a vulnerability |
 | `3` | WFX never answered `/health`, so nothing was exercised |
 
@@ -73,12 +73,13 @@ tests/
     net.py            raw HTTP over TCP/TLS, deliberately not a real client
     logs.py           tailing WFX logs, sanitizer wiring
     server.py         the WFX process under test
+    toml.py           per-run edits to an app's wfx.local.toml, restored when the run ends
     report.py         results, summary table, exit codes
     suite.py          config, lifecycle, run loop
   run_audits.sh       single entry point
   <name>_audit/
     <name>_audit.py   the suite
-    <thing>_upstream.py    mock backend, one file per protocol it has to speak
+    <thing>_upstream.py    mock backend, usually one per protocol (endpoint_audit's serves both of its own)
     app/              the WFX app under test (C++)
     README.md         what this suite covers and why
 ```
@@ -157,10 +158,21 @@ ctx.phase("security").record(findings, security=("PATH_TRAVERSAL_URL", "RESPONSE
 | `configure(cfg)` | derived config, before anything starts |
 | `build_server(cfg)` | non-default flags, TLS probe, working directory |
 | `setup(ctx)` | start mocks, register in `ctx.resources` |
-| `before_phases(ctx)` | boot-time evidence, or preconditions worth failing fast on |
+| `before_phases(ctx)` | boot-time evidence, or preconditions worth failing fast on; return `False` to skip the phases and `before_stop` |
+| `before_stop(ctx)` | leave work in flight that only the worker's exit can tear down; whatever exit leaks lands in the sanitizer scan |
 | `teardown(ctx)` | stop them, always runs |
 
-And three switches:
+The order is `setup`, boot, `before_phases`, the phases, `before_stop`, the liveness read, the
+stop, the sanitizer scan and the forced-kill check, then `teardown`, then every toml patched
+through `common.toml` going back to what the run found.
+
+A suite that needs a config value other than its toml's baseline sets it with
+`common.toml.patch(path, key, value)`, never by writing the file itself: the tomls are tracked,
+and the runner's restore is what keeps an absolute cert path or a restart variant out of git. A
+phase that restarts into a variant calls `common.toml.restore(path)` and restarts again before
+it returns, so the next phase sees the baseline.
+
+And four switches:
 
 | Attribute | Effect |
 |-----------|--------|
@@ -183,12 +195,17 @@ def build_server(self, cfg):
 broke. The runner says so explicitly and waits for the master to revive it.
 
 **`[wfx-crash:*]` lines in red** are crash dumps or sanitizer reports from *this* run;
-`crash_logs` is wiped at startup so nothing stale replays. ASan and UBSan are pointed there
+`crash_logs` is wiped when the run first boots, so nothing stale replays, and kept across a
+mid-run `restart()`, so the final scan still sees every phase. ASan and UBSan are pointed there
 because `wfx run --detach` sends stderr to `/dev/null`, which would otherwise discard them.
 
 **Turn up the logs** with `--wfx-logs all` to see everything WFX printed, or `--wfx-logs crash` to
 see only dumps. `base_audit` defaults to `crash` because it provokes contract violations by the
 thousand, so its `[ERR]` lines are the tests working and printing them buries the results.
+
+**Rows named `sanitizer`, `shutdown` and `exit`** come from the runner and hooks, not a phase: an
+ASan/UBSan report on disk after the stop, a worker that ignored SIGTERM and was force-killed, and
+a suite's `before_stop` checks.
 
 **Run one phase** with `--phase <name>` while iterating. Full runs take minutes.
 

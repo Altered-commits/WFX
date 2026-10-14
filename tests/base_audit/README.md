@@ -1,13 +1,16 @@
 # WFX base audit
 
 Phased correctness and security testing for the WFX server itself. Boots it, runs
-the phases, stops it. Shared plumbing lives in `tests/common/`, see `tests/README.md`
+the phases, stops it, then scans for sanitizer reports and force-killed workers.
+Shared plumbing lives in `tests/common/`, see `tests/README.md`
 
 ---
 
 ## Requirements
 
-- `wfx` on `PATH` (or pass `--wfx /path/to/wfx`)
+- WFX installed with `./scripts/install.sh --local-debug` (puts `wfx` on `PATH`, its headers
+  under `~/.wfx/src`, which `app/CMakeLists.txt` builds against, and ASan/UBSan on), or run
+  through `tests/run_audits.sh` after that install
 - Python 3.8+, standard library only
 - Linux with `/proc` (for worker PID discovery)
 
@@ -23,10 +26,12 @@ python3 base_audit.py
 
 # Single phase
 python3 base_audit.py --phase security
+python3 base_audit.py --phase protocol
 python3 base_audit.py --phase features
 python3 base_audit.py --phase forms
 python3 base_audit.py --phase query
 python3 base_audit.py --phase cors
+python3 base_audit.py --phase groups
 python3 base_audit.py --phase metrics
 python3 base_audit.py --phase soak
 python3 base_audit.py --phase chaos
@@ -47,7 +52,7 @@ python3 base_audit.py --ci
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `query`, `cors`, `metrics`, `soak`, `chaos` |
+| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `query`, `cors`, `groups`, `metrics`, `soak`, `chaos` |
 | `--host HOST` | `127.0.0.1` | Server hostname |
 | `--port N` | `8080` | HTTP port |
 | `--wfx PATH` | `wfx` | Path to the wfx binary |
@@ -66,8 +71,8 @@ python3 base_audit.py --ci
 | Code | Meaning |
 |------|---------|
 | `0` | All phases passed |
-| `1` | Correctness failure, server crash, or server death |
-| `2` | Security finding (path traversal or response splitting). The run stops at the first one: later phases would be measuring an already-compromised server |
+| `1` | A check failed, a phase timed out or raised, a sanitizer report was written, a worker ignored SIGTERM at shutdown, or the server was dead at the end |
+| `2` | Security finding: path traversal, response splitting, info leak, form header injection or decode bypass, query value mangling, or a CORS origin leak. The run stops after the phase that produced it: later phases would be measuring an already-compromised server |
 | `3` | WFX never answered `/health`, so nothing was exercised |
 
 ---
@@ -76,7 +81,7 @@ python3 base_audit.py --ci
 
 ### SECURITY
 
-Runs with 4 background flood threads so the server is under load.
+Runs with 16 background flood threads so the server is under load.
 All vectors are retried up to 3 times. Findings are collected: no early bail.
 
 - **Path traversal: URL** (109 vectors): `../../../../etc/passwd` and other
@@ -85,14 +90,19 @@ All vectors are retried up to 3 times. Findings are collected: no early bail.
   backslash `%5c`, null-byte injection, semicolon bypass, dot-segment tricks,
   query/fragment appended, Windows-style paths.
 - **Path traversal: X-File header** (58 vectors): same corpus delivered as the
-  `X-File` header to `/download`. Also includes absolute paths and null-byte-truncated paths.
+  `X-File` header to `/download`. Also includes absolute paths and null-byte-truncated paths,
+  and `/download` with no `X-File` at all must return 400.
 - **CRLF / response splitting** (19 vectors): CR, LF, CRLF, null bytes, Unicode
   line terminators, full injected HTTP response blocks, reflected through `/echo`.
-  A finding is recorded only if `X-Injected` appears as a parsed header name: zero false positives.
+  A reflected vector is recorded only if `X-Injected` appears as a parsed header name.
+  Two more checks record the same finding without it: a duplicated `Content-Type` or
+  `Set-Cookie`, and a double CRLF faking a second response.
+- **Info leakage**: 16 routes scanned for password-file entries, environment variables, keys
+  and certificates, process maps and command lines, and source or config text.
 - **Contract violations**: each `/violate/*` route is hit 10 times; every
   response must be 500 without crashing the worker.
 
-Exit code 2 for traversal or response-splitting findings; 1 for other failures.
+Exit code 2 for traversal, response-splitting or info-leak findings; 1 for other failures.
 
 ---
 
@@ -128,7 +138,7 @@ content, or missing/wrong header = finding.
 | Area | What is checked |
 |------|----------------|
 | Dynamic segments `:uint` | `/items/42`, `/items/0`, max u64, type mismatch → 404 |
-| Dynamic segments `:int` | Negative values, zero, max i64 |
+| Dynamic segments `:int` | Negative values, zero |
 | Dynamic segments `:string` | Basic strings, hyphenated names |
 | Dynamic segments `:uuid` | Valid UUIDs echoed back; invalid → 404 |
 | Group-prefixed paths | `/api/v1/status`, `/api/v1/item/<id>` |
@@ -136,16 +146,27 @@ content, or missing/wrong header = finding.
 | `MwBreak` | `/mw/blocked` → 403, handler never runs |
 | `MwSkipNext` | Second middleware skipped, handler runs |
 | Context storage | MW writes `uid=42`, handler echoes it |
+| Shared callable types | Two plain sync functions, two plain async functions and two closures from one middleware factory each run their own (`/fn/sync-a`, `/fn/sync-b`, `/fn/async-a`, `/fn/async-b`, `/mw/factory-a`, `/mw/factory-b`) |
 | Async handler | `/async/sleep` returns `slept`; 20 concurrent hits |
-| `ImJson` | `/json/im` body has all expected keys and values |
-| `RmJson` | `/json/rm` body has all expected keys and values |
-| JSON parsing | Valid bodies → 200; invalid/truncated/empty → 400 |
+| Inline async | Async middleware and routes that finish without suspending (`/mw/async-inline`, `/mw/async-inline-break`, `/async/inline`) |
+| Throwing child task | A `WFX::Task` that throws reaches the coroutine awaiting it: `/async/child-throws` catches it (`caught`), the uncaught `/async/void-child-throws` fails the request with `500` |
+| Pipelining | A request sent while the previous one is still suspended is never answered |
+| Abandoned coroutines | The worker survives a client leaving mid-sleep on a nested coroutine |
+| `ImJson` | `/json/im` body contains `"immediate"`, `"meta"` and a pushed string literal (`"tags":["admin"]`, not `true`) |
+| `RmJson` | `/json/rm` body contains `"retained"` |
+| JSON merge and overwrite | `/json/merge` and `/json/overwrite` produce the right bytes after their sources are gone |
+| JSON parsing | Valid bodies → 200; invalid, truncated, empty or duplicate-key bodies → 400 |
 | Chained headers | `X-Chain-A/B/C` all present with exact values on `/chain` |
-| Metrics | `/metrics` body has `network`, `process`, `log` keys |
+| Metrics | `/metrics` returns 200 with a `crashes` field |
+| Buffer relocation | `/echo-full` echoes path, header and body intact across a mid-parse read-buffer move |
+| Limits | Body and header limits at the exact boundary |
+| Drip | A request sent one byte at a time |
+| Streaming | `/stream` reassembles exactly, and the connection closes on time |
+| Flush | `/flush/single`, `/flush/zero`, `/flush/multi`, `/flush/no-end` and `/flush/heavy`, the last under real backpressure |
 | Templates | static, dynamic, conditional, loop, include, inherit |
 | Template branch isolation | Wrong branches must not appear in output |
 | Template inheritance | Child block overrides base; base title must not leak |
-| Content-Type | All template routes return `text/html` |
+| Content-Type | static, dynamic, loop, include and inherit return `text/html` |
 
 Exit code 1 for any failure.
 
@@ -162,13 +183,14 @@ decoding rather than to a validator). Four groups, each a run of vectors:
 | **functional** | Content-Type matching, field structure (order, count, duplicate keys, empty values), required-vs-optional, and validator bounds |
 | **percent-decoding** | Every escape shape through a single isolated field: valid pairs, truncated escapes, non-hex digits, `+` handling, NUL and CRLF bytes, and over-long encodings |
 | **header-injection** | A decoded value carrying CR/LF must never reach a response header. This is the security-relevant one: it is the path from attacker-controlled form input to response splitting |
-| **dos-resistance** | Structural abuse: huge field counts, giant keys and values, deeply repeated separators. Must be bounded and refused, never hang |
+| **dos-resistance** | Structural abuse: huge field counts and long runs of empty separators. Must be bounded and refused, never hang |
 
 Validators bound the **decoded** length, not the raw wire bytes, so a percent-
 encoded payload cannot slip past a length check by being longer before decoding
 than after.
 
-Exit code 2 if header injection lands, 1 for other failures.
+Exit code 2 if header injection lands or a double-decode or invalid escape is accepted, 1 for
+other failures.
 
 ---
 
@@ -185,8 +207,9 @@ got silently mangled by traversal-defense logic that was never meant to touch it
 parser now splits the query off before normalizing and reassembles it byte-for-byte
 untouched afterward, so a set of traversal-shaped query values is checked to survive
 completely unchanged. Also covered: no auto-decoding (`+` and `%20` stay literal,
-same as header values), path normalization still working with a query attached, and
-buffer growth past `header_reserve_hint` (512 B) with a large query value.
+same as header values), path normalization still working with a query attached, a
+4000-byte query value, and a long query surviving a body that grows the receive buffer
+under it.
 
 Exit code 2 if a traversal-shaped value gets mangled, 1 for other failures.
 
@@ -225,6 +248,22 @@ failures.
 
 ---
 
+### GROUPS
+
+Route groups that don't pair up must stop the server from starting. Each case in
+`GROUP_CASES` is the `wfx new` template, scaffolded into a temp dir, with its routes
+replaced and a `/health` added, then run on the next port up from the app under test:
+
+| Case | Must log, and never answer `/health` |
+|------|--------------------------------------|
+| `WFX_GROUP_START` with no `WFX_GROUP_END` | `WFX_GROUP_START() without a matching WFX_GROUP_END()` |
+| `WFX_GROUP_END` with no `WFX_GROUP_START` | `WFX_GROUP_END() without a matching WFX_GROUP_START()` |
+
+An open group would otherwise prefix every route registered after it. Exit code 1 on
+any failure.
+
+---
+
 ### METRICS
 
 Drives known request counts through `/status/<code:uint>` (one status class each)
@@ -250,8 +289,8 @@ Exit code 1 on any mismatch or connection failure.
 
 ### CHAOS
 
-6 scenarios. Each is followed by a recovery wait and a full 52-route
-correctness check. The master process is never targeted: only worker children.
+6 scenarios. Each is followed by a recovery wait and the full `ROUTE_CHECKS` sweep (68 checks
+over 53 distinct paths). The master process is never targeted: only worker children.
 
 | # | Scenario | What happens |
 |---|----------|-------------|
@@ -262,8 +301,8 @@ correctness check. The master process is never targeted: only worker children.
 | 5 | **SIGSTOP → SIGCONT** | One worker paused 3 s while 8 threads hammer; unpaused; routes verified |
 | 6 | **Kill under mixed load** | 75 half-open idle connections + 12 concurrent large-response threads; one worker killed mid-flight |
 
-Recovery timeout is 15 s per scenario. Final `/metrics` is fetched and
-crash + restart counts are reported.
+The recovery wait is 15 s, 20 s for rapid-fire and dual-kill, and SIGSTOP has none since its
+worker is never killed. Final `/metrics` is fetched and crash + restart counts are reported.
 
 Exit code 1 if any scenario fails to recover or a correctness check fails.
 
@@ -285,10 +324,16 @@ every user-facing feature.
 | `/form/raw` | `WFX::Form` with one unvalidated field: isolates percent-decoding from validation |
 | `/big` | 1 MiB of `A`: large-response target |
 | `/stream` | Chunked 512 × 256 B stream: streaming path target |
+| `/flush/single`, `/flush/zero`, `/flush/multi` | `Flush()` from inside a coroutine: one write then `FlushEnd()`, nothing written, and 200 rounds |
+| `/flush/heavy` | ~8 MiB over 4000 flushed rounds, enough to force real backpressure |
+| `/flush/no-end` | Forgets `FlushEnd()`: the response must still end in a valid chunk terminator |
 | `/download` | Serves `public/<X-File>`: path-traversal target |
 | `/violate/204body` | 204 with body: must return 500 |
 | `/violate/conn` | Sets `Connection` header: engine-owned, must return 500 |
 | `/violate/recommit` | Calls `Commit()` twice: must return 500 |
+| `/violate/flush-after-body`, `/violate/flush-twice` | Flush API misuse: must return 500 |
+| `/cors/multi` | One path with GET, POST and PUT and no OPTIONS handler: the generic `OPTIONS` `Allow:` fallback |
+| `/query/echo` | Reports the raw value of `v` and how many query pairs were parsed |
 | `/metrics` | Live crash / restart / RSS / per-route counters as JSON |
 | `/status/<code:uint>` | Returns the given status code: `metrics` phase's status-class workhorse |
 | `/items/<id:uint>` | Dynamic `:uint` segment |
@@ -298,9 +343,16 @@ every user-facing feature.
 | `/api/v1/status` | Group-prefixed flat path |
 | `/api/v1/item/<id:uint>` | Group-prefixed path with dynamic segment |
 | `/mw/injected`, `/mw/blocked`, `/mw/skipnext`, `/ctx` | Middleware/context targets, see the FEATURES table above |
+| `/fn/sync-a`, `/fn/sync-b`, `/fn/async-a`, `/fn/async-b`, `/mw/factory-a`, `/mw/factory-b` | Callables sharing a type: plain functions of one signature, and closures from one middleware factory |
+| `/mw/async-inline`, `/mw/async-inline-break` | Async middleware that finishes without suspending, continuing or breaking with 403 |
+| `/async/inline` | Async route that responds without awaiting anything |
 | `/async/sleep` | Async coroutine + `WFX::SleepFor(25ms)` |
+| `/async/slow`, `/mw/async-slow` | An async handler or middleware suspended long enough for a pipelined request to arrive |
+| `/async/nested-slow` | A route suspended inside a nested coroutine, for the abandoned-client check |
+| `/async/child-throws`, `/async/void-child-throws` | A child `Task<WFX::String>` that throws, caught by its parent, and a child `Task<>` that throws, uncaught |
 | `/json/im` | `WFX::ImJson` streaming JSON |
 | `/json/rm` | `WFX::RmJson` DOM-then-serialise JSON |
+| `/json/merge`, `/json/overwrite` | `RmJson` `Merge`/`Set` from a destroyed source, and scalars assigned over containers |
 | `/parse-json` | `WFX::ParseJson` body parsing |
 | `/chain` | Three chained `.Header()` calls |
 | `/template/static` | Static template render |

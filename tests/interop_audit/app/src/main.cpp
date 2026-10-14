@@ -13,6 +13,8 @@
 //   POST /pg/roundtrip    real INSERT ... RETURNING against real disk-backed storage
 //   POST /pg/tx           a real transaction, commit or rollback, checked from a second
 //                          pooled connection afterward, real atomicity, not a mock's word for it
+//   POST /pg/tx/abandon   a session dropped mid-transaction, then a second session on that
+//                          connection commits; the dropped session's insert must not survive
 //   POST /pg/savepoint    SAVEPOINT / ROLLBACK TO / COMMIT, checked the same way
 //   POST /pg/stream       a chunked read via PostgresEndpoint::Stream against real Postgres
 //   POST /smtp/send       full MAIL/RCPT(xN)/DATA transaction, STARTTLS + AUTH PLAIN or LOGIN
@@ -57,6 +59,19 @@ inline const auto Db = WFX::PostgresEndpoint{"127.0.0.1:5533", WFX::PostgresConf
     .idleInTransactionTimeoutMs  = 30000,
     .statementCacheSize          = 64,
     .statementCacheMinUses       = 2,
+}};
+
+// One connection, so a second session lands on the connection the first one left behind.
+inline const auto DbOne = WFX::PostgresEndpoint{"127.0.0.1:5533", WFX::PostgresConfig{
+    .connLimit                  = 1,
+    .connectTimeoutSeconds       = 8,
+    .requestTimeoutSeconds       = 20,
+    .user                        = "interop",
+    .password                    = "interop-pass",
+    .database                    = "interop",
+    .applicationName             = "wfx-interop-audit",
+    .encryption                  = WFX::PgEncryption::REQUIRED,
+    .authPolicy                  = WFX::PgAuthPolicy::SCRAM_ONLY,
 }};
 
 // AUTH PLAIN preferred path: smtp4dev's default offers PLAIN, so this is the everyday case.
@@ -236,6 +251,66 @@ WFX_POST("/pg/tx", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     j.Write("check_ep", EpJ(checkStatus));
     if(checkStatus == WFX::EpOk && !checkResult->Failed())
         j.Write("visible_count", checkResult->At(0).Get<std::int64_t>("n"));
+    co_return;
+})
+
+// Postgres: a session that ends without Commit or Rollback, then a second session on the same
+// connection that commits. The first session's insert was never committed, so only the second
+// one's row may survive. body is a unique marker for rows "<marker>-abandoned" and "<marker>-kept".
+WFX_POST("/pg/tx/abandon", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
+    std::string_view marker = req.Body();
+
+    WFX::String abandoned{marker};
+    abandoned += "-abandoned";
+    WFX::String kept{marker};
+    kept += "-kept";
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+
+    // Outside any transaction, so rolling the abandoned one back can't take the table with it
+    auto [createStatus, createResult] =
+        co_await DbOne.Query("CREATE TABLE IF NOT EXISTS interop_abandon (id BIGSERIAL PRIMARY KEY, val TEXT NOT NULL)");
+    j.Write("create_ep", EpJ(createStatus));
+    if(createStatus != WFX::EpOk || createResult->Failed())
+        co_return;
+
+    std::int64_t firstPid = 0, secondPid = 0;
+
+    {
+        auto first = DbOne.Session();
+        co_await first.Begin();
+
+        auto [pidStatus, pidResult] = co_await first.Query("SELECT pg_backend_pid() AS pid");
+        if(pidStatus == WFX::EpOk && !pidResult->Failed())
+            firstPid = pidResult->At(0).Get<std::int64_t>("pid");
+
+        co_await first.Query("INSERT INTO interop_abandon(val) VALUES ($1)", std::string_view{abandoned});
+    }
+
+    {
+        auto second = DbOne.Session();
+        co_await second.Begin();
+
+        auto [pidStatus, pidResult] = co_await second.Query("SELECT pg_backend_pid() AS pid");
+        if(pidStatus == WFX::EpOk && !pidResult->Failed())
+            secondPid = pidResult->At(0).Get<std::int64_t>("pid");
+
+        co_await second.Query("INSERT INTO interop_abandon(val) VALUES ($1)", std::string_view{kept});
+        j.Write("commit_ep", EpJ((co_await second.Commit()).first));
+    }
+
+    j.Write("same_conn", firstPid != 0 && firstPid == secondPid);
+
+    auto [checkStatus, checkResult] = co_await DbOne.Query(
+        "SELECT val FROM interop_abandon WHERE val = $1 OR val = $2 ORDER BY val", std::string_view{abandoned},
+        std::string_view{kept});
+    j.Write("check_ep", EpJ(checkStatus));
+    if(checkStatus == WFX::EpOk && !checkResult->Failed()) {
+        j.Write("rows", static_cast<std::uint64_t>(checkResult->RowCount()));
+        if(checkResult->RowCount() > 0)
+            j.Write("first_val", checkResult->At(0).Get<std::string_view>("val"));
+    }
     co_return;
 })
 

@@ -13,16 +13,23 @@
 #
 # Exit codes:
 #   0   all phases passed
-#   1   crash / hang / correctness failure / server death
-#   2   security finding (traversal, response splitting, info leak)
+#   1   crash / hang / correctness failure / server death, a sanitizer report, or a worker
+#       force-killed at shutdown
+#   2   security finding (traversal, response splitting, info leak, form header injection or
+#       decode bypass, query value mangling, CORS origin leak)
+#   3   WFX never answered /health
 
 import concurrent.futures
+import copy
 import json
 import os
 import random
+import shutil
 import signal
 import socket
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -112,64 +119,9 @@ def _build_at_header_size(total, method="GET", path="/health"):
 def req(host, port, method, path, headers=None, body=b"", **kw):
     return raw_send(host, port, _build(method, path, headers, body), **kw)
 
-# Process inspection
+# Server context
 _HAS_PROC = os.path.isdir("/proc")
 
-def children(ppid):
-    if not _HAS_PROC:
-        return []
-    out = []
-    try:
-        for e in os.listdir("/proc"):
-            if not e.isdigit():
-                continue
-            try:
-                with open("/proc/%s/status" % e) as f:
-                    for line in f:
-                        if line.startswith("PPid:"):
-                            if int(line.split()[1]) == ppid:
-                                out.append(int(e))
-                            break
-            except (OSError, ValueError):
-                pass
-    except OSError:
-        pass
-    return out
-
-def rss_mb(pids):
-    if not _HAS_PROC:
-        return 0.0
-    total = 0
-    for p in pids:
-        try:
-            with open("/proc/%d/status" % p) as f:
-                for line in f:
-                    if line.startswith("VmRSS:"):
-                        total += int(line.split()[1])
-                        break
-        except (OSError, ValueError):
-            pass
-    return total / 1024.0
-
-def fd_count(pids):
-    if not _HAS_PROC:
-        return 0
-    total = 0
-    for p in pids:
-        try:
-            total += len(os.listdir("/proc/%d/fd" % p))
-        except OSError:
-            pass
-    return total
-
-def proc_alive(pid):
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
-
-# Server context
 # Payload corpora
 # Leak markers: any of these in a response = information leakage finding
 # Pairs: (must_contain_a, must_contain_b_or_None)
@@ -598,7 +550,7 @@ VIOLATE_ROUTES = ["/violate/204body", "/violate/conn", "/violate/recommit",
 LIGHT_PATHS    = ["/health", "/text", "/api/v1/status", "/chain"]
 
 # Route correctness specification
-# Every route in main.cpp is listed here with exact expected behavior
+# Status/body/header spec for the routes re-verified after every chaos scenario
 ROUTE_CHECKS = [
     # (method, path, headers, body, expected_status, must_contain_in_body, must_have_header)
     # Basic routes
@@ -647,11 +599,21 @@ ROUTE_CHECKS = [
     ("GET",  "/mw/blocked",       None, b"", 403, b"blocked", None),
     # Middleware: MwSkipNext: second MW skipped, handler runs
     ("GET",  "/mw/skipnext",      None, b"", 200, b"handler-ran", None),
+    # Callables sharing a type (plain functions, one factory's closures) each run their own
+    ("GET",  "/fn/sync-a",        None, b"", 200, b"fn-sync-a", None),
+    ("GET",  "/fn/sync-b",        None, b"", 200, b"fn-sync-b", None),
+    ("GET",  "/fn/async-a",       None, b"", 200, b"fn-async-a", None),
+    ("GET",  "/fn/async-b",       None, b"", 200, b"fn-async-b", None),
+    ("GET",  "/mw/factory-a",     None, b"", 200, b"ok", ("X-Mw-Tag", b"a")),
+    ("GET",  "/mw/factory-b",     None, b"", 200, b"ok", ("X-Mw-Tag", b"b")),
     # Context storage: middleware sets uid=42, handler echoes it
     ("GET",  "/ctx",              None, b"", 200, b"42", None),
     # Async handler
     ("GET",  "/async/sleep",      None, b"", 200, b"slept", None),
     ("GET",  "/async/nested-slow", None, b"", 200, b"nested-done", None),
+    # A child coroutine that throws: its parent catches it, and an uncaught one fails the handler
+    ("GET",  "/async/child-throws", None, b"", 200, b"caught", None),
+    ("GET",  "/async/void-child-throws", None, b"", 500, None, None),
     # Async middleware and route that complete without ever suspending
     ("GET",  "/mw/async-inline",  None, b"", 200, b"async-mw-ok", ("X-Async-MW", b"hit")),
     ("GET",  "/mw/async-inline-break", None, b"", 403, b"async-blocked", None),
@@ -659,6 +621,7 @@ ROUTE_CHECKS = [
     # JSON: immediate mode
     ("GET",  "/json/im",          None, b"", 200, b'"immediate"', None),
     ("GET",  "/json/im",          None, b"", 200, b'"meta"', None),
+    ("GET",  "/json/im",          None, b"", 200, b'"tags":["admin"]', None),
     # JSON: retained mode
     ("GET",  "/json/rm",          None, b"", 200, b'"retained"', None),
     # JSON: parse valid
@@ -701,6 +664,72 @@ ROUTE_CHECKS = [
     ("GET",  "/template/inherit", None, b"", 200, b"My Page",      None),
     ("GET",  "/template/inherit", None, b"", 200, b"Child Content", None),
 ]
+
+# Route groups that don't pair up, each run as the `wfx new` template with these routes in place of
+# its own: (label, src/main.cpp body, the fatal that must stop it from starting)
+GROUP_HEALTH = 'WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.SendText("ok"); })\n'
+GROUP_ROUTE  = 'WFX_GET("/x", [](WFX::Request, WFX::Response res) { res.SendText("x"); })\n'
+GROUP_CASES = [
+    ("an unclosed WFX_GROUP_START", GROUP_HEALTH + 'WFX_GROUP_START("/api")\n' + GROUP_ROUTE,
+     "WFX_GROUP_START() without a matching WFX_GROUP_END()"),
+    ("a stray WFX_GROUP_END", GROUP_HEALTH + GROUP_ROUTE + "WFX_GROUP_END()\n",
+     "WFX_GROUP_END() without a matching WFX_GROUP_START()"),
+]
+
+# Process inspection
+def children(ppid):
+    if not _HAS_PROC:
+        return []
+    out = []
+    try:
+        for e in os.listdir("/proc"):
+            if not e.isdigit():
+                continue
+            try:
+                with open("/proc/%s/status" % e) as f:
+                    for line in f:
+                        if line.startswith("PPid:"):
+                            if int(line.split()[1]) == ppid:
+                                out.append(int(e))
+                            break
+            except (OSError, ValueError):
+                pass
+    except OSError:
+        pass
+    return out
+
+def rss_mb(pids):
+    if not _HAS_PROC:
+        return 0.0
+    total = 0
+    for p in pids:
+        try:
+            with open("/proc/%d/status" % p) as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        total += int(line.split()[1])
+                        break
+        except (OSError, ValueError):
+            pass
+    return total / 1024.0
+
+def fd_count(pids):
+    if not _HAS_PROC:
+        return 0
+    total = 0
+    for p in pids:
+        try:
+            total += len(os.listdir("/proc/%d/fd" % p))
+        except OSError:
+            pass
+    return total
+
+def proc_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 # Helpers
 def _probe(host, port, payload, retries=3, delay=0.3):
@@ -748,17 +777,16 @@ def _verify_all_routes(host, port):
             if attempt < 2:
                 time.sleep(0.3)
         b = body_of(raw)
-        ok = (st == expect_st)
-        if ok and needle is not None:
-            ok = needle in b
+        ok, why = (st == expect_st), ""
+        if ok and needle is not None and needle not in b:
+            ok, why = False, ", body missing %r" % needle
         if ok and hdr_check is not None:
             _, hdrs_r, _ = parse_hdrs(raw)
             hname, hval = hdr_check
             vals = hdrs_r.get(hname.lower().encode(), [])
-            ok = bool(vals) and hval in vals[0]
-        detail = None if ok else "%s %s -> %s (expected %s%s)" % (
-            method, path, st, expect_st,
-            (", body missing %r" % needle) if needle and st == expect_st else "")
+            if not vals or hval not in vals[0]:
+                ok, why = False, ", %s %r, got %r" % (hname, hval, vals[:1])
+        detail = None if ok else "%s %s -> %s (expected %s%s)" % (method, path, st, expect_st, why)
         with lock:
             results.append((ok, detail))
 
@@ -1662,25 +1690,25 @@ def phase_query(ctx):
         check("dot-segment path still resolves with a query attached", st == 200 and b == b"42",
               "status=%s body=%r" % (st, b))
 
-    # Buffer growth/relocation: header_reserve_hint is 512 bytes, recv_buffer_incr is 8192, so a
-    # query value comfortably past 512 but under max_header_size (8192) forces at least one grow
-    # cycle. This is what actually exercises the parser fix's memmove reassembly, not just the
-    # split-then-normalize logic on a small request that never needed to grow
-    with term.progress("query", "buffer growth") as pr:
+    # Large query values. The receive buffer starts at recv_buffer_incr (8192), which already holds
+    # any header block max_header_size (8192) allows, so only a body makes it grow. The second
+    # request sends one big enough to, moving the buffer under the already-parsed path and query:
+    # that is what exercises the parser fix's memmove reassembly
+    with term.progress("query", "large values") as pr:
         big_value = "x" * 4000
         st, j = _query_json(host, port, "/query/echo?pad=" + ("p" * 1000) + "&v=" + big_value)
-        check("large query value survives buffer growth", st == 200 and j and j.get("present") is True
+        check("a 4000-byte query value parses intact", st == 200 and j and j.get("present") is True
               and j.get("len") == 4000 and j.get("value") == big_value,
               "st=%s len=%s" % (st, j and j.get("len")))
 
-        # Same growth scenario, checked through the full raw path this time (not just the parsed
-        # value), via the existing /echo-full route's X-Echo-Path header
+        # Checked through the full raw path this time (not just the parsed value), via the
+        # existing /echo-full route's X-Echo-Path header
         traversal_value = "/a/../b" * 200  # ~1400 bytes, still traversal-shaped, still must survive
         st, raw = req(host, port, "POST", "/echo-full?v=" + traversal_value,
-                      headers={"X-Marker": "grow"}, body=b"body", rtimeout=5.0)
+                      headers={"X-Marker": "grow"}, body=b"b" * 20000, rtimeout=5.0)
         _, hdrs, _ = parse_hdrs(raw)
         echoed_path = b"".join(hdrs.get(b"x-echo-path", [b""])).decode(errors="replace")
-        check("full path+query survives growth via X-Echo-Path",
+        check("full path+query survives a body growing the buffer under it (X-Echo-Path)",
               st == 200 and echoed_path == "/echo-full?v=" + traversal_value,
               "status=%s echoed_path=%r" % (st, echoed_path[:120]))
 
@@ -1917,6 +1945,55 @@ def _route_exact(method, path):
 
 def _route_prefix(method, prefix):
     return lambda r: r.get("method") == method and (r.get("path") or "").startswith(prefix)
+
+# PHASE: groups
+# Route groups that don't pair up must stop the server from starting, both ways round: a
+# WFX_GROUP_START left open would prefix every route registered after it, and a stray
+# WFX_GROUP_END has nothing to close. Each GROUP_CASES project runs on its own port next to the
+# app under test
+def phase_groups(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("groups")
+    root = tempfile.mkdtemp(prefix="wfx-groups-")
+
+    try:
+        made = subprocess.run([cfg.wfx, "new", "groups"], cwd=root, capture_output=True, text=True)
+        if made.returncode != 0:
+            p.check("groups: wfx new scaffolds the test project", False, (made.stderr or made.stdout).strip())
+            return
+
+        project = os.path.join(root, "groups")
+
+        # The template logs to stdout only, which a detached run discards
+        toml = os.path.join(project, "config", "wfx.local.toml")
+        with open(toml) as handle:
+            text = handle.read()
+        with open(toml, "w") as handle:
+            handle.write(text.replace("enable_file       = false", "enable_file       = true"))
+
+        gcfg = copy.copy(cfg)
+        gcfg.app_dir = project
+        gcfg.port = cfg.port + 1
+
+        for label, routes, fatal in GROUP_CASES:
+            with open(os.path.join(project, "src", "main.cpp"), "w") as handle:
+                handle.write("#include <wfx/http.hpp>\n\n" + routes)
+
+            srv = common.Server(gcfg)
+            try:
+                srv.start()
+            except RuntimeError as err:
+                p.check("groups: %s still builds" % label, False, str(err))
+                continue
+
+            refused = common.server.poll(lambda: common.logs.worker_logs_contain(project, fatal), 30) is not None
+            served = common.server.health(cfg.host, gcfg.port, 1.5)
+            srv.stop()
+
+            p.check("groups: %s stops the server from starting" % label, refused and not served,
+                    "fatal logged=%s, /health answered=%s" % (refused, served))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 # PHASE: metrics
 def phase_metrics(ctx):
@@ -2242,7 +2319,7 @@ def phase_soak(ctx):
 #   - a per-phase timeout, because a phase that wedges under load would otherwise stall the run
 class BaseAudit(common.Suite):
     name = "base_audit"
-    description = "WFX server torture audit: security, protocol, features, forms, chaos"
+    description = "WFX server torture audit: security, protocol, features, forms, query, cors, groups, metrics, soak, chaos"
     phases = {
         "security": phase_security,
         "protocol": phase_protocol,
@@ -2250,6 +2327,7 @@ class BaseAudit(common.Suite):
         "forms":    phase_forms,
         "query":    phase_query,
         "cors":     phase_cors,
+        "groups":   phase_groups,
         "metrics":  phase_metrics,
         "soak":     phase_soak,
         "chaos":    phase_chaos,

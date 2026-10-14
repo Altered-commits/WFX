@@ -44,7 +44,7 @@ Arguments are formatted into a 1024-byte stack buffer. No heap allocation occurs
 WFX::LogInfo("request at path=", req.Path(), " method=", req.Method());
 ```
 
-**Supported argument types**: `std::string_view`, `const char*`, `char`, `bool`, integers (`int`, `uint32_t`, `uint64_t`, etc.), floats, pointers.
+**Supported argument types**: `std::string_view`, `WFX::StringView`, `const char*`, `char`, `bool`, integers (`int`, `uint32_t`, `uint64_t`, etc.), floats, pointers.
 
 !!! danger
     `LogFatal` does not return. It emits the log line and calls `std::exit`. Use it only for situations where the process cannot continue.
@@ -83,8 +83,8 @@ them when you only want a total.
 | `WFX::GetNetworkMetricsAll()`     | All workers summed                 |
 | `WFX::GetProcessMetricsAll()`     | All workers summed                 |
 
-An index outside `[0, WorkerMetricCount())` returns a zeroed struct rather than
-failing.
+An index outside `[0, WorkerMetricCount())` returns a default-constructed struct (counters 0,
+`pid` -1) rather than failing.
 
 ```cpp
 // This worker's own numbers
@@ -137,7 +137,7 @@ struct NetworkMetrics {
     response-status breakdowns are **not** here. They live in the per-route
     metrics (`RouteMetrics`), where they carry the path and method they belong to.
     See [Route metrics](#route-metrics) below.
-    - `fileFallbacks` is incremented when a file send cannot use `sendfile` directly because the connection is SSL and kernel TLS is not available. In that case WFX falls back to streaming the file through the SSL write path in chunks. `fileCalls` and `fileBytesWritten` count both direct file sends and this fallback path.
+    - `fileFallbacks` is incremented when a file send cannot use `sendfile` directly because the connection is SSL and kernel TLS is not available. In that case WFX falls back to streaming the file through the SSL write path in chunks. `fileCalls` and `fileBytesWritten` count only direct file sends: a fallback counts once in `fileFallbacks`, and its bytes land in `writes`/`bytesWritten`.
 
 ### `SelfMetrics` fields
 
@@ -147,15 +147,15 @@ struct SelfMetrics {
     std::uint64_t vmBytes;         // virtual memory size in bytes
     std::uint32_t restarts;        // how many times this slot has been restarted
     std::uint32_t crashes;         // how many times this slot died unexpectedly
-    std::uint32_t backoffAttempts; // current backoff attempt count
-    std::int32_t  pid;             // current worker PID (-1 if dead)
+    std::uint32_t backoffAttempts; // total revive attempts for this slot
+    std::int32_t  pid;             // PID of the last worker spawned in this slot (0 if never spawned)
     std::int64_t  startedAt;       // unix timestamp of last worker start
-    std::int64_t  nextRetryAt;     // unix timestamp of next allowed restart (0 if not in backoff)
+    std::int64_t  nextRetryAt;     // unix timestamp of the last scheduled restart (never cleared)
 };
 ```
 
 !!! important
-    `GetProcessMetricsAll()` only meaningfully aggregates `rssBytes`, `vmBytes`, `restarts`, and `crashes`. Fields like `pid`, `startedAt`, `nextRetryAt`, and `backoffAttempts` are per-slot only and are zeroed out in the aggregate result.
+    `GetProcessMetricsAll()` only meaningfully aggregates `rssBytes`, `vmBytes`, `restarts`, and `crashes`. Fields like `pid`, `startedAt`, `nextRetryAt`, and `backoffAttempts` are per-slot only: in the aggregate result `startedAt`, `nextRetryAt` and `backoffAttempts` are 0 and `pid` is -1.
 
 ### Route metrics
 
@@ -174,9 +174,9 @@ counters:
 
 ```cpp
 struct RouteMetricsView {
-    Shared::StringView path;    // e.g. "/users/:id", a view valid for the process lifetime
-    Shared::HttpMethod method;  // GET, POST, ...
-    RouteMetrics       metrics;
+    WFX::StringView path;    // full registered pattern, e.g. "/api/users/<id:uint>"; valid for the process lifetime
+    WFX::HttpMethod method;  // GET, POST, ...
+    RouteMetrics    metrics;
 };
 
 struct RouteMetrics {
@@ -186,7 +186,7 @@ struct RouteMetrics {
     std::uint64_t status3xx;  // responses with 3xx status
     std::uint64_t status4xx;  // responses with 4xx status
     std::uint64_t status5xx;  // responses with 5xx status
-    std::uint64_t bytesOut;   // total response bytes written for this route
+    std::uint64_t bytesOut;   // serialized response bytes; for SendFile/Stream bodies only the headers count
 };
 ```
 
@@ -196,7 +196,7 @@ since a route is the same route in every worker. The counts are aggregated at re
 ```cpp
 for(std::uint16_t r = 0; r < WFX::RouteMetricCount(); r++) {
     const auto rv = WFX::GetRouteMetricsAt(r);
-    WFX::LogInfo(WFX::Shared::HttpMethodToStringView(rv.method), " ", rv.path,
+    WFX::LogInfo(WFX::HttpMethodToStringView(rv.method), " ", rv.path,
                  " requests=", rv.metrics.requests, " 5xx=", rv.metrics.status5xx);
 }
 ```
@@ -221,24 +221,24 @@ with the endpoint's host.
 
 ```cpp
 struct EndpointMetricsView {
-    Shared::StringView host;    // e.g. "api.example.com", valid for the process lifetime
-    EndpointMetrics    metrics;
+    WFX::StringView host;    // e.g. "api.example.com", valid for the process lifetime
+    EndpointMetrics metrics;
 };
 
 struct EndpointMetrics {
-    std::uint64_t requests;        // requests issued to this endpoint
+    std::uint64_t requests;        // sends that reached a connection (not coalesced or refused)
     std::uint64_t completed;       // requests that ran to a completed response
     std::uint64_t status1xx;       // completed responses with 1xx status
     std::uint64_t status2xx;       // completed responses with 2xx status
     std::uint64_t status3xx;       // completed responses with 3xx status
     std::uint64_t status4xx;       // completed responses with 4xx status
     std::uint64_t status5xx;       // completed responses with 5xx status
-    std::uint64_t connectFailures; // could not establish a connection
-    std::uint64_t tlsFailures;     // TLS handshake or client-wrap failures
-    std::uint64_t requestTimeouts; // requests that exceeded the request timeout
+    std::uint64_t connectFailures; // refused, timed out (onConnect included), or rejected by onConnect
+    std::uint64_t tlsFailures;     // TLS wrap or handshake failures that ended the slot, in-band upgrades included
+    std::uint64_t requestTimeouts; // requests still in flight when the request timeout fired
     std::uint64_t poolExhausted;   // sends refused because the connection pool was full
-    std::uint64_t otherErrors;     // everything else not split out above
-    std::uint64_t reconnects;      // dead pooled connections re-established
+    std::uint64_t otherErrors;     // requests lost to anything else: a socket error or hangup, a bad response
+    std::uint64_t reconnects;      // background reconnects scheduled after a failed connect
     std::uint64_t coalesceHits;    // requests merged into an in-flight identical request
     std::uint64_t bytesOut;        // total request bytes written to this endpoint
     std::uint64_t bytesIn;         // total response bytes read from this endpoint
@@ -246,10 +246,13 @@ struct EndpointMetrics {
 };
 ```
 
-`requests` counts every send; `completed` counts only the ones that produced a full
-response. `completed` is also the denominator behind the latency mean below, so a
-request that was coalesced (`coalesceHits`), timed out, or failed contributes no latency
-sample. `slotsInUse` is a live gauge, not a monotonic counter.
+`requests` counts every send that reached a connection: a coalesced send counts only in
+`coalesceHits`, a refused one only in `poolExhausted`. `completed` counts only the ones that
+produced a full response. A request that was coalesced, timed out, or failed contributes no
+latency sample, and neither does one whose client left before its response arrived, though that
+one still counts in `completed`. A connection that times out or drops with no request on it, idle in
+the pool or reserved between requests, counts in neither `requestTimeouts` nor `otherErrors`.
+`slotsInUse` is a live gauge, not a monotonic counter.
 
 The status counters are filled from the endpoint's `statusCode` hook, so they stay zero
 for protocols that have no such concept.
@@ -314,10 +317,11 @@ if(WFX::MetricsLatencyEnabled()) {
 ```
 
 !!! note
-    The latency sample for a route or endpoint is taken at exactly the point its
-    `requests`/`completed` counter is incremented, so `meanUs` always equals
-    `sumUs / completed`. Coalesced, timed-out, and failed requests are counted where
-    appropriate but contribute no latency sample.
+    `meanUs` is `sumUs / count`, where `count` is the number of recorded samples. The sample is
+    taken where a route's `requests` or an endpoint's `completed` counter is incremented, so the
+    two match, except for an endpoint request whose client left before its response arrived:
+    it counts in `completed` with no sample. Coalesced, timed-out, and failed requests are
+    counted where appropriate but contribute no latency sample.
 
 ### Usage
 
@@ -387,11 +391,12 @@ WFX_GET("/metrics", [](WFX::Request req, WFX::Response res) {
     // Request and status-class counters are per route, labelled by path
     for(std::uint16_t r = 0; r < WFX::RouteMetricCount(); r++) {
         const auto rv = WFX::GetRouteMetricsAt(r);
-        res.Write("wfx_requests_total{path=\"").Write(rv.path).Write("\"} ")
+        const std::string_view path{rv.path.Data(), rv.path.Size()}; // Write takes std::string_view
+        res.Write("wfx_requests_total{path=\"").Write(path).Write("\"} ")
            .Write(rv.metrics.requests).Write("\n")
-           .Write("wfx_responses_2xx_total{path=\"").Write(rv.path).Write("\"} ")
+           .Write("wfx_responses_2xx_total{path=\"").Write(path).Write("\"} ")
            .Write(rv.metrics.status2xx).Write("\n")
-           .Write("wfx_responses_5xx_total{path=\"").Write(rv.path).Write("\"} ")
+           .Write("wfx_responses_5xx_total{path=\"").Write(path).Write("\"} ")
            .Write(rv.metrics.status5xx).Write("\n");
     }
 
@@ -406,6 +411,6 @@ WFX_GET("/metrics", [](WFX::Request req, WFX::Response res) {
 ```
 
 !!! note
-    - Metrics are monotonically increasing counters except `activeClientConns` and `activeEndpointConns`, which reflect the current live connection counts, and `SelfMetrics` fields which are written by the master process and reflect the live state of each worker slot at the last poll interval. Counters reset when the server restarts.
+    - Metrics are monotonically increasing counters except `activeClientConns`, `activeEndpointConns` and the endpoint `slotsInUse` gauge, which reflect the current live connection counts, and `SelfMetrics` fields which are written by the master process and reflect the live state of each worker slot at the last poll interval. Counters reset when the server restarts.
     - The per-worker functions are useful for per-process dashboards or debugging worker imbalance. For production monitoring, prefer the `All` variants.
     - Total bytes sent is the sum of `bytesWritten` and `fileBytesWritten` since file sends use a separate syscall path.

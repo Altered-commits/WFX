@@ -8,19 +8,20 @@
 # so the entire TLS client trust decision is untested. This drives WFX's
 # HttpEndpoint with EpTlsRequire against a small, hostile TLS mock: an untrusted
 # cert, a hostname-mismatched cert, an expired cert, and a downgraded server. Each
-# must be refused; a client that accepts any of them is a man-in-the-middle hole
-# Refusal is proven twice: the outbound call errors AND the mock recorded a FAILED
-# handshake (the client bailed at the TLS layer, never completing it). Plus: the
-# HTTP framing/desync/injection corpus replayed THROUGH TLS, request-timeout under
-# TLS, and a raw truncation attack (RST with no close_notify)
+# must be refused; a client that accepts any of them is a man-in-the-middle hole.
+# A refusal must surface as SSL_FAILURE with OpenSSL's reason in the worker log, and
+# the cert personas also need a mock-observed FAILED handshake (the client bailed at
+# the TLS layer, never completing it). Plus: inbound mTLS, cross-connection TLS error
+# isolation, the HTTP framing/desync/injection corpus replayed THROUGH TLS,
+# request-timeout under TLS, a raw truncation attack (RST with no close_notify),
+# session resumption, and the STARTTLS plaintext boundary
 #
 # Topology:  audit --(TLS)--> WFX(HTTPS) /call --(TLS)--> hostile mock personality
-# Exit codes: 0 pass  1 correctness fail / worker died  2 SECURITY finding  3 boot crash
+# Exit codes: 0 pass  1 correctness fail / worker dead at the end  2 SECURITY finding  3 boot crash
 
 import itertools
 import json
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -39,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Mirrors EndpointStatus in shared/abis/types.hpp, keep in sync
 EP_SUCCESS     = 0
+EP_SSL_FAILURE = 9
 EP_SERIALIZE   = 11
 EP_REQ_TIMEOUT = 14
 
@@ -238,19 +240,14 @@ def patch_ssl_paths(cfg):
     the dedicated chain-test root when that vector is available), which is why tls_send() defaults
     to presenting a client cert - see CLIENT_CERT above."""
     toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
-    with open(toml) as f:
-        s = f.read()
     good, key = os.path.join(cfg.cert_dir, "good.pem"), os.path.join(cfg.cert_dir, "good-key.pem")
     ca = getattr(cfg, "ca_path", "")
-    s = re.sub(r'(?m)^(\s*cert_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % good, s)
-    s = re.sub(r'(?m)^(\s*key_path\s*=\s*)"[^"]*"',  lambda m: m.group(1) + '"%s"' % key, s)
+    common.toml.patch(toml, "cert_path", good)
+    common.toml.patch(toml, "key_path", key)
     if ca:
-        s = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % ca, s)
+        common.toml.patch(toml, "outbound_ca_path", ca)
         if "client-good" in cfg.avail:
-            client_ca = getattr(cfg, "client_ca_bundle", "") or ca
-            s = re.sub(r'(?m)^(\s*client_ca_path\s*=\s*)"[^"]*"', lambda m: m.group(1) + '"%s"' % client_ca, s)
-    with open(toml, "w") as f:
-        f.write(s)
+            common.toml.patch(toml, "client_ca_path", getattr(cfg, "client_ca_bundle", "") or ca)
     term.log("patch", "server cert -> %s | client CA trust -> %s | inbound mTLS -> %s"
             % (good, ca or "(system store)", "on" if "client-good" in cfg.avail else "off"))
 
@@ -380,6 +377,19 @@ def is_err(r):
 def is_errc(r, code):
     return bool(r) and r.get("ep") == code
 
+def check_tls_refusal(p, cfg, label, r, reason):
+    """The call fails as SSL_FAILURE and the worker logs OpenSSL's reason. Only accepting the peer
+    is a security finding, refusing it under another status misreports why."""
+    refused = is_err(r)
+    p.check(label, is_errc(r, EP_SSL_FAILURE),
+            "ep=%r, wanted %d (SSL_FAILURE)%s" % (r and r.get("ep"), EP_SSL_FAILURE,
+                                                 "" if refused else ", MitM possible"),
+            security=not refused)
+
+    line = "TLS handshake failed for endpoint '127.0.0.1': %s" % reason
+    p.check(label + ": the log says why", common.logs.worker_logs_contain(cfg.app_dir, line),
+            "no worker log line %r" % line)
+
 _sid = itertools.count(1)
 def _next_sid():
     return "s%d" % next(_sid)
@@ -406,20 +416,20 @@ def phase_handshake(ctx):
 def phase_verify(ctx):
     cfg, mock = ctx.cfg, ctx.mock
     p = ctx.phase("verify")
-    labels = {
-        "selfsigned": "untrusted self-signed cert refused",
-        "wronghost":  "hostname-mismatch cert refused",
-        "expired":    "expired cert refused",
+    # Label, and the verify error OpenSSL names for it
+    cases = {
+        "selfsigned": ("untrusted self-signed cert refused", "self-signed certificate"),
+        "wronghost":  ("hostname-mismatch cert refused",     "IP address mismatch"),
+        "expired":    ("expired cert refused",               "certificate has expired"),
     }
     for name, port, cert, opts, expect in PERSONAS:
-        if expect != "refuse" or name == "tls12":
+        if name not in cases:
             continue
+        label, reason = cases[name]
         if not persona_available(cfg, cert):
-            p.check(labels.get(name, name) + " (skipped, no cert)", True)
+            p.check(label + " (skipped, no cert)", True)
             continue
-        r = drive(cfg, "/ok", ep=name, rtimeout=12)
-        p.check(labels[name], is_err(r),
-              "client ACCEPTED it (ep=%r), MitM possible" % (r and r.get("ep")), security=True)
+        check_tls_refusal(p, cfg, label, drive(cfg, "/ok", ep=name, rtimeout=12), reason)
         hs, hf, rq, _ = mock.stats(name)
         # mock.stats() itself dials this same port with an UNVERIFIED TLS client to
         # fetch the counters, so `hs` always includes that one successful handshake
@@ -435,9 +445,9 @@ def phase_protocol(ctx):
     if not persona_available(cfg, "good"):
         p.check("TLS 1.2 downgrade refused (skipped)", True)
         return
-    r = drive(cfg, "/ok", ep="tls12", rtimeout=12)
-    p.check("TLS 1.2 downgrade refused", is_err(r),
-          "client accepted a TLS 1.2 downgrade (ep=%r)" % (r and r.get("ep")), security=True)
+    # No certificate is ever checked here, so the reason is the server's own alert
+    check_tls_refusal(p, cfg, "TLS 1.2 downgrade refused", drive(cfg, "/ok", ep="tls12", rtimeout=12),
+                      "tlsv1 alert protocol version")
 
 # PHASE: mtls
 def phase_mtls(ctx):

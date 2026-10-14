@@ -6,12 +6,9 @@
 #include "config/config.hpp"
 #include "utils/fileops/filemeta.hpp"
 #include "utils/string/string.hpp"
-#include "shared/utils/detection_macro.hpp"
 #include <cstring>
 
-#ifdef WFX_PLATFORM_POSIX
 #include <dlfcn.h>
-#endif
 
 namespace WFX::Core {
 
@@ -300,7 +297,7 @@ void TemplateEngine::LoadDynamicTemplatesFromLib()
 
     // Loop over the templates_ and find the ones with TemplateType::DYNAMIC
     // It will contain the functions name in 'pathOrName' member, use it to get
-    // Generator class inside of .dll/.so.
+    // Generator class inside of .so.
     for(auto& templateMeta : templates_) {
         auto& tmpl = templateMeta.second;
         if(tmpl.type != TemplateType::DYNAMIC)

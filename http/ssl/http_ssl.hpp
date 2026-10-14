@@ -35,8 +35,7 @@ struct HttpWFXSSL {
     // Wrap a socket and return opaque handle
     virtual void* Wrap(SSLSocket fd) = 0;
 
-    // alpnList is a wire-encoded ALPN protocol list (same encoding as the engine's hardcoded
-    // default); empty = offer hardcoded default (http/1.1 only).
+    // alpnList is a wire-encoded ALPN protocol list (RFC 7301); empty offers no ALPN at all.
     //
     // sessionSlot: caller-owned opaque per-endpoint storage for TLS session resumption
     // May be read (offer for reuse) and/or written (store newly negotiated session)
@@ -47,8 +46,12 @@ struct HttpWFXSSL {
     // Empty if the handshake hasn't completed or the peer didn't negotiate ALPN at all
     virtual std::string_view NegotiatedProtocol(void* conn) = 0;
 
-    // Handshake; returns true if done
+    // SUCCESS when done, WANT_READ/WANT_WRITE to wait, anything else failed (see GetHandshakeFailure)
     virtual SSLReturn Handshake(void* conn) = 0;
+
+    // Why conn's Handshake() just failed, for logs: the peer certificate's verify error, else the
+    // TLS layer's own reason. Static text, valid only until this handler's next Handshake()
+    virtual std::string_view GetHandshakeFailure(void* conn) = 0;
 
     // Read/Write functions
     virtual SSLResult Read(void* conn, char* buf, int len) = 0;

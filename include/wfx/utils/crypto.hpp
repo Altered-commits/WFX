@@ -22,13 +22,22 @@
 //
 // Every function returns {CryptoStatus, result}. Check status ==
 // WFX::CryptoOk before using the result.
+//
+// AEAD, key derivation and RandomBytes also take a std::span<std::uint8_t>
+// to write into instead of allocating, for paths that can't afford a heap
+// allocation per call. Those return the CryptoStatus alone, or for AEAD
+// {CryptoStatus, bytes written}
 // -----------------------------------------------------------------------
 
 #include "core/core.hpp"
 #include "shared/abis/crypto_types.hpp"
 #include "wfx/memory.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
+#include <limits>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -48,6 +57,10 @@ inline constexpr auto CryptoBufferTooSmall = CryptoStatus::BUFFER_TOO_SMALL;
 inline constexpr auto CryptoAuthFailed = CryptoStatus::AUTH_FAILED;
 inline constexpr auto CryptoUnsupported = CryptoStatus::UNSUPPORTED;
 inline constexpr auto CryptoInternalError = CryptoStatus::INTERNAL_ERROR;
+
+inline constexpr auto CryptoSha256 = CryptoHashAlgo::SHA256;
+inline constexpr auto CryptoSha384 = CryptoHashAlgo::SHA384;
+inline constexpr auto CryptoSha512 = CryptoHashAlgo::SHA512;
 
 inline constexpr auto CryptoAesGcm = CryptoAeadAlgo::AES_256_GCM;
 inline constexpr auto CryptoChaCha20Poly1305 = CryptoAeadAlgo::CHACHA20_POLY1305;
@@ -89,6 +102,11 @@ template <CryptoHashAlgo Algo> inline constexpr std::uint32_t DigestLenFor()
     else
         return Shared::CRYPTO_SHA512_LEN;
 }
+
+// What Sha256/384/512 and HmacSha256/384/512 hand back, to name in a struct or signature
+using Sha256Digest = Digest<DigestLenFor<CryptoSha256>()>;
+using Sha384Digest = Digest<DigestLenFor<CryptoSha384>()>;
+using Sha512Digest = Digest<DigestLenFor<CryptoSha512>()>;
 
 // vvv One-shot hashing vvv
 template <CryptoHashAlgo Algo> inline std::pair<CryptoStatus, Digest<DigestLenFor<Algo>()>> Hash(std::string_view data)
@@ -274,17 +292,30 @@ private: // Storage
 // accidentally-huge body instead of silently costing 2x its RAM
 inline constexpr std::size_t CryptoAeadMaxSize = 64 * 1024 * 1024; // NOLINT(readability-identifier-naming)
 
-inline std::pair<CryptoStatus, Vector<std::uint8_t>> AeadEncrypt(CryptoAeadAlgo algo, std::string_view key,
-                                                                 std::string_view nonce, std::string_view aad,
-                                                                 std::string_view plaintext)
+// Bytes the auth tag adds: sealing n bytes of plaintext produces n + AeadTagLen(algo)
+constexpr std::uint32_t AeadTagLen(CryptoAeadAlgo algo) noexcept
+{
+    return algo == CryptoAesGcm ? Shared::CRYPTO_AES_GCM_TAG_LEN : Shared::CRYPTO_CHA_CHA_TAG_LEN;
+}
+
+namespace Detail {
+
+// The crypto ABI takes 32-bit lengths. An output capacity past that is clamped rather than
+// truncated, AEAD never writes anywhere near it under CryptoAeadMaxSize
+inline std::uint32_t CapU32(std::size_t n) noexcept
+{
+    return static_cast<std::uint32_t>(std::min<std::size_t>(n, std::numeric_limits<std::uint32_t>::max()));
+}
+
+} // namespace Detail
+
+// Writes plaintext.size() + AeadTagLen(algo) bytes into out, {status, bytes written}
+inline std::pair<CryptoStatus, std::uint32_t> AeadEncrypt(CryptoAeadAlgo algo, std::string_view key,
+                                                          std::string_view nonce, std::string_view aad,
+                                                          std::string_view plaintext, std::span<std::uint8_t> out)
 {
     if(plaintext.size() > CryptoAeadMaxSize)
-        return {CryptoInvalidArg, {}};
-
-    const std::uint32_t tagLen =
-        (algo == CryptoAesGcm) ? Shared::CRYPTO_AES_GCM_TAG_LEN : Shared::CRYPTO_CHA_CHA_TAG_LEN;
-
-    Vector<std::uint8_t> out(plaintext.size() + tagLen);
+        return {CryptoInvalidArg, 0};
 
     std::uint32_t written = 0;
     const CryptoStatus status =
@@ -296,24 +327,34 @@ inline std::pair<CryptoStatus, Vector<std::uint8_t>> AeadEncrypt(CryptoAeadAlgo 
                                            static_cast<std::uint32_t>(aad.size()),
                                            reinterpret_cast<const std::uint8_t*>(plaintext.data()),
                                            static_cast<std::uint32_t>(plaintext.size()), out.data(),
-                                           static_cast<std::uint32_t>(out.size()), &written);
+                                           Detail::CapU32(out.size()), &written);
 
-    if(status == CryptoOk)
-        out.resize(written);
-    else
-        out.clear();
+    return {status, status == CryptoOk ? written : 0};
+}
+
+inline std::pair<CryptoStatus, Vector<std::uint8_t>> AeadEncrypt(CryptoAeadAlgo algo, std::string_view key,
+                                                                 std::string_view nonce, std::string_view aad,
+                                                                 std::string_view plaintext)
+{
+    // Checked before sizing the buffer too, so an oversized input never costs the allocation
+    if(plaintext.size() > CryptoAeadMaxSize)
+        return {CryptoInvalidArg, {}};
+
+    Vector<std::uint8_t> out(plaintext.size() + AeadTagLen(algo));
+    const auto [status, written] = AeadEncrypt(algo, key, nonce, aad, plaintext, out);
+    out.resize(written);
 
     return {status, std::move(out)};
 }
 
-inline std::pair<CryptoStatus, Vector<std::uint8_t>> AeadDecrypt(CryptoAeadAlgo algo, std::string_view key,
-                                                                 std::string_view nonce, std::string_view aad,
-                                                                 std::string_view ciphertext)
+// Writes ciphertext.size() - AeadTagLen(algo) bytes into out, {status, bytes written}. On any
+// failure out holds no plaintext: unauthenticated bytes are never left for the caller to read
+inline std::pair<CryptoStatus, std::uint32_t> AeadDecrypt(CryptoAeadAlgo algo, std::string_view key,
+                                                          std::string_view nonce, std::string_view aad,
+                                                          std::string_view ciphertext, std::span<std::uint8_t> out)
 {
     if(ciphertext.size() > CryptoAeadMaxSize)
-        return {CryptoInvalidArg, {}};
-
-    Vector<std::uint8_t> out(ciphertext.size()); // plaintext is always shorter than this
+        return {CryptoInvalidArg, 0};
 
     std::uint32_t written = 0;
     const CryptoStatus status =
@@ -325,49 +366,98 @@ inline std::pair<CryptoStatus, Vector<std::uint8_t>> AeadDecrypt(CryptoAeadAlgo 
                                            static_cast<std::uint32_t>(aad.size()),
                                            reinterpret_cast<const std::uint8_t*>(ciphertext.data()),
                                            static_cast<std::uint32_t>(ciphertext.size()), out.data(),
-                                           static_cast<std::uint32_t>(out.size()), &written);
+                                           Detail::CapU32(out.size()), &written);
 
-    if(status == CryptoOk)
-        out.resize(written);
-    else
-        out.clear(); // never expose partial/unauthenticated plaintext on failure
+    // The engine scrubs after a failed tag check, this covers a failure anywhere else once it
+    // started writing
+    if(status != CryptoOk) {
+        std::fill_n(out.data(), std::min(out.size(), ciphertext.size()), std::uint8_t{0});
+        return {status, 0};
+    }
+
+    return {status, written};
+}
+
+inline std::pair<CryptoStatus, Vector<std::uint8_t>> AeadDecrypt(CryptoAeadAlgo algo, std::string_view key,
+                                                                 std::string_view nonce, std::string_view aad,
+                                                                 std::string_view ciphertext)
+{
+    if(ciphertext.size() > CryptoAeadMaxSize)
+        return {CryptoInvalidArg, {}};
+
+    Vector<std::uint8_t> out(ciphertext.size()); // plaintext is always shorter than this
+    const auto [status, written] = AeadDecrypt(algo, key, nonce, aad, ciphertext, out);
+    out.resize(written);
 
     return {status, std::move(out)};
 }
 
 // vvv Key derivation vvv
+// The span forms derive exactly out.size() bytes. The ABI takes a 32-bit length, so a span past
+// that is refused rather than derived short
+inline CryptoStatus Pbkdf2(std::string_view password, std::string_view salt, std::uint32_t iterations,
+                           std::span<std::uint8_t> out)
+{
+    if(out.size() > std::numeric_limits<std::uint32_t>::max())
+        return CryptoInvalidArg;
+
+    return Core::CryptoApiExt1()->pbkdf2(reinterpret_cast<const std::uint8_t*>(password.data()),
+                                         static_cast<std::uint32_t>(password.size()),
+                                         reinterpret_cast<const std::uint8_t*>(salt.data()),
+                                         static_cast<std::uint32_t>(salt.size()), iterations, out.data(),
+                                         static_cast<std::uint32_t>(out.size()));
+}
+
 inline std::pair<CryptoStatus, Vector<std::uint8_t>> Pbkdf2(std::string_view password, std::string_view salt,
                                                             std::uint32_t iterations, std::uint32_t outLen)
 {
     Vector<std::uint8_t> out(outLen);
-    const CryptoStatus status =
-        Core::CryptoApiExt1()->pbkdf2(reinterpret_cast<const std::uint8_t*>(password.data()),
-                                      static_cast<std::uint32_t>(password.size()),
-                                      reinterpret_cast<const std::uint8_t*>(salt.data()),
-                                      static_cast<std::uint32_t>(salt.size()), iterations, out.data(), outLen);
+    const CryptoStatus status = Pbkdf2(password, salt, iterations, out);
 
     if(status != CryptoOk)
         out.clear();
 
     return {status, std::move(out)};
+}
+
+inline CryptoStatus Hkdf(std::string_view ikm, std::string_view salt, std::string_view info,
+                         std::span<std::uint8_t> out)
+{
+    if(out.size() > std::numeric_limits<std::uint32_t>::max())
+        return CryptoInvalidArg;
+
+    return Core::CryptoApiExt1()->hkdf(reinterpret_cast<const std::uint8_t*>(ikm.data()),
+                                       static_cast<std::uint32_t>(ikm.size()),
+                                       reinterpret_cast<const std::uint8_t*>(salt.data()),
+                                       static_cast<std::uint32_t>(salt.size()),
+                                       reinterpret_cast<const std::uint8_t*>(info.data()),
+                                       static_cast<std::uint32_t>(info.size()), out.data(),
+                                       static_cast<std::uint32_t>(out.size()));
 }
 
 inline std::pair<CryptoStatus, Vector<std::uint8_t>> Hkdf(std::string_view ikm, std::string_view salt,
                                                           std::string_view info, std::uint32_t outLen)
 {
     Vector<std::uint8_t> out(outLen);
-    const CryptoStatus status =
-        Core::CryptoApiExt1()->hkdf(reinterpret_cast<const std::uint8_t*>(ikm.data()),
-                                    static_cast<std::uint32_t>(ikm.size()),
-                                    reinterpret_cast<const std::uint8_t*>(salt.data()),
-                                    static_cast<std::uint32_t>(salt.size()),
-                                    reinterpret_cast<const std::uint8_t*>(info.data()),
-                                    static_cast<std::uint32_t>(info.size()), out.data(), outLen);
+    const CryptoStatus status = Hkdf(ikm, salt, info, out);
 
     if(status != CryptoOk)
         out.clear();
 
     return {status, std::move(out)};
+}
+
+inline CryptoStatus Argon2id(std::string_view password, std::string_view salt, std::uint32_t iterations,
+                             std::uint32_t memoryKb, std::uint32_t parallelism, std::span<std::uint8_t> out)
+{
+    if(out.size() > std::numeric_limits<std::uint32_t>::max())
+        return CryptoInvalidArg;
+
+    return Core::CryptoApiExt1()->argon2id(reinterpret_cast<const std::uint8_t*>(password.data()),
+                                           static_cast<std::uint32_t>(password.size()),
+                                           reinterpret_cast<const std::uint8_t*>(salt.data()),
+                                           static_cast<std::uint32_t>(salt.size()), iterations, memoryKb, parallelism,
+                                           out.data(), static_cast<std::uint32_t>(out.size()));
 }
 
 inline std::pair<CryptoStatus, Vector<std::uint8_t>> Argon2id(std::string_view password, std::string_view salt,
@@ -375,11 +465,7 @@ inline std::pair<CryptoStatus, Vector<std::uint8_t>> Argon2id(std::string_view p
                                                               std::uint32_t parallelism, std::uint32_t outLen)
 {
     Vector<std::uint8_t> out(outLen);
-    const CryptoStatus status = Core::CryptoApiExt1()->argon2id(reinterpret_cast<const std::uint8_t*>(password.data()),
-                                                                static_cast<std::uint32_t>(password.size()),
-                                                                reinterpret_cast<const std::uint8_t*>(salt.data()),
-                                                                static_cast<std::uint32_t>(salt.size()), iterations,
-                                                                memoryKb, parallelism, out.data(), outLen);
+    const CryptoStatus status = Argon2id(password, salt, iterations, memoryKb, parallelism, out);
 
     if(status != CryptoOk)
         out.clear();
@@ -388,10 +474,18 @@ inline std::pair<CryptoStatus, Vector<std::uint8_t>> Argon2id(std::string_view p
 }
 
 // vvv Misc vvv
+inline CryptoStatus RandomBytes(std::span<std::uint8_t> out)
+{
+    if(out.size() > std::numeric_limits<std::uint32_t>::max())
+        return CryptoInvalidArg;
+
+    return Core::CryptoApiExt1()->randomBytes(out.data(), static_cast<std::uint32_t>(out.size()));
+}
+
 inline std::pair<CryptoStatus, Vector<std::uint8_t>> RandomBytes(std::uint32_t len)
 {
     Vector<std::uint8_t> out(len);
-    const CryptoStatus status = Core::CryptoApiExt1()->randomBytes(out.data(), len);
+    const CryptoStatus status = RandomBytes(out);
 
     if(status != CryptoOk)
         out.clear();

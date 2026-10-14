@@ -40,8 +40,8 @@ eager DNS resolution at startup) are the same as the raw primitive, see
 [Declaring an endpoint](overview.md#declaring-an-endpoint) for the full
 details.
 
-`user` is the only field Postgres actually requires; leaving it empty is a
-fatal error at connect time rather than something the server gets to reject.
+`user` is the only field Postgres actually requires; leaving it empty fails
+every connect with `WFX::EpInternalError` before the server gets to reject it.
 Everything else defaults to a working, if generic, configuration, see
 [Tuning & limits](#tuning-limits) for the full list.
 
@@ -117,9 +117,12 @@ There are two independent things worth checking, and it's easy to check only
 one:
 
 - **`status`** tells you whether a result exists at all. Anything other than
-  `WFX::EpOk` means the connection didn't deliver one, pool exhausted,
-  connect refused, TLS failed, the request timed out, and `rows` shouldn't be
-  touched.
+  `WFX::EpOk` means the connection didn't deliver one, and `rows` shouldn't be
+  touched: `WFX::EpPoolExhausted` for a full pool, `WFX::EpSslFailure` for a
+  failed TLS handshake, `WFX::EpHandshakeTimeout` for a connect, TLS or
+  startup exchange past `connectTimeoutSeconds`, `WFX::EpRequestTimeout` for a
+  query past `requestTimeoutSeconds`, and `WFX::EpInternalError` for a refused
+  connection or handshake (encryption or auth refused, bad credentials).
 - **`rows->Failed()`** tells you whether the server answered with an
   `ErrorResponse` instead of results, a syntax error, a constraint violation,
   a permission failure. `rows->Error()` gives you a [`PgError`](#pgerror)
@@ -363,14 +366,15 @@ struct PgArrayView {
 };
 ```
 
-A malformed header, more than 6 dimensions, or any dimension with a negative
-length, decodes to a value-initialized `PgArrayView` (`elements == nullptr`),
-the same "NULL yields a value-initialized `T`" contract every other codec
-follows. `elements != nullptr` is how you tell a genuinely empty array
+A malformed header, more than 6 dimensions, any dimension with a negative
+length, or more elements than the array's bytes can hold, decodes to a
+value-initialized `PgArrayView` (`elements == nullptr`, `ndim` and `Count()`
+both 0), the same "NULL yields a value-initialized `T`" contract every other
+codec follows. `elements != nullptr` is how you tell a genuinely empty array
 (`Count() == 0` but still well-formed) apart from a decode failure.
 
-Treat `Count()` as informational rather than a value to size a loop or
-allocation from directly; `NextElement` walking the actual bytes is what
+`Count()` never exceeds what the received bytes could hold, but an element
+can still be truncated, so `NextElement` walking the actual bytes is what
 tells you how many elements are really there.
 
 ---
@@ -413,7 +417,9 @@ WFX_POST("/transfer", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 
 `Query` on a `PgSession` has the same signature and return shape as
 `PostgresEndpoint::Query`, just running on the one pinned connection instead
-of whichever one the pool would have picked.
+of whichever one the pool would have picked. On a session that isn't valid,
+every statement fails with `WFX::EpInvalidKey` rather than running on a pooled
+connection.
 
 A transaction is one use of a session, not what a session is for: prepared
 statements, `SET SESSION`, advisory locks, and anything else that's
@@ -434,10 +440,10 @@ default), `REPEATABLE_READ`, or `SERIALIZABLE`. Pass it as the one argument,
     server-side backstop if you want one, not a substitute for finishing your
     own transactions.
 
-The pool stays correct either way: the next request to land on that
-connection sends a `ROLLBACK` ahead of its own statement before doing
-anything else, so an abandoned transaction doesn't leak into someone else's
-query. This happens automatically.
+The pool stays correct either way: whatever lands on that connection next,
+a pooled query or another session, sends a `ROLLBACK` ahead of its own
+statement, so an abandoned transaction never leaks into someone else's work
+and another session's `Commit()` never commits it. This happens automatically.
 
 ### Savepoints
 
@@ -463,8 +469,10 @@ a statement from your input instead of sending it as data. `name` is checked
 against a plain-identifier grammar (letters, digits, underscores, not
 starting with a digit, at most 63 characters, `wire.hpp`'s
 `MAX_IDENTIFIER_LEN`) before it's composed into anything; a name that fails
-that check doesn't reach the wire, the call returns `WFX::EpSerializeError`
-immediately.
+that check doesn't reach the wire, and the call returns `WFX::EpSerializeError`.
+The session's connection is closed with it, so Postgres rolls back the open
+transaction and every later statement on that session returns
+`WFX::EpInvalidKey`.
 
 - **`Savepoint(name)`** marks a point to come back to.
 - **`RollbackTo(name)`** undoes everything since the savepoint. The
@@ -606,9 +614,10 @@ inline const auto Db = WFX::PostgresEndpoint{"db.internal:5432", WFX::PostgresCo
 | `user` / `password` / `database` | Identity sent in the startup message. `password` is never logged |
 | `applicationName` | Shows up in `pg_stat_activity`, useful for telling which service opened a connection |
 | `encryption` / `authPolicy` | See [Encryption and authentication policy](#encryption-and-authentication-policy) |
+| `alpn` | ALPN names offered on the TLS handshake after `SSLRequest`, comma-separated (default `"postgresql"`). PostgreSQL 17 refuses a handshake offering any other name, and older servers ignore ALPN. Empty offers none |
 | `searchPath` / `timeZone` | Sent as startup parameters, one round trip cheaper than issuing `SET` after connecting |
 | `statementTimeoutMs` / `lockTimeoutMs` / `idleInTransactionTimeoutMs` | Server-side `statement_timeout` / `lock_timeout` / `idle_in_transaction_session_timeout`, `0` leaves each unset |
 | `preferBinary` | Ask for binary-format columns where a codec exists (default `true`); has no effect on columns with no binary codec, which come back as text regardless |
 | `maxMessageBytes` | Rejects any single incoming message whose declared length exceeds this (default 16 MiB), before it's used to size an allocation |
-| `statementCacheSize` | Named statements kept per connection (default 64), `0` turns the cache off, see [Statement cache](#statement-cache) |
+| `statementCacheSize` | Named statements kept per connection (default 64), rounded up to a power of two and capped at 4096; `0` turns the cache off, see [Statement cache](#statement-cache) |
 | `statementCacheMinUses` | Executions before SQL earns a name (default 2) |

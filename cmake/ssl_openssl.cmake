@@ -1,18 +1,6 @@
 include(ExternalProject)
 
-# -------------------- NOT LINUX --------------------
-if(WIN32 OR APPLE)
-    message(STATUS "Windows/macOS detected. Looking for a pre-installed OpenSSL")
-    message(STATUS "Please ensure OpenSSL is installed and available in your system's PATH")
-    
-    # Use CMakes standard find module to locate a pre installed OpenSSL
-    find_package(OpenSSL REQUIRED)
-
-    return()
-endif()
-
-# -------------------- LINUX --------------------
-message(STATUS "OpenSSL: Linux detected. Configuring custom OpenSSL build")
+message(STATUS "OpenSSL: Configuring custom OpenSSL build")
 
 # Detect the system CA directory. --openssldir must point here so that
 # SSL_CTX_set_default_verify_paths() finds the system trust store at runtime.

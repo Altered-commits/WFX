@@ -11,8 +11,8 @@
 //   mux   sets hasCapacity, which is what the engine reads to pick the
 //         multiplexed receive loop. Drives onConnect, onDisconnect, and several
 //         requests sharing one physical connection
-//   solo  leaves hasCapacity null. Reserve is refused outright on a multiplexed
-//         endpoint (INVALID_KEY), the multiplexed receive loop has no chunk case
+//   solo  leaves hasCapacity null. Reserve hands out an empty handle on a
+//         multiplexed endpoint, the multiplexed receive loop has no chunk case
 //         so Stream fails the slot there, and onAbort never runs for a
 //         multiplexed request (the abandoned stream is dropped and the shared
 //         connection carries on). onPush and UpgradeToTLS do reach both, and are
@@ -26,6 +26,7 @@
 //   GET  /health                  liveness
 //   GET  /mux/call                one call on a mux instance
 //   GET  /mux/disconnects         onDisconnect counters, by reason
+//   GET  /mux/reserve             whether Reserve() hands out a handle on a mux instance
 //   POST /mux/disconnects/reset   zero those counters
 //   GET  /solo/get                one call on a solo instance
 //   GET  /solo/stream             drain a stream, report counters only
@@ -45,6 +46,7 @@
 #include <wfx/utils/hash.hpp>
 #include <wfx/endpoint/base.hpp>
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <string_view>
@@ -62,7 +64,7 @@
 namespace {
 
 // EndpointStatus -> the plain integer JsonWriter has an overload for
-std::uint64_t EpJ(WFX::Shared::EndpointStatus status) noexcept
+std::uint64_t EpJ(WFX::EndpointStatus status) noexcept
 {
     return static_cast<std::uint64_t>(static_cast<unsigned>(status));
 }
@@ -90,7 +92,10 @@ std::uint32_t HeaderU32(WFX::Request& req, const char* name, std::uint32_t fallb
 //
 // Line oriented, '\n' terminated, spoken to primitive_upstream.py's mux listener:
 //
-//   handshake -> "AUTH <token>\n"      <- "OK\n" | "ERR\n" | (drop, no reply)
+//   handshake -> "AUTH <token>\n"      <- "OK\n" | "ERR\n" | (drop, no reply) | (never, token "hang")
+//                                         token "capped" is "good" with its peak per-connection
+//                                         concurrency recorded
+//              -> "PAD <filler>\n"     <- nothing, ignored before AUTH
 //   request   -> "REQ <id> <key>\n"    <- "RES <id> <value>\n"
 //
 // The id is caller-assigned and travels back on the reply, which is what lets
@@ -101,6 +106,22 @@ namespace {
 
 // How many requests this protocol lets share one connection
 constexpr std::uint32_t MUX_MAX_IN_FLIGHT = 32;
+
+// One "PAD xxx...\n" line, half of send_buffer_max (16 KiB in this app's toml). The padded
+// handshake sends 3, more in total than the send buffer holds. The stalled one sends up to 32 MiB,
+// far more than any socket buffer when the peer stops reading
+constexpr std::uint32_t MUX_PAD_LINES_PADDED = 3;
+constexpr std::uint32_t MUX_PAD_LINES_STALL = 4096;
+constexpr auto MUX_PAD_LINE = [] {
+    std::array<char, 8192> line{};
+    line.fill('x');
+    line[0] = 'P';
+    line[1] = 'A';
+    line[2] = 'D';
+    line[3] = ' ';
+    line.back() = '\n';
+    return line;
+}();
 
 struct MuxReq {
     WFX::String key;
@@ -171,7 +192,54 @@ WFX::EpCoro MuxAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
     co_return reply.starts_with("OK") ? WFX::EpReady : WFX::EpFatal;
 }
 
-WFX::Shared::SerializeResult MuxSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
+// MuxAuthenticate, preceded by padding lines that together outgrow the send buffer. Each Send's
+// bytes are on the wire once it completes, so only one message at a time has to fit
+WFX::EpCoro MuxPaddedAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
+{
+    auto* state = static_cast<MuxSlotState*>(slotStateVoid);
+
+    for(std::uint32_t i = 0; i < MUX_PAD_LINES_PADDED; i++) {
+        if(co_await h.Send(MUX_PAD_LINE.data(), MUX_PAD_LINE.size()) != WFX::EpSlotOk)
+            co_return WFX::EpFatal;
+    }
+
+    WFX::String line = "AUTH ";
+    line += state->token;
+    line += "\n";
+
+    if(co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size())) != WFX::EpSlotOk)
+        co_return WFX::EpFatal;
+
+    auto recv = co_await h.Receive();
+    if(recv.status != WFX::EpSlotOk)
+        co_return WFX::EpFatal;
+
+    std::string_view reply{recv.buf, recv.len};
+    co_return reply.starts_with("OK") ? WFX::EpReady : WFX::EpFatal;
+}
+
+// The mock stops reading once it has this AUTH line, so the padding after it fills the socket and
+// leaves a Send pending. That is still the connect phase, which only connectTimeoutSeconds can end
+WFX::EpCoro MuxStallAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
+{
+    auto* state = static_cast<MuxSlotState*>(slotStateVoid);
+
+    WFX::String line = "AUTH ";
+    line += state->token;
+    line += "\n";
+
+    if(co_await h.Send(line.data(), static_cast<std::uint32_t>(line.size())) != WFX::EpSlotOk)
+        co_return WFX::EpFatal;
+
+    for(std::uint32_t i = 0; i < MUX_PAD_LINES_STALL; i++) {
+        if(co_await h.Send(MUX_PAD_LINE.data(), MUX_PAD_LINE.size()) != WFX::EpSlotOk)
+            co_return WFX::EpFatal;
+    }
+
+    co_return WFX::EpFatal; // never reached while the mock stalls
+}
+
+WFX::SerializeResult MuxSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
                                           std::uint32_t bufLen, std::uint32_t* written,
                                           std::uint64_t* streamKey)
 {
@@ -190,7 +258,7 @@ WFX::Shared::SerializeResult MuxSerialize(void* slotStateVoid, const void* reqVo
     return WFX::EpSerOk;
 }
 
-WFX::Shared::ParseResult MuxParse(void* slotStateVoid, void* /*parseState, unused*/, const char* buf,
+WFX::ParseResult MuxParse(void* slotStateVoid, void* /*parseState, unused*/, const char* buf,
                                   std::uint32_t len, std::uint32_t* consumed, void* /*outObj, unused here*/,
                                   bool isEof, std::uint64_t* completedKey)
 {
@@ -248,9 +316,8 @@ void MuxDestroyOutput(void* outputPtr)
     WFX::Delete(static_cast<MuxRes*>(outputPtr));
 }
 
-// The only cap on how many requests share one connection. EndpointConfig has a
-// maxConcurrentStreams field, but nothing in the engine reads it, so a protocol
-// that wants a limit has to enforce it here.
+// The protocol's own cap on how many requests share one connection. The engine asks this only
+// once the slot is under EndpointConfig::maxConcurrentStreams, see MuxCapped.
 bool MuxHasCapacity(void* slotStateVoid)
 {
     return static_cast<MuxSlotState*>(slotStateVoid)->inFlight < MUX_MAX_IN_FLIGHT;
@@ -287,6 +354,9 @@ WFX::EndpointDesc MuxDesc(const char* token)
 }
 
 using MuxEp = WFX::Endpoint<MuxReq, MuxRes, &MuxAuthenticate>;
+using MuxPaddedEp = WFX::Endpoint<MuxReq, MuxRes, &MuxPaddedAuthenticate>;
+using MuxStallEp = WFX::Endpoint<MuxReq, MuxRes, &MuxStallAuthenticate>;
+using MuxOpenEp = WFX::Endpoint<MuxReq, MuxRes>;
 
 } // namespace
 
@@ -325,12 +395,14 @@ inline const MuxEp MuxBad{
 
 // The mock stalls its AUTH reply well past connectTimeoutSeconds (the engine's 5s
 // floor), so the connect-phase timeout must surface as EpHandshakeTimeout.
+// requestTimeoutSeconds outlasts the stall, so only connectTimeoutSeconds can end it in
+// time: onConnect is part of the connect phase, not of the request it is holding.
 inline const MuxEp MuxSlow{
     MUX_UPSTREAM, MuxDesc("slow"),
     WFX::EndpointConfig{
         .connLimit             = 1,
         .connectTimeoutSeconds = 5,
-        .requestTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 30,
         .idleTimeoutSeconds    = 5,
         .maxReconnectAttempts  = 1,
         .reconnectBackoffBase  = 1,
@@ -355,13 +427,93 @@ inline const MuxEp MuxReset{
     }
 };
 
+// Only the audit's exit check calls this one, right before the stop. The mock never answers
+// its AUTH and neither timeout fires within any run, so the slot is still suspended inside
+// onConnect, the call parked on it, when the worker exits. The sanitizer scan after shutdown
+// fails if exit leaks that coroutine instead of destroying it.
+inline const MuxEp MuxHang{
+    MUX_UPSTREAM, MuxDesc("hang"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 3600,
+        .requestTimeoutSeconds = 3600,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// The padded handshake succeeds. requestTimeoutSeconds sits at the engine's 5s floor, so a
+// "sleep:<secs>" key past it also drives a multiplexed request into its request timeout.
+inline const MuxPaddedEp MuxPadded{
+    MUX_UPSTREAM, MuxDesc("good"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 5,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// onConnect is stuck in a Send when connectTimeoutSeconds fires. requestTimeoutSeconds outlasts
+// the wait, so a handshake timeout can only come from the connect phase being classified right.
+inline const MuxStallEp MuxStall{
+    MUX_UPSTREAM, MuxDesc("stall"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 30,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .reconnectBackoffBase  = 1,
+        .reconnectBackoffMax   = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// The handshake succeeds, under its own token so the mock can tell its connections apart.
+// maxConcurrentStreams sits far below MUX_MAX_IN_FLIGHT, so it is the engine's cap that keeps a
+// connection at two requests, not MuxHasCapacity.
+inline const MuxEp MuxCapped{
+    MUX_UPSTREAM, MuxDesc("capped"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+        .maxConcurrentStreams  = 2,
+    }
+};
+
+// Multiplexed with no onConnect, pointed at the gate so the TCP connect can be held until it
+// times out. Its request waits as a pending stream rather than an attached caller.
+inline const MuxOpenEp MuxGated{
+    GATE_UPSTREAM, MuxDesc("gated"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 30,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .reconnectBackoffBase  = 1,
+        .reconnectBackoffMax   = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
 namespace {
 
 const MuxEp* MuxEndpointOf(std::string_view name) noexcept
 {
-    if(name == "bad")   return &MuxBad;
-    if(name == "slow")  return &MuxSlow;
-    if(name == "reset") return &MuxReset;
+    if(name == "bad")    return &MuxBad;
+    if(name == "slow")   return &MuxSlow;
+    if(name == "reset")  return &MuxReset;
+    if(name == "hang")   return &MuxHang;
+    if(name == "capped") return &MuxCapped;
     return &MuxGood;
 }
 
@@ -436,6 +588,7 @@ std::uint64_t g_soloDisconnects = 0;
 std::uint64_t g_soloAbortRuns = 0;
 std::uint64_t g_soloAbortSideOpens = 0;
 std::uint64_t g_soloAbortSideFailures = 0;
+std::uint64_t g_soloAbortSideEofs = 0;
 
 void* SoloCreateSlotState(void* userCtx)
 {
@@ -610,7 +763,38 @@ WFX::EpAbortCoro SoloOnAbortDoubleClose(WFX::AbortSlotHandle h, void* slotStateV
     co_return;
 }
 
-WFX::Shared::SerializeResult SoloSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
+// Reads each cancel connection until the server closes it, the way a Postgres client ends a
+// CancelRequest. That close has to come back as a failed Receive. The second round opens its
+// connection from inside the first one's failure, so it only gets one if that slot was already freed
+WFX::EpAbortCoro SoloOnAbortAwaitClose(WFX::AbortSlotHandle h, void* slotStateVoid)
+{
+    auto* st = static_cast<SoloSlotState*>(slotStateVoid);
+    g_soloAbortRuns++;
+
+    for(int round = 0; round < 2; round++) {
+        auto [status, side] = co_await h.OpenSideConnection();
+        if(status != WFX::EpSlotOk) {
+            g_soloAbortSideFailures++;
+            co_return;
+        }
+
+        g_soloAbortSideOpens++;
+
+        char buf[32];
+        const int n = std::snprintf(buf, sizeof(buf), "CANCEL %llu\n",
+                                    static_cast<unsigned long long>(st->connId));
+        if(n > 0)
+            co_await side.Send(buf, static_cast<std::uint32_t>(n));
+
+        auto closed = co_await side.Receive();
+        if(closed.status != WFX::EpSlotOk)
+            g_soloAbortSideEofs++;
+
+        side.Close();
+    }
+}
+
+WFX::SerializeResult SoloSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
                                            std::uint32_t bufLen, std::uint32_t* written,
                                            std::uint64_t* /*streamKey, not multiplexed*/)
 {
@@ -642,7 +826,7 @@ WFX::Shared::SerializeResult SoloSerialize(void* slotStateVoid, const void* reqV
     return WFX::EpSerOk;
 }
 
-WFX::Shared::ParseResult SoloParse(void* slotStateVoid, void* /*parseState*/, const char* buf,
+WFX::ParseResult SoloParse(void* slotStateVoid, void* /*parseState*/, const char* buf,
                                    std::uint32_t len, std::uint32_t* consumed, void* outObj,
                                    bool isEof, std::uint64_t* /*completedKey*/)
 {
@@ -734,6 +918,8 @@ WFX::EndpointDesc SoloDesc(const char* cfg)
 using SoloEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect>;
 using SoloAbortEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbort>;
 using SoloAbortBadCloseEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbortDoubleClose>;
+using SoloAbortAwaitCloseEp = WFX::Endpoint<SoloReq, SoloRes, &SoloConnect, &SoloOnAbortAwaitClose>;
+using SoloAbortRawEp = WFX::Endpoint<SoloReq, SoloRes, nullptr, &SoloOnAbort>;
 
 } // namespace
 
@@ -850,6 +1036,21 @@ inline const SoloAbortEp SoloAbortGated{
     }
 };
 
+// The same race without onConnect. Nothing parks the request, it is serialized before the
+// connect even starts, yet the backend still has not seen it while the gate holds the connect.
+inline const SoloAbortRawEp SoloAbortGatedRaw{
+    GATE_UPSTREAM, SoloDesc("abort:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 2,
+        .auxConnLimit          = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
 // Deliberately hostile onAbort. Its own endpoint rather than a slot-state flag,
 // because the point is exercising the ABI's close path directly instead of layering
 // it onto SoloAbort's config.
@@ -863,6 +1064,22 @@ inline const SoloAbortBadCloseEp SoloAbortBadClose{
         .idleTimeoutSeconds    = 5,
         .maxReconnectAttempts  = 1,
         .tlsConfig             = WFX::EpTlsInsecure,
+    }
+};
+
+// The server closes every cancel connection after reading it. exactSlots holds the aux pool to
+// one slot, so onAbort's second cancel needs the first connection's slot back
+inline const SoloAbortAwaitCloseEp SoloAbortAwaitClose{
+    SOLO_UPSTREAM, SoloDesc("abort:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 1,
+        .auxConnLimit          = 1,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+        .exactSlots            = true,
     }
 };
 
@@ -881,15 +1098,26 @@ const SoloEp* SoloEndpointOf(std::string_view name) noexcept
 WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 
 // One call on a mux instance.
-//   X-Mux  good | bad | slow | reset               (default good)
+//   X-Mux  good | bad | slow | reset | hang | capped | padded | stall | gated  (default good)
 //   X-Key  key to echo back; "sleep:<secs>:<value>" delays the mock's reply
 WFX_GET("/mux/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     std::string_view name = "good", key = "hello";
     req.GetHeader("X-Mux", name);
     req.GetHeader("X-Key", key);
 
-    const MuxEp* ep = MuxEndpointOf(name);
-    auto [status, out] = co_await ep->SendPayload(MuxReq{WFX::String(key.data(), key.size())});
+    const MuxReq mreq{WFX::String(key.data(), key.size())};
+
+    WFX::EndpointStatus status{};
+    WFX::EndpointOutput<MuxRes> out;
+
+    if(name == "padded")
+        std::tie(status, out) = co_await MuxPadded.SendPayload(mreq);
+    else if(name == "stall")
+        std::tie(status, out) = co_await MuxStall.SendPayload(mreq);
+    else if(name == "gated")
+        std::tie(status, out) = co_await MuxGated.SendPayload(mreq);
+    else
+        std::tie(status, out) = co_await MuxEndpointOf(name)->SendPayload(mreq);
 
     res.Status(200);
     auto j = WFX::ImJson(res);
@@ -915,9 +1143,19 @@ WFX_POST("/mux/disconnects/reset", [](WFX::Request, WFX::Response res) {
     res.Status(200).SendText("ok");
 })
 
+// Reserve on a multiplexed endpoint, which already shares its connection, so there is nothing
+// to pin and the handle must come back empty
+WFX_GET("/mux/reserve", [](WFX::Request, WFX::Response res) {
+    auto slot = MuxGood.Reserve();
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("reserved", slot.IsValid());
+})
+
 // One call on a solo instance.
 //   X-Solo  good | downgrade | tlsgarbage | abort | abortnoaux | abortmidconnect |
-//           abortgated | abortbadclose                          (default good)
+//           abortgated | abortgatedraw | abortbadclose | abortawaitclose  (default good)
 //   X-Key   key to echo back; "slow:<secs>" delays the mock's reply
 //   X-Leak  1 tells onAbort, on the abort instances, to skip side.Close()
 WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
@@ -928,7 +1166,7 @@ WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     const bool leak = HeaderU32(req, "X-Leak", 0) != 0;
     SoloReq sreq{SoloMode::GET, WFX::String(key.data(), key.size()), 0, 0, 0, 0, leak};
 
-    WFX::Shared::EndpointStatus status{};
+    WFX::EndpointStatus status{};
     WFX::EndpointOutput<SoloRes> out;
 
     if(name == "abort")
@@ -939,8 +1177,12 @@ WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
         std::tie(status, out) = co_await SoloAbortMidConnect.SendPayload(sreq);
     else if(name == "abortgated")
         std::tie(status, out) = co_await SoloAbortGated.SendPayload(sreq);
+    else if(name == "abortgatedraw")
+        std::tie(status, out) = co_await SoloAbortGatedRaw.SendPayload(sreq);
     else if(name == "abortbadclose")
         std::tie(status, out) = co_await SoloAbortBadClose.SendPayload(sreq);
+    else if(name == "abortawaitclose")
+        std::tie(status, out) = co_await SoloAbortAwaitClose.SendPayload(sreq);
     else
         std::tie(status, out) = co_await SoloEndpointOf(name)->SendPayload(sreq);
 
@@ -1032,11 +1274,13 @@ WFX_GET("/solo/stream", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 // give.
 //   X-N        requests to run on the reservation
 //   X-Release  early | late | double   which release pattern to take
+//   X-Hold     ms to leave the reservation idle after them, then report a send through it
 WFX_GET("/solo/reserve", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     std::string_view releaseMode = "late";
     req.GetHeader("X-Release", releaseMode);
 
     const std::uint32_t n = HeaderU32(req, "X-N", 3);
+    const std::uint32_t holdMs = HeaderU32(req, "X-Hold", 0);
 
     auto slot = SoloGood.Reserve();
 
@@ -1068,6 +1312,14 @@ WFX_GET("/solo/reserve", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     j.Write("same", sameConn);
     j.Write("last", lastStatus);
 
+    // Idle past idleTimeoutSeconds, the reservation's connection is closed under it, so the
+    // send after fails rather than reaching it
+    if(holdMs > 0) {
+        co_await WFX::SleepFor(holdMs);
+        auto [holdStatus, holdOut] = co_await slot.SendPayload(SoloReq{SoloMode::GET, "after-hold", 0, 0});
+        j.Write("after_hold", EpJ(holdStatus));
+    }
+
     // Releasing twice must be harmless, the handle clears on the first call
     if(releaseMode == "double") {
         slot.Release();
@@ -1076,7 +1328,13 @@ WFX_GET("/solo/reserve", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     else if(releaseMode == "early")
         slot.Release();
 
-    // "late" leaves it to the destructor, the path an early co_return would take
+    // A released reservation is empty, so a send through it has to fail rather than run on
+    // whichever connection the pool hands out. "late" leaves the release to the destructor,
+    // the path an early co_return would take
+    if(releaseMode != "late") {
+        auto [afterStatus, afterOut] = co_await slot.SendPayload(SoloReq{SoloMode::GET, "after-release", 0, 0});
+        j.Write("after_release", EpJ(afterStatus));
+    }
 
     co_return;
 })
@@ -1173,12 +1431,14 @@ WFX_GET("/solo/abort", [](WFX::Request, WFX::Response res) {
     j.Write("runs", g_soloAbortRuns);
     j.Write("side_opens", g_soloAbortSideOpens);
     j.Write("side_failures", g_soloAbortSideFailures);
+    j.Write("side_eofs", g_soloAbortSideEofs);
 })
 
 WFX_POST("/solo/abort/reset", [](WFX::Request, WFX::Response res) {
     g_soloAbortRuns = 0;
     g_soloAbortSideOpens = 0;
     g_soloAbortSideFailures = 0;
+    g_soloAbortSideEofs = 0;
     res.Status(200).SendText("ok");
 })
 
@@ -1199,7 +1459,7 @@ WFX_GET("/rss", [](WFX::Request, WFX::Response res) {
 // Per-endpoint metrics, summed across workers, each tagged with its host. Several
 // instances share one host, so the metrics phase asserts on the aggregate delta
 // across every slot rather than mapping a slot back to one instance. ev.host is a
-// Shared::StringView, written through the JsonWriter overload for it.
+// WFX::StringView, written through the JsonWriter overload for it.
 WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     const bool latencyOn = WFX::MetricsLatencyEnabled();
 

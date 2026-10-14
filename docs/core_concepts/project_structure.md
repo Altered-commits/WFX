@@ -12,10 +12,11 @@ Understanding this structure will help you know where files live, what each dire
 
 ## Directory Overview
 
-`wfx new` itself only creates `public/`, `src/`, `templates/`, `config/`, `.gitignore`,
-`CMakeLists.txt`, and `config/wfx.local.toml`. `build/` and `intermediate/` appear after your first
-`wfx build`/`wfx run`, and `logs/` appears after your first `wfx run`. This is the full layout
-you'll have once you've run the project at least once:
+`wfx new` itself only creates `.gitignore`, `CMakeLists.txt`, `config/wfx.local.toml`,
+`src/main.cpp`, `src/api_entry.cpp`, `templates/index.html`, `public/style.css` and
+`public/script.js`. `build/` and `intermediate/` appear after your first `wfx build`/`wfx run`,
+and `logs/` appears after your first `wfx run`. This is the full layout you'll have once you've
+run the project at least once:
 
 ```text
 <your_workspace>/
@@ -98,9 +99,9 @@ This directory contains all C++ source files that implement your application log
 
 By default, **main.cpp** is provided with a few example routes to demonstrate basic functionality. You are free to modify or remove this file as needed. You may also add any number of additional C++ source files and subdirectories inside `src/`.
 
-The WFX build system automatically discovers and compiles all `.cpp` files located under `src/`, including those inside nested folders. File and directory naming is entirely up to you, with one exception: **api_entry.cpp**.
+The WFX build system automatically discovers and compiles all `.cpp` files located under `src/`, including those inside nested folders. File and directory naming is entirely up to you.
 
-**api_entry.cpp** is a special, engine-required file and **must NOT be modified or deleted**. It is used internally by WFX to wire application code into the engine.
+The one thing every project needs is **api_entry.cpp**'s single line, `WFX_API_ENTRY()` from `<wfx/app.hpp>`: it defines the entry point the engine calls to wire application code into it. Keep it expanded **exactly once** across `src/` (`wfx new` puts it in `api_entry.cpp`); without it the engine refuses to load the app, and a second copy fails to link.
 
 ---
 

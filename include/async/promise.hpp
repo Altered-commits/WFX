@@ -9,6 +9,7 @@
 #include "shared/utils/deferred_value.hpp"
 #include "shared/utils/memory.hpp"
 #include <coroutine>
+#include <exception>
 #include <type_traits>
 
 namespace WFX::Async {
@@ -28,6 +29,10 @@ struct BasePromise {
     // Stays null for the usual case of the engine driving this coroutine directly through
     // Resume()/SetCompletion(), and final_suspend below just falls through to that old path
     std::coroutine_handle<> continuation = nullptr;
+
+    // What escaped the coroutine body, set by unhandled_exception. Task<T>::await_resume rethrows a
+    // child's into its awaiting parent; an engine-driven root's only fails its result
+    std::exception_ptr exception = nullptr;
 
 public:
     // The engine kills a suspended chain by destroying its innermost frame, the one parked on an
@@ -115,6 +120,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     void unhandled_exception() noexcept
     {
+        exception = std::current_exception();
         status = AsyncStatus::INTERNAL_FAILURE;
     }
 
@@ -124,13 +130,23 @@ public:
         return {this};
     }
 
+    // A coroutine that threw never stored a value, so only a completed one is read; the engine
+    // ignores the action of a failed result anyway
     AsyncResult BuildAsyncResult() noexcept
     {
+        const bool completed = status == AsyncStatus::COMPLETED;
+
         if constexpr(std::is_same_v<T, Shared::MiddlewareAction>)
-            return AsyncResult{.data = nullptr, .dataLen = 0, .action = value.Get(), .status = status};
+            return AsyncResult{.data = nullptr,
+                               .dataLen = 0,
+                               .action = completed ? value.Get() : Shared::MiddlewareAction::BREAK,
+                               .status = status};
 
         else if constexpr(std::is_same_v<T, Shared::ConnectResult>)
-            return AsyncResult{.data = nullptr, .dataLen = 0, .connectResult = value.Get(), .status = status};
+            return AsyncResult{.data = nullptr,
+                               .dataLen = 0,
+                               .connectResult = completed ? value.Get() : Shared::ConnectResult::FATAL,
+                               .status = status};
 
         // Only MiddlewareAction/ConnectResult Tasks are ever engine-driven directly (see
         // WFX::MwCoro / WFX::EpCoro), every other T is always 'co_await'ed by another
@@ -161,6 +177,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
     void unhandled_exception() noexcept
     {
+        exception = std::current_exception();
         status = AsyncStatus::INTERNAL_FAILURE;
     }
 

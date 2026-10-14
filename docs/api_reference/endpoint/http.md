@@ -9,6 +9,7 @@ host and its connection pool.
     resolution and refresh, TLS mode, reconnect/backoff behavior, prewarm, and
     coalescing all work exactly as described on the [Endpoint overview](overview.md),
     `HttpEndpoint` just wires them up for you with an HTTP-shaped request/response.
+    One difference: `connLimit` is exact here, never rounded up to a multiple of 64.
 
     To use it, include:
     ```cpp
@@ -90,9 +91,10 @@ struct HttpEndpointRequest {
     `std::string_view`s. They must stay alive for the entire duration of the
     `co_await`, WFX does not copy them for you.
 
-`Host`, `Content-Length`, and `Transfer-Encoding` are always set by WFX itself;
-any of those you add yourself in `headers` are silently dropped in favor of
-the engine's own values. `HttpEndpointRequestHeaders` is case-insensitive on
+WFX writes `Host` itself, and `Content-Length` whenever there is a body or the
+method is POST, PUT or PATCH; it never sends `Transfer-Encoding`. Any of those
+three you add yourself in `headers` are silently dropped.
+`HttpEndpointRequestHeaders` is case-insensitive on
 lookup (`Get`, `Contains`) and `Set` (replaces an existing header instead of
 duplicating it); `Add` always appends.
 
@@ -126,17 +128,18 @@ inline const auto Api = WFX::HttpEndpoint{"api.example.com:443", WFX::HttpEndpoi
 }};
 ```
 
-`HttpEndpointConfig` carries every pool setting described in
+`HttpEndpointConfig` carries these pool settings, described in
 [Pool settings](overview.md#pool-settings) (`connLimit`, `connectTimeoutSeconds`,
 `requestTimeoutSeconds`, `idleTimeoutSeconds`, `maxReconnectAttempts`,
 `reconnectBackoffBaseSeconds`, `reconnectBackoffMaxSeconds`, `tlsConfig`,
-`prewarm`), plus HTTP-specific protocol hardening knobs:
+`prewarm`), plus these HTTP-specific knobs:
 
 | Setting | Meaning |
 |---------|---------|
 | `maxHeaderBytes` | Cap on the status line + header block size (default 16 KiB) |
 | `maxBodyBytes` | Cap on the response body size (default 16 MiB) |
 | `maxHeaderCount` | Cap on the number of response headers, an amplification defense (default 100) |
+| `alpn` | ALPN names offered on TLS, comma-separated, most preferred first (default `"http/1.1"`). This client only speaks HTTP/1.1, so offer another name only to a server that calls HTTP/1.1 something else. Empty offers none |
 | `coalesceKey` | Dedup function, see [Coalescing](#coalescing) below |
 
 There is no `dnsRefreshSeconds` on `HttpEndpointConfig`; `HttpEndpoint` always
@@ -164,7 +167,7 @@ std::uint64_t MyCoalesce(const void* reqVoid) {
     if(req.method != WFX::HttpMethod::GET)
         return 0; // never coalesce non-GET requests
 
-    return WFX::Shared::Hasher::Fnv1a(req.path.data(), req.path.size());
+    return WFX::Fnv1a(req.path);
 }
 
 inline const auto Api = WFX::HttpEndpoint{"api.example.com:443",

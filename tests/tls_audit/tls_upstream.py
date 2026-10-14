@@ -12,6 +12,8 @@
 #   wronghost   8445  trusted CA, SAN=evil.example       -> client MUST reject (hostname)
 #   expired     8446  trusted CA, notAfter in the past   -> client MUST reject (expired)
 #   tls12       8447  valid cert, server capped at 1.2   -> client MUST reject (downgrade)
+#   upgrade     8448  plaintext until STARTTLS, good cert -> client MUST accept and discard
+#                                                           pre-upgrade bytes
 #
 # A client that ACCEPTS any bad one is a MitM hole. The 'good' listener also serves
 # the HTTP framing/desync/injection corpus and the truncation/slow-response attacks,
@@ -29,7 +31,7 @@ import threading
 import time
 
 _lock = threading.Lock()
-_stats = {}   # name -> {"handshakes":int, "hs_fail":int, "requests":int}
+_stats = {}   # name -> {"handshakes":int, "hs_fail":int, "requests":int, "resumed":int}
 _staged = {}  # id -> (raw_bytes, keep_alive)
 
 def _stat(name, key, n=1):
@@ -333,7 +335,7 @@ def main():
     ap = argparse.ArgumentParser(description="WFX tls_audit hostile TLS mock")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--listen", action="append", required=True,
-                    help="name=..,port=..,cert=..,key=..[,maxver=1.2]")
+                    help="name=..,port=..,cert=..,key=..[,maxver=1.2][,kind=upgrade[,inject=1]]")
     args = ap.parse_args()
 
     threads = []

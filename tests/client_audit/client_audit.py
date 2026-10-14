@@ -16,8 +16,9 @@
 # SSLRequest, StartupMessage and SCRAM-SHA-256 handshake, with either the handshake
 # or one query's response turned hostile.
 #
-# The audit never talks to a mock's data port: it drives WFX, and WFX drives the
-# mock. See README.md for what each phase proves.
+# The audit never sends a vector to a mock itself: it drives WFX, and WFX drives the
+# mock. The HTTP mock's /ctl/* routes share its data port, the SMTP and Postgres mocks
+# have their own control ports. See README.md for what each phase proves.
 #
 # Usage:
 #   python3 client_audit.py                    # all phases
@@ -26,20 +27,25 @@
 #
 # Exit codes:
 #   0   all phases passed
-#   1   correctness failure, or the worker died during the run
+#   1   a non-security check failed (sanitizer reports and workers force-killed at
+#       shutdown included), the worker was not answering at the end, or nothing was
+#       checked
 #   2   security finding: a pooled connection poisoned or desynced, a smuggled
 #       request or response body delivered as real, a CR/LF/NUL reaching the wire
-#       through a path, a header, an SMTP field or a Postgres auth exchange, one
-#       request's headers or body surfacing in another's, coalesced waiters getting
-#       the wrong key's response, an SMTP session continuing in plaintext or
-#       trusting pre-TLS bytes, or a Postgres auth downgrade or forged SCRAM signature
-#       going unnoticed
+#       through a path, a header or an SMTP field, one request's headers or body
+#       surfacing in another's, coalesced waiters getting the wrong key's response,
+#       an SMTP session continuing in plaintext or trusting pre-TLS bytes, a bad
+#       STARTTLS cert accepted, a Postgres client trusting bytes spliced after the
+#       SSL verdict or falling back to plaintext, a Postgres auth downgrade, forged
+#       SCRAM signature or unauthenticated server error going unnoticed, a bound
+#       parameter reaching the SQL text, a hostile savepoint name reaching the wire,
+#       any client offering an ALPN other than its own or its configured one, or
+#       pg_startup's embedded NUL no longer reaching the wire
 #   3   WFX never answered /health, so nothing was exercised
 
 import itertools
 import json
 import os
-import re
 import socket
 import subprocess
 import sys
@@ -59,13 +65,26 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # EndpointStatus, mirrors shared/abis/types.hpp, keep in sync
 EP_SUCCESS           = 0
 EP_POOL_EXHAUSTED    = 6
-EP_INTERNAL          = 10  # where a co_return EpFatal from SmtpOnConnect lands for every
-                           # non-timeout handshake refusal, bad cert or wrong credentials
-                           # alike: the coroutine only ever answers EpReady or EpFatal, so
-                           # the engine's generic connect-failure funnel classifies it
+EP_SSL_FAILURE       = 9   # the TLS handshake failed, in-band upgrades included
+EP_INTERNAL          = 10  # where a co_return EpFatal from an onConnect coroutine lands for
+                           # every other non-timeout handshake refusal: the coroutine only
+                           # ever answers EpReady or EpFatal, so the engine's generic
+                           # connect-failure funnel classifies it
 EP_SERIALIZE         = 11
 EP_HANDSHAKE_TIMEOUT = 13
 EP_REQ_TIMEOUT       = 14
+
+# What every TLS mock advertises, in its own order of preference, so the protocol it selects
+# names exactly what the client offered: postgresql or x-wfx-probe when it offered that,
+# http/1.1 when it offered only that, nothing when it offered none of them
+ALPN_PROBE = "postgresql|x-wfx-probe|http/1.1"
+
+# What the custom-ALPN endpoints in app/src/main.cpp are configured to offer instead of their
+# protocol's own
+ALPN_CUSTOM = "x-wfx-probe"
+
+# The HTTP mock's TLS listener, compiled into app/src/main.cpp's UPSTREAM_TLS
+HTTP_TLS_PORT = 8092
 
 # EpDefault's connLimit in app/src/main.cpp, compiled in rather than passed on the
 # command line. HttpEndpointConfig allocates slots exactly, so this is the real
@@ -81,8 +100,10 @@ _stage_ids = itertools.count(1)
 SMTP_CONTROL_PORT = 8199
 
 SMTP_PERSONAS = [
-    # Happy paths
-    ("good",                8100, "good",       {},                                       "accept"),
+    # Happy paths. Both TLS listeners here record the ALPN the client offered: good is driven
+    # by an endpoint left at SMTP's own, alpn_custom by one configured with ALPN_CUSTOM
+    ("good",                8100, "good",       {"alpn": ALPN_PROBE},                     "accept"),
+    ("alpn_custom",         8122, "good",       {"alpn": ALPN_PROBE},                     "accept"),
     ("auth_login_only",     8101, "good",       {"auth_mechanisms": "LOGIN"},             "accept"),
     # CVE-2011-0411 / CVE-2026-41319 class: plaintext spliced in right after the STARTTLS
     # go-ahead. A correct client discards whatever is already buffered before the TLS wrap,
@@ -103,21 +124,26 @@ SMTP_PERSONAS = [
     ("drop_starttls",       8119, "good",       {"drop_after": "starttls"},               "refuse"),
     ("drop_auth",           8120, "good",       {"drop_after": "auth"},                   "refuse"),
     ("drop_data_prompt",    8121, "good",       {"drop_after": "data_prompt"},            "refuse"),
+    ("data_250",            8124, "good",       {"data_reply": "250"},                    "refuse"),
     # Hang-shaped personas: they never complete on their own, so only the client's own
     # timeout ends them. Driven against the short-budget endpoints in main.cpp, whose
-    # 5s budgets are the engine's floor, rather than the 8s every other persona gets
+    # 5s budgets are the engine's floor, rather than the 8s every other persona gets.
+    # silent_ehlo2 alone keeps a 30s request budget, so only its 5s connect budget can
+    # end its hang after the STARTTLS upgrade
     ("flood_greeting",      8110, "good",       {"flood_at": "greeting"},                 "hang"),
     ("flood_ehlo2",         8111, "good",       {"flood_at": "ehlo2"},                    "hang"),
     ("huge_line_greeting",  8112, "good",       {"huge_line_at": "greeting"},             "hang"),
     ("huge_line_ehlo2",     8113, "good",       {"huge_line_at": "ehlo2"},                "hang"),
     ("slow_trickle",        8114, "good",       {"slow_trickle": "0.05"},                 "hang"),
     ("silent_data",         8115, "good",       {"silent_after": "DATA"},                 "hang"),
+    ("silent_ehlo2",        8123, "good",       {"silent_after": "ehlo2"},                "hang"),
 ]
 
 # One persona per fixed port, same shape as SMTP_PERSONAS but without a cert column:
-# no Postgres persona needs one, every SSL-verdict fault is refused by the client
-# before a TLS handshake would start. Ports and names are compiled into
-# app/src/main.cpp's Pg_* endpoints and PgEndpointOf(), keep the two in sync.
+# every SSL-verdict fault is refused by the client before a TLS handshake would start,
+# so only the ALPN personas complete one, and they name their cert in a "tls" option
+# instead. Ports and names are compiled into app/src/main.cpp's Pg_* endpoints and
+# PgEndpointOf(), keep the two in sync.
 PG_CONTROL_PORT = 8198
 
 PG_PERSONAS = [
@@ -131,7 +157,7 @@ PG_PERSONAS = [
     ("drop_ready",            8135, {"drop_after": "ready"},            "refuse"),
     ("unknown_type_startup",  8136, {"unknown_type_at": "startup"},     "refuse"),
 
-    # Resource-shaped: a flood of ParameterStatus never lets the handshake finish, an
+    # Resource-shaped: a flood of NoticeResponse never lets the handshake finish, an
     # oversized NoticeResponse trips FrameMessage's declared-length bound instead
     ("flood_backendkeydata",  8137, {"flood_at": "backendkeydata"},                 "hang"),
     ("huge_ready",            8138, {"huge_at": "ready", "huge_bytes": "8192"},      "refuse"),
@@ -192,6 +218,10 @@ PG_PERSONAS = [
     # CVE-2024-10977 class: a full ErrorResponse mid-handshake carrying
     # attacker-shaped content (ANSI escapes, CR/LF), from a peer not yet trusted
     ("error_at_handshake",    8166, {"error_at": "auth_challenge"}, "refuse"),
+    # A full TLS handshake recording the ALPN the client offered: alpn_default is driven by
+    # an endpoint left at Postgres's own, alpn_custom by one configured with ALPN_CUSTOM
+    ("alpn_default",          8167, {"tls": "good", "alpn": ALPN_PROBE}, "accept"),
+    ("alpn_custom",           8168, {"tls": "good", "alpn": ALPN_PROBE}, "accept"),
 ]
 
 # Mocks
@@ -204,7 +234,10 @@ class HttpMock:
 
     def start(self):
         cmd = [sys.executable, os.path.join(HERE, "http_upstream.py"),
-               "--host", self.cfg.host, "--port", str(self.cfg.http_port)]
+               "--host", self.cfg.host, "--port", str(self.cfg.http_port),
+               "--tls-port", str(HTTP_TLS_PORT), "--alpn", ALPN_PROBE,
+               "--cert", os.path.join(self.cfg.cert_dir, "good.pem"),
+               "--key", os.path.join(self.cfg.cert_dir, "good-key.pem")]
         term.log("http-mock", "starting: %s" % " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
@@ -247,6 +280,10 @@ class HttpMock:
     def idle_conns(self):
         """Accepted connections minus served requests, so connections opened and never used."""
         return self._count("/ctl/idleconns")
+
+    def alpn(self):
+        """What the TLS listener selected from the last client's ALPN offer, "" for none."""
+        return self._ctl("/ctl/alpn").decode("latin-1")
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -352,7 +389,11 @@ class PgMock:
         for name, port, opts, expect in PG_PERSONAS:
             spec = "name=%s,port=%d" % (name, port)
             for key, value in opts.items():
-                spec += ",%s=%s" % (key, value)
+                if key == "tls":
+                    spec += ",cert=%s,key=%s" % (os.path.join(self.cfg.cert_dir, value + ".pem"),
+                                                 os.path.join(self.cfg.cert_dir, value + "-key.pem"))
+                else:
+                    spec += ",%s=%s" % (key, value)
             cmd += ["--listen", spec]
 
         term.log("pg-mock", "starting %d Postgres listeners" % len(self.ports))
@@ -425,7 +466,8 @@ def ensure_smtp_certs(cfg):
 
     Plain openssl throughout, because STARTTLS trust needs a cert this suite's own CA
     signed, not a browser-trusted one. Every other persona reuses the 'good' cert,
-    since they exercise protocol behaviour rather than certificate trust.
+    since they exercise protocol behaviour rather than certificate trust, and so do
+    the HTTP mock's TLS listener and the Postgres ALPN personas.
     """
     os.makedirs(cfg.cert_dir, exist_ok=True)
 
@@ -476,20 +518,11 @@ def ensure_smtp_certs(cfg):
         raise RuntimeError("could not generate the audit's 'good' STARTTLS cert")
 
 def patch_outbound_ca(cfg):
-    """Points outbound_ca_path at the throwaway CA, so the 'good' persona is trusted.
-
-    The HTTP mock is plaintext, so nothing else in this suite reads that setting.
+    """Points outbound_ca_path at the throwaway CA, so the 'good' cert is trusted, the one every
+    TLS persona serves and the HTTP mock's TLS listener too.
     """
-    toml = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
-    with open(toml) as f:
-        text = f.read()
-
-    text = re.sub(r'(?m)^(\s*outbound_ca_path\s*=\s*)"[^"]*"',
-                  lambda m: m.group(1) + '"%s"' % cfg.smtp_ca_path, text)
-
-    with open(toml, "w") as f:
-        f.write(text)
-
+    common.toml.patch(os.path.join(cfg.app_dir, "config", "wfx.local.toml"), "outbound_ca_path",
+                      cfg.smtp_ca_path)
     term.log("patch", "outbound TLS CA trust -> %s" % cfg.smtp_ca_path)
 
 # Driving WFX: HTTP
@@ -1821,7 +1854,7 @@ def phase_smtp_starttls(ctx):
     mock.reset("inject")
     r = smtp_send(cfg, "inject", body=b"still fine")
     p.check("inject: fails closed rather than falling back to plaintext",
-            is_errc(r, EP_INTERNAL), "r=%r" % r, security=True)
+            is_errc(r, EP_SSL_FAILURE), "r=%r" % r, security=not is_err(r))
     stats = mock.stats("inject")
     p.check("inject: the pre-TLS plaintext never reaches an authenticated session",
             stats.get("auth_ok", 0) == 0 and not stats.get("bodies"), "stats=%r" % stats,
@@ -1851,9 +1884,12 @@ def phase_smtp_certs(ctx):
             p.check(labels[name] + " (skipped, cert unavailable)", True)
             continue
 
+        # Only accepting the cert is a security finding, refusing it under another status
+        # misreports why
         r = smtp_send(cfg, name)
-        p.check(labels[name], is_err(r), "the client ACCEPTED it (r=%r), a MitM is possible" % r,
-                security=True)
+        p.check(labels[name], is_errc(r, EP_SSL_FAILURE),
+                "r=%r, wanted SSL_FAILURE%s" % (r, "" if is_err(r) else ", a MitM is possible"),
+                security=not is_err(r))
 
         stats = mock.stats(name)
         p.check("%s: the client bailed at the TLS layer" % name, stats.get("hs_fail", 0) >= 1,
@@ -1876,6 +1912,15 @@ def phase_smtp_resource(ctx):
         p.check("%s: the hostile handshake is refused rather than hanging forever" % name,
                 is_errc(r, EP_INTERNAL) or is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
 
+    # A hang right after the STARTTLS upgrade is still the connect phase: the upgrade must not
+    # restart the clock, and the 30s request budget main.cpp gives this persona never applies.
+    # The engine notices a 5s budget on its own 5s tick, so up to 10s, plus slack
+    t0 = time.time()
+    r = smtp_send(cfg, "silent_ehlo2", rtimeout=25.0)
+    elapsed = time.time() - t0
+    p.check("silent_ehlo2: a hang after the STARTTLS upgrade ends on the connect budget",
+            is_errc(r, EP_HANDSHAKE_TIMEOUT) and elapsed < 15.0, "elapsed %.1fs r=%r" % (elapsed, r))
+
     # Post-connect hang: the mock authenticates normally, then goes silent forever the
     # moment DATA arrives. requestTimeoutSeconds, not connectTimeoutSeconds, is what has
     # to catch this
@@ -1890,10 +1935,12 @@ def phase_smtp_drops(ctx):
     cfg = ctx.cfg
     p = ctx.phase("smtp_drops")
 
-    for name in ("drop_greeting", "drop_pre_handshake", "drop_starttls", "drop_auth"):
+    # drop_pre_handshake closes where the TLS handshake should start, so TLS is what failed
+    for name, want in (("drop_greeting", EP_INTERNAL), ("drop_pre_handshake", EP_SSL_FAILURE),
+                       ("drop_starttls", EP_INTERNAL), ("drop_auth", EP_INTERNAL)):
         r = smtp_send(cfg, name)
         p.check("%s: an abrupt close during the handshake is refused cleanly" % name,
-                is_errc(r, EP_INTERNAL), "r=%r" % r)
+                is_errc(r, want), "r=%r" % r)
         p.check("%s: the refusal is reported at the mail stage" % name,
                 bool(r) and r.get("stage") == "mail", "r=%r" % r)
 
@@ -1903,6 +1950,17 @@ def phase_smtp_drops(ctx):
     r = smtp_send(cfg, "drop_data_prompt")
     p.check("drop_data_prompt: an abrupt close after the DATA prompt is refused, not hung",
             is_err(r), "r=%r" % r)
+
+    # DATA answered with a 2xx instead of its 354 go-ahead: the body must not go out, and
+    # SendMail must not call a message the server never took sent
+    mock = ctx.smtp_mock
+    mock.reset("data_250")
+    r = smtp_send_mail(cfg, "data_250", body=b"never sent")
+    p.check("data_250: SendMail does not report success when DATA never got its go-ahead",
+            bool(r) and r.get("success") is False, "r=%r" % r)
+    stats = mock.stats("data_250")
+    p.check("data_250: no body is sent without the go-ahead", stats.get("bodies", []) == [],
+            "stats=%r" % stats)
 
 # PHASE: smtp_inject
 def phase_smtp_inject(ctx):
@@ -2132,26 +2190,25 @@ def phase_pg_types(ctx):
             "infinity rather than reading past the digit array",
             is_ok(r) and not r.get("failed") and r.get("value") == "inf", "r=%r" % r)
 
-    # PgArrayView::Count() (types.hpp) has no overflow guard on the dimension product, so
-    # this documents the current behaviour rather than asserting the result is meaningful.
-    # array_walked stays 0 regardless: the header claims 6 dimensions of 50000, but no
-    # element bytes ever followed it, so Count()'s garbage product and what NextElement
-    # can actually step are two independent, and here disagreeing, signals
+    # A malformed array header must leave the view empty, ndim and Count() both 0, never
+    # half-filled from the header it rejected
+    def array_rejected(r):
+        return (is_ok(r) and not r.get("failed") and r.get("array_ok") is False and
+                r.get("array_ndim") == 0 and r.get("array_count") == 0)
+
+    # 6 dimensions of 50000 is within MAX_ARRAY_DIMS, but claims more elements than an int32
+    # can count and far more than the zero element bytes behind it can hold
     r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_OVERFLOW")
-    p.check("PGAUDIT_ARRAY_OVERFLOW: 6 dimensions is within MAX_ARRAY_DIMS, so DecodeArray accepts "
-            "it and the worker does not crash computing Count()",
-            is_ok(r) and not r.get("failed") and r.get("array_ok") is True and r.get("array_ndim") == 6,
-            "r=%r" % r)
-    p.check("PGAUDIT_ARRAY_OVERFLOW: Count()'s overflowed product has nothing walkable behind it",
-            r.get("array_walked") == 0, "r=%r" % r)
+    p.check("PGAUDIT_ARRAY_OVERFLOW: a header claiming more elements than its bytes can hold is "
+            "rejected and leaves the view empty", array_rejected(r), "r=%r" % r)
 
     r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_BADDIM")
-    p.check("PGAUDIT_ARRAY_BADDIM: more dimensions than MAX_ARRAY_DIMS is rejected by DecodeArray",
-            is_ok(r) and not r.get("failed") and r.get("array_ok") is False, "r=%r" % r)
+    p.check("PGAUDIT_ARRAY_BADDIM: more dimensions than MAX_ARRAY_DIMS is rejected and leaves the "
+            "view empty", array_rejected(r), "r=%r" % r)
 
     r = pg_query(cfg, sql="SELECT PGAUDIT_ARRAY_NEGDIM")
-    p.check("PGAUDIT_ARRAY_NEGDIM: a negative dimension length is rejected by DecodeArray",
-            is_ok(r) and not r.get("failed") and r.get("array_ok") is False, "r=%r" % r)
+    p.check("PGAUDIT_ARRAY_NEGDIM: a negative dimension length is rejected and leaves the view empty",
+            array_rejected(r), "r=%r" % r)
 
     # The good path none of the vectors above exercise: a well-formed array with real
     # element bytes actually has to decode through Get<PgArrayView> and NextElement,
@@ -2245,7 +2302,7 @@ def phase_pg_resource(ctx):
     p = ctx.phase("pg_resource")
 
     r = pg_query(cfg, persona="flood_backendkeydata", rtimeout=15.0)
-    p.check("flood_backendkeydata: a ParameterStatus flood never lets the handshake finish, so "
+    p.check("flood_backendkeydata: a NoticeResponse flood never lets the handshake finish, so "
             "the connect budget ends it",
             is_errc(r, EP_INTERNAL) or is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
 
@@ -2372,6 +2429,39 @@ def phase_pg_reconnect(ctx):
             "and one accepted",
             stats.get("connect_attempts") == 2, "stats=%r" % stats)
 
+# PHASE: alpn
+#
+# HTTP and Postgres offer their own protocol's ALPN and nothing else, SMTP offers none, and an
+# endpoint configured with its own offers that instead. PostgreSQL 17 aborts a handshake
+# offering anything but "postgresql", so a Postgres client offering http/1.1 cannot reach any
+# current server
+def phase_alpn(ctx):
+    cfg, pg, smtp, http = ctx.cfg, ctx.pg_mock, ctx.smtp_mock, ctx.http_mock
+    p = ctx.phase("alpn")
+
+    for persona, want, label in (("alpn_default", "postgresql", "Postgres offers postgresql"),
+                                 ("alpn_custom", ALPN_CUSTOM, "Postgres offers the ALPN it was configured with")):
+        pg.reset(persona)
+        r = pg_query(cfg, persona=persona)
+        offered = pg.stats(persona).get("alpn")
+        p.check(label, is_ok(r) and not r.get("failed") and offered == want,
+                "offered %r, wanted %r, r=%r" % (offered, want, r), security=True)
+
+    for persona, want, label in (("good", "", "SMTP offers no ALPN"),
+                                 ("alpn_custom", ALPN_CUSTOM, "SMTP offers the ALPN it was configured with")):
+        smtp.reset(persona)
+        r = smtp_send(cfg, persona)
+        offered = smtp.stats(persona).get("alpn")
+        p.check(label, is_ok(r) and offered == want, "offered %r, wanted %r, r=%r" % (offered, want, r),
+                security=True)
+
+    for ep, want, label in (("tls_default", "http/1.1", "HTTP offers http/1.1"),
+                            ("tls_custom", ALPN_CUSTOM, "HTTP offers the ALPN it was configured with")):
+        r = http_call(cfg, "/ok", ep=ep)
+        offered = http.alpn()
+        p.check(label, is_ok(r, 200, "hello") and offered == want,
+                "offered %r, wanted %r, r=%r" % (offered, want, r), security=True)
+
 class ClientAudit(common.Suite):
     name = "client_audit"
     description = "WFX HttpEndpoint, SmtpEndpoint and PostgresEndpoint audit"
@@ -2413,6 +2503,7 @@ class ClientAudit(common.Suite):
         "pg_savepoint":       phase_pg_savepoint,
         "pg_startup":         phase_pg_startup,
         "pg_reconnect":       phase_pg_reconnect,
+        "alpn":               phase_alpn,
     }
 
     def add_arguments(self, parser):

@@ -1,12 +1,12 @@
 [Project]
-middleware_list = []    # Order of middleware registered by either User or Engine
+middleware_list = []    # Execution order of the middleware registered with WFX_MIDDLEWARE
 
 [Build]
 dir_name            = "build"          # Build directory used by CMake
 preferred_config    = "Debug"          # Active build configuration (must match CMake: Debug / Release)
 preferred_generator = "Unix Makefiles" # Exact CMake generator used to configure the build directory
 
-# TUNED FOR TORTURE (see ../README.md). Big send buffer so /big buffers ~1 MiB and applies real
+# TUNED FOR TORTURE (see ../../README.md). Big send buffer so /big buffers ~1 MiB and applies real
 # memory pressure under a RAM cap; recv buffer >= max_body_size so a full body fits then overflows
 # cleanly; tight timeouts so slowloris/slow-body/idle get reaped within a short run
 [Network]
@@ -22,7 +22,6 @@ recv_buffer_max              = 73728   # max_body_size + max_header_size: a body
                                #          both, not just the body alone (see config.hpp's own TODO on
                                #          this exact invariant); bigger bodies still overflow cleanly
 recv_buffer_incr             = 8192    # Buffer growth step (in bytes)
-header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
 max_header_size              = 8192    # Max total size of all headers (header-bomb target)
 max_header_count             = 64      # Max number of headers allowed (header-count-bomb target)
 max_body_size                = 65536   # Max size of request body (body-bomb target)
@@ -32,17 +31,17 @@ idle_timeout                 = 10      # Max idle time before reap
 max_connections              = 100000     # Total concurrent cap (reachable -> exhaustion testable)
 
 [ENV]
-env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
+env_path = "..." # Path to .env file. IMPORTANT: chmod 600, the file is skipped if group or other can access it
 
-# Per-IP cap and rate limiter cranked wide open because ALL siege traffic is from 127.0.0.1 and
+# Per-IP cap and rate limiter cranked wide open because ALL audit traffic is from 127.0.0.1 and
 # would otherwise be throttled before it ever stressed the server (the limiter itself wants a
 # separate, dedicated run)
 [IP]
-max_connections_per_ip       = 100000     # = max_connections: single-IP siege must use every slot
-max_request_burst_per_ip     = 100000000  # Effectively off for localhost siege
-max_requests_per_ip_per_sec  = 100000000  # Effectively off for localhost siege
+max_connections_per_ip       = 100000     # = max_connections: single-IP audit traffic must use every slot
+max_request_burst_per_ip     = 100000000  # Effectively off for localhost audit traffic
+max_requests_per_ip_per_sec  = 100000000  # Effectively off for localhost audit traffic
 
-# One origin plus credentials so the credentials-header and origin-echo paths are both live;
+# Two origins plus credentials so the credentials-header and origin-echo paths are both live;
 # allowed_headers empty so the reflect-Access-Control-Request-Headers branch runs; exposed_headers
 # non-empty so the static-list branch runs too. Between this and query params, the two config
 # fields never exercised here (wildcardOrigin, "*" + allow_credentials rejection) are load-time-
@@ -68,18 +67,13 @@ curves                      = "X25519:P-256"  # Elliptic curves preference list 
 enable_server_session_cache = true            # Enable server side session cache
 enable_client_session_cache = true            # Enable client side session cache
 enable_ktls                 = false           # Enable Kernel TLS (KTLS) if supported
-server_session_cache_size   = 4096            # Size of server session cache (In bytes)
-client_session_cache_size   = 1024            # Size of client session cache (In bytes)
+server_session_cache_size   = 4096            # Max sessions in the server session cache
+client_session_cache_size   = 1024            # Max sessions in the client session cache
 min_proto_version           = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
 security_level              = 2               # SSL security level (0-5)
 
-[Windows]
-accept_slots       = 4096    # Number of pre-allocated AcceptEx contexts
-connection_threads = "auto"  # IOCP worker thread count
-request_threads    = "all"   # Threads executing user handlers
-
 [Linux]
-worker_processes        = 2      # Max simultaneous worker connections
+worker_processes        = 2      # Number of worker processes to fork
 worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
 backlog                 = 1024   # Max pending connections in OS listen queue
 
@@ -94,7 +88,7 @@ max_events       = 1024   # How many events should epoll handle at a time
 
 [Logging]
 min_level         = 2          # info: surfaces "Server running", [ERR] contract-violations, [FTL] crashes
-enable_stdout     = false      # Write to stdout (siege.py scans this stream)
+enable_stdout     = false      # Off: the audit tails the logs/ files, stdout is discarded under --detach
 enable_colors     = false      # No ANSI codes -> clean log scanning by the harness
 enable_timestamps = true       # Prepend [HH:MM:SS.mmm] to each line
 enable_file       = true       # Write to log files
@@ -109,7 +103,6 @@ latency       = true   # AUDIT: on so the metrics phase can assert route latency
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)
 template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size     = 2048    # Max chunk size to read / write from template cache file (in bytes)
 master_poll_interval = 2       # Master wake interval in seconds: worker restart detection and metrics polling
 worker_backoff_base  = 1       # Base backoff in seconds (doubles each attempt)
 worker_backoff_max   = 2      # Max backoff cap in seconds

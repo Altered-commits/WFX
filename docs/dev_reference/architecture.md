@@ -59,7 +59,8 @@ flowchart TD
         direction TB
         S1[fork]
         S1 --> S2{pid == 0?\nchild}
-        S2 -- Yes --> S3[setpgid\nfirst worker becomes group leader\nrest join group]
+        S2 -- Yes --> S2a[RandomPool Reseed\nfatal on failure]
+        S2a --> S3[setpgid\nfirst worker becomes group leader\nrest join group]
         S3 --> S4[MetricTracer InitWorker slot]
         S4 --> S5[CrashTracer SetWorkerName\nCrashTracer Install]
         S5 --> S6[Open worker-N.log if file logging enabled]
@@ -110,7 +111,7 @@ deadline, SIGKILLed, and reaped before the master proceeds. No worker
 outlives its master. This also keeps the master's own worst-case shutdown
 time bounded by `workerShutdownTimeout` regardless of worker count, which
 matters because `wfx control stop` gives up and force-kills the master
-itself if it waits past that same budget, see [Engine Commands](../core_concepts/engine_commands.md#wfx-control).
+itself if it waits past that budget plus a 2-second grace, see [Engine Commands](../core_concepts/engine_commands.md#wfx-control).
 
 ---
 
@@ -131,7 +132,7 @@ flowchart TD
     C -- Parse error --> H[Mark connection close\nWrite 400 Bad Request]
     C -- Streaming body or unsupported --> I[Mark connection close\nWrite 501 Not Implemented]
 
-    C -- Success --> J[Increment request counter\nreset per-request async tracking\nstamp routeStartUs if latency metrics are on]
+    C -- Success --> J[Reset per-request async tracking\nstamp routeStartUs if latency metrics are on]
     J --> J1[Parse Connection header]
     J1 --> J2{Header combination valid?}
     J2 -- No --> J3[Mark connection close\nWrite 400 Bad Request]
@@ -199,10 +200,14 @@ flowchart TD
     S1 -- Sync --> W[Execute handler directly]
     W --> Finish
 
-    S1 -- Async --> X[Set connection context for the ABI boundary\ninvoke the async handler, clear the context pointer]
-    X --> X1[[FinishRequest, return either way\nhandler may already have completed\nsynchronously by this point, or not]]
+    S1 -- Async --> X[Set connection context for the ABI boundary\nmark INLINE_RUNNING, invoke the async handler,\nclear the context pointer]
+    X --> X0{Completed inline?}
+    X0 -- Yes --> X2[[FinishRequest, then HandleResponse directly]]
+    X0 -- No --> X1[[FinishRequest, return\nthe coroutine finishes later]]
 
-    U([OnCoroutineComplete fires]) --> U1{Async result status}
+    U([OnCoroutineComplete fires]) --> U0{Still INLINE_RUNNING?}
+    U0 -- Yes --> U4[Record the status and action\n500 + BREAK on failure\nreturn to the caller that started it]
+    U0 -- No --> U1{Async result status}
     U1 -- IO failure --> U2[Mark connection close\nSet 500 response]
     U2 --> Direct[[HandleResponse directly, see: Sending the response]]
     U1 -- Completed AND still at middleware stage --> U3[Store the resulting middleware action]
@@ -210,10 +215,12 @@ flowchart TD
     U1 -- Completed AND past middleware stage --> Direct
 ```
 
-`OnCoroutineComplete`'s two exits are worth noticing: one goes back into
-`HandleSuccess` (an async middleware resuming), the other skips straight to
-`HandleResponse`, not through `FinishRequest` again, since `FinishRequest`
-already ran once, synchronously, right when the handler was first dispatched.
+`OnCoroutineComplete`'s three exits are worth noticing. While the coroutine is still
+`INLINE_RUNNING` (it finished inside the call that started it), it only records the result and
+returns to that caller. Otherwise one exit goes back into `HandleSuccess` (an async middleware
+resuming), and the other skips straight to `HandleResponse`, not through `FinishRequest` again,
+since `FinishRequest` already ran once, synchronously, right when the handler was first
+dispatched.
 
 `W`/`X` above are a black box from this diagram's point of view: a route
 handler is free to make its own outbound calls in there (Postgres, HTTP,
@@ -273,7 +280,7 @@ flowchart TD
     G -- Yes --> H[Compute relative path and output path]
 
     H --> I[Get disk file stats]
-    I --> J{Cache entry matches\nmodified time?}
+    I --> J{Cache entry matches\nmodified time, and for a DYNAMIC\nentry user_templates.so exists?}
     J -- Yes --> K[Load from cache\nadd to templates map]
     K --> F
     J -- No --> L[Mark for cache update]
@@ -528,9 +535,9 @@ flowchart TD
     AN --> AO([Flush, return success])
 ```
 
-The footer and factory-function writes are the only two writes in this
-function that aren't error-checked, everything before them returns `false` on
-a write failure.
+The per-case closing brace, the footer, the factory-function write and the final flush are the
+only writes in this function that aren't error-checked, everything before them returns `false`
+on a write failure.
 
 ---
 

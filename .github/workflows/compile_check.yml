@@ -71,6 +71,12 @@ jobs:
     - name: Build
       run: cmake --build build
 
+    # Nothing in the engine includes include/wfx/*, only user .so builds do, and CI builds none.
+    # This compiles every public header the way a user app sees them (no WFX_ENGINE_BUILD), on
+    # every compiler and arch above, see include/misc/header_check.cpp
+    - name: Build header check
+      run: cmake --build build --target wfx_header_check
+
     # Hands the wfx binary to audit_check.yml so it never has to compile. Only the
     # binary, include/ and shared/ are tracked source already in its checkout.
     - name: Upload wfx binary for the audit stage

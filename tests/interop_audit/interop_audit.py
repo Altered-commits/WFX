@@ -65,7 +65,7 @@ def ensure_certs():
     instances and the HTTPS upstream. Idempotent, skipped once already generated.
 
     Postgres additionally gets its own copy, chowned to the postgres user's uid *inside the
-    postgres:16-alpine image* (looked up rather than hardcoded, in case it ever changes) and
+    postgres:17-alpine image* (looked up rather than hardcoded, in case it ever changes) and
     chmod 600, since it refuses to start otherwise. The chown needs root, which a throwaway
     container gives us without needing sudo on the host.
     """
@@ -92,11 +92,11 @@ def ensure_certs():
     shutil.copyfile(os.path.join(shared_dir, "server.key"), os.path.join(pg_dir, "server.key"))
     os.chmod(os.path.join(pg_dir, "server.key"), 0o600)
 
-    uid_probe = subprocess.run(["docker", "run", "--rm", "postgres:16-alpine", "id", "-u", "postgres"],
+    uid_probe = subprocess.run(["docker", "run", "--rm", "postgres:17-alpine", "id", "-u", "postgres"],
                                capture_output=True, text=True)
     uid = uid_probe.stdout.strip()
     if uid_probe.returncode != 0 or not uid.isdigit():
-        raise RuntimeError("could not look up postgres:16-alpine's postgres uid:\n%s" % uid_probe.stderr)
+        raise RuntimeError("could not look up postgres:17-alpine's postgres uid:\n%s" % uid_probe.stderr)
 
     chown = subprocess.run(["docker", "run", "--rm", "-v", "%s:/certs" % pg_dir, "alpine:3.20",
                             "chown", "%s:%s" % (uid, uid), "/certs/server.key"],
@@ -138,31 +138,18 @@ def ensure_docker_up(cfg):
 
     term.log("docker", term.green("up: postgres :%d, smtp4dev :%d/:%d" % (PG_PORT, SMTP_PORT_PLAIN, SMTP_PORT_LOGIN)))
 
-# Config patching (cert_path/key_path/outbound_ca_path are "..." placeholders in git, the
-# harness fills in the real absolute paths, same pattern client_audit uses for its own certs)
-def patch_toml_value(toml_path, key, value):
-    import re
-    with open(toml_path) as f:
-        text = f.read()
-
-    pattern = r'(?m)^(\s*%s\s*=\s*)"[^"]*"' % re.escape(key)
-    text, n = re.subn(pattern, lambda m: m.group(1) + '"%s"' % value, text)
-    if n == 0:
-        raise RuntimeError("%s: no '%s = \"...\"' line to patch" % (toml_path, key))
-
-    with open(toml_path, "w") as f:
-        f.write(text)
-
+# Config patching: both tomls keep placeholders in git, the run fills in the real absolute cert
+# paths through common.toml, which puts the placeholders back when it ends
 def patch_configs():
     shared_crt = os.path.join(CERTS_DIR, "shared", "server.crt")
     shared_key = os.path.join(CERTS_DIR, "shared", "server.key")
 
     upstream_toml = os.path.join(HERE, "upstream", "config", "wfx.local.toml")
-    patch_toml_value(upstream_toml, "cert_path", shared_crt)
-    patch_toml_value(upstream_toml, "key_path", shared_key)
+    common.toml.patch(upstream_toml, "cert_path", shared_crt)
+    common.toml.patch(upstream_toml, "key_path", shared_key)
 
     app_toml = os.path.join(HERE, "app", "config", "wfx.local.toml")
-    patch_toml_value(app_toml, "outbound_ca_path", shared_crt)
+    common.toml.patch(app_toml, "outbound_ca_path", shared_crt)
 
     term.log("patch", "outbound TLS trust + HTTPS upstream cert -> %s" % shared_crt)
 
@@ -273,6 +260,14 @@ def phase_postgres(ctx):
         marker = "tx-%s-%d" % (iso, time.time_ns())
         r = _json(cfg, "POST", "/pg/tx", {"X-Isolation": iso}, marker.encode())
         p.check("isolation level accepted: %s" % iso, r and r.get("begin_ep") == EP_SUCCESS, "got %r" % r)
+
+    marker = "abandon-%d" % time.time_ns()
+    r = _json(cfg, "POST", "/pg/tx/abandon", body=marker.encode())
+    p.check("abandoned tx: the next session runs on the same connection", r and r.get("same_conn") is True,
+           "got %r" % r)
+    p.check("abandoned tx: that session's commit does not commit the abandoned insert",
+           r and r.get("commit_ep") == EP_SUCCESS and r.get("rows") == 1 and r.get("first_val") == marker + "-kept",
+           "got %r" % r)
 
     marker = "sp-%d" % time.time_ns()
     r = _json(cfg, "POST", "/pg/savepoint", body=marker.encode())

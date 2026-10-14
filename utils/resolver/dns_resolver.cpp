@@ -14,8 +14,6 @@
 namespace WFX::Utils {
 namespace DNSResolver {
 
-// Linux / macOS, both use the BSD resolver API
-
 // Builds a single ResolvedAddr from an already-known IP (literal or loopback alias)
 // No DNS involved, nothing to ever refresh, so ttlSeconds is set to UINT32_MAX
 static void AppendLiteralAddr(int family, const void* rawAddr, std::uint16_t port, ResolvedAddrs& outAddrs)

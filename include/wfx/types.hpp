@@ -6,8 +6,10 @@
 
 // -----------------------------------------------------------------------
 // wfx/types.hpp
-// All ABI-stable types re-exported into the WFX namespace.
-// Include this if you only need types without HTTP/Async/Form machinery.
+// All ABI-stable types re-exported into the WFX namespace, with the
+// constants for their values. Types and constants only: the functions that
+// work on them live with what they do (JSON in wfx/json.hpp, HTTP helpers
+// in wfx/http.hpp).
 // -----------------------------------------------------------------------
 
 #include "shared/abis/types.hpp"
@@ -39,70 +41,7 @@ using SegmentVariant = Shared::SegmentVariant;
 using Any = Shared::Any;
 using JsonObject = Shared::JsonObject;
 using JsonWriter = Shared::JsonWriter;
-
-// -----------------------------------------------------------------------
-// JSON serializers
-//
-// Two complementary serializers, pick based on your use case:
-//
-// WFX::ImJson  : Immediate-mode Json (16 bytes, zero heap)
-//                Streams JSON directly into the response buffer as each
-//                Write/Obj/Arr call is made. No allocation, no DOM.
-//                Best for large or repetitive payloads where structure
-//                is known upfront and throughput is the priority.
-//
-//   WFX_GET("/json", [](WFX::Request req, WFX::Response res) {
-//       auto w = WFX::ImJson(res);
-//       w.Write("key", "value");
-//       w.Arr("items");
-//           w.Obj(); w.Write("id", 1); w.End();
-//       w.End();
-//   })
-//
-// WFX::RmJson  : Retained-mode Json, DOM object (8 bytes, heap-backed)
-//                Builds a full JSON object in memory first, then
-//                serializes it in one shot via Write(). Supports nested
-//                access, array push, and merge.
-//                Best for dynamic payloads where structure is built
-//                conditionally or incrementally.
-//
-//   WFX_GET("/json", [](WFX::Request req, WFX::Response res) {
-//       auto o = WFX::RmJson();
-//       o["key"] = "value";
-//       o["meta"]["version"] = 2u;
-//       o.Write(res);
-//   })
-// -----------------------------------------------------------------------
-inline Shared::JsonWriter ImJson(Http::Response& res) noexcept
-{
-    return Shared::JsonWriter{res};
-}
-inline Shared::JsonObject RmJson() noexcept
-{
-    return Shared::JsonObject::Init();
-}
-
-// Hint overload
-inline Shared::JsonObject RmJson(std::uint32_t nodeHint, std::uint32_t kvHint, std::uint32_t strHint) noexcept
-{
-    return Shared::JsonObject::Init(nodeHint, kvHint, strHint);
-}
-
-// -----------------------------------------------------------------------
-// Parses a JSON body into a JsonObject.
-//
-// view : Controls string storage strategy.
-//        When false, all strings are copied into internal storage and
-//        remain valid after the input body is destroyed. When true,
-//        strings reference the input body directly, so the body must
-//        remain alive.
-//
-// maxDepth : Maximum allowed nesting depth
-// -----------------------------------------------------------------------
-inline Shared::JsonParseResult ParseJson(std::string_view body, bool view = false, std::uint32_t maxDepth = 64) noexcept
-{
-    return Shared::JsonParser::ParseImpl(body, view, maxDepth);
-}
+using JsonParseResult = Shared::JsonParseResult;
 
 // -----------------------------------------------------------------------
 // Segment variant tags, use with Request::GetSegment().Tag()
@@ -121,12 +60,15 @@ inline constexpr auto SegStcStr = Shared::SEG_VARIANT_STC_STR;
 // -----------------------------------------------------------------------
 // Middleware flow control
 //
-// Return one of these from any middleware (sync or async):
+// A sync middleware returns WFX::MiddlewareAction (an async one returns
+// WFX::MwCoro, see wfx/async.hpp), and its value is one of these:
 //
 //   return WFX::MwContinue;   // run next middleware, then the handler
 //   return WFX::MwSkipNext;   // skip the next middleware, keep going
 //   return WFX::MwBreak;      // stop everything, handler never runs
 // -----------------------------------------------------------------------
+using MiddlewareAction = Shared::MiddlewareAction;
+
 inline constexpr auto MwContinue = Shared::MiddlewareAction::CONTINUE;
 inline constexpr auto MwSkipNext = Shared::MiddlewareAction::SKIP_NEXT;
 inline constexpr auto MwBreak = Shared::MiddlewareAction::BREAK;
@@ -145,6 +87,8 @@ inline constexpr auto MwBreak = Shared::MiddlewareAction::BREAK;
 //   AsyncInternalFailure : unhandled exception or engine fault
 //   AsyncNone            : not yet run (internal sentinel, rarely seen by users)
 // -----------------------------------------------------------------------
+using AsyncStatus = Shared::AsyncStatus;
+
 inline constexpr auto AsyncOk = Shared::AsyncStatus::COMPLETED;
 inline constexpr auto AsyncTimerFailure = Shared::AsyncStatus::TIMER_FAILURE;
 inline constexpr auto AsyncIoFailure = Shared::AsyncStatus::IO_FAILURE;
@@ -154,12 +98,17 @@ inline constexpr auto AsyncNone = Shared::AsyncStatus::NONE;
 // -----------------------------------------------------------------------
 // Stream flow control
 //
-// Return one of these from your Stream() generator callable:
+// Your Stream() generator takes a WFX::StreamBuffer to fill and returns a
+// WFX::StreamResult, whose action is one of these:
 //
 //   return { bytesWritten, WFX::StreamContinue };   // more chunks to come
 //   return { bytesWritten, WFX::StreamDone };       // finished, connection kept as the request asked
 //   return { bytesWritten, WFX::StreamClose };      // finished, close connection
 // -----------------------------------------------------------------------
+using StreamAction = Shared::StreamAction;
+using StreamResult = Shared::StreamResult;
+using StreamBuffer = Shared::StreamBuffer;
+
 inline constexpr auto StreamContinue = Shared::StreamAction::CONTINUE;
 inline constexpr auto StreamDone = Shared::StreamAction::STOP_AND_ALIVE_CONN;
 inline constexpr auto StreamClose = Shared::StreamAction::STOP_AND_CLOSE_CONN;

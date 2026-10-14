@@ -70,7 +70,6 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Network", "recv_buffer_max", networkConfig.maxReadBufferSize);
         ExtractValue(tbl, "Network", "send_buffer_incr", networkConfig.sendBufferIncSize);
         ExtractValue(tbl, "Network", "recv_buffer_incr", networkConfig.readBufferIncSize);
-        ExtractValue(tbl, "Network", "header_reserve_hint", networkConfig.headerReserveHintSize);
         ExtractValue(tbl, "Network", "max_header_size", networkConfig.maxHeaderTotalSize);
         ExtractValue(tbl, "Network", "max_body_size", networkConfig.maxBodyTotalSize);
         ExtractValue(tbl, "Network", "max_header_count", networkConfig.maxHeaderTotalCount);
@@ -80,14 +79,10 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Network", "max_connections", networkConfig.maxConnections);
 
         // vvv OS Specific vvv
-#ifdef WFX_PLATFORM_LINUX
         ExtractValue(tbl, "Linux", "worker_processes", osSpecificConfig.workerProcesses);
         ExtractValue(tbl, "Linux", "worker_shutdown_timeout", osSpecificConfig.workerShutdownTimeout);
         ExtractValue(tbl, "Linux", "backlog", osSpecificConfig.backlog);
         ExtractValue(tbl, "Linux.Epoll", "max_events", osSpecificConfig.maxEvents);
-#else
-#error "Unsupported platform - add a WFX_PLATFORM_<X> branch here to load that platform's fields"
-#endif
 
         // vvv Logging vvv
         ExtractValue(tbl, "Logging", "min_level", loggingConfig.minLevel);
@@ -100,7 +95,6 @@ void Config::LoadCoreSettings(std::string_view path)
 
         // vvv Misc vvv
         ExtractValue(tbl, "Misc", "file_cache_size", miscConfig.fileCacheSize);
-        ExtractValue(tbl, "Misc", "cache_chunk_size", miscConfig.cacheChunkSize);
         ExtractValue(tbl, "Misc", "template_chunk_size", miscConfig.templateChunkSize);
         ExtractValue(tbl, "Misc", "master_poll_interval", miscConfig.masterPollInterval);
         ExtractValue(tbl, "Misc", "worker_backoff_base", miscConfig.workerBackoffBase);

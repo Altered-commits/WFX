@@ -36,12 +36,13 @@ inline std::uint64_t WyHash(std::string_view data, std::uint64_t seed = 0) noexc
     return Shared::Hasher::WyHash(data.data(), data.size(), seed);
 }
 
-inline std::uint64_t Fnv1a(std::string_view data) noexcept
+// constexpr, so it also hashes a literal at compile time
+constexpr std::uint64_t Fnv1a(std::string_view data) noexcept
 {
     return Shared::Hasher::Fnv1a(data.data(), data.size());
 }
 
-inline std::uint64_t Fnv1aCaseInsensitive(std::string_view data) noexcept
+constexpr std::uint64_t Fnv1aCaseInsensitive(std::string_view data) noexcept
 {
     return Shared::Hasher::Fnv1aCaseInsensitive(data.data(), data.size());
 }

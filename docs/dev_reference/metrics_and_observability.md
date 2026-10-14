@@ -6,7 +6,7 @@ WFX tracks server metrics across all worker processes using a shared memory regi
 
 ## Memory layout
 
-Before the fork, the master calls `MetricTracer::Create(workerCount, maxRoutes, maxEndpoints, latency)`. This allocates a contiguous shared memory region (`mmap(MAP_SHARED | MAP_ANONYMOUS)` on POSIX, `CreateFileMapping` on Windows) with one block per worker:
+Before the fork, the master calls `MetricTracer::Create(workerCount, maxRoutes, maxEndpoints, latency)`. This allocates a contiguous shared memory region (`mmap(MAP_SHARED | MAP_ANONYMOUS)`) with one block per worker:
 
 ```
 [ WorkerMetrics ][ RouteMetrics x maxRoutes ][ EndpointMetrics x maxEndpoints ]
@@ -28,11 +28,11 @@ After the fork, each worker calls `MetricTracer::InitWorker(index)` which stores
 ```
 WorkerMetrics
     LogMetrics     log        (48 bytes, 6 x uint64)
-    NetworkMetrics network    (120 bytes, 15 x uint64)
+    NetworkMetrics network    (80 bytes, 10 x uint64)
     SelfMetrics    self       (48 bytes)
 ```
 
-`RouteMetrics` (56 bytes: request count plus one counter per status class, `1xx`-`5xx`, plus `bytesOut`) and `EndpointMetrics` (adds `completed`, `connectFailures`, `tlsFailures`, `requestTimeouts`, `poolExhausted`, `otherErrors` on top of the same shape) live in their own arrays right after `WorkerMetrics` in the same block, sized to `maxRoutes`/`maxEndpoints` - see [Memory layout](#memory-layout) above. `LatencyMetrics` (a running `sumUs` plus a 192-bucket histogram, one bucket per fine-grained power-of-two-ish duration range) exists per route and per endpoint too, but only when `[Metrics] latency = true`.
+`RouteMetrics` (56 bytes: request count plus one counter per status class, `1xx`-`5xx`, plus `bytesOut`) and `EndpointMetrics` (136 bytes) live in their own arrays right after `WorkerMetrics` in the same block, sized to `maxRoutes`/`maxEndpoints` - see [Memory layout](#memory-layout) above. `EndpointMetrics` has the same shape plus `completed`, `connectFailures`, `tlsFailures`, `requestTimeouts`, `poolExhausted`, `otherErrors`, `reconnects`, `coalesceHits`, `bytesIn` and the `slotsInUse` gauge. `LatencyMetrics` (a running `sumUs` plus a 192-bucket histogram, one bucket per fine-grained power-of-two-ish duration range) exists per route and per endpoint too, but only when `[Metrics] latency = true`.
 
 All of these structs are defined in `shared/abis/types.hpp` because they cross the ABI boundary. User code queries them directly through `UtilsAPIExt1`. `WorkerMetrics` itself does not cross the boundary. It lives purely on the engine side inside the mapped region.
 
@@ -61,7 +61,7 @@ if(auto* m = MetricTracer::Current())
     m->network.accepts++;
 ```
 
-`MetricTracer::Current()` returns a cached pointer set at `InitWorker` time. The check is a single null test against a pointer that is always in L1 cache on the hot path.
+`MetricTracer::Current()` recomputes this worker's slot on every call from the base pointer, the index `InitWorker` stored, and the stride, with a null and bounds check. Hot paths call it once and keep the pointer.
 
 In `EpollConnectionHandler`, the pointer is cached at construction time into `metrics_` to avoid even the function call:
 
@@ -92,9 +92,9 @@ When `[Metrics] latency = true`, `RecordRouteLatencyUs(routeIdx, us)`/`RecordEnd
 
 ## Reading metrics
 
-Any worker can read the entire mapped region at any time. `MetricTracer` provides an `Aggregate...()` function for each category (`AggregateLog`, `AggregateNetwork`, `AggregateSelf`, `AggregateRoute(idx)`, `AggregateEndpoint(idx)`, `AggregateRouteLatency(idx)`, `AggregateEndpointLatency(idx)`) that loops over all workers' slots and sums the relevant fields for that one route/endpoint index (or, for the three worker-level categories, across the whole worker). Each category also has a per-worker variant that returns only the current worker's slot without summing.
+Any worker can read the entire mapped region at any time. `MetricTracer` provides an `Aggregate...()` function for each category (`AggregateLog`, `AggregateNetwork`, `AggregateSelf`, `AggregateRoute(idx)`, `AggregateEndpoint(idx)`, `AggregateRouteLatency(idx)`, `AggregateEndpointLatency(idx)`) that loops over all workers' slots and sums the relevant fields for that one route/endpoint index (or, for the three worker-level categories, across the whole worker). Only the three worker-level categories (log, network, self) also have a per-worker variant, which takes an explicit worker index and returns that one slot without summing. Route, endpoint and latency getters take a route/endpoint index and always aggregate across workers.
 
-The aggregate and per-worker functions for each category are exposed to user code through `UtilsAPIExt1`, and wrapped as inline functions in `include/wfx/telemetry.hpp`. See that file for the current list of available functions.
+These functions are exposed to user code through `UtilsAPIExt1`, and wrapped as inline functions in `include/wfx/telemetry.hpp`. See that file for the current list of available functions.
 
 Not every field makes sense to aggregate. For `SelfMetrics`, only `rssBytes`, `vmBytes`, `restarts`, and `crashes` are summed across slots. Fields like `pid`, `startedAt`, `nextRetryAt`, and `backoffAttempts` are per-slot only and are not included in the aggregate result.
 
@@ -112,7 +112,7 @@ Worker: MetricTracer::InitWorker(i) // slot index stored process-locally
 Master: MetricTracer::Destroy()     // region released, hygiene only
 ```
 
-If the process crashes before `Destroy()` is called, the OS reclaims the shared memory region automatically. On POSIX this is because the mapping is anonymous and not backed by a file. On Windows, all handles are closed by the OS on process termination which releases the mapping. No manual cleanup is needed.
+If the process crashes before `Destroy()` is called, the OS reclaims the shared memory region automatically. This is because the mapping is anonymous and not backed by a file. No manual cleanup is needed.
 
 ---
 
@@ -123,7 +123,7 @@ If the process crashes before `Destroy()` is called, the OS reclaims the shared 
 1. Append the new `uint64_t` field at the end of the struct in `shared/abis/types.hpp`.
 2. Add the aggregation line in the corresponding `Aggregate...()` function in `utils/diagnostics/metric_tracer.cpp`.
 3. Increment it from the right place in the engine.
-4. The `static_assert` on `WorkerMetrics` will fail if the new size is not a multiple of 64. If it fails, add padding fields until it passes.
+4. `WorkerMetrics` is `alignas(64)`, so its size rounds up to a multiple of 64 on its own; the `static_assert` only guards against that alignment being removed.
 
 !!! important
     Never remove or reorder fields in any metric struct that crosses the ABI boundary. Reordering breaks user binaries compiled against an older version.

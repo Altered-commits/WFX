@@ -315,6 +315,7 @@ public:
 
         const std::uint32_t off = strLen;
         if(data)
+            // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker): strs/strCap change together, grown above
             std::memcpy(strs + off, data, len);
 
         strs[off + len] = '\0';
@@ -916,6 +917,7 @@ private:
         while(slots[h] != JSON_NIL) {
             if(slots[h] != JSON_TOMB) {
                 const JsonKV& kv = s_->kvs[slots[h]];
+                // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker): a live slot's key is stored in strs
                 if(kv.keyLen == klen && std::memcmp(s_->strs + kv.keyOff, key, klen) == 0)
                     return slots[h];
             }
@@ -1152,6 +1154,7 @@ private:
         // Dedup against existing keys. Reads strs + keyOff now, before any realloc below
         const std::uint32_t existing = HTFind(s_->strs + keyOff, klen);
         if(existing != JSON_NIL)
+            // NOLINTNEXTLINE(clang-analyzer-core.NullDereference): HTFind only finds a key in an allocated kvs
             return JsonRef{s_, s_->kvs[existing].valIdx};
 
         // New key: bytes already live in strs at keyOff, so no AllocStr/copy is needed. The
@@ -1764,6 +1767,7 @@ private:
                     if(i)
                         Raw(res, ",", 1);
 
+                    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference): a non-zero count means buf is allocated
                     const JsonKV& kv = kvs[list[i]];
                     Raw(res, "\"", 1);
                     Escaped(res, strs + kv.keyOff, kv.keyLen);

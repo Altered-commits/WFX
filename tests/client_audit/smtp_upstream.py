@@ -22,15 +22,25 @@ import ssl
 import threading
 import time
 
+_BOOL_KEYS = ("starttls", "mismatched_code", "malformed_greeting", "auth_fail")
+_FLOAT_KEYS = ("slow_trickle", "timeout")
+
 _lock = threading.Lock()
-_stats = {}  # name -> {"handshakes", "hs_fail", "auth_ok", "auth_fail", "bodies": [...]}
+_stats = {}  # name -> {"handshakes", "hs_fail", "auth_ok", "auth_fail", "alpn", "bodies": [...]}
 
 def _stat_init(name):
-    return _stats.setdefault(name, {"handshakes": 0, "hs_fail": 0, "auth_ok": 0, "auth_fail": 0, "bodies": []})
+    return _stats.setdefault(name, {"handshakes": 0, "hs_fail": 0, "auth_ok": 0, "auth_fail": 0, "alpn": "",
+                                    "bodies": []})
 
 def _bump(name, key, n=1):
     with _lock:
         _stat_init(name)[key] += n
+
+def _record_alpn(name, sock):
+    """The protocol this side selected from what the client offered, "" when it offered none
+    of ours. Read against the persona's probe list, built so each answer has one offer behind it."""
+    with _lock:
+        _stat_init(name)["alpn"] = sock.selected_alpn_protocol() or ""
 
 def _record_body(name, body):
     with _lock:
@@ -153,6 +163,8 @@ def serve_conn(raw_sock, name, opts):
 
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(certfile=opts["cert"], keyfile=opts["key"])
+        if opts.get("alpn"):
+            ctx.set_alpn_protocols(opts["alpn"].split("|"))
         try:
             sock = ctx.wrap_socket(raw_sock, server_side=True)
         except (ssl.SSLError, OSError) as e:
@@ -160,6 +172,7 @@ def serve_conn(raw_sock, name, opts):
             print("smtp mock '%s' TLS handshake failed: %r" % (name, e), flush=True)
             return
         _bump(name, "handshakes")
+        _record_alpn(name, sock)
         sock.settimeout(opts.get("timeout", 60.0))
         reader.set_sock(sock)
 
@@ -171,6 +184,12 @@ def serve_conn(raw_sock, name, opts):
         # client may trust
         line = reader.read_line()
         if not line.upper().startswith(b"EHLO"):
+            return
+
+        if opts.get("silent_after") == "ehlo2":
+            # Goes quiet forever with the upgrade already done, leaving the client's own
+            # connectTimeoutSeconds to end it
+            time.sleep(3600)
             return
 
         if opts.get("flood_at") == "ehlo2":
@@ -246,6 +265,12 @@ def serve_conn(raw_sock, name, opts):
             elif upper.startswith(b"RCPT TO"):
                 _send(sock, b"250 2.1.5 OK\r\n", opts)
             elif upper.startswith(b"DATA"):
+                # A 2xx in place of the 354 go-ahead: the client must not send a body, or call
+                # the message sent
+                if opts.get("data_reply"):
+                    _send(sock, b"%s 2.0.0 OK\r\n" % opts["data_reply"].encode(), opts)
+                    continue
+
                 _send(sock, b"354 Start mail input; end with <CRLF>.<CRLF>\r\n", opts)
                 if opts.get("drop_after") == "data_prompt":
                     sock.close()
@@ -335,9 +360,6 @@ def parse_listen(spec):
             kv[k.strip()] = v.strip()
     return kv
 
-_BOOL_KEYS = ("starttls", "mismatched_code", "malformed_greeting", "auth_fail")
-_FLOAT_KEYS = ("slow_trickle", "timeout")
-
 def coerce_opts(kv):
     opts = dict(kv)
     for k in _BOOL_KEYS:
@@ -351,7 +373,7 @@ def coerce_opts(kv):
     return opts
 
 def main():
-    ap = argparse.ArgumentParser(description="WFX smtp_audit hostile SMTP mock")
+    ap = argparse.ArgumentParser(description="WFX client_audit hostile SMTP mock")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--control-port", type=int, required=True)
     ap.add_argument("--listen", action="append", required=True,

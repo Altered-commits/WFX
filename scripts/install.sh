@@ -4,7 +4,7 @@ set -e
 # ---------------------------------------------------------------
 # WFX Installer
 # Supports: Linux only
-# Usage: curl -fsSL https://raw.githubusercontent.com/.../install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/.../install.sh | bash
 #
 # Two families of mode, same last step either way: 'wfx' ends up at
 # ~/.wfx/bin/wfx and ~/.wfx/src holds whatever a user project's CMakeLists.txt
@@ -67,7 +67,7 @@ set -e
 #
 # Final folder structure (end-user / local mode):
 #   ~/.wfx/
-#   ~/.wfx/bin/bin/wfx
+#   ~/.wfx/bin/wfx
 #   ~/.wfx/src/                 (cloned repo, or a symlink to one in local mode)
 #   ~/.wfx/src/build_install/   (cmake build artifacts, end-user mode only)
 #   ~/.wfx/daemons/
@@ -236,7 +236,7 @@ if [ -n "$PREBUILT_MODE" ]; then
     # -------------------------------------------------------------
     # Arrow-key/Enter driven select menu. Reads and writes through /dev/tty
     # directly instead of stdin/stdout, so this still works when the script
-    # itself arrived over a pipe (curl ... | sh -s -- --prebuilt-interactive),
+    # itself arrived over a pipe (curl ... | bash -s -- --prebuilt-interactive),
     # the same trick rustup's installer uses. If there's no controlling
     # terminal at all, falls back to whichever option the caller passed
     # first instead of hanging on a read that can never receive input -

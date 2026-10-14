@@ -25,7 +25,7 @@ This page describes the top-level layout of the WFX repository.
     User-facing headers. Everything the user includes in their project lives here. The engine rarely touches this folder.
 
 - `os_specific/`  
-    Platform-specific I/O backends. Each supported OS implements the same connection handler interface here. The engine calls the interface, never the platform code directly.
+    The I/O backend behind the connection handler interface, `os_specific/linux/` (epoll) being the only one. The engine calls the interface, never the backend directly.
 
 - `shared/`  
     Code shared between the engine and user code. Contains ABI-stable structs and types that cross the boundary between the engine and the loaded user library.
@@ -110,15 +110,15 @@ private:
     - `entry.yml` - The only workflow actually triggered on push/PR. Orchestrates the five reusable workflows below: filter, then format, then compile, then audit and tidy in parallel (both gated on compile succeeding, not on each other). Also reports one collected status for branch protection.
     - `filter_check.yml` - Reusable, called by `entry.yml`. Decides whether CI should run at all based on which files changed, using `.ciignore`.
     - `format_check.yml` - Reusable, called by `entry.yml` after the filter passes. Validates code formatting using `scripts/format.sh` (dry run by default, same convention as `tidy.sh`).
-    - `compile_check.yml` - Reusable, called by `entry.yml` after formatting passes. Checks for successful compilation of WFX, always built `Debug` with `-DWFX_ENABLE_ASAN=ON` (see [Build Macros](build_macros.md)) since the artifact never leaves CI - `Debug` keeps full symbols so ASan crash traces are actually readable.
+    - `compile_check.yml` - Reusable, called by `entry.yml` after formatting passes. Checks for successful compilation of WFX, always built `Debug` with `-DWFX_ENABLE_ASAN=ON` (see [Build Macros](build_macros.md)) since the artifact never leaves CI - `Debug` keeps full symbols so ASan crash traces are actually readable. Also builds `wfx_header_check`, which compiles every public header under `include/` the way a user app sees them, since nothing in the engine includes them.
     - `audit_check.yml` - Reusable, called by `entry.yml` after compile passes. Never builds `wfx` itself: downloads the ASan-instrumented binary `compile_check.yml` already uploaded as an artifact, restores that same job's `build/` cache for the custom OpenSSL `.so`s `wfx` links against (headers come from its own checkout, they're tracked source), then runs all seven test audits (`base`, `endpoint`, `client`, `tls`, `crypto`, `ip`, `interop`) as parallel matrix jobs via `tests/run_audits.sh`. `interop` needs Docker, which comes preinstalled on the runner.
     - `tidy_check.yml` - Reusable, called by `entry.yml` after compile passes, in parallel with `audit_check.yml`. Runs `scripts/tidy.sh` (clang-tidy static analysis).
     - `docs_build.yml` - Independent, triggers on push to `main`. Builds and deploys this documentation site.
-    - `release_build.yml` - Independent, triggers on pushing a version tag. A guard job first checks the tagged commit is actually reachable from `main`, refusing the release otherwise. The build matrix then compiles the engine once per supported CPU target (see `WFX_TARGET_FLAGS` in [Build Macros](build_macros.md)), with `WFX_STATIC_SSL=ON` so each binary links its own OpenSSL statically instead of depending on that CI runner's `.so` files, and a final job publishes every target's binary plus its checksum as assets on a GitHub Release matching the tag.
+    - `release_build.yml` - Independent, triggers on pushing a version tag. A guard job first checks the tagged commit is actually reachable from `main`, refusing the release otherwise. The build matrix then compiles the engine once per supported CPU target (see `WFX_TARGET_FLAGS` in [Build Macros](build_macros.md)), with `WFX_STATIC_SSL=ON` so each binary links its own OpenSSL statically instead of depending on that CI runner's `.so` files. A final job publishes every target's binary plus its checksum, and `wfx-headers.tar.gz` from a separate headers job, as assets on a GitHub Release matching the tag; these are what `install.sh --prebuilt-*` downloads.
 
 - `scripts/`  
     Shell scripts for project tooling.
-    - `install.sh` - Installs WFX to `~/.wfx`, builds / updates from source, and adds the binary to PATH. `--local-debug` (contributor mode) symlinks `~/.wfx/src` to the checkout and builds Debug with ASan+UBSan on; `--local-release` does the same symlink but builds an optimized Release with sanitizers off (perf testing); the plain end-user path (no flags) does a real clone and an optimized Release build.
+    - `install.sh` - Installs WFX to `~/.wfx`, builds / updates from source, and adds the binary to PATH. `--local-debug` (contributor mode) symlinks `~/.wfx/src` to the checkout and builds Debug with ASan+UBSan on; `--local-release` does the same symlink but builds an optimized Release with sanitizers off (perf testing); the plain end-user path (no flags) does a real clone and an optimized Release build; `--prebuilt-interactive` and `--prebuilt-known <version> <target>` download a released binary and headers instead. Each machine is locked to its first install family, recorded in `~/.wfx/.install_type`.
     - `uninstall.sh` - Removes `~/.wfx` entirely and cleans up PATH entries from shell configs.
     - `format.sh` - Runs clang-format across the codebase. Dry run by default (used for CI validation); `--fix` applies formatting in-place, `--files` targets specific files.
     - `tidy.sh` - Runs clang-tidy static analysis, self-caching results (`py/tidy_cache.py`) and parallelized across jobs. Supports `--changed` (only files changed vs `main`) and `--fix` (apply auto-fixes).
@@ -145,7 +145,7 @@ private:
     Top-level copyright notice, points to `THIRD_PARTY_NOTICES.md` for third-party attributions.
 
 - `THIRD_PARTY_NOTICES.md`  
-    Full third-party license texts and attributions. Covers toml++, TLSF, and OpenSSL.
+    Full third-party license texts and attributions. Covers toml++, TLSF, OpenSSL, Project Wycheproof, xxHash, WyHash, MurmurHash3, FNV-1a, and Flux.
 
 - `README.md`  
     Project readme.

@@ -51,11 +51,7 @@ set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
 # Compile configuration
 # --------------------------------------------------
 function(configure_compile target)
-    if(WIN32)
-        set(WFX_HOME "$ENV{USERPROFILE}/.wfx/src")
-    else()
-        set(WFX_HOME "$ENV{HOME}/.wfx/src")
-    endif()
+    set(WFX_HOME "$ENV{HOME}/.wfx/src")
 
     target_include_directories(${target} PRIVATE
         "${CMAKE_SOURCE_DIR}"
@@ -63,65 +59,39 @@ function(configure_compile target)
         "${WFX_HOME}"
     )
 
-    if(MSVC)
-        target_compile_options(${target} PRIVATE
-            /EHsc /Gw /Gy
-            $<$<CONFIG:Release>:/O2 /GL /MD>
-            $<$<CONFIG:Debug>:/Od /MDd>
-        )
-    else()
-        target_compile_options(${target} PRIVATE
-            -fPIC
-            -Wno-return-type-c-linkage
-            $<$<CONFIG:Release>:
-                -O3
-                -fvisibility=hidden
-                -fvisibility-inlines-hidden
-                -ffunction-sections
-                -fdata-sections
-            >
-            $<$<CONFIG:Debug>:-O0>
-        )
+    target_compile_options(${target} PRIVATE
+        -fPIC
+        -Wno-return-type-c-linkage
+        $<$<CONFIG:Release>:
+            -O3
+            -fvisibility=hidden
+            -fvisibility-inlines-hidden
+            -ffunction-sections
+            -fdata-sections
+        >
+        $<$<CONFIG:Debug>:-O0>
+    )
 
-        set_target_properties(${target} PROPERTIES
-            CXX_VISIBILITY_PRESET hidden
-            VISIBILITY_INLINES_HIDDEN YES
-        )
-    endif()
+    set_target_properties(${target} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+    )
 endfunction()
 
 # --------------------------------------------------
 # Shared-library link configuration
 # --------------------------------------------------
 function(configure_shared target)
-    if(MSVC)
-        target_link_options(${target} PRIVATE
-            /DLL
-            $<$<CONFIG:Release>:/LTCG /OPT:REF /OPT:ICF /DEBUG:OFF>
-            $<$<CONFIG:Debug>:/DEBUG>
-        )
+    target_link_options(${target} PRIVATE
+        $<$<CONFIG:Release>:
+            -Wl,--gc-sections
+            -Wl,--strip-all
+        >
+    )
 
-        set_target_properties(${target} PROPERTIES
-            INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
-        )
-    else()
-        if(APPLE)
-            target_link_options(${target} PRIVATE
-                $<$<CONFIG:Release>:-Wl,-dead_strip>
-            )
-        else()
-            target_link_options(${target} PRIVATE
-                $<$<CONFIG:Release>:
-                    -Wl,--gc-sections
-                    -Wl,--strip-all
-                >
-            )
-        endif()
-
-        set_target_properties(${target} PROPERTIES
-            INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
-        )
-    endif()
+    set_target_properties(${target} PROPERTIES
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
+    )
 
     set_target_properties(${target} PROPERTIES
         PREFIX ""
@@ -174,7 +144,7 @@ logs/
 
     // 2. Create essential config ('local' is the default env for `wfx run`/`wfx build`)
     CreateFile(projBase / "config" / "wfx.local.toml", R"([Project]
-middleware_list = []    # Order of middleware registered by either User or Engine
+middleware_list = []    # Execution order of the middleware registered with WFX_MIDDLEWARE
 
 [Build]
 dir_name            = "build"          # Build directory used by CMake
@@ -186,7 +156,6 @@ send_buffer_max              = 16384   # Max total send buffer size per connecti
 send_buffer_incr             = 4096    # Buffer growth step (in bytes)
 recv_buffer_max              = 16384   # Max total recv buffer size per connection (in bytes)
 recv_buffer_incr             = 4096    # Buffer growth step (in bytes)
-header_reserve_hint          = 512     # Initial header allocation hint size (in bytes)
 max_header_size              = 8192    # Max total size of all headers (in bytes)
 max_header_count             = 64      # Max number of headers allowed
 max_body_size                = 8192    # Max size of request body (in bytes)
@@ -196,12 +165,12 @@ idle_timeout                 = 40      # Max time limit for a connection to stay
 max_connections              = 2000    # Max total concurrent connections (Rounded up to the nearest multiple of 64)
 
 [ENV]
-env_path = "..." # Path to .env file. IMPORTANT: Except for Windows OS, chmod 600 the env file
+env_path = "..." # Path to .env file. IMPORTANT: chmod 600, the file is skipped if group or other can access it
 
 [IP]
-max_connections_per_ip       = 20      # Per-IP connection cap
-max_request_burst_per_ip     = 10      # Initial request tokens per IP
-max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per IP)
+max_connections_per_ip       = 20      # Connection cap per client subnet (IPv4 /24, IPv6 /64)
+max_request_burst_per_ip     = 10      # Initial request tokens per client subnet
+max_requests_per_ip_per_sec  = 5       # Refill rate (tokens per second per client subnet)
 max_tracked_identities       = 24576   # Cap on distinct resolved identities tracked at once, oldest evicted first
 real_ip_header               = ""      # Header to trust for the real client IP, e.g. "CF-Connecting-IP" [Empty disables real-IP resolution]
 real_ip_recursive            = false   # X-Forwarded-For-style chains only: walk past trusted hops to find the real client
@@ -230,13 +199,13 @@ curves                      = "X25519:P-256"  # Elliptic curves preference list 
 enable_server_session_cache = true            # Enable server side session cache
 enable_client_session_cache = true            # Enable client side session cache
 enable_ktls                 = false           # Enable Kernel TLS (KTLS) if supported
-server_session_cache_size   = 4096            # Size of server session cache (In bytes)
-client_session_cache_size   = 1024            # Size of client session cache (In bytes)
+server_session_cache_size   = 4096            # Max sessions in the server session cache
+client_session_cache_size   = 1024            # Max sessions in the client session cache
 min_proto_version           = 3               # Minimum TLS protocol version (1->TLSv1.1, 2->TLSv1.2, 3->TLSv1.3)
 security_level              = 2               # SSL security level (0-5)
 
 [Linux]
-worker_processes        = 2      # Max simultaneous worker connections
+worker_processes        = 2      # Number of worker processes to fork
 worker_shutdown_timeout = 5      # Seconds to wait before force-killing a worker
 backlog                 = 1024   # Max pending connections in OS listen queue
 
@@ -260,33 +229,17 @@ latency       = false  # Record per-route / per-endpoint latency histograms (cos
 [Misc]
 file_cache_size      = 20      # Number of files cached for efficiency (LFU)
 template_chunk_size  = 16384   # Max chunk size to read / write at once when compiling templates (in bytes)
-cache_chunk_size     = 2048    # Max chunk size to read / write from template cache file (in bytes)
 master_poll_interval = 2       # Master wake interval in seconds: worker restart detection and metrics polling
 worker_backoff_base  = 1       # Base backoff in seconds (doubles each attempt)
 worker_backoff_max   = 16      # Max backoff cap in seconds
 )");
 
     // 3. Bridge between engine and user code
-    CreateFile(projBase / "src/api_entry.cpp", R"(#include <core/deferred_init_vector.hpp>
-#include <core/core.hpp>
-#include <shared/utils/compiler_macro.hpp>
+    CreateFile(projBase / "src/api_entry.cpp", R"(#include <wfx/app.hpp>
 
-// To prevent name mangling 
-extern "C" {
-    WFX_EXPORT void RegisterMasterAPI(const WFX::Shared::MasterAPITable* api)
-    {
-        static bool registered = false;
-        if(registered)
-            return;
-
-        if(api) {
-            WFX::Core::SetMasterApi(api);
-            WFX::Core::ExecuteAndEraseDeferred();
-
-            registered = true;
-        }
-    }
-})");
+// The entry point the engine calls once it has loaded this app
+WFX_API_ENTRY()
+)");
 
     // 4. Code example
     CreateFile(projBase / "src/main.cpp", R"cxx(#include <wfx/http.hpp>

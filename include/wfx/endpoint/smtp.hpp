@@ -50,10 +50,11 @@
 //     mistaken for the DATA terminator, which would otherwise
 //     silently truncate the message (a correctness bug as much as
 //     a security one).
-//   - Server certificate verification reuses the engine's existing
-//     outbound TLS trust decision (EndpointConfig::tlsConfig), the
-//     same one tls_audit's phase_verify already exhaustively tests.
-//     No SMTP-specific certificate logic exists here to get wrong.
+//   - Server certificate verification is the engine's own:
+//     UpgradeToTLS wraps the connection with the same check every
+//     outbound TLS endpoint uses, which tls_audit's phase_verify
+//     already exhaustively tests. No SMTP-specific certificate
+//     logic exists here to get wrong.
 //   - Multi-line responses are bounded (maxResponseLineBytes /
 //     maxResponseLines) so a hostile or compromised relay can't
 //     OOM or hang a worker with an endless "250-..." flood.
@@ -188,6 +189,9 @@ struct SmtpEndpointConfig {
     std::string_view username; // e.g. WFX::GetEnvString("SMTP_USERNAME") (never logged)
     std::string_view password; // e.g. WFX::GetEnvString("SMTP_PASSWORD") (never logged)
     std::string_view heloName; // EHLO identity, e.g. "mail.example.com"
+
+    // ALPN offered on STARTTLS, separated by commas. SMTP has no name of its own, so none
+    std::string_view alpn{};
 };
 
 // -----------------------------------------------------------------------
@@ -397,8 +401,8 @@ inline Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoi
 
 // Incremental parser for one (possibly multi-line) "CODE-text\r\n"..."CODE text\r\n" response,
 // used for the transaction phase (MAIL FROM / RCPT TO / DATA / body). onConnect's handshake reads
-// responses through a separate, non-incremental path (LineResponse below) since it talks to the
-// raw SlotHandle directly rather than through this Parse()/Serialize() pair
+// responses through a separate path (LineResponse below) since it talks to the raw SlotHandle
+// directly rather than through this Parse()/Serialize() pair
 struct ParseState {
     WFX::String lineAcc;
     std::uint16_t code = 0;
@@ -803,9 +807,8 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 
     {
         auto authResp = co_await ReadResponse(h, opts, pending);
-        // Wrong credentials or a refusal both land here; no retry-with-the-same-credentials loop.
-        // Reconnects go through the engine's own backoff (maxReconnectAttempts), not a tight
-        // local one
+        // Wrong credentials or a refusal both land here. EpFatal ends the slot with no retry:
+        // the same credentials can't succeed on a second try
         if(!authResp.ok || authResp.code != SMTP_AUTH_SUCCESS)
             co_return EpFatal;
     }
@@ -818,7 +821,7 @@ inline EpCoro SmtpOnConnect(SlotHandle h, void* slotStateVoid)
 // -----------------------------------------------------------------------
 // One MAIL FROM / RCPT TO / DATA exchange, pinned to a single
 // reserved connection. See Async::Resolve::Reserve()'s doc comment
-// ("SQL transactions, LISTEN/NOTIFY, any sticky session"). Always
+// ("SQL transactions, LISTEN/NOTIFY"). Always
 // check IsValid() before use: the pool can be exhausted.
 // -----------------------------------------------------------------------
 class SmtpTransaction {
@@ -844,8 +847,9 @@ public:
     {
         return slot_.SendPayload(SmtpCmd{SmtpCmdKind::DATA_START});
     }
-    // Builds the From/To/Reply-To/Subject headers and a dot-stuffed body internally. Every field
-    // is CR/LF/NUL-screened before it reaches the wire (see Serialize()'s DATA_BODY case)
+    // Builds the From/To/Reply-To/Subject headers and a dot-stuffed body internally. Every header
+    // field is CR/LF/NUL-screened before it reaches the wire, and the body is screened for NUL,
+    // since its CR/LF are real line structure (see Serialize()'s DATA_BODY case)
     auto DataBody(std::string_view fromAddr, std::string_view fromName, std::string_view toAddr,
                   std::string_view toName, std::string_view subject, std::string_view body,
                   std::string_view replyTo = {}) const noexcept
@@ -875,17 +879,20 @@ private:
 };
 
 // Result of SmtpEndpoint::SendMail below.
-//   status   EpOk once DATA actually goes through, otherwise whatever stopped it, including
-//            failures that happen before any SMTP response exists at all (pool exhausted,
-//            connect failure, timeout)
-//   response whichever step's response came back last, empty if 'status' never got that far
+//   status   the last step's status: EpOk whenever it got a reply, accepted or not, otherwise
+//            whatever stopped it below the SMTP layer (pool exhausted, a refused or failed
+//            handshake, a timeout)
+//   accepted set only once the server accepted the message body, which is what Success() reports.
+//            A 2xx to MAIL, RCPT or DATA alone never sets it
+//   response the last step's reply, empty when it got none
 struct SmtpSendOutcome {
     Shared::EndpointStatus status = EpInternalError;
+    bool accepted = false;
     EndpointOutput<SmtpResponse> response;
 
     bool Success() const noexcept
     {
-        return status == EpOk && response && response->Success();
+        return accepted;
     }
 };
 
@@ -912,7 +919,7 @@ public:
                   .exactSlots = true,
                   .prewarm = config.prewarm,
                   .maxConcurrentStreams = 0,
-                  .alpnProtocols = {},
+                  .alpnProtocols = {config.alpn.data(), config.alpn.size()},
               })
     {}
 
@@ -940,6 +947,9 @@ public:
                        std::string_view toName, std::string_view subject, std::string_view body, SmtpSendOutcome& out,
                        std::string_view replyTo = {}) const
     {
+        // A reused outcome must not carry an earlier send's result into this one
+        out = SmtpSendOutcome{};
+
         auto tx = Begin();
         if(!tx.IsValid()) {
             out.status = EpPoolExhausted;
@@ -967,7 +977,7 @@ public:
             co_return;
 
         auto [s4, r4] = co_await tx.DataBody(fromAddr, fromName, toAddr, toName, subject, body, replyTo);
-        record(s4, r4, r4 && r4->Success());
+        out.accepted = record(s4, r4, r4 && r4->Success());
     }
 
 private:

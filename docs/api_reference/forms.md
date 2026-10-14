@@ -44,7 +44,7 @@ enum class FormError : std::uint8_t {
 
 - `NONE`: Parsing, validation, and sanitization succeeded
 - `UNSUPPORTED_CONTENT_TYPE`: The request either lacks a `Content-Type` header or uses a type the form system does not support
-- `MALFORMED`: The request body could not be decoded into key-value input (e.g. broken URL encoding)
+- `MALFORMED`: The body isn't exactly the schema's fields in declaration order (a missing, extra, reordered or duplicate key, or a pair without `=`), or it has a bad `%XX` escape
 - `CLEAN_FAILED`: One or more fields failed validation or sanitization
 
 If the error is not `NONE`, application logic must not continue.
@@ -60,19 +60,19 @@ Understanding these layers is mandatory to use the form system correctly.
 
 A **schema** is the complete, immutable definition of a form.
 
-In WFX, schemas are represented by `Form::FormSchema` and are intended to be defined statically.
+In WFX, schemas are represented by `WFX::Form::FormSchema` and are intended to be defined statically.
 
 It is constructed with:
 
 - The form name (`const char*`)
-- One or more `Form::Field(...)` definitions, **in order**
+- One or more `WFX::Form::Field(...)` definitions, **in order**
 
 **Example**:
 ```cpp
-inline const auto LoginForm = Form::FormSchema{
+inline const auto LoginForm = WFX::Form::FormSchema{
     "login",
-    Form::Field("username", Form::Text{ .ascii = true, .max = 64 }),
-    Form::Field("password", Form::Text{ .ascii = true, .min = 6, .max = 64 })
+    WFX::Form::Field("username", WFX::Form::Text{ .ascii = true, .max = 64 }),
+    WFX::Form::Field("password", WFX::Form::Text{ .ascii = true, .min = 6, .max = 64 })
 };
 ```
 
@@ -99,17 +99,17 @@ This schema is **immutable**. **Fields and rules** cannot be changed later.
 
 A **field** represents a single named input expected by the form.
 
-Fields are declared using the `Form::Field` factory function and are always part of a schema.  
+Fields are declared using the `WFX::Form::Field` factory function and are always part of a schema.  
 They do not exist independently.
 
 A field is constructed with:
 
 - The field name (`const char*`)
-- A rule instance describing the expected input type (e.g. `Form::Text`, `Form::Int`)
+- A rule instance describing the expected input type (e.g. `WFX::Form::Text`, `WFX::Form::Int`)
 
 **Example**:
 ```cpp
-Form::Field("username", Form::Text{ .ascii = true, .max = 64 })
+WFX::Form::Field("username", WFX::Form::Text{ .ascii = true, .max = 64 })
 ```
 
 **Custom Overrides**
@@ -122,15 +122,15 @@ Chaining functions are provided **only to override** these defaults when needed.
 **Example**:
 ```cpp
 // Custom validator and sanitizer
-Form::Field("username", Form::Text{ .ascii = true, .max = 64 })
+WFX::Form::Field("username", WFX::Form::Text{ .ascii = true, .max = 64 })
         .CustomValidator(&MyValidator)
         .CustomSanitizer(&MySanitizer)
 
 // Or individually
-Form::Field("username", Form::Text{ .ascii = true, .max = 64 })
+WFX::Form::Field("username", WFX::Form::Text{ .ascii = true, .max = 64 })
         .CustomValidator(&MyValidator)
 
-Form::Field("password", Form::Text{ .ascii = true, .max = 64 })
+WFX::Form::Field("password", WFX::Form::Text{ .ascii = true, .max = 64 })
         .CustomSanitizer(&MySanitizer)
 ```
 
@@ -152,7 +152,7 @@ Every field must be constructed with **exactly one rule instance**.
 
 **Example**:
 ```cpp
-Form::Int{ .min = 18, .max = 120 }
+WFX::Form::Int{ .min = 18, .max = 120 }
 ```
 
 #### **Base Interface**
@@ -165,8 +165,8 @@ struct BaseRule {
 };
 ```
 
-- `required = true`: input must be present
-- `required = false`: input may be omitted
+- `required = true`: the field must have a non-empty value
+- `required = false`: the field may be submitted empty (`name=`); the key itself must still appear, in schema order
 
 #### **Decayed Type**
 
@@ -174,7 +174,7 @@ Each rule is associated with a **decayed type**, representing the **final C++ ty
 by the form system after sanitization and validation.
 This enables **compile-time type safety** for all form operations
 
-The decayed type is determined via the `Form::DecayedType<Rule>` trait.
+The decayed type is determined via the `WFX::Form::DecayedType<Rule>` trait.
 
 #### **Builtins**
 
@@ -190,14 +190,16 @@ of `BaseRule` (`.required`, defaulting to `true`), which are not repeated below.
 | `Float` | `.min` (`double`)<br>`.max` (`double`) | `-1e308`<br>`1e308` | `double` |
 
 - `ascii` restricts input to ASCII characters
-- `strict` enables the stricter of the two email grammars
+- `strict` also rejects any non-ASCII byte; the email grammar is the same either way
 - `min` and `max` bound length for `Text`, and value for the numeric rules
 
 ```cpp
-Form::Text{ .min = 3, .max = 32 }          // 3-32 characters
-Form::Text{ .required = false }            // optional, from BaseRule
-Form::Int{ .min = 0, .max = 150 }          // an age
-Form::Email{}                              // strict by default
+WFX::Form::Text{ .min = 3, .max = 32 }     // 3-32 characters
+WFX::Form::Text{ {.required = false} }     // optional: required lives in the BaseRule base
+WFX::Form::Text{ {false}, false, 0, 500 }  // optional and bounded: positional, since designated
+                                           // and positional initializers can't be mixed
+WFX::Form::Int{ .min = 0, .max = 150 }     // an age
+WFX::Form::Email{}                         // strict by default
 ```
 
 !!! important
@@ -215,19 +217,19 @@ Custom rules may be defined when built-in rules are insufficient.
 
 A custom rule **must**:
 
-- Inherit from `Form::BaseRule`
+- Inherit from `WFX::Form::BaseRule`
 - Define its own configuration fields
 - Provide a `DecayedType` specialization mapping the rule to a concrete value type
 - Have a default sanitizer and validator available to the engine
 
 **Example**:
 ```cpp
-struct MyRule : Form::BaseRule {
+struct MyRule : WFX::Form::BaseRule {
     std::size_t limit;
 };
 
 template<>
-struct Form::DecayedType<MyRule> {
+struct WFX::Form::DecayedType<MyRule> {
     using Type = std::size_t;
 };
 ```
@@ -306,13 +308,13 @@ A custom rule must expose:
 #include <charconv>
 
 // Custom Rule
-struct HexUInt : Form::BaseRule {
+struct HexUInt : WFX::Form::BaseRule {
     std::uint64_t max = UINT64_MAX;
 };
 
 // Decayed Type
 template<>
-struct Form::DecayedType<HexUInt> {
+struct WFX::Form::DecayedType<HexUInt> {
     using Type = std::uint64_t;
 };
 
@@ -335,7 +337,7 @@ static inline bool ValidateHexUInt( // Must follow validator signature
 }
 
 // Validator Dispatcher
-static constexpr Form::ValidatorFn DefaultValidatorFor(const HexUInt&)
+static constexpr WFX::Form::ValidatorFn DefaultValidatorFor(const HexUInt&)
 {
     return ValidateHexUInt;
 }
@@ -365,7 +367,7 @@ static inline bool SanitizeHexUInt( // Must follow sanitizer signature
 
 // Sanitizer Dispatcher
 static constexpr
-Form::SanitizerFn<std::uint64_t> DefaultSanitizerFor(const HexUInt&)
+WFX::Form::SanitizerFn<std::uint64_t> DefaultSanitizerFor(const HexUInt&)
 {
     return SanitizeHexUInt;
 }
@@ -378,8 +380,8 @@ Form::SanitizerFn<std::uint64_t> DefaultSanitizerFor(const HexUInt&)
     For example, if sanitization already performs string-to-number conversion and failure detection,
     duplicating that work in validation is unnecessary.
 
-    - Avoid hardcoding `Form::SanitizerFn<std::uint64_t>` or `std::uint64_t& out`.
-    Instead, use `Form::SanitizerFn<Form::DecayedType<HexUInt>::Type>`.
+    - Avoid hardcoding `WFX::Form::SanitizerFn<std::uint64_t>` or `std::uint64_t& out`.
+    Instead, use `WFX::Form::SanitizerFn<WFX::Form::DecayedType<HexUInt>::Type>`.
     This ensures the sanitizer automatically stays correct if the rule’s output type is changed later, without requiring updates in multiple places.
 
 **Example (Overriding default cleanup logic)**:
@@ -401,9 +403,9 @@ static bool SanitizeEvenInt(
 }
 
 // ...
-Form::Field(
+WFX::Form::Field(
     "count",
-    Form::Int{ .min = 0, .max = 100 }
+    WFX::Form::Int{ .min = 0, .max = 100 }
 )
 .CustomSanitizer(SanitizeEvenInt);
 // ...
@@ -450,7 +452,7 @@ WFX_MIDDLEWARE("ParseForm", [](WFX::Request req, WFX::Response res) {
 
     decltype(LoginForm)::CleanedType output;
 
-    if(LoginForm.Parse(req, output) != Form::FormError::NONE) {
+    if(LoginForm.Parse(req, output) != WFX::Form::FormError::NONE) {
         res.Status(WFX::HttpStatus::BAD_REQUEST)
            .SendText("Invalid form data");
         return WFX::MwBreak;
@@ -464,11 +466,13 @@ WFX_MIDDLEWARE("ParseForm", [](WFX::Request req, WFX::Response res) {
  * The parsed form data is stored as a tuple in the request context.
  * Now we can use the stored form as:
  *
- *  // Get the form
- *  auto form = req.GetContext<decltype(LoginForm)::CleanedType>("login-form");
+ *  // Get the form: a pointer to the stored tuple, plus whether the key was found
+ *  auto [form, ok] = req.GetContext<decltype(LoginForm)::CleanedType>("login-form");
  *
  *  // Accesses the first field in declaration order
- *  auto& username = std::get<0>(form);
+ *  if(ok && form) {
+ *      auto& username = std::get<0>(*form);
+ *  }
  */
 ```
 
@@ -494,7 +498,7 @@ What it does:
 
 decltype(LoginForm)::CleanedType output;
 
-if(LoginForm.ParseStatic(req.Body(), output) != Form::FormError::NONE) {
+if(LoginForm.ParseStatic(req.Body(), output) != WFX::Form::FormError::NONE) {
     // Handle failure
 }
 
@@ -532,11 +536,11 @@ field.present
     - Safe to read **only if** parsing succeeded
 
 - `.present`  
-    - Indicates whether the field was actually provided in the input
+    - Indicates whether the field carried a value
     - Meaningful **only for optional fields** (`.required = false`)
     - Semantics:  
-        - `true` -> field was present and parsed
-        - `false` -> field was omitted by the user
+        - `true` -> field had a value and parsed
+        - `false` -> field was submitted empty (`name=`)
 
     - For required fields, `.present` is always `true` on successful parsing
 
@@ -595,11 +599,10 @@ These are always the responsibility of the user.
 //    - Returns a pre-rendered HTML string_view
 //    - Simple and straightforward
 
-auto o = WFX::RmJson();
-
-o["login_form_fields"] = LoginForm.Render();
-
 WFX_GET("/form", [](WFX::Request req, WFX::Response res) {
+    auto o = WFX::RmJson();
+    o["login_form_fields"] = LoginForm.Render();
+
     res.SendTemplate("login-page.html", std::move(o));
 })
 ```
@@ -651,8 +654,8 @@ WFX_GET("/form", [](WFX::Request req, WFX::Response res) {
     This means the following is allowed but **incorrect**:
 
     ```cpp
-    inline const auto LoginForm  = Form::FormSchema{ "login",  /* ... */ };
-    inline const auto SigninForm = Form::FormSchema{ "login",  /* ... */ };
+    inline const auto LoginForm  = WFX::Form::FormSchema{ "login",  /* ... */ };
+    inline const auto SigninForm = WFX::Form::FormSchema{ "login",  /* ... */ };
     ```
 
     Since rendered input IDs are generated using the format

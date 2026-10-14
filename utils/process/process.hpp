@@ -12,7 +12,7 @@ namespace WFX::Utils {
 // Useful for debugging
 struct ProcessResult {
     std::int32_t exitCode = 0; // Function's exit code
-    std::uint32_t osCode = 0;  // On Windows it is used with GetLastError
+    std::uint32_t osCode = 0;  // errno when the process fails to start or be waited on
 };
 
 namespace ProcessUtils {

@@ -51,9 +51,11 @@ single run exercises inbound and outbound TLS at once.
 
 ## The crown jewels (SECURITY)
 
-Refusal is proven twice for each hostile persona: the outbound call errors **and**
-the mock recorded a *failed* TLS handshake (the client bailed at the TLS layer,
-never completing it).
+Each refusal must surface as `SSL_FAILURE` (any other status is a correctness
+failure, only acceptance is a security finding), **and** the worker must log
+`TLS handshake failed for endpoint '127.0.0.1': <OpenSSL reason>`. The three cert
+personas are also checked against the mock's counter for a *failed* TLS
+handshake (the client bailed at the TLS layer, never completing it).
 
 | Persona | Port | Cert | Client must |
 |---|---|---|---|
@@ -105,33 +107,37 @@ python3 tls_audit.py --list-phases        # list phases and exit
 python3 tls_audit.py --ci                 # no colors, GitHub Actions log groups and error annotations
 ```
 
-Phases: `handshake`, `verify`, `protocol`, `mtls`, `framing`, `desync`, `inject`, `resource`, `resumption`, `upgrade`.
+Phases: `handshake`, `verify`, `protocol`, `mtls`, `isolation`, `framing`, `desync`, `inject`, `resource`, `resumption`, `upgrade`.
+
+`isolation` proves a record that fails to authenticate on one inbound connection never drops
+another connection's request (the worker's OpenSSL error queue is per call, not shared).
 
 ### What it does
 
 1. Generates certs into `certs/` (gitignored) for every persona in the table
    above, plus the `client-*` certs for the `mtls` phase. See `ensure_certs()`
    in `tls_audit.py` for exactly how each one is built and why.
-2. Pins the WFX client's `outbound_ca_path` (and `client_ca_path`, for inbound
-   mTLS) directly at the mkcert root CA, so `good`'s "must accept" outcome is
-   deterministic instead of depending on `mkcert -install` having reached the
-   OS trust store.
+2. Pins the WFX client's `outbound_ca_path` directly at the mkcert root CA, so
+   `good`'s "must accept" outcome is deterministic instead of depending on
+   `mkcert -install` having reached the OS trust store, and points
+   `client_ca_path` (inbound mTLS) at a bundle of the mkcert root plus the
+   dedicated chain-test root.
 3. Boots the mock (one TLS listener per persona) and the app
    (`wfx run --use-https --https-port-override`), streaming both sides' logs
    live so a boot-time crash is visible immediately instead of looking like a
    flaky test.
-4. Runs the `handshake`/`verify`/`protocol`/`mtls`/`framing`/`desync`/`inject`/
-   `resource`/`resumption`/`upgrade` phases over TLS.
+4. Runs the `handshake`/`verify`/`protocol`/`mtls`/`isolation`/`framing`/`desync`/
+   `inject`/`resource`/`resumption`/`upgrade` phases over TLS.
 
 ### Exit codes
 
 | Code | Meaning |
 |------|---------|
 | `0` | all pass |
-| `1` | a non-security vector failed, or the worker died mid-run |
-| `2` | **SECURITY**: a bad cert, a protocol downgrade, a smuggle, or a truncation was accepted |
+| `1` | a non-security vector failed (a sanitizer report or a worker force-killed at shutdown included), the worker was not answering at the end, or nothing was checked |
+| `2` | **SECURITY**: a hostile peer or client cert accepted, a downgrade, a smuggle or pool poison, an unrejected CR/LF/NUL, a truncation delivered as complete, pre-upgrade bytes trusted or a double wrap allowed, or one connection's TLS error dropping another's request |
 | `3` | **boot crash**: WFX never answered `/health` within the ready timeout; see `[wfx-crash:*]` above the report |
 
 ## Requirements
 
-- `wfx` and `mkcert` on `PATH` (run `mkcert -install` once), `openssl`, Python 3.8+, Linux.
+- `wfx`, `mkcert` and `openssl` on `PATH` (the audit runs `mkcert -install` itself), Python 3.8+, Linux.

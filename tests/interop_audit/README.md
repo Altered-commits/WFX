@@ -28,7 +28,7 @@ against the real thing."
 ## Architecture
 
 ```
-interop_audit.py --HTTP--> WFX app /pg/*     --Postgres(TLS)--> postgres:16-alpine (Docker)
+interop_audit.py --HTTP--> WFX app /pg/*     --Postgres(TLS)--> postgres:17-alpine (Docker)
                  --HTTP--> WFX app /smtp/*    --SMTP(STARTTLS)-> smtp4dev, smtp4dev-loginonly (Docker)
                  --HTTP--> WFX app /http/call --HTTPS----------> upstream/ (a second real WFX server)
                  +-------- smtp4dev's own REST API, to confirm real delivery -----+
@@ -82,13 +82,18 @@ python3 interop_audit.py --no-docker      # you already ran `docker compose up -
 python3 interop_audit.py --keep-docker    # leave containers running after this run
 ```
 
-One command is the whole setup: `python3 interop_audit.py` generates the TLS
-cert (idempotent, skipped once `certs/` exists), fixes its permissions for
-Postgres, runs `docker compose up -d --wait`, patches `outbound_ca_path` /
-`cert_path` / `key_path` in the two apps' `wfx.local.toml`, boots the HTTPS
-upstream and the app under test, drives every phase, and prints a per-phase
-report. `docker compose up -d` by hand works too, once `certs/` already exists
-from a prior run.
+One command is the whole setup: `python3 interop_audit.py` patches
+`outbound_ca_path` / `cert_path` / `key_path` in the two apps' `wfx.local.toml`,
+generates the TLS cert (idempotent, skipped once `certs/` exists) and fixes its
+permissions for Postgres, runs `docker compose up -d --wait` and waits for each
+port, boots the HTTPS upstream and the app under test, drives every phase, and
+prints a per-phase report. `docker compose up -d` by hand works too, once
+`certs/` already exists from a prior run: with `--no-docker` no cert is
+generated at all.
+
+After a Postgres major-version bump in `docker-compose.yml`, a `pgdata` volume
+kept by `--keep-docker` or `--no-docker` still holds the old cluster, which the
+new image refuses to start on; run `docker compose down -v` once.
 
 Containers are torn down (`docker compose down -v`) after every run by
 default, so nothing keeps running in the background once the suite exits.
@@ -97,11 +102,11 @@ doesn't want to pay image-pull/`initdb` cost again on the next run.
 `--no-docker` (assumes Docker's already up) leaves teardown alone too, since
 that flag means you're managing the containers yourself.
 
-> The config-patching step edits `app/config/wfx.local.toml` and
-> `upstream/config/wfx.local.toml` in place, the same way `client_audit` edits
-> its own `outbound_ca_path`. Don't commit those lines with a real path in
-> them: checked in, they point every other checkout at a cert that isn't
-> there. Leave `cert_path` / `key_path` / `outbound_ca_path` as `"..."` / `""`.
+> The config-patching step goes through `common.toml`, which puts
+> `app/config/wfx.local.toml` and `upstream/config/wfx.local.toml` back the way
+> it found them when the run ends, so no real path reaches git. A run killed with
+> SIGKILL skips that restore; `git checkout` on the two files brings the
+> placeholders back.
 
 ### Requirements
 
@@ -143,6 +148,6 @@ the script.
 
 | Phase | What it proves |
 |-------|----------------|
-| **postgres** | Real SCRAM auth over real TLS; int/bool/text decode; a real `INSERT ... RETURNING`; a committed transaction visible from a second pooled connection and a rolled-back one that isn't, real atomicity; all three isolation levels accepted; `SAVEPOINT`/`ROLLBACK TO`/`COMMIT` leaving only the pre-savepoint row; a chunked read via `Stream` across many chunks; the statement cache staying correct across repeated executions |
+| **postgres** | Real SCRAM auth over real TLS against PostgreSQL 17, which refuses any ALPN but `postgresql`, so the client's per-protocol ALPN is proven too; int/bool/text decode; a real `INSERT ... RETURNING`; a committed transaction visible from a second pooled connection and a rolled-back one that isn't, real atomicity; a session dropped mid-transaction never committed by the next session on its connection; all three isolation levels accepted; `SAVEPOINT`/`ROLLBACK TO`/`COMMIT` leaving only the pre-savepoint row; a chunked read via `Stream` across many chunks; the statement cache staying correct across repeated executions |
 | **smtp** | A full STARTTLS + AUTH PLAIN transaction, and the same against a LOGIN-only server so the fallback path is genuinely forced, not assumed; delivery confirmed through smtp4dev's own API, including `secureConnection`; multi-recipient delivery (`RCPT TO` called more than once); RFC 5321 dot-stuffing round-tripping through a real MTA; the `SendMail` single-call wrapper as its own code path; `RSET` mid-transaction followed by a working fresh transaction on the same connection |
 | **http** | Every verb (`GET`/`POST`/`PUT`/`PATCH`/`DELETE`) against a real server; a representative status-code matrix; Basic-Auth accepted and refused correctly; a real chunked response fully reassembled; a client-side request timeout firing against a genuinely slow (not hostile) real server |
