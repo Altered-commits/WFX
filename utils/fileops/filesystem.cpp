@@ -3,7 +3,6 @@
 
 #include "posix/filemanip.hpp"
 #include "filesystem.hpp"
-#include "shared/utils/detection_macro.hpp"
 
 namespace WFX::Utils {
 
@@ -68,13 +67,8 @@ bool GetFileStats(const char* path, FileStats& out)
 
     out.size = st.st_size;
 
-#ifdef WFX_PLATFORM_MACOS
-    auto sec = st.st_mtimespec.tv_sec;
-    auto nsec = st.st_mtimespec.tv_nsec;
-#else
     auto sec = st.st_mtim.tv_sec;
     auto nsec = st.st_mtim.tv_nsec;
-#endif
 
     out.modifiedNs = static_cast<std::int64_t>(sec) * 1'000'000'000LL + static_cast<std::int64_t>(nsec);
 

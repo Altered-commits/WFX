@@ -5,14 +5,14 @@
 #
 # Certs are generated and permission-fixed by interop_audit.py's setup(), not by hand:
 # `python3 interop_audit.py` alone brings this whole stack up. `docker compose up -d` works too
-# once certs/ already exists (see README.md for the one-time cert step if you want that path).
+# once certs/ already exists, so run `python3 interop_audit.py` once first to generate them.
 #
 # Every service is reachable on 127.0.0.1 at a fixed host port, mirroring how every other
 # audit's mocks are addressed; interop_audit/app/src/main.cpp dials those same ports.
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: interop
       POSTGRES_PASSWORD: interop-pass

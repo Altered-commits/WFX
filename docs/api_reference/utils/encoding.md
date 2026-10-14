@@ -11,6 +11,8 @@ Base64, hex, and URL (percent) encoding. Pure user-space, no engine ABI call inv
 
 Every decode function returns `{bool, result}`; `false` means the input was malformed, and the result is empty in that case.
 
+Base64 and hex also come in an out-buffer form that writes into a `std::span` instead of allocating and returns `{ok, written}`. Size the buffer with `Base64EncodedLen(bytes, padded)`, `Base64DecodedMaxLen(chars)`, `HexEncodedLen(bytes)` and `HexDecodedLen(chars)`; a buffer that is too small returns `{false, 0}`.
+
 ---
 
 ### Base64
@@ -18,6 +20,10 @@ Every decode function returns `{bool, result}`; `false` means the input was malf
 ```cpp
 String Base64Encode(std::string_view data, bool urlSafe = false, bool padded = true);
 std::pair<bool, Vector<std::uint8_t>> Base64Decode(std::string_view data);
+
+std::pair<bool, std::size_t> Base64Encode(std::string_view data, std::span<char> out,
+                                         bool urlSafe = false, bool padded = true);
+std::pair<bool, std::size_t> Base64Decode(std::string_view data, std::span<std::uint8_t> out);
 ```
 
 - `Base64Encode`: `urlSafe` swaps `+`/`/` for `-`/`_`; `padded` controls trailing `=` characters.
@@ -40,6 +46,9 @@ if(!ok) {
 ```cpp
 String HexEncode(std::string_view data, bool upper = false);
 std::pair<bool, Vector<std::uint8_t>> HexDecode(std::string_view data);
+
+std::pair<bool, std::size_t> HexEncode(std::string_view data, std::span<char> out, bool upper = false);
+std::pair<bool, std::size_t> HexDecode(std::string_view data, std::span<std::uint8_t> out);
 ```
 
 - `HexEncode`: `upper` selects `A-F` instead of `a-f`.
@@ -70,7 +79,10 @@ RFC 3986 percent-encoding. `UrlEncode` leaves the unreserved set (`A-Z a-z 0-9 -
 ```cpp
 auto encoded = WFX::UrlEncode("hello world/foo"); // "hello%20world%2Ffoo"
 
-auto [ok, decoded] = WFX::UrlDecode(req.Query("redirect"));
+std::string_view redirect;
+req.GetQueryParams().Get("redirect", redirect);
+
+auto [ok, decoded] = WFX::UrlDecode(redirect);
 if(!ok) {
     res.Status(WFX::HttpStatus::BAD_REQUEST).SendText("malformed redirect param");
     return;

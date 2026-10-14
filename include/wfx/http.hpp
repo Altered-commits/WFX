@@ -17,7 +17,8 @@
 //   WFX::MwContinue / MwSkipNext / MwBreak          (via wfx/types.hpp)
 //   WFX::AsyncOk / AsyncTimerFailure / ...          (via wfx/types.hpp)
 //   WFX::StreamContinue / StreamDone / StreamClose  (via wfx/types.hpp)
-//   WFX::RmJson / ImJson / JsonObject / ParseJson   (via wfx/types.hpp)
+//   WFX::RmJson / ImJson / JsonObject / ParseJson   (via wfx/json.hpp)
+//   WFX::HttpMethodToStringView / HttpMethodToEnum
 //
 // Sync handler:
 //   WFX_GET("/hello", [](WFX::Request req, WFX::Response res) {
@@ -39,6 +40,7 @@
 #include "http/routes.hpp"
 #include "http/middleware.hpp"
 #include "wfx/async.hpp"
+#include "wfx/json.hpp"
 #include "wfx/types.hpp"
 
 namespace WFX {
@@ -48,6 +50,14 @@ namespace WFX {
 // -----------------------------------------------------------------------
 using Request = Http::Request;
 using Response = Http::Response;
+
+// -----------------------------------------------------------------------
+// HTTP helpers
+//   WFX::HttpMethodToStringView(WFX::HttpMethod::GET) == "GET"
+//   WFX::HttpMethodToEnum("GET") == WFX::HttpMethod::GET
+// -----------------------------------------------------------------------
+using Shared::HttpMethodToEnum;
+using Shared::HttpMethodToStringView;
 
 } // namespace WFX
 

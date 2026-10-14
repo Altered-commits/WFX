@@ -198,6 +198,11 @@ public: // Main Functions
         Comma();
         WStr({v.Data(), v.Size()});
     }
+    void Push(const char* v)
+    {
+        Comma();
+        WStr(v);
+    }
     void Push(std::int64_t v)
     {
         Comma();

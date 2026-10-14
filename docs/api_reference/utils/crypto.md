@@ -22,12 +22,14 @@ Do not use `Hash` functions for anything security-sensitive: they are not collis
 
 Every operation crosses into the engine via `Core::CryptoApiExt1()` and returns a `{CryptoStatus, result}` pair (or, for streaming APIs, a `CryptoStatus` alone). Always check the status before touching the result.
 
+AEAD, key derivation and `RandomBytes` also come in an out-buffer form taking a `std::span<std::uint8_t>` to write into, for paths that can't afford a heap allocation per call. Those return the `CryptoStatus` alone, or `{CryptoStatus, bytes written}` for AEAD.
+
 ```cpp
 enum class CryptoStatus : std::uint8_t {
     OK = 0,
     INVALID_ARG,      // Null pointer, or key/nonce/output length doesn't match the algo
     BUFFER_TOO_SMALL, // Caller-provided output buffer is too small
-    AUTH_FAILED,      // AEAD tag verification failed on decrypt; out is left untouched
+    AUTH_FAILED,      // AEAD tag or signature check failed; on decrypt, out is wiped
     UNSUPPORTED,      // Backend doesn't provide this algorithm (e.g. Argon2 provider missing)
     INTERNAL_ERROR    // Underlying crypto library failure
 };
@@ -50,6 +52,7 @@ auto [status, digest] = WFX::Sha256(data);   // also: Sha384, Sha512
 
 - `data` (`std::string_view`): the bytes to hash
 - Returns `std::pair<CryptoStatus, Digest<N>>`, where `N` is 32/48/64 for SHA256/384/512
+- `WFX::Sha256Digest` / `Sha384Digest` / `Sha512Digest` name those types, and `WFX::CryptoSha256` / `CryptoSha384` / `CryptoSha512` the algorithms, for the templated `Hash<Algo>` / `Hmac<Algo>` / `HashStream<Algo>` forms
 
 `Digest<N>` is a small fixed-size wrapper:
 
@@ -166,6 +169,18 @@ std::pair<CryptoStatus, Vector<std::uint8_t>> AeadEncrypt(
 std::pair<CryptoStatus, Vector<std::uint8_t>> AeadDecrypt(
     CryptoAeadAlgo algo, std::string_view key, std::string_view nonce,
     std::string_view aad, std::string_view ciphertext);
+
+// Out-buffer forms: {status, bytes written}. Sealing n bytes needs n + AeadTagLen(algo) of room,
+// opening needs ciphertext.size() - AeadTagLen(algo)
+std::pair<CryptoStatus, std::uint32_t> AeadEncrypt(
+    CryptoAeadAlgo algo, std::string_view key, std::string_view nonce,
+    std::string_view aad, std::string_view plaintext, std::span<std::uint8_t> out);
+
+std::pair<CryptoStatus, std::uint32_t> AeadDecrypt(
+    CryptoAeadAlgo algo, std::string_view key, std::string_view nonce,
+    std::string_view aad, std::string_view ciphertext, std::span<std::uint8_t> out);
+
+constexpr std::uint32_t AeadTagLen(CryptoAeadAlgo algo);
 ```
 
 `key`/`nonce` must match the algorithm's exact size, or `INVALID_ARG` is returned:
@@ -179,6 +194,7 @@ std::pair<CryptoStatus, Vector<std::uint8_t>> AeadDecrypt(
 - `AeadEncrypt` output is `ciphertext || tag` (tag appended, not separate)
 - `AeadDecrypt` expects that same `ciphertext || tag` layout as input
 - On `AUTH_FAILED` (tag mismatch), `AeadDecrypt` returns an empty vector; unauthenticated plaintext is never exposed, even partially
+- The out-buffer `AeadDecrypt` leaves no plaintext in `out` on any failure; a too-small `out` returns `BUFFER_TOO_SMALL`
 
 !!! warning
     AEAD is one-shot only. Both input and output live fully in memory. Inputs larger than `WFX::CryptoAeadMaxSize` (64 MiB) are rejected with `INVALID_ARG` up front, to fail loudly on an accidentally huge body instead of silently costing 2x its RAM. This is a hard cap, not a soft default. Genuinely large payloads need chunked, independently-authenticated framing (e.g. libsodium's `crypto_secretstream`), which WFX does not currently provide.
@@ -230,6 +246,15 @@ std::pair<CryptoStatus, Vector<std::uint8_t>> Argon2id(
     std::string_view password, std::string_view salt,
     std::uint32_t iterations, std::uint32_t memoryKb,
     std::uint32_t parallelism, std::uint32_t outLen);
+
+// Out-buffer forms: derive exactly out.size() bytes
+CryptoStatus Pbkdf2(std::string_view password, std::string_view salt,
+                    std::uint32_t iterations, std::span<std::uint8_t> out);
+CryptoStatus Hkdf(std::string_view ikm, std::string_view salt,
+                  std::string_view info, std::span<std::uint8_t> out);
+CryptoStatus Argon2id(std::string_view password, std::string_view salt,
+                      std::uint32_t iterations, std::uint32_t memoryKb,
+                      std::uint32_t parallelism, std::span<std::uint8_t> out);
 ```
 
 - **`Pbkdf2`**: PBKDF2-HMAC-SHA256 (RFC 8018). Writes exactly `outLen` bytes.
@@ -294,16 +319,20 @@ static std::pair<CryptoStatus, AsymKey> FromEcPublic(CryptoAsymKeyType curve, st
 
 **Example (generate once, cache, reuse across requests)**:
 ```cpp
-// Module-scope: paid once at process start, never inside a handler
-static WFX::AsymKey g_signingKey = []() {
+// Paid once per worker at startup, never inside a handler. It can't be built at namespace scope:
+// the engine's API isn't wired up during static initialization, so a constructor fills it in
+// (needs #include <wfx/app.hpp>)
+static WFX::AsymKey g_signingKey;
+
+WFX_CONSTRUCTOR([] {
     auto [status, key] = WFX::AsymKey::Generate(WFX::CryptoEd25519Key);
 
     // Fail fast at startup
     if(status != WFX::CryptoOk)
         WFX::LogFatal("generate failed");
 
-    return std::move(key);
-}();
+    g_signingKey = std::move(key);
+});
 
 WFX_POST("/tokens/issue", [](WFX::Request req, WFX::Response res) {
     auto [status, sig] = g_signingKey.Sign(WFX::CryptoEd25519, req.Body());
@@ -347,7 +376,7 @@ CryptoStatus Verify(CryptoAsymScheme scheme, std::string_view msg, std::string_v
 ```
 
 - **`Sign`**: one-shot only, no streaming variant, for any scheme. Ed25519 in particular cannot be streamed at all (RFC 8032 signs the whole message in a single call), so there's no incremental signing API here regardless of scheme. Requires a private key; `CryptoInvalidArg` if the key/scheme don't match.
-- **`Verify`**: `CryptoOk` if the signature verifies, `CryptoAuthFailed` if it's well-formed but cryptographically rejected (tampered message, wrong key, or a signature that just doesn't verify), `CryptoInvalidArg` for a key/scheme mismatch or a malformed signature length (e.g. an `ES256` signature that isn't exactly 64 bytes gets rejected before verification is even attempted).
+- **`Verify`**: `CryptoOk` if the signature verifies, `CryptoAuthFailed` if it's well-formed but cryptographically rejected (tampered message, wrong key, or a signature that just doesn't verify), `CryptoInvalidArg` for a key/scheme mismatch, an empty signature, or an `ES256`/`ES384` signature of the wrong length. A wrong-length RSA or Ed25519 signature is `CryptoAuthFailed`.
 
 **Example (verifying an externally-issued signature against a loaded public key)**:
 ```cpp
@@ -389,9 +418,10 @@ auto [status, pem] = g_signingKey.ExportPublic();
 
 ```cpp
 std::pair<CryptoStatus, Vector<std::uint8_t>> RandomBytes(std::uint32_t len);
+CryptoStatus RandomBytes(std::span<std::uint8_t> out); // fills all of out
 ```
 
-Fills a vector with cryptographically secure random bytes (CSPRNG). `len == 0` returns `CryptoOk` and an empty vector.
+Fills a vector (or `out`) with cryptographically secure random bytes (CSPRNG). `len == 0` returns `CryptoOk` and an empty vector.
 
 #### `ConstantTimeEquals`
 
@@ -420,7 +450,8 @@ WFX_POST("/login", [](WFX::Request req, WFX::Response res) {
         return;
     }
 
-    auto provided = req.Header("X-Signature");
+    std::string_view provided;
+    req.GetHeader("X-Signature", provided);
 
     if(!WFX::ConstantTimeEquals(mac.View(), provided)) {
         res.Status(WFX::HttpStatus::UNAUTHORIZED).SendText("bad signature");
@@ -459,7 +490,7 @@ std::uint64_t Fnv1a(std::string_view data) noexcept;
 std::uint64_t Fnv1aCaseInsensitive(std::string_view data) noexcept;
 ```
 
-FNV-1a. Simpler and slower than `WyHash`, but constexpr-friendly for compile-time string hashing. `Fnv1aCaseInsensitive` folds ASCII case before hashing (`'A'-'Z'` to lowercase), useful for header names and other case-insensitive keys.
+FNV-1a. Simpler and slower than `WyHash`; for compile-time string hashing use `WFX::Fnv1a`, which is constexpr. `Fnv1aCaseInsensitive` folds ASCII case before hashing (`'A'-'Z'` to lowercase), useful for header names and other case-insensitive keys.
 
 ### `Xxh3`
 

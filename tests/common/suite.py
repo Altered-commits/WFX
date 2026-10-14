@@ -12,7 +12,7 @@ import os
 import threading
 import time
 
-from . import logs, term
+from . import logs, term, toml
 from .report import Report, EXIT_NO_BOOT
 from .server import Server
 
@@ -120,8 +120,15 @@ class Suite:
         """Runs once the server is up, before the first phase.
 
         For evidence that must be snapshotted at boot, or preconditions worth failing fast on.
-        Return False to skip the phases
-        record why with ctx.phase(...).failed() first.
+        Return False to skip the phases and before_stop; record why with
+        ctx.phase(...).failed() first.
+        """
+
+    def before_stop(self, ctx):
+        """Runs after the phases, right before the server stops.
+
+        For leaving work in flight that only the worker's exit can tear down. Whatever that exit
+        leaks lands in the sanitizer scan right after the stop.
         """
 
     def teardown(self, ctx):
@@ -164,6 +171,7 @@ class Suite:
 
             if self.before_phases(ctx) is not False:
                 self._run_phases(ctx)
+                self.before_stop(ctx)
 
             # Liveness is read while the server still runs, then it is stopped before the scan:
             # LeakSanitizer only writes its report when a worker exits
@@ -184,7 +192,10 @@ class Suite:
         finally:
             follower.stop()
             server.stop(confirm_exit=self.confirm_exit)
-            self.teardown(ctx)
+            try:
+                self.teardown(ctx)
+            finally:
+                toml.restore_all()
 
     def _check_sanitizer_reports(self, ctx):
         """Turn any ASan/UBSan report from this run into a failing check."""

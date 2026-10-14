@@ -7,13 +7,7 @@
 #include <cstdint>
 #include "shared/utils/detection_macro.hpp"
 
-#if defined(WFX_PLATFORM_POSIX)
 #include <signal.h>
-#elif defined(WFX_PLATFORM_WINDOWS)
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#endif
 
 #define WFX_TRACE()                                                                                                    \
     const WFX::Utils::CrashTracer::ScopedFrame wfxTraceFrame                                                           \
@@ -91,15 +85,9 @@ private:
     static void SafeWriteFrame(int fd, const Frame& f, int i) noexcept;
     static void SafeWriteTimestamp(int fd, long long epoch) noexcept;
 
-#if defined(WFX_PLATFORM_POSIX)
     static void InstallPosix() noexcept;
     static void PosixHandler(int sig, siginfo_t* info, void* uctx) noexcept;
     static void WriteRegisters(int fd, void* uctx) noexcept;
-#elif defined(WFX_PLATFORM_WINDOWS)
-    static void InstallWindows() noexcept;
-    static LONG WINAPI WindowsVEHandler(EXCEPTION_POINTERS* ep) noexcept;
-    static void WriteRegisters(int fd, CONTEXT* ctx) noexcept;
-#endif
 };
 
 } // namespace WFX::Utils

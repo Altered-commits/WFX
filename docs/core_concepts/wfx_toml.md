@@ -6,8 +6,8 @@ lives at `config/wfx.<env>.toml` in your project for every environment you run o
 for how `--env` picks which file gets loaded.
 
 !!! note
-    - All settings in this page are applied **per worker process**, not globally. For example, if `max_connections` is set to `2000` and WFX is running with `4` worker processes, the effective maximum connection capacity is `2000 × 4 = 8000` concurrent connections.
-    - If a setting does not explicitly mention `(In bytes)`, its value should be interpreted as a count, not a size. For example, `file_cache_size` represents the number of cached files, while `cache_chunk_size` and `template_chunk_size` explicitly specify `(In bytes)`, meaning their values are treated as byte sizes.
+    - All settings in this page are applied **per worker process**, not globally. For example, if `max_connections` is set to `2000` and WFX is running with `4` worker processes, the effective maximum connection capacity is `2048 × 4 = 8192` concurrent connections (each worker rounds `2000` up to a multiple of 64, see below).
+    - If a setting does not explicitly mention `(In bytes)`, its value should be interpreted as a count, not a size. For example, `file_cache_size` represents the number of cached files, while `template_chunk_size` explicitly specifies `(In bytes)`, meaning its value is treated as a byte size.
 
 !!! warning
     Beyond checking for the **presence of certain required keys** (marked with `*`), WFX only
@@ -29,7 +29,7 @@ middleware_list = [] # Array of strings
 - `middleware_list`*: Ordered list of middleware identifiers.
     - Order matters: middleware executes exactly in declaration order
     - Middleware list may be empty, but the key itself must exist
-    - Used to register both engine-provided and user-defined middleware
+    - Names middleware registered with `WFX_MIDDLEWARE`. Validated at startup: no duplicates, every name must be registered, and every registered middleware must be listed
 
 ---
 
@@ -66,7 +66,6 @@ send_buffer_max              = 16384   # 32-bit Unsigned Integer (In bytes)
 send_buffer_incr             = 4096    # 32-bit Unsigned Integer (In bytes)
 recv_buffer_max              = 16384   # 32-bit Unsigned Integer (In bytes)
 recv_buffer_incr             = 4096    # 32-bit Unsigned Integer (In bytes)
-header_reserve_hint          = 512     # 16-bit Unsigned Integer (In bytes)
 max_header_size              = 8192    # 32-bit Unsigned Integer (In bytes)
 max_body_size                = 8192    # 32-bit Unsigned Integer (In bytes)
 max_header_count             = 64      # 16-bit Unsigned Integer
@@ -82,7 +81,6 @@ max_connections              = 2000    # 32-bit Unsigned Integer
 - `send_buffer_incr`: Growth increment when send buffer expands. **Validated: cannot exceed `send_buffer_max`.**
 - `recv_buffer_max`: Max total inbound buffer per connection. **Validated: must be at least `max_header_size + max_body_size`**, or a request maxed out on both could never fit and would always be rejected.
 - `recv_buffer_incr`: Growth increment when receive buffer expands. **Validated: cannot exceed `recv_buffer_max`.**
-- `header_reserve_hint`: Initial allocation hint for headers
 
 ### Headers & Body
 
@@ -108,7 +106,7 @@ max_connections              = 2000    # 32-bit Unsigned Integer
 
 ## `[ENV]`
 
-Environment variable loading. This section is **optional**.
+Environment variable loading. The section and its `env_path` key are **mandatory**; the file it points to is optional.
 
 ```toml
 [ENV]
@@ -116,8 +114,8 @@ env_path = "..." # String (Path to .env file)
 ```
 
 !!! note
-    On non-Windows systems, the file must have permission `600` (meaning that only the file's owner has read and write access).
-    Insecure permissions may result in startup failure.
+    The file must be owned by the user running WFX and grant no group or other permissions (e.g. `600`
+    or `400`). Otherwise it is skipped and no variables are loaded; startup continues.
 
 ---
 
@@ -140,17 +138,19 @@ trusted_proxies              = []      # Array of Strings (CIDR blocks)
 ### Limiting
 
 - `max_connections_per_ip`  
-  Maximum number of simultaneous connections allowed from a single IP address per worker process.  
+  Maximum number of simultaneous connections allowed per client subnet (IPv4 /24, IPv6 /64) per
+  worker process; a connection over the cap gets a 503.  
   This prevents one client from consuming all available connections.  
   **Validated: must be greater than 0**, or every IP is denied every connection unconditionally.
 
 - `max_request_burst_per_ip`  
-  The number of requests an IP address is allowed to send immediately without being throttled.  
-  Think of this as a bucket of tokens given to each IP when it first connects.
+  The number of requests a client subnet (IPv4 /24, IPv6 /64) is allowed to send immediately
+  without being throttled.  
+  Think of this as a bucket of tokens given to each subnet when it first connects.
 
 - `max_requests_per_ip_per_sec`  
   How fast the token bucket for each IP is refilled, measured in **tokens per second**.  
-  Once an IP runs out of tokens, further requests are delayed or rejected until tokens are refilled.
+  Once a subnet runs out of tokens, further requests are rejected with 429 until tokens are refilled.
 
 - `max_tracked_identities`  
   Maximum number of distinct resolved identities whose rate-limit bucket is kept in memory at
@@ -242,10 +242,11 @@ max_age           = 600    # 32-bit Unsigned Integer (In seconds)
   own cap has no effect on that browser.
 
 !!! note "Preflight is answered before your handler ever runs"
-    A real preflight (an `OPTIONS` request carrying `Access-Control-Request-Method`) is answered
-    entirely by the engine, before routing and before any middleware (it still goes through
-    connection/rate limiting first, same as every other request). Your route handlers, including
-    one registered with `WFX_OPTIONS` at the same path, never see it. See
+    A real preflight (an `OPTIONS` request carrying `Access-Control-Request-Method`) from an
+    allowed origin, with `enabled = true`, is answered entirely by the engine, before routing and
+    before any middleware (it still goes through connection/rate limiting first, same as every
+    other request). Your route handlers, including one registered with `WFX_OPTIONS` at the same
+    path, never see it. A preflight from any other origin falls through to normal routing. See
     [Routing](../api_reference/routing.md#cors-and-options) for the full behavior, including what
     happens to bare `OPTIONS` requests that aren't a CORS preflight at all.
 
@@ -253,8 +254,11 @@ max_age           = 600    # 32-bit Unsigned Integer (In seconds)
 
 ## `[SSL]`
 
-TLS configuration. This section is **only used when WFX is running in HTTPS mode**.
-When HTTPS is enabled, certificate paths are **mandatory**; all other settings are **optional**.
+TLS configuration. `cert_path` and `key_path` must always be present, on every run and build,
+though the files they name are only loaded in HTTPS mode; all other settings are **optional**.
+The inbound settings apply in HTTPS mode, and the outbound ones (`outbound_ca_path`, the ciphers,
+`curves`, `min_proto_version`, `security_level` and the client session cache) apply to every
+outbound TLS endpoint, whether or not WFX itself serves HTTPS.
 
 ```toml
 [SSL]
@@ -268,8 +272,8 @@ curves                      = "X25519:P-256"  # String
 enable_server_session_cache = true            # Boolean (true or false)
 enable_client_session_cache = true            # Boolean (true or false)
 enable_ktls                 = false           # Boolean (true or false)
-server_session_cache_size   = 4096            # 64-bit Unsigned Integer (In bytes)
-client_session_cache_size   = 1024            # 64-bit Unsigned Integer (In bytes)
+server_session_cache_size   = 4096            # 64-bit Unsigned Integer (number of sessions)
+client_session_cache_size   = 1024            # 64-bit Unsigned Integer (number of sessions)
 min_proto_version           = 2               # 8-bit Unsigned Integer (1 - 3 only)
 security_level              = 2               # Integer (0 - 5 only)
 ```
@@ -310,12 +314,12 @@ security_level              = 2               # Integer (0 - 5 only)
   **Example**: a returning client skips the expensive key exchange, improving speed at the cost of more RAM usage.
 
 - `enable_client_session_cache`  
-  Same idea, but for the **outbound** `HttpEndpoint` TLS client: lets WFX resume
-  a session when reconnecting to the same upstream (e.g. after an idle-timeout
-  disconnect or a pool reconnect), instead of doing a full handshake every time.
+  Same idea, but for every **outbound** TLS endpoint (HTTP, Postgres, SMTP), one cached session
+  per endpoint: lets WFX resume a session when reconnecting to the same upstream (e.g. after an
+  idle-timeout disconnect or a pool reconnect), instead of doing a full handshake every time.
 
 - `server_session_cache_size` / `client_session_cache_size`  
-  Maximum memory allocated for each of the two session caches above. When a
+  Maximum number of sessions each of the two session caches above holds. When a
   limit is reached, older sessions are evicted, and the next reconnect on that
   side performs a full TLS handshake again.
 
@@ -390,9 +394,9 @@ max_rotations     = 2         # 16-bit Unsigned Integer
 - `enable_stdout`: Write log output to stdout.
 - `enable_colors`: ANSI color codes on stdout. Automatically disabled if stdout is not a TTY.
 - `enable_timestamps`: Prepend `[HH:MM:SS.mmm]` to each log line.
-- `enable_file`: Write log output to per-worker log files under `logs/default_logs/`.
+- `enable_file`: Write log output to files under `logs/default_logs/`: `master.log` plus one log file per worker.
 - `max_file_size`: Max size of a single log file before it rotates. Only applies when `enable_file = true`.
-- `max_rotations`: Number of rotated log files to keep. Files are named `.1` through `.N`, oldest are discarded. Only applies when `enable_file = true`.
+- `max_rotations`: Number of rotated log files to keep. Files are named `.1` through `.N`, oldest are discarded. Only applies when `enable_file = true`. Must be 1 to 32; anything else falls back to 4.
 
 ---
 
@@ -430,7 +434,6 @@ Miscellaneous engine-level settings covering caching, internal I/O, and worker p
 ```toml
 [Misc]
 file_cache_size      = 20    # 16-bit Unsigned Integer
-cache_chunk_size     = 2048  # 16-bit Unsigned Integer (In bytes)
 template_chunk_size  = 16384 # 32-bit Unsigned Integer (In bytes)
 master_poll_interval = 2     # 16-bit Unsigned Integer (In seconds)
 worker_backoff_base  = 1     # 16-bit Unsigned Integer (In seconds)
@@ -439,7 +442,6 @@ worker_backoff_max   = 16    # 16-bit Unsigned Integer (In seconds)
 
 - `file_cache_size`: Number of files cached in memory (LFU)
 - `template_chunk_size`: Max I/O chunk size during template compilation
-- `cache_chunk_size`: Max I/O chunk size for template cache files
 - `master_poll_interval`: How often the master process wakes up to check for dead workers and poll memory metrics. Lower values mean faster crash detection at the cost of slightly more wakeups. **Validated: must be greater than 0**, or the master process busy-spins at 100% CPU instead of sleeping.
 - `worker_backoff_base`: Starting backoff delay in seconds before the first restart attempt. Doubles on each subsequent attempt.
 - `worker_backoff_max`: Maximum backoff delay cap in seconds. A crashed worker is always restarted, there is no restart limit: once the backoff reaches this cap, every further restart waits this long.

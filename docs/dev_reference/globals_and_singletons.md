@@ -1,6 +1,6 @@
 # Globals and Singletons
 
-WFX uses plain globals with free functions instead of Meyers singletons. Each global lives in a `.cpp` file inside an anonymous namespace, making it inaccessible from outside that translation unit. The only way to reach it is through its `Get...()` function.
+WFX uses plain globals with free functions instead of Meyers singletons. Each global lives in a `.cpp` file as a file-scope `static` (internal linkage), making it inaccessible from outside that translation unit. The only way to reach it is through its `Get...()` function.
 
 This avoids the thread-safe initialization guard that Meyers singletons emit on every call, and makes initialization order explicit rather than lazy.
 
@@ -54,11 +54,11 @@ Returns the global config instance. Populated by `LoadCoreSettings()` and `LoadF
 WFX::Utils::RandomPool& GetRandomPool() noexcept;
 ```
 
-Returns the cryptographically secure random byte pool. Backed by `getrandom()` on Linux and `BCryptGenRandom` on Windows, with a `/dev/urandom` fallback for older kernels. The pool pre-fills 1MB of random bytes at construction and refills on demand.
+Returns the cryptographically secure random byte pool. Backed by `getrandom()`, with a `/dev/urandom` fallback for kernels without it. The pool pre-fills 1MB of random bytes at construction and refills on demand.
 
-The SSL key is generated from this pool during construction and cached. All workers inherit the same SSL key after the fork via `GetSSLKey()`.
+The master generates the SSL key from this pool with an explicit `GenerateSSLKey()` call before the fork and caches it; all workers inherit the same key via `GetSSLKey()`.
 
-If workers need crypto random bytes after the fork, `GetBytes()` is safe to call per-worker since each worker has its own pool instance.
+`fork()` copies the master's pool as is, so each worker calls `Reseed()` first thing; after that `GetBytes()` is safe to call per worker, and no two workers (or respawns) share a byte stream.
 
 ---
 
@@ -122,7 +122,7 @@ The master uses `workerPids` and `workerPGID` for process group management and s
 
 ## `MetricTracer`
 
-`MetricTracer` is a pure static class with no instance and no `Get` function. It manages a shared `mmap` region allocated before the fork. See the **[Metrics and Observability](./metrics_and_observability.md)** page for details.
+`MetricTracer` is a namespace of free functions over process-local `inline` globals, with no instance and no `Get` function. It manages a shared `mmap` region allocated before the fork. See the **[Metrics and Observability](./metrics_and_observability.md)** page for details.
 
 ---
 
@@ -132,10 +132,10 @@ The order in which these are initialized matters. The master process follows thi
 
 1. `GetLogger()` - available immediately at program start (heap allocated, constructed on first call)
 2. `GetConfig()` - constructed at program start, populated via `LoadCoreSettings()`
-3. `GetRandomPool()` - constructed at program start, generates SSL key in constructor
+3. `GetRandomPool()` - constructed at program start (fills the pool); the master calls `GenerateSSLKey()` on it before the fork
 4. `GetTemplateEngine()` - constructed at program start, compiled before fork
 5. `MetricTracer::Create()` - called explicitly before fork
 6. `fork()`
-7. Per-worker: `GetBufferPool().Init()` and `GetFileCache().Init()`
+7. Per-worker: `GetRandomPool().Reseed()`, `MetricTracer::InitWorker()`, then `GetBufferPool().Init()` and `GetFileCache().Init()`
 
 `GetMasterState()` is available throughout. `GetLogger()` is the only one safe to call from a destructor of any other global.

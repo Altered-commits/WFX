@@ -30,7 +30,8 @@ real install. If you need a fast build for perf testing, use `bash scripts/insta
 --local-release` instead: same checkout, same `build/` directory, optimized Release with
 sanitizers off.
 
-After editing, either run `./wfx` from the checkout root while iterating, or rebuild with
+After editing, either rebuild with `cmake --build build` and run `./wfx` from the checkout root
+(`install.sh --local-*` moves the binary out of the checkout), or rebuild with
 whichever `--local-*` mode you last used to refresh `wfx` on PATH. Switching between the two modes
 reconfigures and recompiles whatever the flag change touches, they share the same `build/`
 directory. See [Build Macros](build_macros.md) for exactly what each mode sets under the hood.

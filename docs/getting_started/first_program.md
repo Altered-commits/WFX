@@ -43,4 +43,4 @@ Open your browser and visit these routes to verify the content. If you see the e
 
 WFX is now running on your system.
 
-For beginners, it is recommended to continue to the **[Overview](../core_concepts/project_structure.md)** section to learn about the project structure and available engine commands.
+For beginners, it is recommended to continue to the **[Project Structure](../core_concepts/project_structure.md)** section to learn about the project structure and available engine commands.

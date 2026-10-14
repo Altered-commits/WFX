@@ -6,6 +6,6 @@
 5. onAbort-equivalent for request timeout
 
 # To Fix:
-1. Add write budget per connection (backend: epoll/io_uring/iocp/kqueue), so one connection can't hoard writing
+1. Add write budget per connection (backend: epoll/io_uring), so one connection can't hoard writing
 2. When server reaches connection limit, drop random connections instead of the current policy
 3. Template engine caching logic still needs a real pass

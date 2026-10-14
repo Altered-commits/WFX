@@ -18,7 +18,8 @@
         {                                                                                                              \
             WFX::Core::GlobalWFXDeferred.emplace_back([] {                                                             \
                 WFX::Core::HttpApiExt1()->registerMiddleware(WFX::Shared::StringView::FromCString(name),               \
-                                                             WFX::Http::MakeMwCallback(__VA_ARGS__));                  \
+                                                             WFX::Http::MakeMwCallback<WFX_MW_CLASS(uniq)>(            \
+                                                                 __VA_ARGS__));                                        \
             });                                                                                                        \
         }                                                                                                              \
     } WFX_MW_INSTANCE(uniq);                                                                                           \

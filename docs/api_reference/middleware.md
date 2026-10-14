@@ -113,13 +113,9 @@ The only difference is that execution occurs inside a coroutine.
 
 **Example**:
 ```cpp
-/*
- * NOTE: This header is mandatory when using any builtin async utilities-
- *       -such as functions like 'SleepFor'. It also brings in the core-
- *       -async machinery, including 'WFX::MwCoro' and related types
- */
+// <wfx/http.hpp> already includes <wfx/async.hpp>, which provides SleepFor, WFX::MwCoro and
+// the rest of the async machinery
 #include <wfx/http.hpp>
-#include <wfx/async.hpp>
 
 WFX_MIDDLEWARE("RequestCooldown", [](WFX::Request _, WFX::Response res) -> WFX::MwCoro {
     auto err = co_await WFX::SleepFor(2000);

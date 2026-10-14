@@ -30,18 +30,53 @@ import sys
 import threading
 import time
 
+# -----------------------------------------------------------------------
+# Protocol constants, mirroring include/wfx/endpoint/postgres/protocol.hpp
+# -----------------------------------------------------------------------
+FE_BIND, FE_CLOSE, FE_DESCRIBE, FE_EXECUTE, FE_PARSE = b"B", b"C", b"D", b"E", b"P"
+FE_PASSWORD, FE_QUERY, FE_SYNC, FE_TERMINATE = b"p", b"Q", b"S", b"X"
+
+BE_AUTHENTICATION, BE_BACKEND_KEY_DATA = b"R", b"K"
+BE_BIND_COMPLETE, BE_CLOSE_COMPLETE, BE_PARSE_COMPLETE = b"2", b"3", b"1"
+BE_COMMAND_COMPLETE, BE_DATA_ROW, BE_ERROR_RESPONSE = b"C", b"D", b"E"
+BE_EMPTY_QUERY_RESPONSE, BE_NO_DATA, BE_NOTICE_RESPONSE = b"I", b"n", b"N"
+BE_PARAMETER_STATUS, BE_PORTAL_SUSPENDED, BE_READY_FOR_QUERY = b"S", b"s", b"Z"
+BE_ROW_DESCRIPTION = b"T"
+BE_COPY_OUT_RESPONSE, BE_NEGOTIATE_PROTOCOL, BE_NOTIFICATION_RESPONSE = b"H", b"v", b"A"
+
+AUTH_OK, AUTH_KERBEROS_V5, AUTH_CLEARTEXT_PASSWORD = 0, 2, 3
+AUTH_MD5_PASSWORD, AUTH_GSS, AUTH_GSS_CONTINUE, AUTH_SSPI = 5, 7, 8, 9
+AUTH_SASL, AUTH_SASL_CONTINUE, AUTH_SASL_FINAL = 10, 11, 12
+
+PROTOCOL_3_0 = 196608
+SSL_REQUEST_CODE = 80877103
+CANCEL_REQUEST_CODE = 80877102
+
+OID_INT4, OID_TEXT, OID_NUMERIC, OID_INT4_ARRAY = 23, 25, 1700, 1007
+FORMAT_BINARY = 1
+
+STREAM_ROWS = 5
+
+_FLOAT_KEYS = ("slow_trickle", "timeout")
+
 _lock = threading.Lock()
 _stats = {}  # name -> {"handshakes", "hs_fail", "auth_ok", "auth_fail", "queries", "cancels",
-             #          "last_sql", "connect_attempts", "raw_startup"}
+             #          "last_sql", "connect_attempts", "raw_startup", "alpn"}
 
 def _stat_init(name):
     return _stats.setdefault(name, {"handshakes": 0, "hs_fail": 0, "auth_ok": 0, "auth_fail": 0,
                                     "queries": 0, "cancels": 0, "last_sql": "", "connect_attempts": 0,
-                                    "raw_startup": ""})
+                                    "raw_startup": "", "alpn": ""})
 
 def _bump(name, key, n=1):
     with _lock:
         _stat_init(name)[key] += n
+
+def _record_alpn(name, sock):
+    """The protocol this side selected from what the client offered, "" when it offered none
+    of ours. Read against the persona's probe list, built so each answer has one offer behind it."""
+    with _lock:
+        _stat_init(name)["alpn"] = sock.selected_alpn_protocol() or ""
 
 # -----------------------------------------------------------------------
 # Connection plumbing
@@ -71,31 +106,6 @@ class ByteReader:
             self.buf += d
         out, self.buf = self.buf[:n], self.buf[n:]
         return out
-
-# -----------------------------------------------------------------------
-# Protocol constants, mirroring include/wfx/endpoint/postgres/protocol.hpp
-# -----------------------------------------------------------------------
-FE_BIND, FE_CLOSE, FE_DESCRIBE, FE_EXECUTE, FE_PARSE = b"B", b"C", b"D", b"E", b"P"
-FE_PASSWORD, FE_QUERY, FE_SYNC, FE_TERMINATE = b"p", b"Q", b"S", b"X"
-
-BE_AUTHENTICATION, BE_BACKEND_KEY_DATA = b"R", b"K"
-BE_BIND_COMPLETE, BE_CLOSE_COMPLETE, BE_PARSE_COMPLETE = b"2", b"3", b"1"
-BE_COMMAND_COMPLETE, BE_DATA_ROW, BE_ERROR_RESPONSE = b"C", b"D", b"E"
-BE_EMPTY_QUERY_RESPONSE, BE_NO_DATA, BE_NOTICE_RESPONSE = b"I", b"n", b"N"
-BE_PARAMETER_STATUS, BE_PORTAL_SUSPENDED, BE_READY_FOR_QUERY = b"S", b"s", b"Z"
-BE_ROW_DESCRIPTION = b"T"
-BE_COPY_OUT_RESPONSE, BE_NEGOTIATE_PROTOCOL, BE_NOTIFICATION_RESPONSE = b"H", b"v", b"A"
-
-AUTH_OK, AUTH_KERBEROS_V5, AUTH_CLEARTEXT_PASSWORD = 0, 2, 3
-AUTH_MD5_PASSWORD, AUTH_GSS, AUTH_GSS_CONTINUE, AUTH_SSPI = 5, 7, 8, 9
-AUTH_SASL, AUTH_SASL_CONTINUE, AUTH_SASL_FINAL = 10, 11, 12
-
-PROTOCOL_3_0 = 196608
-SSL_REQUEST_CODE = 80877103
-CANCEL_REQUEST_CODE = 80877102
-
-OID_INT4, OID_TEXT, OID_NUMERIC, OID_INT4_ARRAY = 23, 25, 1700, 1007
-FORMAT_BINARY = 1
 
 # -----------------------------------------------------------------------
 # Message framing, backend side. Every typed message is [1 byte type][int32
@@ -306,7 +316,7 @@ def _magic_datarow_first():
     return [data_row([struct.pack(">i", 1)])], "SELECT 1"
 
 def _magic_array_overflow():
-    # int4[], 6 dims of 50000 each: the product overflows int32, no element bytes needed
+    # int4[], 6 dims of 50000 each: the product overflows int32, and no element bytes follow
     hdr = struct.pack(">iii", 6, 0, OID_INT4)
     for _ in range(6):
         hdr += struct.pack(">ii", 50000, 1)
@@ -345,8 +355,6 @@ MAGIC_QUERIES = {
     "PGAUDIT_ARRAY_ELEMENTS": _magic_array_elements,
     "PGAUDIT_ARRAY_TRUNCATED": _magic_array_truncated,
 }
-
-STREAM_ROWS = 5
 
 def _stream_dataset():
     return [data_row([struct.pack(">i", i)]) for i in range(1, STREAM_ROWS + 1)]
@@ -668,6 +676,8 @@ def serve_conn(raw_sock, name, opts):
 
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ctx.load_cert_chain(certfile=opts["cert"], keyfile=opts["key"])
+            if opts.get("alpn"):
+                ctx.set_alpn_protocols(opts["alpn"].split("|"))
             try:
                 sock = ctx.wrap_socket(raw_sock, server_side=True)
             except (ssl.SSLError, OSError) as e:
@@ -675,6 +685,7 @@ def serve_conn(raw_sock, name, opts):
                 print("pg mock '%s' TLS handshake failed: %r" % (name, e), flush=True)
                 return
             _bump(name, "handshakes")
+            _record_alpn(name, sock)
             sock.settimeout(opts.get("timeout", 60.0))
             reader.set_sock(sock)
 
@@ -875,8 +886,6 @@ def parse_listen(spec):
             k, v = part.split("=", 1)
             kv[k.strip()] = v.strip()
     return kv
-
-_FLOAT_KEYS = ("slow_trickle", "timeout")
 
 def coerce_opts(kv):
     opts = dict(kv)

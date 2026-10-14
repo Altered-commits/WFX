@@ -38,20 +38,23 @@ def _is_important(line):
     lowered = line.lower()
     return any(word in lowered for word in _KEYWORDS)
 
-def launch_env(app_dir):
-    """Environment for `wfx run`, plus a wiped crash_logs to launch it into.
+def launch_env(app_dir, wipe=True):
+    """Environment for `wfx run`, plus a crash_logs to launch it into, wiped unless told otherwise.
 
     Old dumps are removed so anything the follower prints in red belongs to this run; a report from
-    hours ago replaying at startup would otherwise read as a fresh crash. default_logs is left alone.
+    hours ago replaying at startup would otherwise read as a fresh crash. A restart mid-run passes
+    wipe=False, since what is there is this run's and the end-of-run scan still has to see it.
+    default_logs is left alone.
     """
     crash_dir = os.path.join(app_dir, "logs", "crash_logs")
 
     try:
         os.makedirs(crash_dir, exist_ok=True)
-        for name in os.listdir(crash_dir):
-            path = os.path.join(crash_dir, name)
-            if os.path.isfile(path):
-                os.remove(path)
+        if wipe:
+            for name in os.listdir(crash_dir):
+                path = os.path.join(crash_dir, name)
+                if os.path.isfile(path):
+                    os.remove(path)
     except OSError:
         return dict(os.environ)
 
@@ -113,6 +116,30 @@ def forced_worker_kills(app_dir):
             return [line.strip() for line in handle if "did not exit in time" in line]
     except OSError:
         return []
+
+def _worker_lines(app_dir):
+    """Every line in every worker's log, rotated ones included. Every log is opened fresh on boot
+    (CircularFileSink::OpenFresh), so they all belong to the server's current boot."""
+    root = os.path.join(app_dir, "logs", "default_logs")
+    try:
+        names = [name for name in os.listdir(root) if name.startswith("worker-")]
+    except OSError:
+        return
+
+    for name in names:
+        try:
+            with open(os.path.join(root, name), "r", errors="replace") as handle:
+                yield from handle
+        except OSError:
+            continue
+
+def worker_logs_contain(app_dir, text):
+    """Whether any worker logged a line holding text."""
+    return any(text in line for line in _worker_lines(app_dir))
+
+def worker_logs_count(app_dir, text):
+    """How many lines holding text the workers logged."""
+    return sum(text in line for line in _worker_lines(app_dir))
 
 class LogFollower(threading.Thread):
     """Tails the app's log directories and prints new lines as they appear, like `tail -F`."""

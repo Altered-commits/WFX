@@ -14,7 +14,7 @@
 //   WFX::LoadJwk(jwksJson, kid)   : {CryptoStatus, AsymKey}, public key only
 // -----------------------------------------------------------------------
 
-#include "wfx/http.hpp"
+#include "wfx/json.hpp"
 #include "wfx/utils/crypto.hpp"
 #include "wfx/utils/encoding.hpp"
 

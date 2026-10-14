@@ -9,7 +9,8 @@ one upstream relay and its connection pool.
     resolution and refresh, reconnect/backoff behavior, and prewarm all work
     exactly as described on the [Endpoint overview](overview.md),
     `SmtpEndpoint` just wires them up for you with an SMTP-shaped handshake
-    and transaction.
+    and transaction. One difference: `connLimit` is exact here, never rounded up
+    to a multiple of 64.
 
     To use it, include:
     ```cpp
@@ -111,7 +112,7 @@ WFX_POST("/contact", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
         "Contact Form",          // toName:    display name on To:
         "New enquiry",           // subject
         "message body",          // body
-        outcome
+        outcome                  // replyTo, an optional last argument, sets Reply-To:
     );
 
     if(!outcome.Success()) {
@@ -128,25 +129,37 @@ WFX_POST("/contact", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 
 ```cpp
 struct SmtpSendOutcome {
-    Shared::EndpointStatus status; // EpOk once DATA actually goes through
-    EndpointOutput<SmtpResponse> response; // the last reply that came back, if any
+    WFX::EndpointStatus status;    // the last step's status, EpOk whenever it got a reply
+    bool accepted;                 // the server accepted the message body
+    EndpointOutput<SmtpResponse> response; // the last step's reply, empty if it got none
 
-    bool Success() const noexcept; // status == EpOk && response && response->Success()
+    bool Success() const noexcept; // accepted
 };
 ```
 
-- **`status`** tells you whether a real SMTP conversation even happened. It's
-  `WFX::EpOk` once the message is fully sent. Anything else means the
-  problem was below the SMTP layer entirely: the connection pool was full
-  (`WFX::EpPoolExhausted`), the relay refused the TCP/TLS connection, or a
-  command timed out. A real reply from the server was never received in any
-  of those cases.
-- **`response`** stays empty (`bool(outcome.response) == false`) exactly when
-  that happens. Once a real SMTP reply exists, `response` holds it: `code`
-  and `text`, the same shape `SmtpTransaction`'s own methods return, see
-  [`SmtpResponse`](#smtpresponse) below.
+`SendMail` resets the whole outcome first, so reusing one across calls never
+carries an earlier send's result over.
+
+- **`status`** is the status of the last step attempted, and tells you whether
+  a real SMTP conversation happened there. It's `WFX::EpOk` whenever that step
+  got a reply, accepted or not: a `550` to `MAIL FROM` is still `EpOk`.
+  Anything else means the problem was below the SMTP layer:
+    - `WFX::EpPoolExhausted`: the connection pool was full
+    - `WFX::EpSslFailure`: the `STARTTLS` handshake failed
+    - `WFX::EpHandshakeTimeout`: the handshake ran past `connectTimeoutSeconds`
+    - `WFX::EpInternalError`: the server refused the handshake (no `STARTTLS`,
+      no `AUTH PLAIN` or `LOGIN`, or the credentials were rejected)
+    - `WFX::EpSerializeError`: a field carried CR, LF or NUL, reported on the
+      command that carries it
+    - `WFX::EpRequestTimeout`: a command timed out
+- **`response`** holds the last step's reply, `code` and `text`, the same shape
+  `SmtpTransaction`'s own methods return, see [`SmtpResponse`](#smtpresponse)
+  below. It's empty (`bool(outcome.response) == false`) when that step got no
+  reply.
 - **`Success()`** is the one thing most callers need: true only if the whole
-  four-step exchange completed and the server accepted it.
+  four-step exchange completed and the server accepted it. A `2xx` to `DATA`
+  in place of its `354` go-ahead stops the exchange before the body is sent,
+  so it is not a success, even though that reply is a `2xx`.
 
 If you need to know exactly which step failed (bad sender vs. bad recipient
 vs. the message itself getting rejected), `SendMail` won't tell you that on
@@ -195,7 +208,8 @@ connections.
 Always check `IsValid()` before calling anything else on `tx`. It comes back
 false when every connection in the pool is already busy (bounded by
 `connLimit`, see [Tuning & limits](#tuning-limits) below), there simply
-wasn't a free connection to hand you.
+wasn't a free connection to hand you. A command sent through an invalid `tx`
+fails with `WFX::EpInvalidKey`.
 
 ### `MailFrom(addr)`
 
@@ -323,6 +337,7 @@ inline const auto Relay = WFX::SmtpEndpoint{"smtp.example.com:587", WFX::SmtpEnd
 | `maxResponseLines` | Cap on the number of lines in one multi-line response (default 64), a DoS defense against an endless `250-...` flood |
 | `username` / `password` | Credentials offered via `AUTH PLAIN` or `AUTH LOGIN`, whichever the server advertises. Never logged |
 | `heloName` | The identity sent in `EHLO`, e.g. `"mail.example.com"` |
+| `alpn` | ALPN names offered on the `STARTTLS` handshake, comma-separated. SMTP has no name of its own, so the default is empty, which offers none |
 
 There is no `tlsConfig` on `SmtpEndpointConfig`: STARTTLS is negotiated
 in-band by the client's own `onConnect` handshake, the underlying connection

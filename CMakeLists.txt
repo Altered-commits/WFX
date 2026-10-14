@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(wfx VERSION 0.1.0)
+project(wfx)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,16 +14,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 # -----------------------------
-# Set actively used OS
+# WFX builds on Linux only
 # -----------------------------
-if(WIN32)
-    set(CURRENT_OS windows)
-elseif(APPLE)
-    set(CURRENT_OS macos)
-elseif(UNIX)
-    set(CURRENT_OS linux)
-else()
-    message(FATAL_ERROR "Unsupported OS")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "WFX builds on Linux only")
 endif()
 
 # -----------------------------
@@ -33,10 +27,6 @@ endif()
 # -----------------------------
 option(WFX_ENABLE_ASAN "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 if(WFX_ENABLE_ASAN)
-    if(MSVC)
-        message(FATAL_ERROR "WFX_ENABLE_ASAN is not supported with MSVC")
-    endif()
-
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=address,undefined)
 
@@ -56,32 +46,6 @@ include(cmake/third_party.cmake)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # -----------------------------
-# Helper function to filter sources by OS
-# -----------------------------
-function(filter_sources_by_os out_var)
-    set(filtered_sources "")
-    foreach(src IN LISTS ${out_var})
-        if(NOT src MATCHES "/(windows|linux|macos|posix)/")
-            list(APPEND filtered_sources "${src}")
-        elseif(src MATCHES "/${CURRENT_OS}/")
-            list(APPEND filtered_sources "${src}")
-        elseif(src MATCHES "/posix/" AND NOT CURRENT_OS STREQUAL "windows")
-            # 'posix/' sources build for both linux and macos, only excluded on windows
-            list(APPEND filtered_sources "${src}")
-        endif()
-    endforeach()
-    set(${out_var} "${filtered_sources}" PARENT_SCOPE)
-endfunction()
-
-# -----------------------------
-# Compile definitions
-# -----------------------------
-add_compile_definitions(
-    $<$<CONFIG:Debug>:WFX_DEBUG>
-    WFX_ENGINE_BUILD
-)
-
-# -----------------------------
 # Gather sources
 # -----------------------------
 file(GLOB_RECURSE WFX_CLI_SOURCES         "${CMAKE_CURRENT_SOURCE_DIR}/cli/*.cpp")
@@ -91,10 +55,6 @@ file(GLOB_RECURSE WFX_HTTP_SOURCES        "${CMAKE_CURRENT_SOURCE_DIR}/http/*.cp
 file(GLOB_RECURSE WFX_SHARED_SOURCES      "${CMAKE_CURRENT_SOURCE_DIR}/shared/*.cpp")
 file(GLOB_RECURSE WFX_OS_SPECIFIC_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/os_specific/*.cpp")
 file(GLOB_RECURSE WFX_UTILS_SOURCES       "${CMAKE_CURRENT_SOURCE_DIR}/utils/*.cpp")
-
-# Filter OS-specific sources
-filter_sources_by_os(WFX_OS_SPECIFIC_SOURCES)
-filter_sources_by_os(WFX_UTILS_SOURCES)
 
 # -----------------------------
 # Engine executable target
@@ -112,6 +72,14 @@ add_executable(wfx
 target_include_directories(wfx PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/include
+)
+
+# -----------------------------
+# Compile definitions, engine only: wfx_header_check below must compile without WFX_ENGINE_BUILD
+# -----------------------------
+target_compile_definitions(wfx PRIVATE
+    $<$<CONFIG:Debug>:WFX_DEBUG>
+    WFX_ENGINE_BUILD
 )
 
 # -----------------------------
@@ -146,19 +114,14 @@ target_compile_options(wfx PRIVATE
         -O3 ${WFX_TARGET_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants
     >
 
-    # Release (Clang / AppleClang)
-    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:
+    # Release (Clang)
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:
         -O3 ${WFX_TARGET_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants
     >
 
     # Release (Intel oneAPI / icx)
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:IntelLLVM>>:
         -O3 ${WFX_TARGET_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=auto -fmerge-all-constants -xHost
-    >
-
-    # Release (MSVC)
-    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:
-        /O2 /GL /Gw /Gy /Zc:inline /GS-
     >
 )
 
@@ -171,25 +134,18 @@ target_link_options(wfx PRIVATE
         -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto
     >
 
-    # Release (Clang / AppleClang): bfd's LTO plugin doesn't treat ASan's per-TU-
+    # Release (Clang): bfd's LTO plugin doesn't treat ASan's per-TU-
     # -ctor/dtor sections as GC roots, so --gc-sections can discard one while-
     # -.init_array/.fini_array still references it. lld does this correctly
-    $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:
         -Wl,--gc-sections -Wl,--as-needed -Wl,-s -flto=auto -fuse-ld=lld
-    >
-
-    # Release (MSVC)
-    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:
-        /LTCG /OPT:REF /OPT:ICF
     >
 )
 
 # -----------------------------
-# OS-specific system libraries
+# System libraries
 # -----------------------------
-if(UNIX)
-    target_link_libraries(wfx PRIVATE dl pthread resolv)
-endif()
+target_link_libraries(wfx PRIVATE dl pthread resolv)
 
 # -----------------------------
 # Third-party libraries
@@ -212,8 +168,9 @@ target_link_libraries(wfx PRIVATE
 # EXCLUDE_FROM_ALL: compile_commands.json (what tidy.sh needs) is emitted at CMake CONFIGURE
 # time for every target regardless of this flag, so this only has to exist, not be built by
 # default. Without it, a plain './scripts/install.sh' (cmake --build with no --target) would
-# compile this too, on every install, for a target nothing ever links against. Build it
-# on demand with 'cmake --build build --target wfx_header_check' to actually verify it compiles.
+# compile this too, on every install, for a target nothing ever links against. CI builds it in
+# compile_check.yml on every compiler and arch; locally, 'cmake --build build --target
+# wfx_header_check' does the same.
 # -----------------------------
 add_library(wfx_header_check OBJECT EXCLUDE_FROM_ALL include/misc/header_check.cpp)
 target_include_directories(wfx_header_check PRIVATE

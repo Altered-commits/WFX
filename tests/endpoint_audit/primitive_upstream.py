@@ -25,6 +25,7 @@
 
 import argparse
 import socket
+import struct
 import threading
 import time
 
@@ -33,6 +34,14 @@ _lock = threading.Lock()
 # Connections the mux listener has accepted. One multiplexed endpoint drives many
 # concurrent requests, so this is what proves they shared a connection
 _mux_connections = 0
+
+# Mux handshakes left unanswered on purpose (token "hang"). Each one is a client still
+# suspended inside onConnect, which proves a slot was mid-handshake when WFX exited
+_mux_hanging = 0
+
+# The most requests any one token "capped" connection had outstanding at once, which is what
+# proves the endpoint's maxConcurrentStreams held on the wire
+_mux_capped_peak = 0
 
 # Every solo connection gets an id, handed to the client once in "OK <connId>". The
 # app keeps it in slot state and stamps it on every response it builds, so which
@@ -76,7 +85,9 @@ def _float(text, default):
 #
 #   GET /ctl/ping                 -> "pong"
 #   GET /ctl/mux/conns            -> connections the mux listener accepted
-#   GET /ctl/solo/cancels         -> "<count> <last connId>"
+#   GET /ctl/mux/hanging          -> handshakes still left unanswered (token "hang")
+#   GET /ctl/mux/capped/peak      -> most requests one token "capped" connection had outstanding
+#   GET /ctl/solo/cancels      -> "<count> <last connId>"
 #   GET /ctl/solo/cancels/reset   -> "ok", zeroes both
 #   GET /ctl/gate/close           -> "ok", new connects to the gate stay in flight
 #   GET /ctl/gate/open            -> "ok", a held connect lands on its next SYN retry
@@ -90,6 +101,14 @@ def _control_body(path):
     if path == "/ctl/mux/conns":
         with _lock:
             return str(_mux_connections)
+
+    if path == "/ctl/mux/hanging":
+        with _lock:
+            return str(_mux_hanging)
+
+    if path == "/ctl/mux/capped/peak":
+        with _lock:
+            return str(_mux_capped_peak)
 
     if path == "/ctl/solo/cancels":
         with _lock:
@@ -149,13 +168,17 @@ def _serve_control_conn(sock):
 # Newline-delimited ASCII. One connection is one handshake followed by any number of
 # requests:
 #
+#   Client -> "PAD <filler>\n"     any number before AUTH, ignored
 #   Client -> "AUTH <token>\n"      once, right after connecting
-#   Server -> "OK\n"                token "good", or "slow" after a long stall
+#   Server -> "OK\n"                token "good" or "capped", or "slow" after a long stall
 #          -> "ERR\n"               token "bad"; the connection stays open, the
 #                                   client's own onConnect decides what to do
 #          -> (closes, no reply)    token "reset"
+#          -> (never replies)       token "hang", held open until the client closes
+#          -> (stops reading)       token "stall", so whatever the client sends next
+#                                   piles up in the socket
 #
-#   Client -> "REQ <id> <key>\n"    any number of these, id is caller-assigned
+#   Client -> "REQ <id> <key>\n"   any number of these, id is caller-assigned
 #   Server -> "RES <id> <value>\n"  value is the key, unless the key reads
 #                                   "sleep:<secs>:<value>", in which case the reply
 #                                   is delayed by <secs> and carries <value>
@@ -163,7 +186,7 @@ def _serve_control_conn(sock):
 # Replies go out from independent per-request threads, so with more than one request
 # in flight they can, and are meant to, come back out of order.
 def _serve_mux_conn(sock):
-    global _mux_connections
+    global _mux_connections, _mux_hanging, _mux_capped_peak
     with _lock:
         _mux_connections += 1
 
@@ -176,6 +199,8 @@ def _serve_mux_conn(sock):
     write_lock = threading.Lock()
     buf = b""
     authed = False
+    capped = False
+    outstanding = 0  # requests on this connection not yet answered, tracked for token "capped" only
 
     def send_line(line):
         with write_lock:
@@ -185,8 +210,14 @@ def _serve_mux_conn(sock):
                 pass
 
     def reply_after(rid, value, delay):
+        nonlocal outstanding
         if delay > 0:
             time.sleep(delay)
+        # Counted down before the reply goes out, so the peak never includes a request the
+        # client could already have seen answered
+        if capped:
+            with _lock:
+                outstanding -= 1
         send_line("RES %s %s\n" % (rid, value))
 
     try:
@@ -206,11 +237,15 @@ def _serve_mux_conn(sock):
             buf = buf[nl + 1:]
 
             if not authed:
+                if line.startswith("PAD "):
+                    continue
+
                 parts = line.split(" ", 1)
                 token = parts[1] if len(parts) > 1 else ""
-                if token == "good":
+                if token in ("good", "capped"):
                     send_line("OK\n")
                     authed = True
+                    capped = token == "capped"
                 elif token == "slow":
                     # connectTimeoutSeconds is 5, and the engine only notices on its
                     # own 5s timer tick, so the worst case is 10s before it gives up.
@@ -220,6 +255,23 @@ def _serve_mux_conn(sock):
                     authed = True
                 elif token == "reset":
                     return  # drop mid-handshake, no reply
+                elif token == "stall":
+                    # Outlasts the client's connect timeout without reading another byte
+                    time.sleep(20.0)
+                    return
+                elif token == "hang":
+                    # No timeout either, so only the client ends this, by giving up or exiting
+                    sock.settimeout(None)
+                    with _lock:
+                        _mux_hanging += 1
+                    try:
+                        while sock.recv(4096):
+                            pass
+                    except OSError:
+                        pass
+                    with _lock:
+                        _mux_hanging -= 1
+                    return
                 else:
                     send_line("ERR\n")
                 continue
@@ -235,6 +287,11 @@ def _serve_mux_conn(sock):
                 if len(bits) == 3:
                     delay = _float(bits[1], 0.0)
                     value = bits[2]
+
+            if capped:
+                with _lock:
+                    outstanding += 1
+                    _mux_capped_peak = max(_mux_capped_peak, outstanding)
 
             threading.Thread(target=reply_after, args=(rid, value, delay), daemon=True).start()
     except OSError:
@@ -352,6 +409,12 @@ def _serve_solo_conn(sock, gated=False):
             if gated:
                 with _lock:
                     _gate_requests += 1
+
+            # Key "reset": abort with a RST instead of answering, so the client sees a socket
+            # error mid-request rather than a clean EOF
+            if line == "GET reset":
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                return
 
             if line.startswith("GET "):
                 _solo_serve_get(send, conn_id, line[4:])

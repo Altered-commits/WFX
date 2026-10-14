@@ -5,6 +5,7 @@
 #define WFX_INC_CXX_ASYNC_TASK_HPP
 
 #include "promise.hpp"
+#include <exception>
 #include <type_traits>
 
 namespace WFX::Async {
@@ -63,17 +64,27 @@ public:
         return handle;
     }
 
+    // Not noexcept: a child that threw rethrows here, into the awaiting coroutine
     // NOLINTNEXTLINE(readability-identifier-naming) - C++20 coroutine protocol name, fixed spelling
-    T await_resume() noexcept
+    T await_resume()
     {
-        // Completed normally, so the awaiting coroutine is the one running this: the child must not
+        // The child finished, so the awaiting coroutine is the one running this: the child must not
         // take it down as its frame goes (see ~BasePromise)
-        handle.promise().continuation = nullptr;
+        auto& promise = handle.promise();
+        promise.continuation = nullptr;
+
+        // A child that threw never stored a value. Its exception carries on in the parent, exactly
+        // where a normal call's would, and fails the parent only if nothing there catches it
+        if(promise.exception) {
+            const std::exception_ptr exception = promise.exception;
+            handle.destroy();
+            std::rethrow_exception(exception);
+        }
 
         if constexpr(std::is_void_v<T>)
             handle.destroy();
         else {
-            T value = std::move(handle.promise().value.Get());
+            T value = std::move(promise.value.Get());
             handle.destroy();
             return value;
         }

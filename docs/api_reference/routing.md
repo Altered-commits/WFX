@@ -149,7 +149,7 @@ Groups may be nested to form hierarchical route structures.
 
 !!! warning
     Each `WFX_GROUP_START` must be paired with a corresponding `WFX_GROUP_END`.  
-    If the number of start and end macros does not match, the server will fail to start and terminate with an error.
+    If they don't pair up, the server never starts serving: each worker exits at startup with an error naming the unmatched macro.
 
 ---
 
@@ -190,12 +190,8 @@ This allows the route handler itself to `co_await` builtins such as `SleepFor`, 
 The signature is identical to a normal route, except the lambda returns an async coroutine type:
 
 ```cpp
-/*
- * NOTE: This header is mandatory when using any builtin async utilities such as
- * functions like 'SleepFor'. It also brings in the core async machinery,
- * including 'WFX::Coro' and related types.
- */
-#include <wfx/async.hpp>
+// <wfx/http.hpp> already includes <wfx/async.hpp>, which provides SleepFor, WFX::Coro and
+// the rest of the async machinery
 #include <wfx/http.hpp>
 
 WFX_GET("/async", [](WFX::Request req, WFX::Response res) -> WFX::Coro {

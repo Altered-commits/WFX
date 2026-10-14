@@ -14,7 +14,8 @@
 //   #include "wfx/async.hpp"             : Coro, MwCoro, SleepFor
 //   #include "wfx/form.hpp"              : Form parsing, Schema, Field
 //   #include "wfx/app.hpp"               : App lifecycle (WFX_CONSTRUCTOR)
-//   #include "wfx/types.hpp"             : Just types and aliases, no HTTP machinery
+//   #include "wfx/json.hpp"              : ImJson / RmJson / ParseJson
+//   #include "wfx/types.hpp"             : Just types, aliases and constants, no functions
 //   #include "wfx/telemetry.hpp"         : Logging and metrics
 //   #include "wfx/memory.hpp"            : Engine-allocator wrappers (Alloc/New/Vector/String)
 //   #include "wfx/utils/crypto.hpp"      : Hashing, HMAC, AEAD, KDFs, CSPRNG, asymmetric sign/verify
@@ -33,6 +34,7 @@
 #include "wfx/async.hpp"
 #include "wfx/form.hpp"
 #include "wfx/app.hpp"
+#include "wfx/json.hpp"
 #include "wfx/types.hpp"
 #include "wfx/telemetry.hpp"
 #include "wfx/memory.hpp"

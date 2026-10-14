@@ -20,7 +20,7 @@
 # vectors (Project Wycheproof's ed25519_test.json) for known-answer coverage a
 # self-consistent round-trip could never catch
 #
-# Exit codes: 0 all pass, 1 any failure
+# Exit codes: 0 all pass, 1 failure, 2 security finding, 3 server never came up
 
 import base64
 import hashlib
@@ -51,7 +51,64 @@ ST_AUTH_FAILED = 3
 ST_UNSUPPORTED = 4
 ST_INTERNAL_ERROR = 5
 
+# Both AEAD algorithms append a 16-byte tag
+AEAD_TAG_LEN = 16
+
+# What every *-into route in app/src/main.cpp prefills its out buffer with (OUT_BUFFER_FILL there)
+OUT_BUFFER_FILL = 0xAA
+
 HASH_ALGOS = {"sha256": hashlib.sha256, "sha384": hashlib.sha384, "sha512": hashlib.sha512}
+
+EC_CURVE_LEN = {"ec_p256": 32, "ec_p384": 48}
+
+# scheme name -> (WFX key-type header value, cryptography hash class, RSA padding factory or None)
+SCHEMES = {
+    "rs256":   ("rsa", hashes.SHA256, lambda h: padding.PKCS1v15()),
+    "rs384":   ("rsa", hashes.SHA384, lambda h: padding.PKCS1v15()),
+    "rs512":   ("rsa", hashes.SHA512, lambda h: padding.PKCS1v15()),
+    "ps256":   ("rsa", hashes.SHA256, lambda h: padding.PSS(mgf=padding.MGF1(h()), salt_length=h().digest_size)),
+    "ps384":   ("rsa", hashes.SHA384, lambda h: padding.PSS(mgf=padding.MGF1(h()), salt_length=h().digest_size)),
+    "ps512":   ("rsa", hashes.SHA512, lambda h: padding.PSS(mgf=padding.MGF1(h()), salt_length=h().digest_size)),
+    "es256":   ("ec_p256", hashes.SHA256, None),
+    "es384":   ("ec_p384", hashes.SHA384, None),
+    "ed25519": ("ed25519", None, None),
+}
+
+# scheme key -> JOSE "alg" name (RFC 7518/8037). Only differs from the scheme key for
+# ed25519, JOSE calls it "EdDSA"
+JOSE_ALG = {
+    "rs256": "RS256", "rs384": "RS384", "rs512": "RS512",
+    "ps256": "PS256", "ps384": "PS384", "ps512": "PS512",
+    "es256": "ES256", "es384": "ES384",
+    "ed25519": "EdDSA",
+}
+
+# Real, independently-maintained Ed25519 test vectors (Project Wycheproof,
+# testvectors_v1/ed25519_test.json) - a curated subset spanning valid signatures, RFC 8032 known
+# test vectors, and the edge cases "Taming the many EdDSAs" (eprint.iacr.org/2020/1244) showed most
+# libraries get wrong: non-canonical/malleated (R,S) pairs, S just above the group order, truncated
+# and garbage-appended signatures, and single-bit R corruption. Catches a systematically-wrong-but-
+# self-consistent implementation that round-trip testing alone could never reveal
+WYCHEPROOF_ED25519 = [
+    # (tcId, flag, pk_hex, msg_hex, sig_hex, expect_valid, comment)
+    (1, 'Valid', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '', 'd4fbdb52bfa726b44d1786a8c0d171c3e62ca83c9e5bbe63de0bb2483f8fd6cc1429ab72cafc41ab56af02ff8fcc43b99bfe4c7ae940f60f38ebaa9d311c4007', True, ''),
+    (2, 'Valid', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '78', 'd80737358ede548acb173ef7e0399f83392fe8125b2ce877de7975d8b726ef5b1e76632280ee38afad12125ea44b961bf92f1178c9fa819d020869975bcbe109', True, ''),
+    (10, 'InvalidSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '3f', '00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', False, 'special values for r and s'),
+    (11, 'InvalidSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '3f', '00000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000', False, 'special values for r and s'),
+    (30, 'TruncatedSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '', False, 'empty signature'),
+    (31, 'TruncatedSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab0', False, 's missing'),
+    (33, 'SignatureWithGarbage', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab07a9155711ecfaf7f99f277bad0c6ae7e39d4eef676573336a5c51eb6f946b30d2020', False, 'signature too long'),
+    (34, 'SignatureWithGarbage', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab07a9155711ecfaf7f99f277bad0c6ae7e39d4eef676573336a5c51eb6f946b30d7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', False, 'include pk in signature'),
+    (38, 'CompressedSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '546573743137', '93de3ca252426c95f735cb9edd92e83321ac62372d5aa5b379786bae111ab6b17251330e8f9a7c30d6993137c596007d7b001409287535ac4804e662bc58a3', False, 'removing 0 byte from signature'),
+    (39, 'CompressedSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374313236', 'dffed33a7f420b62bb1731cfd03be805affd18a281ec02b1067ba6e9d20826569e742347df59c88ae96db1f1969fb189b0ec34381d85633e1889da48d95e0e', False, 'removing 0 byte from signature'),
+    (42, 'InvalidEncoding', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '313233343030', '647c1492402ab5ce03e2c3a7f0384d051b9cf3570f1207fc78c1bcc98c281c2b1d125e5538f38afbcc1c84e489521083041d24bc6240767029da063271a1ff0c', False, 'modified bit 0 in R'),
+    (43, 'InvalidEncoding', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '313233343030', '677c1492402ab5ce03e2c3a7f0384d051b9cf3570f1207fc78c1bcc98c281c2bc108ca4b87a49c9ed2cf383aecad8f54a962b2899da891e12004d7993a627e01', False, 'modified bit 1 in R'),
+    (63, 'SignatureMalleability', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab067654bce3832c2d76f8f6f5dafc08d9339d4eef676573336a5c51eb6f946b31d', False, 'checking malleability'),
+    (64, 'SignatureMalleability', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab05439412b5395d42f462c67008eba6ca839d4eef676573336a5c51eb6f946b32d', False, 'checking malleability'),
+    (80, 'Ktv', 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a', '', 'e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b', True, 'draft-josefsson-eddsa-ed25519-02: Test 1'),
+    (81, 'Ktv', '3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c', '72', '92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00', True, 'draft-josefsson-eddsa-ed25519-02: Test 2'),
+    (85, 'InvalidKtv', '100fdf47fb94f1536a4f7c3fda27383fa03375a8f527c537e6f1703c47f94f86', '6a0bc2b0057cedfc0fa2e3f7f7d39279b30f454a69dfd1117c758d86b19d85e0', '0971f86d2c9c78582524a103cb9cf949522ae528f8054dc20107d999be673ff4e25ebf2f2928766b1248bec6e91697775f8446639ede46ad4df4053000000010', False, 'Signature with S just above the bound. [David Benjamin]'),
+]
 
 # Routes answer JSON, so every call goes through here. A failure is reported rather than swallowed:
 # a null result otherwise looks identical whether the route 500'd, the worker died, or the JSON was
@@ -85,6 +142,16 @@ def hmac_call(cfg, algo, key, data, path="/crypto/hmac"):
 def aead_call(cfg, path, algo, key, nonce, aad, data, rtimeout=30.0):
     headers = {"X-Algo": algo, "X-Key": key.hex(), "X-Nonce": nonce.hex(), "X-Aad": aad.hex()}
     return call(cfg, "POST", path, headers, data, rtimeout=rtimeout)
+
+def into_call(cfg, path, data, cap, headers=None):
+    """One out-buffer call into an X-Cap byte buffer: {status, written, buf} (see WriteInto)."""
+    headers = dict(headers or {})
+    headers["X-Cap"] = str(cap)
+    return call(cfg, "POST", path, headers, data)
+
+def aead_into(cfg, path, algo, key, nonce, aad, data, cap):
+    headers = {"X-Algo": algo, "X-Key": key.hex(), "X-Nonce": nonce.hex(), "X-Aad": aad.hex()}
+    return into_call(cfg, path, data, cap, headers)
 
 def kdf_call(cfg, path, headers):
     return call(cfg, "GET", path, headers)
@@ -441,21 +508,6 @@ def public_key_material(pem_bytes):
         return ("ed25519", k.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw))
     raise TypeError(type(k))
 
-EC_CURVE_LEN = {"ec_p256": 32, "ec_p384": 48}
-
-# scheme name -> (WFX key-type header value, cryptography hash class, RSA padding factory or None)
-SCHEMES = {
-    "rs256":   ("rsa", hashes.SHA256, lambda h: padding.PKCS1v15()),
-    "rs384":   ("rsa", hashes.SHA384, lambda h: padding.PKCS1v15()),
-    "rs512":   ("rsa", hashes.SHA512, lambda h: padding.PKCS1v15()),
-    "ps256":   ("rsa", hashes.SHA256, lambda h: padding.PSS(mgf=padding.MGF1(h()), salt_length=h().digest_size)),
-    "ps384":   ("rsa", hashes.SHA384, lambda h: padding.PSS(mgf=padding.MGF1(h()), salt_length=h().digest_size)),
-    "ps512":   ("rsa", hashes.SHA512, lambda h: padding.PSS(mgf=padding.MGF1(h()), salt_length=h().digest_size)),
-    "es256":   ("ec_p256", hashes.SHA256, None),
-    "es384":   ("ec_p384", hashes.SHA384, None),
-    "ed25519": ("ed25519", None, None),
-}
-
 def crypto_sign(priv, scheme_name, msg):
     """Signs with `cryptography`, returning bytes in WFX's own wire format (raw R||S for EC)."""
     kind, hash_cls, pad_fn = SCHEMES[scheme_name]
@@ -487,15 +539,6 @@ def crypto_verify(pub, scheme_name, msg, sig):
     except InvalidSignature:
         return False
 
-# scheme key -> JOSE "alg" name (RFC 7518/8037). Only differs from the scheme key for
-# ed25519, JOSE calls it "EdDSA"
-JOSE_ALG = {
-    "rs256": "RS256", "rs384": "RS384", "rs512": "RS512",
-    "ps256": "PS256", "ps384": "PS384", "ps512": "PS512",
-    "es256": "ES256", "es384": "ES384",
-    "ed25519": "EdDSA",
-}
-
 def build_jwt(priv_key, scheme, payload, kid="test-1", alg_override=None):
     """Builds a compact JWT signed with `cryptography`, in WFX's own wire format. Returns
     (token, signing_input, signature) so tamper tests can recombine the pieces themselves.
@@ -512,33 +555,6 @@ def wfx_jwt_verify(cfg, token, key_pem=None, aud=None, rtimeout=30.0):
     if aud is not None:
         headers["X-Aud"] = aud
     return call(cfg, "POST", "/jwt/verify", headers, token, rtimeout=rtimeout)
-
-# Real, independently-maintained Ed25519 test vectors (Project Wycheproof,
-# testvectors_v1/ed25519_test.json) - a curated subset spanning valid signatures, RFC 8032 known
-# test vectors, and the edge cases "Taming the many EdDSAs" (eprint.iacr.org/2020/1244) showed most
-# libraries get wrong: non-canonical/malleated (R,S) pairs, S just above the group order, truncated
-# and garbage-appended signatures, and single-bit R corruption. Catches a systematically-wrong-but-
-# self-consistent implementation that round-trip testing alone could never reveal
-WYCHEPROOF_ED25519 = [
-    # (tcId, flag, pk_hex, msg_hex, sig_hex, expect_valid, comment)
-    (1, 'Valid', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '', 'd4fbdb52bfa726b44d1786a8c0d171c3e62ca83c9e5bbe63de0bb2483f8fd6cc1429ab72cafc41ab56af02ff8fcc43b99bfe4c7ae940f60f38ebaa9d311c4007', True, ''),
-    (2, 'Valid', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '78', 'd80737358ede548acb173ef7e0399f83392fe8125b2ce877de7975d8b726ef5b1e76632280ee38afad12125ea44b961bf92f1178c9fa819d020869975bcbe109', True, ''),
-    (10, 'InvalidSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '3f', '00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', False, 'special values for r and s'),
-    (11, 'InvalidSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '3f', '00000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000', False, 'special values for r and s'),
-    (30, 'TruncatedSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '', False, 'empty signature'),
-    (31, 'TruncatedSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab0', False, 's missing'),
-    (33, 'SignatureWithGarbage', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab07a9155711ecfaf7f99f277bad0c6ae7e39d4eef676573336a5c51eb6f946b30d2020', False, 'signature too long'),
-    (34, 'SignatureWithGarbage', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab07a9155711ecfaf7f99f277bad0c6ae7e39d4eef676573336a5c51eb6f946b30d7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', False, 'include pk in signature'),
-    (38, 'CompressedSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '546573743137', '93de3ca252426c95f735cb9edd92e83321ac62372d5aa5b379786bae111ab6b17251330e8f9a7c30d6993137c596007d7b001409287535ac4804e662bc58a3', False, 'removing 0 byte from signature'),
-    (39, 'CompressedSignature', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374313236', 'dffed33a7f420b62bb1731cfd03be805affd18a281ec02b1067ba6e9d20826569e742347df59c88ae96db1f1969fb189b0ec34381d85633e1889da48d95e0e', False, 'removing 0 byte from signature'),
-    (42, 'InvalidEncoding', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '313233343030', '647c1492402ab5ce03e2c3a7f0384d051b9cf3570f1207fc78c1bcc98c281c2b1d125e5538f38afbcc1c84e489521083041d24bc6240767029da063271a1ff0c', False, 'modified bit 0 in R'),
-    (43, 'InvalidEncoding', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '313233343030', '677c1492402ab5ce03e2c3a7f0384d051b9cf3570f1207fc78c1bcc98c281c2bc108ca4b87a49c9ed2cf383aecad8f54a962b2899da891e12004d7993a627e01', False, 'modified bit 1 in R'),
-    (63, 'SignatureMalleability', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab067654bce3832c2d76f8f6f5dafc08d9339d4eef676573336a5c51eb6f946b31d', False, 'checking malleability'),
-    (64, 'SignatureMalleability', '7d4d0e7f6153a69b6242b522abbee685fda4420f8834b108c3bdae369ef549fa', '54657374', '7c38e026f29e14aabd059a0f2db8b0cd783040609a8be684db12f82a27774ab05439412b5395d42f462c67008eba6ca839d4eef676573336a5c51eb6f946b32d', False, 'checking malleability'),
-    (80, 'Ktv', 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a', '', 'e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b', True, 'draft-josefsson-eddsa-ed25519-02: Test 1'),
-    (81, 'Ktv', '3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c', '72', '92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00', True, 'draft-josefsson-eddsa-ed25519-02: Test 2'),
-    (85, 'InvalidKtv', '100fdf47fb94f1536a4f7c3fda27383fa03375a8f527c537e6f1703c47f94f86', '6a0bc2b0057cedfc0fa2e3f7f7d39279b30f454a69dfd1117c758d86b19d85e0', '0971f86d2c9c78582524a103cb9cf949522ae528f8054dc20107d999be673ff4e25ebf2f2928766b1248bec6e91697775f8446639ede46ad4df4053000000010', False, 'Signature with S just above the bound. [David Benjamin]'),
-]
 
 # PHASE: asym-roundtrip
 def phase_asym_roundtrip(ctx):
@@ -1035,6 +1051,77 @@ def phase_encoding(ctx):
         p.check("url decode rejects truncated/invalid escape: %r" % bad,
               bool(r) and r.get("ok") is False, "got %r" % r)
 
+# PHASE: out-buffer
+#
+# The allocating forms are built on the out-buffer ones, so the phases above already prove what
+# they compute. This covers only what the caller's buffer itself exposes: the written count, a
+# buffer one short, and what a failed decrypt leaves behind
+def phase_out_buffer(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("out-buffer")
+    import base64
+
+    fill = bytes([OUT_BUFFER_FILL])
+
+    def buf(r):
+        return bytes.fromhex(r.get("buf", "")) if r else b""
+
+    # AEAD
+    key, nonce, aad, pt = os.urandom(32), os.urandom(12), os.urandom(8), os.urandom(100)
+    sealed_len = len(pt) + AEAD_TAG_LEN
+
+    r = aead_into(cfg, "/crypto/aead/encrypt-into", "aesgcm", key, nonce, aad, pt, sealed_len)
+    opened = aead_call(cfg, "/crypto/aead/decrypt", "aesgcm", key, nonce, aad, buf(r))
+    p.check("aead encrypt-into: exact room seals a message the allocating form opens",
+            bool(r) and r.get("status") == ST_OK and r.get("written") == sealed_len
+            and bool(opened) and opened.get("hex") == pt.hex(), "into=%r opened=%r" % (r, opened))
+
+    r = aead_into(cfg, "/crypto/aead/encrypt-into", "aesgcm", key, nonce, aad, pt, sealed_len - 1)
+    p.check("aead encrypt-into: one byte short is refused before anything is written",
+            bool(r) and r.get("status") == ST_BUFFER_TOO_SMALL and r.get("written") == 0
+            and buf(r) == fill * (sealed_len - 1), "got %r" % r)
+
+    sealed = aead_call(cfg, "/crypto/aead/encrypt", "aesgcm", key, nonce, aad, pt)
+    sealed_bytes = bytes.fromhex(sealed["hex"]) if sealed else b"\x00" * sealed_len
+
+    tampered = bytearray(sealed_bytes)
+    tampered[0] ^= 0x01
+    r = aead_into(cfg, "/crypto/aead/decrypt-into", "aesgcm", key, nonce, aad, bytes(tampered), len(pt))
+    p.check("aead decrypt-into: a tampered message leaves no plaintext in the buffer, not even a prefix",
+            bool(r) and r.get("status") == ST_AUTH_FAILED and r.get("written") == 0
+            and buf(r) == b"\x00" * len(pt), "got %r" % r, security=True)
+
+    r = aead_into(cfg, "/crypto/aead/decrypt-into", "aesgcm", key, nonce, aad, sealed_bytes, len(pt) - 1)
+    p.check("aead decrypt-into: one byte short is refused",
+            bool(r) and r.get("status") == ST_BUFFER_TOO_SMALL and r.get("written") == 0, "got %r" % r)
+
+    # Base64
+    data = os.urandom(50)
+    encoded = base64.b64encode(data)
+
+    r = into_call(cfg, "/encoding/base64/encode-into", data, len(encoded))
+    p.check("base64 encode-into: exact room writes the reference encoding and reports its length",
+            bool(r) and r.get("status") == 1 and r.get("written") == len(encoded) and buf(r) == encoded,
+            "got %r want %r" % (r, encoded))
+
+    r = into_call(cfg, "/encoding/base64/encode-into", data, len(encoded) - 1)
+    p.check("base64 encode-into: one char short is refused, the buffer untouched",
+            bool(r) and r.get("status") == 0 and buf(r) == fill * (len(encoded) - 1), "got %r" % r)
+
+    # An overrun past the buffer would land as a sanitizer report instead, at the end of the run
+    r = into_call(cfg, "/encoding/base64/decode-into", encoded, len(data) - 1)
+    p.check("base64 decode-into: a buffer shorter than the payload is refused",
+            bool(r) and r.get("status") == 0, "got %r" % r)
+
+    # Hex
+    r = into_call(cfg, "/encoding/hex/encode-into", data, len(data) * 2 - 1)
+    p.check("hex encode-into: one char short is refused, the buffer untouched",
+            bool(r) and r.get("status") == 0 and buf(r) == fill * (len(data) * 2 - 1), "got %r" % r)
+
+    r = into_call(cfg, "/encoding/hex/decode-into", data.hex().encode(), len(data) - 1)
+    p.check("hex decode-into: a buffer shorter than the payload is refused",
+            bool(r) and r.get("status") == 0, "got %r" % r)
+
 class CryptoAudit(common.Suite):
     name = "crypto_audit"
     description = "WFX crypto ABI audit"
@@ -1054,6 +1141,7 @@ class CryptoAudit(common.Suite):
         "jwk":               phase_jwk,
         "jwt":               phase_jwt,
         "encoding":          phase_encoding,
+        "out-buffer":        phase_out_buffer,
     }
 
 if __name__ == "__main__":

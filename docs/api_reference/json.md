@@ -1,6 +1,6 @@
 # Json
 
-WFX provides three JSON tools: two serializers for building and sending JSON responses, and a parser for reading incoming JSON from request bodies. No extra `#include` is needed (all three are available everywhere).
+WFX provides three JSON tools: two serializers for building and sending JSON responses, and a parser for reading incoming JSON from request bodies. They live in `<wfx/json.hpp>`, which `<wfx/http.hpp>` already includes, so a handler file needs nothing extra.
 
 ---
 
@@ -52,7 +52,7 @@ w.Write("score",  9.5);
 w.Write("token",  nullptr);   // emits null
 ```
 
-**Supported value types**: `std::string_view`, `const char*`, `bool`, `std::int64_t`, `std::uint64_t`, `double`, `std::nullptr_t`, `Shared::UUID`. Narrower integer and float types are widened automatically.
+**Supported value types**: `std::string_view`, `const char*`, `bool`, `std::int64_t`, `std::uint64_t`, `double`, `std::nullptr_t`, `WFX::UUID`. Narrower integer and float types are widened automatically.
 
 ### Nested objects
 
@@ -162,7 +162,7 @@ o["score"]  = 9.5;
 o["token"]  = nullptr;    // null
 ```
 
-**Supported types**: `bool`, `std::int64_t`, `std::uint64_t`, `double`, `std::string_view`, `const char*`, `std::nullptr_t`, `Shared::UUID`, and narrower variants.
+**Supported types**: `bool`, `std::int64_t`, `std::uint64_t`, `double`, `std::string_view`, `const char*`, `std::nullptr_t`, `WFX::UUID`, and narrower variants.
 
 !!! tip
     `const char*` values are stored as zero-copy views. The pointed-to string must remain alive for as long as the `RmJson` object exists. `std::string_view` values are copied into internal storage and are safe to use with temporaries.
@@ -284,7 +284,7 @@ WFX_GET("/order", [](WFX::Request req, WFX::Response res) {
 An object that repeats a key is rejected with the error `duplicate key`. Parsers disagree on which of two duplicates wins, so a body like `{"role":"user","role":"admin"}` could mean one thing to a proxy or validator in front and another to your handler.
 
 ```cpp
-inline Shared::JsonParseResult ParseJson(
+inline WFX::JsonParseResult ParseJson(
     std::string_view body,
     bool             view     = false,
     std::uint32_t    maxDepth = 64

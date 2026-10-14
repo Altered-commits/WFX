@@ -129,7 +129,7 @@ private: // TLS
 
 private: // Slot state
     // Single point every 'eventType' write goes through, table-driven against the exact
-    // transition graph (kLegalFrom in the .cpp), logger_.Fatal's on an illegal pair.
+    // transition graph (LEGAL_FROM in the .cpp), logger_.Fatal's on an illegal pair.
     void EnterState(ConnectionTag* ctx, EventType next);
 
 private: // Connection management
@@ -232,7 +232,10 @@ private: // Endpoint receive path
     void CompleteStreamInline(EndpointCtx* ctx, EndpointEntry& entry, ParseResult pr);
 
 private: // Endpoint failure / teardown
-    void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointMetadata& meta, bool success);
+    void FinalizeEndpointRequest(EndpointCtx* ctx, EndpointMetadata& meta, bool success,
+                                 EndpointStatus failStatus = EndpointStatus::INTERNAL_ERROR);
+    // A socket error ends the connection: a connect failure while still connecting, else a Close
+    void FailEndpointIO(EndpointCtx* ctx);
     void TeardownSlotOnFailure(EndpointCtx* ctx, EndpointEntry& entry);
     void FailSlotOnParseError(EndpointCtx* ctx, EndpointEntry& entry);
     void ResolveMultiplexedStream(EndpointCtx* ctx, EndpointEntry& entry, std::uint64_t key);
@@ -243,7 +246,7 @@ private: // Endpoint failure / teardown
 private: // Prewarm / reconnect
     void HandlePrewarm();
     void HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,
-                              DisconnectReason reason = DisconnectReason::ERROR, bool tls = false);
+                              DisconnectReason reason = DisconnectReason::ERROR);
     void ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& entry);
     void HandleReconnects();
     std::uint32_t ComputeBackoffSeconds(const EndpointConfig& config, std::uint16_t attempt);
@@ -256,11 +259,13 @@ private: // onConnect
 
 private: // onAbort / side connections
     // Fires desc.onAbort. Unlike FireOnConnect, ctx does NOT transition eventType (still
-    // mid-request, EVENT_ENDPOINT_RECV); onAbort only ever drives a separate auxPool ctx.
+    // mid-request); onAbort only ever drives a separate auxPool ctx.
     void FireOnAbort(EndpointCtx* ctx, EndpointEntry& entry);
     // Connected (+TLS'd if needed): fires the caller's asyncData with the aux ctx as result.data
     void CompleteAuxConnect(EndpointCtx* auxCtx);
-    // Connect/TLS failed: tears down auxCtx and fires the caller's asyncData with the failure
+    // Every way a side connection ends besides the caller's Close(): connect/TLS failure, the peer
+    // closing it, a read/write error, or the timer ending its usage window. Frees auxCtx, then fires
+    // the caller's asyncData (a pending Send/Receive included) with the failure
     void FailAuxConnect(EndpointCtx* auxCtx, SlotStatus status);
 
 private: // Wrap / low-level

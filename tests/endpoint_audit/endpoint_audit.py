@@ -16,12 +16,17 @@
 #
 # Exit codes:
 #   0   all phases passed
-#   1   correctness failure, or the worker died during the run
+#   1   a non-security check failed (sanitizer reports and workers force-killed at
+#       shutdown included), the worker was not answering at the end, or nothing was
+#       checked
 #   2   security finding: one caller receiving another's response, a refused
-#       handshake still being served, a pinned connection shared with anyone else,
-#       an unsolicited push desyncing the framing, a failed TLS upgrade leaving
-#       the endpoint usable in plaintext, or memory growing with the total
-#       response size rather than the chunk size
+#       handshake still being served, a pinned connection shared with anyone else
+#       or a released one's send running on a pooled connection, an unsolicited
+#       push desyncing the framing, a failed TLS upgrade leaving the endpoint
+#       usable in plaintext, memory growing with the total response size rather
+#       than the chunk size, onAbort firing where it must not or its
+#       cancel naming the wrong connection, or an abandoned request reaching the
+#       backend
 #   3   WFX never answered /health, so nothing was exercised
 
 import os
@@ -38,19 +43,29 @@ from common import net, term
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# EndpointStatus, mirrors shared/abis/types.hpp, keep in sync. Only the three this
+# EndpointStatus, mirrors shared/abis/types.hpp, keep in sync. Only the ones this
 # suite asserts on by name are listed; every other failure is checked as "not success"
 EP_SUCCESS           = 0
+EP_INVALID_KEY       = 5
 EP_INTERNAL          = 10  # where a co_return EpFatal from onConnect lands: the coroutine
                            # only ever answers EpReady or EpFatal, so the engine's generic
                            # connect-failure funnel classifies it, not a per-cause status
 EP_HANDSHAKE_TIMEOUT = 13
+EP_REQUEST_TIMEOUT   = 14
 
 # Waits the engine's own budgets dictate. Its timeout timer ticks every 5s
 # (INVOKE_TIMEOUT_COOLDOWN), so an N-second budget can take up to N+5 to be noticed
 IDLE_RECYCLE_WAIT    = 11.0  # idleTimeoutSeconds 5, plus a tick, plus slack
 AUX_RECLAIM_WAIT     = 5.5   # connectTimeoutSeconds 5 reclaiming a leaked side connection
 REQUEST_TIMEOUT_WAIT = 17.0  # requestTimeoutSeconds 10, plus a tick, plus slack
+
+# MuxCapped's maxConcurrentStreams in app/src/main.cpp, and a burst well past it
+MUX_STREAM_CAP = 2
+CAPPED_BURST   = 6
+
+# An outbound_ca_path that can't load, and what the worker logs when it tries
+MISSING_CA     = "/nonexistent/wfx-endpoint-audit-ca.pem"
+CA_LOAD_FAILED = "Failed to load configured CA certificate for client ctx"
 
 # The mock upstream
 class Mock:
@@ -90,6 +105,20 @@ class Mock:
         """Connections the mux listener accepted, the evidence for what got shared."""
         try:
             return int(self._ctl("/ctl/mux/conns"))
+        except ValueError:
+            return -1
+
+    def mux_hanging(self):
+        """Handshakes the mock is still leaving unanswered, each one a slot suspended in onConnect."""
+        try:
+            return int(self._ctl("/ctl/mux/hanging"))
+        except ValueError:
+            return -1
+
+    def capped_peak(self):
+        """Most requests one token "capped" connection had outstanding at once."""
+        try:
+            return int(self._ctl("/ctl/mux/capped/peak"))
         except ValueError:
             return -1
 
@@ -137,8 +166,17 @@ def _json(cfg, method, path, headers=None, rtimeout=15.0):
 def mux_call(cfg, key="hello", mux="good", rtimeout=8.0):
     return _json(cfg, "GET", "/mux/call", {"X-Mux": mux, "X-Key": key}, rtimeout)
 
+def hold_mux_call(cfg, key, mux="good"):
+    """Sends a mux call and returns its socket unread, so the call stays in flight until it closes."""
+    sock = net.connect(cfg.host, cfg.port)
+    sock.sendall(net.request("GET", "/mux/call", {"X-Mux": mux, "X-Key": key}))
+    return sock
+
 def mux_disconnects(cfg):
     return _json(cfg, "GET", "/mux/disconnects") or {}
+
+def mux_reserve(cfg):
+    return _json(cfg, "GET", "/mux/reserve")
 
 def mux_disconnects_reset(cfg):
     _json(cfg, "POST", "/mux/disconnects/reset")
@@ -151,8 +189,11 @@ def solo_stream(cfg, count=10, size=64, mode="server", stop=0, rtimeout=60.0):
                  {"X-Mode": mode, "X-Count": str(count), "X-Size": str(size), "X-Stop": str(stop)},
                  rtimeout)
 
-def solo_reserve(cfg, n=3, release="late", rtimeout=20.0):
-    return _json(cfg, "GET", "/solo/reserve", {"X-N": str(n), "X-Release": release}, rtimeout)
+def solo_reserve(cfg, n=3, release="late", hold=0.0, rtimeout=20.0):
+    headers = {"X-N": str(n), "X-Release": release}
+    if hold:
+        headers["X-Hold"] = str(int(hold * 1000))
+    return _json(cfg, "GET", "/solo/reserve", headers, rtimeout)
 
 def solo_reserve_pair(cfg, rtimeout=20.0):
     return _json(cfg, "GET", "/solo/reserve/pair", rtimeout=rtimeout)
@@ -288,6 +329,38 @@ def phase_mux_handshake(ctx):
     p.check("onDisconnect: the rejected and dropped handshakes are reported as errors",
             counters.get("error", 0) >= 2, "counters=%r" % counters)
 
+    # Each Send's bytes are on the wire once it completes, so a handshake sent as several
+    # messages may total more than send_buffer_max (16 KiB here)
+    r = mux_call(cfg, key="padded-ok", mux="padded")
+    p.check("onConnect: a handshake whose Sends total more than the send buffer still succeeds",
+            is_ok(r) and r.get("value") == "padded-ok", "r=%r" % r)
+
+    # The mock stops reading mid-handshake, so onConnect is stuck in a Send, not a Receive,
+    # when connectTimeoutSeconds fires. That is still the connect phase
+    before = mux_disconnects(cfg)
+    t0 = time.time()
+    r = mux_call(cfg, mux="stall", rtimeout=20.0)
+    elapsed = time.time() - t0
+    after = mux_disconnects(cfg)
+    p.check("onConnect stuck in a Send: surfaces as a handshake timeout, not a request timeout",
+            is_errc(r, EP_HANDSHAKE_TIMEOUT) and elapsed < 18.0, "elapsed %.1fs r=%r" % (elapsed, r))
+    p.check("onDisconnect: the stuck Send is reported as a handshake timeout",
+            after.get("handshake", 0) - before.get("handshake", 0) == 1, "before=%r after=%r" % (before, after))
+
+    # Without onConnect, a multiplexed request waits on its connecting slot as a pending
+    # stream rather than an attached caller. Its connect timing out still has to fail it as
+    # a handshake timeout and count as a connect failure, not a background reconnect
+    baseline = metrics(cfg)
+    mock.gate_close()
+    r = mux_call(cfg, mux="gated", rtimeout=20.0)
+    mock.gate_open()
+    after = metrics(cfg)
+    p.check("multiplexed, no onConnect: a connect timeout fails the waiting stream as a handshake timeout",
+            is_errc(r, EP_HANDSHAKE_TIMEOUT), "r=%r" % r)
+    moved = {name: metric(after, name) - metric(baseline, name) for name in ("connect_failures", "reconnects")}
+    p.check("multiplexed, no onConnect: that timeout counts as a connect failure, not a reconnect",
+            moved == {"connect_failures": 1, "reconnects": 0}, "moved=%r" % moved)
+
     # A rejected, dropped or timed-out handshake must not poison the pool for the
     # next legitimate connection attempt
     r = mux_call(cfg, key="still-good")
@@ -323,11 +396,35 @@ def phase_mux_multiplex(ctx):
             "mux connections before=%d after=%d, expected at most one more"
             % (conns_before, conns_after))
 
+    # MuxCapped's maxConcurrentStreams sits far under what MuxHasCapacity allows. The warm-up
+    # leaves one connection idle and ready, so the burst's first two land on it together and the
+    # rest have to open more connections rather than pile onto it
+    warm = mux_call(cfg, key="warm", mux="capped")
+    burst = in_parallel(lambda i: mux_call(cfg, key="sleep:1.0:cap%d" % i, mux="capped", rtimeout=10.0),
+                        CAPPED_BURST)
+    p.check("maxConcurrentStreams: requests past the cap are still served, on more connections",
+            is_ok(warm) and all(is_ok(r) for r in burst), "warm=%r burst=%r" % (warm, burst))
+
+    peak = mock.capped_peak()
+    p.check("maxConcurrentStreams: a connection carries exactly its cap at once, never more",
+            peak == MUX_STREAM_CAP, "peak %d outstanding on one connection, cap %d" % (peak, MUX_STREAM_CAP))
+
     # Nothing rides the connection from here on, so the idle timer is free to fire
     time.sleep(IDLE_RECYCLE_WAIT)
     counters = mux_disconnects(cfg)
     p.check("onDisconnect: an idle connection is reported as an idle timeout",
             counters.get("idle", 0) >= 1, "counters=%r" % counters)
+
+    # A stream whose reply outlasts requestTimeoutSeconds (5s on this instance) fails as a
+    # request timeout, the same status a single-slot request gets
+    r = mux_call(cfg, key="sleep:15:late", mux="padded", rtimeout=20.0)
+    p.check("a multiplexed stream past requestTimeoutSeconds fails as a request timeout",
+            is_errc(r, EP_REQUEST_TIMEOUT), "r=%r" % r)
+
+    # The connection is already shared between callers, so there is nothing to pin
+    r = mux_reserve(cfg)
+    p.check("Reserve on a multiplexed endpoint hands back an empty handle",
+            bool(r) and r.get("reserved") is False, "r=%r" % r)
 
 # PHASE: mux_soak
 def phase_mux_soak(ctx):
@@ -407,6 +504,12 @@ def phase_solo_pinning(ctx):
         r = solo_reserve(cfg, n=2, release=mode)
         p.check("reserve: release=%s completes cleanly" % mode,
                 bool(r) and r.get("reserved") == 1 and r.get("same") == 1, "r=%r" % r)
+
+    # A send through a released reservation must not quietly run on a pooled connection:
+    # the sequence it belongs to would be split across connections
+    r = solo_reserve(cfg, n=1, release="early")
+    p.check("reserve: a send through a released reservation fails instead of using the pool",
+            bool(r) and r.get("after_release") == EP_INVALID_KEY, "r=%r" % r, security=True)
 
     p.check("reserve: the pool is still healthy after every release pattern",
             is_ok(solo_get(cfg, key="after-release")), "")
@@ -616,6 +719,28 @@ def phase_solo_upgrade(ctx):
     p.check("upgrade: the plaintext endpoint is unaffected by the failed upgrades",
             is_ok(solo_get(cfg, key="after-upgrade-failures")), "", security=True)
 
+    # The outbound TLS context is built on demand by the first upgrade, so a CA that can't load
+    # surfaces inside a running worker. It has to fail that upgrade, not the worker, and stay
+    # failed rather than being rebuilt by every later one
+    toml_path = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
+    common.toml.patch(toml_path, "outbound_ca_path", MISSING_CA)
+    try:
+        if not ctx.server.restart():
+            p.failed("bad CA: the server boots with an outbound_ca_path that can't load", "no /health")
+        else:
+            first = solo_get(cfg, key="x", solo="tlsgarbage", rtimeout=20.0)
+            second = solo_get(cfg, key="x", solo="tlsgarbage", rtimeout=20.0)
+            p.check("bad CA: the upgrade fails cleanly instead of taking the worker down",
+                    is_err(first) and is_err(second), "first=%r second=%r" % (first, second))
+
+            loads = common.logs.worker_logs_count(cfg.app_dir, CA_LOAD_FAILED)
+            p.check("bad CA: the broken context is built once, not again by every upgrade",
+                    loads == 1, "'%s' logged %d times" % (CA_LOAD_FAILED, loads))
+    finally:
+        common.toml.restore(toml_path)
+        if not ctx.server.restart():
+            p.failed("bad CA: the server comes back on the baseline config", "no /health")
+
     p.check("worker healthy after the upgrade phase", wfx_healthy(cfg) and mock.ping())
 
 # PHASE: solo_abort
@@ -739,6 +864,23 @@ def phase_solo_abort(ctx):
             is_ok(r) and r.get("value") == "%s:after-tcpconnect" % r.get("conn"), "r=%r" % r,
             security=True)
 
+    # The same race without onConnect. Nothing parks the request, since it is serialized
+    # before the connect starts, but the backend still has not seen it: onAbort must not
+    # fire, and no cancel may go out for it
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    mock.gate_close()
+    abandon_solo_get(cfg, {"X-Solo": "abortgatedraw", "X-Key": "x"}, hold=0.3)
+    mock.gate_open()
+    time.sleep(2.0)  # the SYN retry lands about 1s after the first try
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort, no onConnect: onAbort never fires while the TCP connect is still in flight",
+            after.get("runs", 0) == before.get("runs", 0), "before=%r after=%r" % (before, after),
+            security=True)
+    p.check("abort, no onConnect: no cancel goes out for a request the backend never saw", count == 0,
+            "count=%d" % count, security=True)
+
     # Hostile onAbort: closes its side connection three times and keeps the handle
     # afterwards. A real protocol author will get this wrong at least once, so the
     # engine must survive it rather than double-free the aux slot or corrupt whichever
@@ -753,6 +895,23 @@ def phase_solo_abort(ctx):
             "count=%d" % count)
     p.check("abort: the endpoint is still usable after that misuse",
             is_ok(solo_get(cfg, key="after-badclose", solo="abortbadclose")), "")
+
+    # The server closing a side connection (here right after the cancel, as a Postgres server
+    # does) must reach onAbort as a failed Receive. Its second cancel opens from inside that
+    # failure, and with exactly one aux slot it only connects if the first slot is already free
+    mock.cancels_reset()
+    before = abort_stats(cfg)
+    abandon_solo_get(cfg, {"X-Solo": "abortawaitclose", "X-Key": "slow:1.0"}, hold=0.1)
+    time.sleep(0.6)
+    after = abort_stats(cfg)
+    count, _ = mock.cancels()
+    p.check("abort: a side connection the server closed resumes onAbort with a failed Receive",
+            after.get("side_eofs", 0) - before.get("side_eofs", 0) == 2, "before=%r after=%r" % (before, after))
+    p.check("abort: a cancel opened from inside that failure gets its own connection", count == 2,
+            "count=%d" % count)
+    time.sleep(1.0)  # the abandoned primary's reply lands and its slot returns to the pool
+    p.check("abort: the endpoint is still usable after the server closed its side connections",
+            is_ok(solo_get(cfg, key="after-awaitclose", solo="abortawaitclose")), "")
 
     # Scope cut: once a request is already streaming, past its first chunk, a client
     # disconnect still force-closes. onAbort is defined for single-slot in-flight
@@ -901,6 +1060,23 @@ def phase_metrics(ctx):
     p.check("metrics: a failed TLS handshake lands in a failure bucket", sum(moved.values()) >= 1,
             "no failure bucket moved: %r" % moved)
 
+    # The backend resets the connection mid-request instead of answering. That socket error
+    # fails the request, so it counts in other_errors, and only once
+    before = metrics(cfg)
+    r = solo_get(cfg, key="reset")
+    moved = metric(metrics(cfg), "other_errors") - metric(before, "other_errors")
+    p.check("metrics: a connection reset mid-request counts once in other_errors",
+            is_err(r) and moved == 1, "r=%r other_errors +%d" % (r, moved))
+
+    # A reservation idle past idleTimeoutSeconds has its connection closed with nothing in
+    # flight. after_hold proves the close happened; it is no request timeout
+    before = metrics(cfg)
+    r = solo_reserve(cfg, n=1, hold=IDLE_RECYCLE_WAIT, rtimeout=IDLE_RECYCLE_WAIT + 10.0)
+    moved = metric(metrics(cfg), "request_timeouts") - metric(before, "request_timeouts")
+    p.check("metrics: an idle reservation timing out is not counted as a request timeout",
+            bool(r) and r.get("after_hold") == EP_INVALID_KEY and moved == 0,
+            "r=%r request_timeouts +%d" % (r, moved))
+
     # Gauge invariant: every lease taken above has since been returned, which is what
     # catches an unbalanced increment and decrement
     end = metrics(cfg)
@@ -963,7 +1139,47 @@ class EndpointAudit(common.Suite):
                 "is MUX_UPSTREAM in app/src/main.cpp pointing at port %d?" % ctx.cfg.mux_port)
             return False
 
+    def before_stop(self, ctx):
+        # One coroutine suspended in each place only the worker's exit can reach. Each row
+        # proves its coroutine is really there, the sanitizer scan after the stop proves exit
+        # destroyed it rather than leaking it
+        cfg, mock = ctx.cfg, ctx.mock
+        p = ctx.phase("exit")
+        held = ctx.resources["exit_clients"] = []
+
+        # MuxHang (main.cpp) dials for this call, and the mock never answers its AUTH
+        held.append(hold_mux_call(cfg, "x", mux="hang"))
+        waited = common.server.poll(lambda: mock.mux_hanging() >= 1, 3.0)
+        p.check("a slot is suspended inside onConnect", waited is not None,
+                "hanging=%d" % mock.mux_hanging())
+
+        # The mock holds this reply for 30s, and the socket stays open through the stop, so
+        # the request handler is still awaiting its endpoint
+        sock = hold_mux_call(cfg, "sleep:30:x")
+        held.append(sock)
+        sock.settimeout(0.5)
+        try:
+            answered = bool(sock.recv(1))
+        except OSError:
+            answered = False
+        p.check("a request handler is suspended awaiting its endpoint", not answered)
+
+        # The gate drops the side connection's SYN and stays closed through the stop, so
+        # onAbort is still awaiting OpenSideConnection
+        warm = solo_get(cfg, key="exit-warm", solo="abortgated")
+        mock.gate_close()
+        before = abort_stats(cfg)
+        abandon_solo_get(cfg, {"X-Solo": "abortgated", "X-Key": "slow:5"}, hold=0.2)
+        time.sleep(0.3)
+        after = abort_stats(cfg)
+        delta = {k: after.get(k, 0) - before.get(k, 0) for k in ("runs", "side_opens", "side_failures")}
+        p.check("an onAbort is suspended on a side connection still connecting",
+                is_ok(warm) and delta == {"runs": 1, "side_opens": 0, "side_failures": 0},
+                "warm=%r delta=%r" % (warm, delta))
+
     def teardown(self, ctx):
+        for sock in ctx.resources.get("exit_clients", ()):
+            sock.close()
         if "mock" in ctx.resources:
             ctx.mock.stop()
 

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2025-2026 Altered-commits
 //
-// Every route exists to give crypto_audit.py a surface to check wfx/utils/crypto.hpp
-// against independently-computed (Python hashlib/hmac/AES-GCM) expected values.
+// Every route exists to give crypto_audit.py a surface to check wfx/utils/crypto.hpp, jwk.hpp,
+// jwt.hpp and encoding.hpp against independently-computed expected values: hashlib, hmac,
+// PBKDF2 and a hand-rolled HKDF, the cryptography package for asymmetric keys, JWK and JWT,
+// and Python's own codecs. AEAD and Argon2id have no oracle and are checked structurally.
 // Binary inputs travel as hex-encoded headers (key/nonce/aad/salt/ikm/info/password);
 // the primary data blob (hash/hmac input, AEAD plaintext/ciphertext) travels as the
 // raw POST body.
@@ -17,10 +19,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <string>
 #include <string_view>
 
 namespace {
+
+// What every out-buffer route prefills the caller's buffer with, see WriteInto
+constexpr std::uint8_t OUT_BUFFER_FILL = 0xAA;
 
 WFX::String ToHex(std::string_view bytes)
 {
@@ -155,6 +161,18 @@ template <typename T> void WriteStatusHex(WFX::Response& res, WFX::CryptoStatus 
     w.Write("hex", ToHex(std::string_view(reinterpret_cast<const char*>(data.data()), data.size())));
 }
 
+// An out-buffer call's answer: its status (a CryptoStatus, or 1/0 for an encoding call's ok), how
+// much it claims to have written, and the caller's whole buffer after it. The buffer starts out
+// filled with OUT_BUFFER_FILL, so anything the call left untouched is visible as such
+template <typename T> void WriteInto(WFX::Response& res, std::uint64_t status, std::uint64_t written, const T& buf)
+{
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("status", status);
+    w.Write("written", written);
+    w.Write("buf", ToHex(std::string_view(reinterpret_cast<const char*>(buf.data()), buf.size())));
+}
+
 // Streams deterministic content (numChunks * chunkLen bytes, chunk c filled with 'A'+c%26) out
 // through res.Stream(), driving a WFX::HashStream<Algo> across however many callback invocations
 // the engine chooses to split the buffer into. Once the last content byte has been produced, the
@@ -169,7 +187,7 @@ void RunHashStreamResponse(WFX::Response& res, std::uint32_t numChunks, std::uin
     res.Status(200).Stream(
         [numChunks, chunkLen, chunkIndex = std::uint32_t{0}, withinChunk = std::uint32_t{0},
          phase = StreamPhase::DATA, footer = WFX::String{}, footerOffset = std::size_t{0},
-         hasher = WFX::HashStream<Algo>()](WFX::Shared::StreamBuffer buf) mutable -> WFX::Shared::StreamResult {
+         hasher = WFX::HashStream<Algo>()](WFX::StreamBuffer buf) mutable -> WFX::StreamResult {
             std::size_t written = 0;
 
             while(written < buf.size) {
@@ -213,15 +231,15 @@ void RunHashStreamResponse(WFX::Response& res, std::uint32_t numChunks, std::uin
                     break;
             }
 
-            const auto action = (phase == StreamPhase::DONE) ? WFX::Shared::StreamAction::STOP_AND_ALIVE_CONN
-                                                              : WFX::Shared::StreamAction::CONTINUE;
+            const auto action = (phase == StreamPhase::DONE) ? WFX::StreamDone
+                                                              : WFX::StreamContinue;
             return {written, action};
         });
 }
 
 } // namespace
 
-// Liveness probe: polled by crypto_audit.py's Server.wait_ready()/alive(), same as every
+// Liveness probe: polled by common.Server's wait_ready()/alive(), same as every
 // other audit app.
 WFX_GET("/health", [](WFX::Request, WFX::Response res) { res.Status(200).SendText("ok"); })
 
@@ -340,6 +358,29 @@ WFX_POST("/crypto/aead/decrypt", [](WFX::Request req, WFX::Response res) {
 
     auto [s, out] = WFX::AeadDecrypt(algo, key, nonce, aad, req.Body());
     WriteStatusHex(res, s, out);
+})
+
+// The out-buffer forms, into an X-Cap byte buffer
+WFX_POST("/crypto/aead/encrypt-into", [](WFX::Request req, WFX::Response res) {
+    const auto algo = AeadAlgoFromHeader(req);
+    const WFX::String key = HexHeader(req, "X-Key");
+    const WFX::String nonce = HexHeader(req, "X-Nonce");
+    const WFX::String aad = HexHeader(req, "X-Aad");
+
+    WFX::Vector<std::uint8_t> buf(UintHeader(req, "X-Cap"), OUT_BUFFER_FILL);
+    auto [s, written] = WFX::AeadEncrypt(algo, key, nonce, aad, req.Body(), buf);
+    WriteInto(res, static_cast<std::uint64_t>(s), written, buf);
+})
+
+WFX_POST("/crypto/aead/decrypt-into", [](WFX::Request req, WFX::Response res) {
+    const auto algo = AeadAlgoFromHeader(req);
+    const WFX::String key = HexHeader(req, "X-Key");
+    const WFX::String nonce = HexHeader(req, "X-Nonce");
+    const WFX::String aad = HexHeader(req, "X-Aad");
+
+    WFX::Vector<std::uint8_t> buf(UintHeader(req, "X-Cap"), OUT_BUFFER_FILL);
+    auto [s, written] = WFX::AeadDecrypt(algo, key, nonce, aad, req.Body(), buf);
+    WriteInto(res, static_cast<std::uint64_t>(s), written, buf);
 })
 
 // vvv Key derivation vvv
@@ -596,6 +637,34 @@ WFX_POST("/encoding/hex/decode", [](WFX::Request req, WFX::Response res) {
     w.Write("ok", ok);
     w.Write("hex", ok ? WFX::HexEncode(std::string_view(reinterpret_cast<const char*>(out.data()), out.size()))
                        : WFX::String{});
+})
+
+// The out-buffer forms, into an X-Cap byte buffer
+WFX_POST("/encoding/base64/encode-into", [](WFX::Request req, WFX::Response res) {
+    const bool urlSafe = UintHeader(req, "X-Urlsafe", 0) != 0;
+    const bool padded = UintHeader(req, "X-Padded", 1) != 0;
+
+    WFX::String buf(UintHeader(req, "X-Cap"), static_cast<char>(OUT_BUFFER_FILL));
+    auto [ok, written] = WFX::Base64Encode(req.Body(), std::span<char>{buf.data(), buf.size()}, urlSafe, padded);
+    WriteInto(res, ok ? 1 : 0, written, buf);
+})
+
+WFX_POST("/encoding/base64/decode-into", [](WFX::Request req, WFX::Response res) {
+    WFX::Vector<std::uint8_t> buf(UintHeader(req, "X-Cap"), OUT_BUFFER_FILL);
+    auto [ok, written] = WFX::Base64Decode(req.Body(), buf);
+    WriteInto(res, ok ? 1 : 0, written, buf);
+})
+
+WFX_POST("/encoding/hex/encode-into", [](WFX::Request req, WFX::Response res) {
+    WFX::String buf(UintHeader(req, "X-Cap"), static_cast<char>(OUT_BUFFER_FILL));
+    auto [ok, written] = WFX::HexEncode(req.Body(), std::span<char>{buf.data(), buf.size()});
+    WriteInto(res, ok ? 1 : 0, written, buf);
+})
+
+WFX_POST("/encoding/hex/decode-into", [](WFX::Request req, WFX::Response res) {
+    WFX::Vector<std::uint8_t> buf(UintHeader(req, "X-Cap"), OUT_BUFFER_FILL);
+    auto [ok, written] = WFX::HexDecode(req.Body(), buf);
+    WriteInto(res, ok ? 1 : 0, written, buf);
 })
 
 WFX_POST("/encoding/url/encode", [](WFX::Request req, WFX::Response res) {

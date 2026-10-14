@@ -9,12 +9,18 @@
 #include "async/task.hpp"
 #include "core/core.hpp"
 #include "shared/abis/types.hpp"
+#include <array>
+#include <tuple>
+#include <utility>
 
 namespace WFX::Http {
 
 template <typename T> struct AlwaysFalse : std::false_type {};
 
-template <typename Lambda> Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
+// The callable lives in a static of each instantiation, so Tag must be unique to the call site (the
+// registering macro passes its own struct). Keyed on the callable's type alone, plain functions of
+// one signature, or closures from one factory, would all run the first one registered
+template <typename Tag, typename Lambda> Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
 {
     // Async route: Lambda returns WFX::Coro (Task<void>)
     if constexpr(std::is_invocable_r_v<Async::Task<void>, Lambda, Request, Response>) {
@@ -54,7 +60,8 @@ template <typename Lambda> Shared::RouteCallback MakeRouteCallback(Lambda&& cb)
     }
 }
 
-template <typename Lambda> Shared::MwCallback MakeMwCallback(Lambda&& cb)
+// Same Tag rule as MakeRouteCallback
+template <typename Tag, typename Lambda> Shared::MwCallback MakeMwCallback(Lambda&& cb)
 {
     // Async middleware: returns WFX::MwCoro (Task<MiddlewareAction>)
     if constexpr(std::is_invocable_r_v<Async::Task<Shared::MiddlewareAction>, Lambda, Request, Response>) {
@@ -89,22 +96,28 @@ template <typename Lambda> Shared::MwCallback MakeMwCallback(Lambda&& cb)
     }
 }
 
-// Variadic helper to build a 'MwCallback' array for per-route middleware
+// A per-route middleware's Tag: its route's Tag plus its position in the list
+template <typename RouteTag, std::size_t Index> struct MwListTag {};
+
+// Per-route middleware, held as given until the route macro builds them under its own Tag
 template <typename... Lambdas> struct MwCallbackArray {
-    Shared::MwCallback entries[sizeof...(Lambdas)];
+    std::tuple<std::decay_t<Lambdas>...> fns;
 
 public:
-    MwCallbackArray(Lambdas&&... mws) : entries{MakeMwCallback(std::forward<Lambdas>(mws))...}
+    MwCallbackArray(Lambdas&&... mws) : fns{std::forward<Lambdas>(mws)...}
     {}
 
 public:
-    const Shared::MwCallback* Data() const
+    template <typename RouteTag> std::array<Shared::MwCallback, sizeof...(Lambdas)> Build()
     {
-        return entries;
+        return BuildImpl<RouteTag>(std::index_sequence_for<Lambdas...>{});
     }
-    std::size_t Count() const
+
+private:
+    template <typename RouteTag, std::size_t... Index>
+    std::array<Shared::MwCallback, sizeof...(Lambdas)> BuildImpl(std::index_sequence<Index...>)
     {
-        return sizeof...(Lambdas);
+        return {MakeMwCallback<MwListTag<RouteTag, Index>>(std::get<Index>(fns))...};
     }
 };
 

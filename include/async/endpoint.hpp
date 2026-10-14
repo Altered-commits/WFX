@@ -166,6 +166,8 @@ public:
     // in-band (Postgres SSLRequest, SMTP STARTTLS). Probe with Send/Receive first, then call
     // this only if the server agreed. The endpoint must be configured plaintext, otherwise
     // the engine already wrapped it at connect time and this fails with EpSlotInvalidState.
+    // On onConnect's own slot a failed handshake never resumes this: the engine ends onConnect
+    // and a waiting caller gets EpSslFailure. Only a failure to wrap at all returns EpSlotTlsError.
     SlotUpgradeTlsAwaitable UpgradeToTLS() const noexcept
     {
         return SlotUpgradeTlsAwaitable{raw.impl};
@@ -216,7 +218,7 @@ inline SlotOpenSideConnectionAwaitable::Result SlotOpenSideConnectionAwaitable::
 }
 
 // Restricted handle passed into onAbort coroutines: OpenSideConnection + NegotiatedProtocol only
-// The primary slot is still mid-request (EVENT_ENDPOINT_RECV) when onAbort fires, so driving
+// The primary slot is still mid-request (sending or receiving) when onAbort fires, so driving
 // Send/Receive/UpgradeToTLS on it directly is illegal (crashes or corrupts the real response
 // in flight). This is a compile-time restriction, not a runtime guard, since there's no safe
 // general meaning for it. A protocol that needs to talk must go through OpenSideConnection()
@@ -373,8 +375,10 @@ using UserOnConnectFn = Task<ConnectResult> (*)(SlotHandle, void*);
 // ABI signature EndpointOnConnectFn. Each distinct user function
 // gets its own instantiation with its own function pointer
 //
-// constexpr nullptr specialization: returns nullptr directly so
-// the engine skips the onConnect phase for simple protocols
+// The nullptr specialization returns nullptr directly so the engine
+// skips the onConnect phase for simple protocols. A specialization,
+// not if constexpr(UserFn == nullptr): GCC under -fsanitize=undefined
+// refuses that comparison as a constant expression
 template <UserOnConnectFn UserFn>
 void EraseOnConnectImpl(EndpointSlotHandle handle, void* slotState, AsyncCompleteFn onDone, void* onDoneUd) noexcept
 {
@@ -386,10 +390,12 @@ void EraseOnConnectImpl(EndpointSlotHandle handle, void* slotState, AsyncComplet
 
 template <UserOnConnectFn UserFn> constexpr EndpointOnConnectFn GetErasedOnConnect() noexcept
 {
-    if constexpr(UserFn == nullptr)
-        return nullptr;
-    else
-        return &EraseOnConnectImpl<UserFn>;
+    return &EraseOnConnectImpl<UserFn>;
+}
+
+template <> constexpr EndpointOnConnectFn GetErasedOnConnect<nullptr>() noexcept
+{
+    return nullptr;
 }
 
 // User facing onAbort function pointer type
@@ -411,16 +417,19 @@ void EraseOnAbortImpl(EndpointSlotHandle handle, void* slotState, AsyncCompleteF
 
 template <UserOnAbortFn UserFn> constexpr EndpointOnAbortFn GetErasedOnAbort() noexcept
 {
-    if constexpr(UserFn == nullptr)
-        return nullptr;
-    else
-        return &EraseOnAbortImpl<UserFn>;
+    return &EraseOnAbortImpl<UserFn>;
+}
+
+template <> constexpr EndpointOnAbortFn GetErasedOnAbort<nullptr>() noexcept
+{
+    return nullptr;
 }
 
 // One chunk of a streamed response. data borrows the engine's output object and stays valid
 // only until the next Next(), which is what keeps peak memory at one chunk instead of the
 // whole response. Copy anything you need to outlive the loop iteration
-// done marks the final delivery, at which point data is null and the slot is back in the pool
+// done marks the last result: data is null after a chunked stream, carries the whole response if
+// the protocol never returned a chunk, and a failure also sets done, with a non-EpOk status
 template <typename TRes> struct StreamChunk {
     EndpointStatus status = EndpointStatus::SUCCESS;
     const TRes* data = nullptr;
@@ -589,7 +598,8 @@ private: // Storage
 //
 // Releases on destruction, so an early co_return or a thrown exception can't leak the pin. The
 // underlying slot can still die on its own (server hangup, idle timeout); the handle detects
-// that and later sends fail with EpInvalidKey rather than landing on an unrelated connection
+// that and later sends fail with EpInvalidKey rather than landing on an unrelated connection.
+// A send through an empty handle (a refused Reserve, or after Release) fails the same way
 template <typename TReq, typename TRes> class ReservedSlot {
 public:
     ReservedSlot(std::uint16_t idx, std::uint64_t handle, EndpointDestroyStateFn destroy) noexcept
@@ -624,7 +634,8 @@ public:
     ReservedSlot& operator=(const ReservedSlot&) = delete;
 
 public:
-    // False when the reservation failed (pool exhausted) or was already released
+    // False when the reservation failed (pool exhausted, or a multiplexed endpoint) or was
+    // already released
     bool IsValid() const noexcept
     {
         return handle_ != 0;
@@ -632,13 +643,13 @@ public:
 
     SendPayloadAwaitable<TReq, TRes> SendPayload(TReq req) const noexcept
     {
-        return {endpointIdx_, std::move(req), destroyOutput_, handle_};
+        return {endpointIdx_, std::move(req), destroyOutput_, PinnedHandle()};
     }
 
     // Same chunked consumption as Resolve::Stream(), pinned to this reservation
     StreamHandle<TReq, TRes> Stream(TReq req) const noexcept
     {
-        return {endpointIdx_, std::move(req), handle_, destroyOutput_};
+        return {endpointIdx_, std::move(req), PinnedHandle(), destroyOutput_};
     }
 
     // Idempotent, also runs on destruction. Safe to call mid-request: the engine hands the
@@ -651,6 +662,18 @@ public:
         Core::EndpointApiExt1()->releaseSlot(handle_);
         handle_ = 0;
     }
+
+private: // Helpers
+    // 0 would route the send through the pool, quietly spreading what was meant for one connection
+    // across several, so an empty handle sends NO_SLOT_HANDLE and fails with EpInvalidKey instead
+    std::uint64_t PinnedHandle() const noexcept
+    {
+        return handle_ != 0 ? handle_ : NO_SLOT_HANDLE;
+    }
+
+private: // Constexprs
+    // No slot ever decodes from this: endpoint index 0xFFFF and generation 0 are both reserved
+    static constexpr std::uint64_t NO_SLOT_HANDLE = ~0xFFFFULL;
 
 private: // Storage
     std::uint16_t endpointIdx_ = 0;

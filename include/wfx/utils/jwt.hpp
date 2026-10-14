@@ -22,7 +22,7 @@
 // specific provider's endpoint and HTTP client, left to the caller
 // -----------------------------------------------------------------------
 
-#include "wfx/types.hpp"
+#include "wfx/json.hpp"
 #include "wfx/utils/crypto.hpp"
 #include "wfx/utils/encoding.hpp"
 

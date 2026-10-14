@@ -1,9 +1,10 @@
 # WFX Crypto Audit
 
-Correctness testing for the `wfx/utils/crypto.hpp` ABI: hashing, HMAC, AEAD,
-key derivation, CSPRNG, constant-time comparison, asymmetric sign/verify, JWKS
-loading, compact JWT parsing/verification, and Base64/Hex/URL encoding. Boots
-the server, drives every crypto route, checks results against Python oracles
+Correctness testing for the `wfx/utils/crypto.hpp`, `jwk.hpp`, `jwt.hpp` and
+`encoding.hpp` ABIs: hashing, HMAC, AEAD, key derivation, CSPRNG, constant-time
+comparison, asymmetric sign/verify, JWKS loading, compact JWT parsing/verification,
+and Base64/Hex/URL encoding. Boots the server, drives every crypto route, checks
+results against Python oracles
 where one exists (`hashlib`, `hmac`, PBKDF2, a hand-rolled RFC 5869 HKDF, the
 `cryptography` package for asymmetric schemes), stops the server.
 
@@ -11,10 +12,12 @@ where one exists (`hashlib`, `hmac`, PBKDF2, a hand-rolled RFC 5869 HKDF, the
 
 ## Requirements
 
-- `wfx` on `PATH` (or pass `--wfx /path/to/wfx`)
+- WFX installed with `./scripts/install.sh --local-debug` (puts `wfx` on `PATH`, its headers
+  under `~/.wfx/src`, which `app/CMakeLists.txt` builds against, and ASan/UBSan on), or run
+  through `tests/run_audits.sh` after that install
 - Python 3.8+, plus the third-party [`cryptography`](https://pypi.org/project/cryptography/)
-  package (`pip install cryptography`) — needed by the `asym-*` phases, everything
-  else uses only the standard library
+  package (`pip install cryptography`). It's imported at startup, so the suite needs it to run
+  at all; the `asym-*`, `jwk` and `jwt` phases use it as their oracle
 - Linux with `/proc` (for worker PID discovery)
 
 ---
@@ -48,8 +51,8 @@ python3 crypto_audit.py --ci
 | Code | Meaning |
 |------|---------|
 | `0` | All phases passed |
-| `1` | Correctness failure |
-| `2` | **Security**: an AEAD forgery was accepted (tampered ciphertext, wrong AAD, cross-algorithm key/nonce), a tampered asymmetric signature or message verified, a key/scheme confusion was accepted, a JWKS duplicate-kid lookup resolved to the wrong entry, or a tampered/wrong-key/alg-confused JWT verified |
+| `1` | A check failed, a phase timed out or raised, a sanitizer report was written, a worker ignored SIGTERM at shutdown, or the server was dead at the end |
+| `2` | **Security**: an AEAD forgery was accepted (tampered ciphertext, wrong AAD, cross-algorithm key/nonce), a tampered asymmetric signature or message verified, a key/scheme confusion was accepted, a private key exported from a public-only handle, a hostile key component (off-curve or zero EC point, wrong-curve claim, degenerate RSA, an oversized modulus that hangs) accepted, a JWKS duplicate-kid lookup resolved to the wrong entry, or a tampered/wrong-key/alg-confused JWT verified |
 | `3` | Server never came up |
 
 ---
@@ -105,10 +108,11 @@ salt producing a different output.
 
 ### misc
 
-`WFX::RandomBytes`: correct length, differs across calls, not all-zero, and
-`len=0` specifically checked as `INVALID_ARG` (an explicit zero-length check,
-distinct from the null-pointer checks the hash/HMAC/AEAD empty-input cases go
-through). `WFX::ConstantTimeEquals`: equal/unequal/different-length comparisons.
+`WFX::RandomBytes`: correct length, differs across calls, not all-zero, `len=0`
+returns OK with an empty result, and two workers respawned after a SIGKILL never
+repeat each other's bytes. `WFX::ConstantTimeEquals`: equal/unequal/different-length
+comparisons. Malformed hex headers on the HMAC and AEAD routes must not crash the
+worker.
 
 ### asym-roundtrip
 
@@ -156,7 +160,7 @@ that must still resolve the real key correctly and quickly.
 ### jwt
 
 `wfx/utils/jwt.hpp`: a valid token round trip for every asymmetric scheme
-(parse, `alg`/`kid` reported correctly, audience and time claims both valid),
+(parse, `alg` reported correctly, audience and time claims both valid),
 tamper detection on both the signature and the payload (old signature paired
 with a changed payload), alg confusion (`none` with the signature segment
 stripped entirely, `HS256`, and garbage `alg` values, all of which must be
@@ -172,6 +176,16 @@ Base64 (standard/url-safe, padded/unpadded), Hex, and URL encode/decode round
 trips checked against Python's own codecs, decode leniency (the shared
 lookup table accepts a mixed standard/url-safe alphabet, by design), rejection
 of genuinely invalid input, and a large-payload timing sanity check.
+
+### out-buffer
+
+The `std::span` forms of AEAD, Base64 and Hex. The allocating forms are built on
+them, so the phases above already prove what they compute; this one covers what
+only the caller's buffer shows. An exact-size buffer reports the right written
+count, a buffer one byte short is refused before anything is written, and a
+tampered AEAD message leaves no plaintext in the buffer, not even a prefix
+(security). A decode into a too-small buffer is refused; an overrun would surface
+as a sanitizer report.
 
 ---
 

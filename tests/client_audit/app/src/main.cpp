@@ -40,7 +40,7 @@
 //   X-Fwd / X-Fwd2 / X-Fwd3   headers to forward upstream, "Name: Value"
 //   X-Want    upstream response header to echo back into "hdr"     (optional)
 //
-// The raw WFX::Endpoint<> primitive underneath both clients is audited separately,
+// The raw WFX::Endpoint<> primitive underneath all three clients is audited separately,
 // in tests/endpoint_audit.
 
 #include <wfx/http.hpp>
@@ -61,8 +61,16 @@
 
 // An endpoint bakes host:port into the instance, so the HTTP mock is pinned at
 // COMPILE time. The harness must launch http_upstream.py on this exact port; it is
-// mirrored in client_audit.py as HTTP_PORT.
+// mirrored as client_audit.py's --http-port default.
 #define UPSTREAM "127.0.0.1:8091"
+
+// The same mock behind TLS, recording the ALPN each client offers. Mirrored in
+// client_audit.py as HTTP_TLS_PORT.
+#define UPSTREAM_TLS "127.0.0.1:8092"
+
+// What the custom-ALPN endpoints offer instead of their protocol's own. Mirrored in
+// client_audit.py as ALPN_CUSTOM.
+#define ALPN_CUSTOM "x-wfx-probe"
 
 // WFX::HttpEndpoint instances
 //
@@ -170,6 +178,20 @@ inline const auto EpPrewarm = WFX::HttpEndpoint{UPSTREAM, WFX::HttpEndpointConfi
     .prewarm               = 3,
 }};
 
+// Over TLS, one left at HTTP's own ALPN and one configured with its own, so the mock can
+// tell which each offered.
+inline const auto EpTlsDefault = WFX::HttpEndpoint{UPSTREAM_TLS, WFX::HttpEndpointConfig{
+    .connLimit             = 1,
+    .requestTimeoutSeconds = 10,
+    .tlsConfig             = WFX::EpTlsRequire,
+}};
+inline const auto EpTlsCustom = WFX::HttpEndpoint{UPSTREAM_TLS, WFX::HttpEndpointConfig{
+    .connLimit             = 1,
+    .requestTimeoutSeconds = 10,
+    .tlsConfig             = WFX::EpTlsRequire,
+    .alpn                  = ALPN_CUSTOM,
+}};
+
 // WFX::SmtpEndpoint instances
 //
 // One per smtp_upstream.py persona. Both the port and the name are compiled in here
@@ -178,7 +200,8 @@ inline const auto EpPrewarm = WFX::HttpEndpoint{UPSTREAM, WFX::HttpEndpointConfi
 //
 // Two budgets: SmtpCfg() gives 8s to personas that answer or refuse straight away,
 // and SmtpCfgFast() drops that to 5s, the engine's floor, for the ones that never
-// answer at all and can only be ended by the client's own timeout.
+// answer at all and can only be ended by the client's own timeout. silent_ehlo2
+// takes SmtpCfg(5, 30), so only its connect budget can end its post-STARTTLS hang.
 static WFX::SmtpEndpointConfig SmtpCfg(std::uint16_t connectTimeout = 8, std::uint16_t requestTimeout = 8) noexcept
 {
     return WFX::SmtpEndpointConfig{
@@ -206,6 +229,11 @@ inline const auto Smtp_good               = WFX::SmtpEndpoint{"127.0.0.1:8100", 
 // alive slot from a genuinely fresh one, so phase_smtp_inject could silently inherit a connection
 // left over from phase_smtp_handshake's earlier /smtp/send "good" calls instead of a clean one
 inline const auto Smtp_good_injectroute   = WFX::SmtpEndpoint{"127.0.0.1:8100", SmtpCfg()};
+inline const auto Smtp_alpn_custom        = WFX::SmtpEndpoint{"127.0.0.1:8122", [] {
+    auto cfg = SmtpCfg();
+    cfg.alpn = ALPN_CUSTOM;
+    return cfg;
+}()};
 inline const auto Smtp_auth_login_only    = WFX::SmtpEndpoint{"127.0.0.1:8101", SmtpCfg()};
 inline const auto Smtp_inject             = WFX::SmtpEndpoint{"127.0.0.1:8103", SmtpCfg()};
 inline const auto Smtp_no_starttls        = WFX::SmtpEndpoint{"127.0.0.1:8102", SmtpCfg()};
@@ -221,6 +249,7 @@ inline const auto Smtp_drop_pre_handshake = WFX::SmtpEndpoint{"127.0.0.1:8118", 
 inline const auto Smtp_drop_starttls      = WFX::SmtpEndpoint{"127.0.0.1:8119", SmtpCfg()};
 inline const auto Smtp_drop_auth          = WFX::SmtpEndpoint{"127.0.0.1:8120", SmtpCfg()};
 inline const auto Smtp_drop_data_prompt   = WFX::SmtpEndpoint{"127.0.0.1:8121", SmtpCfg()};
+inline const auto Smtp_data_250           = WFX::SmtpEndpoint{"127.0.0.1:8124", SmtpCfg()};
 
 inline const auto Smtp_flood_greeting     = WFX::SmtpEndpoint{"127.0.0.1:8110", SmtpCfgFast()};
 inline const auto Smtp_flood_ehlo2        = WFX::SmtpEndpoint{"127.0.0.1:8111", SmtpCfgFast()};
@@ -228,6 +257,9 @@ inline const auto Smtp_huge_line_greeting = WFX::SmtpEndpoint{"127.0.0.1:8112", 
 inline const auto Smtp_huge_line_ehlo2    = WFX::SmtpEndpoint{"127.0.0.1:8113", SmtpCfgFast()};
 inline const auto Smtp_slow_trickle       = WFX::SmtpEndpoint{"127.0.0.1:8114", SmtpCfgFast()};
 inline const auto Smtp_silent_data        = WFX::SmtpEndpoint{"127.0.0.1:8115", SmtpCfgFast()};
+// Hangs right after the STARTTLS upgrade, still inside onConnect. The request budget outlasts
+// the audit's wait, so only connectTimeoutSeconds can end it in time
+inline const auto Smtp_silent_ehlo2       = WFX::SmtpEndpoint{"127.0.0.1:8123", SmtpCfg(5, 30)};
 
 // heloName itself carries a CRLF-injection attempt. Points at the 'good' mock port, but the
 // connection is never actually opened, SmtpOnConnect's HasInjectionBytes(opts->heloName) check
@@ -245,6 +277,7 @@ inline const auto Smtp_heloinject = WFX::SmtpEndpoint{"127.0.0.1:8100", WFX::Smt
 
 static const WFX::SmtpEndpoint* SmtpEndpointOf(std::string_view e) noexcept
 {
+    if(e == "alpn_custom")        return &Smtp_alpn_custom;
     if(e == "auth_login_only")    return &Smtp_auth_login_only;
     if(e == "inject")             return &Smtp_inject;
     if(e == "no_starttls")        return &Smtp_no_starttls;
@@ -260,12 +293,14 @@ static const WFX::SmtpEndpoint* SmtpEndpointOf(std::string_view e) noexcept
     if(e == "drop_starttls")      return &Smtp_drop_starttls;
     if(e == "drop_auth")          return &Smtp_drop_auth;
     if(e == "drop_data_prompt")   return &Smtp_drop_data_prompt;
+    if(e == "data_250")           return &Smtp_data_250;
     if(e == "flood_greeting")     return &Smtp_flood_greeting;
     if(e == "flood_ehlo2")        return &Smtp_flood_ehlo2;
     if(e == "huge_line_greeting") return &Smtp_huge_line_greeting;
     if(e == "huge_line_ehlo2")    return &Smtp_huge_line_ehlo2;
     if(e == "slow_trickle")       return &Smtp_slow_trickle;
     if(e == "silent_data")        return &Smtp_silent_data;
+    if(e == "silent_ehlo2")       return &Smtp_silent_ehlo2;
     if(e == "heloinject")         return &Smtp_heloinject;
     return &Smtp_good;
 }
@@ -273,10 +308,11 @@ static const WFX::SmtpEndpoint* SmtpEndpointOf(std::string_view e) noexcept
 // WFX::PostgresEndpoint instances
 //
 // One per postgres_upstream.py persona. Ports are compiled in here and mirrored in
-// client_audit.py's PG_PERSONAS table, keep the two in sync. None of these personas
-// needs a certificate: every SSL-verdict fault (garbage byte, plaintext splice,
-// plaintext-when-required) is refused by the client before a TLS handshake would
-// ever start, so postgres_upstream.py never wraps the socket for them.
+// client_audit.py's PG_PERSONAS table, keep the two in sync. Only the two alpn_*
+// personas complete a TLS handshake, on the good cert: every SSL-verdict fault
+// (garbage byte, plaintext splice, plaintext-when-required) is refused by the client
+// before a TLS handshake would ever start, so postgres_upstream.py never wraps the
+// socket for those.
 //
 // PgCfg's defaults match postgres_upstream.py's SCRAM_USER/SCRAM_PASSWORD and skip TLS
 // negotiation (PgEncryption::NONE) so most personas exercise only the StartupMessage
@@ -387,6 +423,15 @@ inline const auto Pg_scram_mixed          = WFX::PostgresEndpoint{"127.0.0.1:816
 inline const auto Pg_scram_server_error   = WFX::PostgresEndpoint{"127.0.0.1:8165", PgCfg()};
 inline const auto Pg_error_at_handshake   = WFX::PostgresEndpoint{"127.0.0.1:8166", PgCfg()};
 
+// A full TLS handshake each, one left at Postgres's own ALPN and one configured with its
+// own, so the mock can tell which each offered
+inline const auto Pg_alpn_default         = WFX::PostgresEndpoint{"127.0.0.1:8167", PgCfg(8, 8, WFX::PgEncryption::REQUIRED)};
+inline const auto Pg_alpn_custom          = WFX::PostgresEndpoint{"127.0.0.1:8168", [] {
+    auto cfg = PgCfg(8, 8, WFX::PgEncryption::REQUIRED);
+    cfg.alpn = ALPN_CUSTOM;
+    return cfg;
+}()};
+
 static const WFX::PostgresEndpoint* PgEndpointOf(std::string_view e) noexcept
 {
     if(e == "drop_startup")          return &Pg_drop_startup;
@@ -425,13 +470,15 @@ static const WFX::PostgresEndpoint* PgEndpointOf(std::string_view e) noexcept
     if(e == "scram_mixed")           return &Pg_scram_mixed;
     if(e == "scram_server_error")    return &Pg_scram_server_error;
     if(e == "error_at_handshake")    return &Pg_error_at_handshake;
+    if(e == "alpn_default")          return &Pg_alpn_default;
+    if(e == "alpn_custom")           return &Pg_alpn_custom;
     return &Pg_good;
 }
 
 // Reflecting the outcome
 
 template <typename OutT>
-static void Emit(WFX::Request& req, WFX::Response& res, WFX::Shared::EndpointStatus st, OutT& out)
+static void Emit(WFX::Request& req, WFX::Response& res, WFX::EndpointStatus st, OutT& out)
 {
     res.Status(200);
     auto j = WFX::ImJson(res);
@@ -451,7 +498,7 @@ static void Emit(WFX::Request& req, WFX::Response& res, WFX::Shared::EndpointSta
 }
 
 // EndpointStatus -> the plain integer JsonWriter has an overload for
-static std::uint64_t EpJ(WFX::Shared::EndpointStatus s) noexcept
+static std::uint64_t EpJ(WFX::EndpointStatus s) noexcept
 {
     return static_cast<std::uint64_t>(static_cast<unsigned>(s));
 }
@@ -478,7 +525,7 @@ static std::uint32_t HeaderU32(WFX::Request& req, const char* name, std::uint32_
 // string comparisons instead of a JSON field per possible C++ type. Arrays are the one
 // exception: the decoded shape and Count() are what pg_types actually needs to see,
 // not a stringified element list, so those get their own three fields instead.
-static void WritePgValue(WFX::Shared::JsonWriter& j, const WFX::PgResult& result, const WFX::PgRow& row,
+static void WritePgValue(WFX::JsonWriter& j, const WFX::PgResult& result, const WFX::PgRow& row,
                          std::uint16_t col)
 {
     if(row.IsNull(col)) {
@@ -505,19 +552,18 @@ static void WritePgValue(WFX::Shared::JsonWriter& j, const WFX::PgResult& result
             break;
         }
         case 1007: { // int4[]
-            // Get<PgArrayView> leaves elements null on a decode failure (a malformed
-            // header) and sets it, even for a genuinely empty array, on success, so it
-            // doubles as the ok/fail signal DecodeArray's own bool return would give
+            // A malformed header leaves the view empty, elements null included, while
+            // even a genuinely empty array sets elements, so it doubles as the ok/fail
+            // signal. ndim and Count() are reported either way, since an empty view
+            // must say 0 for both
             const auto av = row.Get<WFX::PgArrayView>(col);
             const bool ok = av.elements != nullptr;
             j.Write("array_ok", ok);
             j.Write("array_ndim", static_cast<std::int64_t>(av.ndim));
-            j.Write("array_count", static_cast<std::int64_t>(ok ? av.Count() : 0));
+            j.Write("array_count", static_cast<std::int64_t>(av.Count()));
 
-            // Walking is a second, independent check from Count(): a header that
-            // overflows Count()'s product can still legitimately have zero walkable
-            // bytes behind it, and a truncated element has to stop the walk rather
-            // than read past what actually arrived
+            // Walking is a second, independent check from Count(): a truncated
+            // element has to stop the walk rather than read past what actually arrived
             std::int64_t walked = 0;
             bool anyNull = false;
             if(ok) {
@@ -569,6 +615,8 @@ static const WFX::HttpEndpoint* EndpointOf(std::string_view e) noexcept
     if(e == "unreach")  return &EpUnreach;
     if(e == "idle")     return &EpIdle;
     if(e == "prewarm")  return &EpPrewarm;
+    if(e == "tls_default") return &EpTlsDefault;
+    if(e == "tls_custom")  return &EpTlsCustom;
     return &EpDefault;
 }
 
@@ -942,7 +990,7 @@ WFX_POST("/pg/query", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     res.Status(200);
     auto j = WFX::ImJson(res);
 
-    auto emit = [&j](WFX::Shared::EndpointStatus status, const auto& result) {
+    auto emit = [&j](WFX::EndpointStatus status, const auto& result) {
         j.Write("ep", EpJ(status));
         if(status != WFX::EpOk)
             return;

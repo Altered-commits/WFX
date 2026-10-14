@@ -33,6 +33,8 @@
 //   WFX::GetRouteLatencyAt(r)     : one route's latency histogram, summed across workers
 //   WFX::GetEndpointLatencyAt(e)  : one endpoint's latency histogram, summed across workers
 //   WFX::ComputeLatencyStats(h)   : histogram to count/mean/stddev/min/max/p50/p90/p95/p99/p999
+//   WFX::LogMetrics / NetworkMetrics / ProcessMetrics / RouteMetricsView / EndpointMetricsView /
+//   LatencyMetrics / LatencyStats : what those return
 //
 // Usage:
 //   WFX::LogInfo("[MyHandler]: started on port ", port);
@@ -218,6 +220,21 @@ template <typename... Args> [[noreturn]] inline void LogFatal(Args&&... args) no
     WFX_UNREACHABLE;
 }
 
+// vvv Metric types vvv
+// What the getters below return. A *View carries the route's path and method, or the endpoint's host,
+// next to its counters
+using LogMetrics = Shared::LogMetrics;
+using NetworkMetrics = Shared::NetworkMetrics;
+using ProcessMetrics = Shared::SelfMetrics;
+using RouteMetrics = Shared::RouteMetrics;
+using EndpointMetrics = Shared::EndpointMetrics;
+using RouteMetricsView = Shared::RouteMetricsView;
+using EndpointMetricsView = Shared::EndpointMetricsView;
+using LatencyMetrics = Shared::LatencyMetrics;
+
+// Buckets in a LatencyMetrics histogram
+inline constexpr auto LatencyBucketCount = Shared::LATENCY_BUCKET_COUNT; // NOLINT(readability-identifier-naming)
+
 // vvv Metrics API vvv
 // Number of worker slots, and the index of the worker running this handler
 // Together they cover both traversal and "what are my own numbers"
@@ -240,7 +257,7 @@ inline std::uint16_t WorkerIndex() noexcept
 }
 
 // Out of range returns a zeroed struct rather than failing
-inline Shared::LogMetrics GetLogMetricsAt(std::uint16_t worker) noexcept
+inline LogMetrics GetLogMetricsAt(std::uint16_t worker) noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -249,7 +266,7 @@ inline Shared::LogMetrics GetLogMetricsAt(std::uint16_t worker) noexcept
     return api->getLogMetricsAt(worker);
 }
 
-inline Shared::NetworkMetrics GetNetworkMetricsAt(std::uint16_t worker) noexcept
+inline NetworkMetrics GetNetworkMetricsAt(std::uint16_t worker) noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -258,7 +275,7 @@ inline Shared::NetworkMetrics GetNetworkMetricsAt(std::uint16_t worker) noexcept
     return api->getNetMetricsAt(worker);
 }
 
-inline Shared::SelfMetrics GetProcessMetricsAt(std::uint16_t worker) noexcept
+inline ProcessMetrics GetProcessMetricsAt(std::uint16_t worker) noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -267,7 +284,7 @@ inline Shared::SelfMetrics GetProcessMetricsAt(std::uint16_t worker) noexcept
     return api->getSelfMetricsAt(worker);
 }
 
-inline Shared::LogMetrics GetLogMetricsAll() noexcept
+inline LogMetrics GetLogMetricsAll() noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -276,7 +293,7 @@ inline Shared::LogMetrics GetLogMetricsAll() noexcept
     return api->getLogMetricsAggregate();
 }
 
-inline Shared::NetworkMetrics GetNetworkMetricsAll() noexcept
+inline NetworkMetrics GetNetworkMetricsAll() noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -285,7 +302,7 @@ inline Shared::NetworkMetrics GetNetworkMetricsAll() noexcept
     return api->getNetMetricsAggregate();
 }
 
-inline Shared::SelfMetrics GetProcessMetricsAll() noexcept
+inline ProcessMetrics GetProcessMetricsAll() noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -316,7 +333,7 @@ inline std::uint16_t EndpointMetricCount() noexcept
     return api->getEndpointMetricCount();
 }
 
-inline Shared::RouteMetricsView GetRouteMetricsAt(std::uint16_t route) noexcept
+inline RouteMetricsView GetRouteMetricsAt(std::uint16_t route) noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -325,7 +342,7 @@ inline Shared::RouteMetricsView GetRouteMetricsAt(std::uint16_t route) noexcept
     return api->getRouteMetricsAt(route);
 }
 
-inline Shared::EndpointMetricsView GetEndpointMetricsAt(std::uint16_t endpoint) noexcept
+inline EndpointMetricsView GetEndpointMetricsAt(std::uint16_t endpoint) noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -345,7 +362,7 @@ inline bool MetricsLatencyEnabled() noexcept
     return api->getMetricsLatencyEnabled();
 }
 
-inline Shared::LatencyMetrics GetRouteLatencyAt(std::uint16_t route) noexcept
+inline LatencyMetrics GetRouteLatencyAt(std::uint16_t route) noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -354,7 +371,7 @@ inline Shared::LatencyMetrics GetRouteLatencyAt(std::uint16_t route) noexcept
     return api->getRouteLatencyAt(route);
 }
 
-inline Shared::LatencyMetrics GetEndpointLatencyAt(std::uint16_t endpoint) noexcept
+inline LatencyMetrics GetEndpointLatencyAt(std::uint16_t endpoint) noexcept
 {
     const auto* api = Core::UtilsApiExt1();
     if(!api)
@@ -395,7 +412,7 @@ inline std::uint64_t LatencyBucketMidpointUs(std::uint32_t idx) noexcept
 }
 
 // Nearest-rank percentile over the cumulative bucket counts
-inline std::uint64_t LatencyPercentile(const Shared::LatencyMetrics& h, std::uint64_t count, double q) noexcept
+inline std::uint64_t LatencyPercentile(const LatencyMetrics& h, std::uint64_t count, double q) noexcept
 {
     if(count == 0)
         return 0;
@@ -405,25 +422,25 @@ inline std::uint64_t LatencyPercentile(const Shared::LatencyMetrics& h, std::uin
         rank = 1;
 
     std::uint64_t cum = 0;
-    for(std::uint32_t i = 0; i < Shared::LATENCY_BUCKET_COUNT; i++) {
+    for(std::uint32_t i = 0; i < LatencyBucketCount; i++) {
         cum += h.buckets[i];
         if(cum >= rank)
             return LatencyBucketMidpointUs(i);
     }
 
-    return LatencyBucketMidpointUs(Shared::LATENCY_BUCKET_COUNT - 1);
+    return LatencyBucketMidpointUs(LatencyBucketCount - 1);
 }
 
 } // namespace Detail
 
 // Turns a raw histogram (from GetRouteLatencyAt / GetEndpointLatencyAt) into the derived numbers.
 // Returns a zeroed struct when no samples were recorded (latency off, or no traffic yet)
-inline LatencyStats ComputeLatencyStats(const Shared::LatencyMetrics& h) noexcept
+inline LatencyStats ComputeLatencyStats(const LatencyMetrics& h) noexcept
 {
     LatencyStats stats{};
 
     std::uint64_t count = 0;
-    for(std::uint32_t i = 0; i < Shared::LATENCY_BUCKET_COUNT; i++)
+    for(std::uint32_t i = 0; i < LatencyBucketCount; i++)
         count += h.buckets[i];
 
     stats.count = count;
@@ -438,7 +455,7 @@ inline LatencyStats ComputeLatencyStats(const Shared::LatencyMetrics& h) noexcep
     bool haveFirst = false;
     double variance = 0.0;
 
-    for(std::uint32_t i = 0; i < Shared::LATENCY_BUCKET_COUNT; i++) {
+    for(std::uint32_t i = 0; i < LatencyBucketCount; i++) {
         if(h.buckets[i] == 0)
             continue;
 

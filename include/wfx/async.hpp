@@ -40,11 +40,17 @@ namespace WFX {
 
 // -----------------------------------------------------------------------
 // Coroutine return types, put these in your handler's return type:
-//   -> WFX::Coro     for route handlers
-//   -> WFX::MwCoro   for middleware
+//   -> WFX::Coro       for route handlers
+//   -> WFX::MwCoro     for middleware
+//   -> WFX::Task<T>    for your own coroutines another one co_awaits for a T
+//
+//   WFX::Task<int> CountUsers() { ... co_return n; }
+//   auto n = co_await CountUsers();
 // -----------------------------------------------------------------------
-using Coro = WFX::Async::Task<void>;
-using MwCoro = WFX::Async::Task<Shared::MiddlewareAction>;
+template <typename T = void> using Task = Async::Task<T>;
+
+using Coro = Task<void>;
+using MwCoro = Task<MiddlewareAction>;
 
 // -----------------------------------------------------------------------
 // SleepFor(ms) - suspend for `ms` milliseconds, then resume.
