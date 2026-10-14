@@ -154,7 +154,7 @@ WFX::EpCoro UpConnect(WFX::SlotHandle h, void* slotStateVoid)
     co_return WFX::EpReady;
 }
 
-WFX::Shared::SerializeResult UpSerialize(void*, const void* reqVoid, char* buf, std::uint32_t bufLen,
+WFX::SerializeResult UpSerialize(void*, const void* reqVoid, char* buf, std::uint32_t bufLen,
                                          std::uint32_t* written, std::uint64_t*)
 {
     auto& req = *static_cast<const UpReq*>(reqVoid);
@@ -167,7 +167,7 @@ WFX::Shared::SerializeResult UpSerialize(void*, const void* reqVoid, char* buf, 
     return WFX::EpSerOk;
 }
 
-WFX::Shared::ParseResult UpParse(void* slotStateVoid, void*, const char* buf, std::uint32_t len,
+WFX::ParseResult UpParse(void* slotStateVoid, void*, const char* buf, std::uint32_t len,
                                  std::uint32_t* consumed, void* outObj, bool isEof, std::uint64_t*)
 {
     auto* st = static_cast<UpSlotState*>(slotStateVoid);
@@ -266,7 +266,7 @@ WFX_GET("/upgrade", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 
 // `st` checked BEFORE `out` is dereferenced — out is empty on any transport/TLS failure.
 template <typename OutT>
-static void Emit(WFX::Request& req, WFX::Response& res, WFX::Shared::EndpointStatus st, OutT& out)
+static void Emit(WFX::Request& req, WFX::Response& res, WFX::EndpointStatus st, OutT& out)
 {
     res.Status(200);
     auto j = WFX::ImJson(res);

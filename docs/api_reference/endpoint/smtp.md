@@ -129,7 +129,7 @@ WFX_POST("/contact", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 
 ```cpp
 struct SmtpSendOutcome {
-    Shared::EndpointStatus status; // the last step's status, EpOk whenever it got a reply
+    WFX::EndpointStatus status;    // the last step's status, EpOk whenever it got a reply
     bool accepted;                 // the server accepted the message body
     EndpointOutput<SmtpResponse> response; // the last step's reply, empty if it got none
 

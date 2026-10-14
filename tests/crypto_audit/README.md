@@ -177,6 +177,16 @@ trips checked against Python's own codecs, decode leniency (the shared
 lookup table accepts a mixed standard/url-safe alphabet, by design), rejection
 of genuinely invalid input, and a large-payload timing sanity check.
 
+### out-buffer
+
+The `std::span` forms of AEAD, Base64 and Hex. The allocating forms are built on
+them, so the phases above already prove what they compute; this one covers what
+only the caller's buffer shows. An exact-size buffer reports the right written
+count, a buffer one byte short is refused before anything is written, and a
+tampered AEAD message leaves no plaintext in the buffer, not even a prefix
+(security). A decode into a too-small buffer is refused; an overrun would surface
+as a sanitizer report.
+
 ---
 
 ## Test app (`app/`)

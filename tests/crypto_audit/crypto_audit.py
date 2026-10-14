@@ -51,6 +51,12 @@ ST_AUTH_FAILED = 3
 ST_UNSUPPORTED = 4
 ST_INTERNAL_ERROR = 5
 
+# Both AEAD algorithms append a 16-byte tag
+AEAD_TAG_LEN = 16
+
+# What every *-into route in app/src/main.cpp prefills its out buffer with (OUT_BUFFER_FILL there)
+OUT_BUFFER_FILL = 0xAA
+
 HASH_ALGOS = {"sha256": hashlib.sha256, "sha384": hashlib.sha384, "sha512": hashlib.sha512}
 
 EC_CURVE_LEN = {"ec_p256": 32, "ec_p384": 48}
@@ -136,6 +142,16 @@ def hmac_call(cfg, algo, key, data, path="/crypto/hmac"):
 def aead_call(cfg, path, algo, key, nonce, aad, data, rtimeout=30.0):
     headers = {"X-Algo": algo, "X-Key": key.hex(), "X-Nonce": nonce.hex(), "X-Aad": aad.hex()}
     return call(cfg, "POST", path, headers, data, rtimeout=rtimeout)
+
+def into_call(cfg, path, data, cap, headers=None):
+    """One out-buffer call into an X-Cap byte buffer: {status, written, buf} (see WriteInto)."""
+    headers = dict(headers or {})
+    headers["X-Cap"] = str(cap)
+    return call(cfg, "POST", path, headers, data)
+
+def aead_into(cfg, path, algo, key, nonce, aad, data, cap):
+    headers = {"X-Algo": algo, "X-Key": key.hex(), "X-Nonce": nonce.hex(), "X-Aad": aad.hex()}
+    return into_call(cfg, path, data, cap, headers)
 
 def kdf_call(cfg, path, headers):
     return call(cfg, "GET", path, headers)
@@ -1035,6 +1051,77 @@ def phase_encoding(ctx):
         p.check("url decode rejects truncated/invalid escape: %r" % bad,
               bool(r) and r.get("ok") is False, "got %r" % r)
 
+# PHASE: out-buffer
+#
+# The allocating forms are built on the out-buffer ones, so the phases above already prove what
+# they compute. This covers only what the caller's buffer itself exposes: the written count, a
+# buffer one short, and what a failed decrypt leaves behind
+def phase_out_buffer(ctx):
+    cfg = ctx.cfg
+    p = ctx.phase("out-buffer")
+    import base64
+
+    fill = bytes([OUT_BUFFER_FILL])
+
+    def buf(r):
+        return bytes.fromhex(r.get("buf", "")) if r else b""
+
+    # AEAD
+    key, nonce, aad, pt = os.urandom(32), os.urandom(12), os.urandom(8), os.urandom(100)
+    sealed_len = len(pt) + AEAD_TAG_LEN
+
+    r = aead_into(cfg, "/crypto/aead/encrypt-into", "aesgcm", key, nonce, aad, pt, sealed_len)
+    opened = aead_call(cfg, "/crypto/aead/decrypt", "aesgcm", key, nonce, aad, buf(r))
+    p.check("aead encrypt-into: exact room seals a message the allocating form opens",
+            bool(r) and r.get("status") == ST_OK and r.get("written") == sealed_len
+            and bool(opened) and opened.get("hex") == pt.hex(), "into=%r opened=%r" % (r, opened))
+
+    r = aead_into(cfg, "/crypto/aead/encrypt-into", "aesgcm", key, nonce, aad, pt, sealed_len - 1)
+    p.check("aead encrypt-into: one byte short is refused before anything is written",
+            bool(r) and r.get("status") == ST_BUFFER_TOO_SMALL and r.get("written") == 0
+            and buf(r) == fill * (sealed_len - 1), "got %r" % r)
+
+    sealed = aead_call(cfg, "/crypto/aead/encrypt", "aesgcm", key, nonce, aad, pt)
+    sealed_bytes = bytes.fromhex(sealed["hex"]) if sealed else b"\x00" * sealed_len
+
+    tampered = bytearray(sealed_bytes)
+    tampered[0] ^= 0x01
+    r = aead_into(cfg, "/crypto/aead/decrypt-into", "aesgcm", key, nonce, aad, bytes(tampered), len(pt))
+    p.check("aead decrypt-into: a tampered message leaves no plaintext in the buffer, not even a prefix",
+            bool(r) and r.get("status") == ST_AUTH_FAILED and r.get("written") == 0
+            and buf(r) == b"\x00" * len(pt), "got %r" % r, security=True)
+
+    r = aead_into(cfg, "/crypto/aead/decrypt-into", "aesgcm", key, nonce, aad, sealed_bytes, len(pt) - 1)
+    p.check("aead decrypt-into: one byte short is refused",
+            bool(r) and r.get("status") == ST_BUFFER_TOO_SMALL and r.get("written") == 0, "got %r" % r)
+
+    # Base64
+    data = os.urandom(50)
+    encoded = base64.b64encode(data)
+
+    r = into_call(cfg, "/encoding/base64/encode-into", data, len(encoded))
+    p.check("base64 encode-into: exact room writes the reference encoding and reports its length",
+            bool(r) and r.get("status") == 1 and r.get("written") == len(encoded) and buf(r) == encoded,
+            "got %r want %r" % (r, encoded))
+
+    r = into_call(cfg, "/encoding/base64/encode-into", data, len(encoded) - 1)
+    p.check("base64 encode-into: one char short is refused, the buffer untouched",
+            bool(r) and r.get("status") == 0 and buf(r) == fill * (len(encoded) - 1), "got %r" % r)
+
+    # An overrun past the buffer would land as a sanitizer report instead, at the end of the run
+    r = into_call(cfg, "/encoding/base64/decode-into", encoded, len(data) - 1)
+    p.check("base64 decode-into: a buffer shorter than the payload is refused",
+            bool(r) and r.get("status") == 0, "got %r" % r)
+
+    # Hex
+    r = into_call(cfg, "/encoding/hex/encode-into", data, len(data) * 2 - 1)
+    p.check("hex encode-into: one char short is refused, the buffer untouched",
+            bool(r) and r.get("status") == 0 and buf(r) == fill * (len(data) * 2 - 1), "got %r" % r)
+
+    r = into_call(cfg, "/encoding/hex/decode-into", data.hex().encode(), len(data) - 1)
+    p.check("hex decode-into: a buffer shorter than the payload is refused",
+            bool(r) and r.get("status") == 0, "got %r" % r)
+
 class CryptoAudit(common.Suite):
     name = "crypto_audit"
     description = "WFX crypto ABI audit"
@@ -1054,6 +1141,7 @@ class CryptoAudit(common.Suite):
         "jwk":               phase_jwk,
         "jwt":               phase_jwt,
         "encoding":          phase_encoding,
+        "out-buffer":        phase_out_buffer,
     }
 
 if __name__ == "__main__":

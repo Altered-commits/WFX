@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -97,13 +98,13 @@ WFX_GET("/big", [](WFX::Request, WFX::Response res) {
 
 WFX_GET("/stream", [](WFX::Request, WFX::Response res) {
     int remaining = 512;
-    res.Status(200).Stream([remaining](WFX::Shared::StreamBuffer buf) mutable -> WFX::Shared::StreamResult {
+    res.Status(200).Stream([remaining](WFX::StreamBuffer buf) mutable -> WFX::StreamResult {
         if(remaining <= 0)
-            return {0, WFX::Shared::StreamAction::STOP_AND_ALIVE_CONN};
+            return {0, WFX::StreamDone};
         std::size_t n = std::min<std::size_t>(buf.size, 256);
         std::memset(buf.buffer, 'S', n);
         remaining--;
-        return {n, WFX::Shared::StreamAction::CONTINUE};
+        return {n, WFX::StreamContinue};
     });
 })
 
@@ -243,7 +244,7 @@ WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     j.End();
 
     // Per-route counters, summed across workers, each tagged with its own path and method.
-    // rv.path / HttpMethodToStringView return Shared::StringView, written directly via the
+    // rv.path / HttpMethodToStringView return WFX::StringView, written directly via the
     // JsonWriter StringView overload (no manual std::string_view wrapping).
     const bool latencyOn = WFX::MetricsLatencyEnabled();
     j.Write("latency_enabled", latencyOn);
@@ -253,7 +254,7 @@ WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
         const auto rv = WFX::GetRouteMetricsAt(r);
         j.Obj();
         j.Write("path", rv.path);
-        j.Write("method", WFX::Shared::HttpMethodToStringView(rv.method));
+        j.Write("method", WFX::HttpMethodToStringView(rv.method));
         j.Write("requests", rv.metrics.requests);
         j.Write("status_1xx", rv.metrics.status1xx);
         j.Write("status_2xx", rv.metrics.status2xx);
@@ -432,6 +433,39 @@ WFX_GET("/async/sleep", [](WFX::Request, WFX::Response res) -> WFX::Coro {
         co_return;
     }
     res.Status(200).SendText("slept");
+    co_return;
+})
+
+// Child coroutines that throw before ever reaching co_return, so they have no value to hand back.
+// Their exception has to reach the co_awaiting parent as an exception, like any other call's
+static WFX::Task<WFX::String> ThrowingChild()
+{
+    throw std::runtime_error("child failed");
+    co_return WFX::String{"unreachable"};
+}
+
+static WFX::Task<> ThrowingVoidChild()
+{
+    throw std::runtime_error("void child failed");
+    co_return;
+}
+
+WFX_GET("/async/child-throws", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    try {
+        const WFX::String value = co_await ThrowingChild();
+        res.Status(200).SendText(std::string_view{value});
+    }
+    catch(const std::runtime_error&) {
+        res.Status(200).SendText("caught");
+    }
+    co_return;
+})
+
+// Nobody catches the child's exception here, so the handler fails as a whole (500) rather than
+// carrying on as if the child had succeeded
+WFX_GET("/async/void-child-throws", [](WFX::Request, WFX::Response res) -> WFX::Coro {
+    co_await ThrowingVoidChild();
+    res.Status(200).SendText("continued");
     co_return;
 })
 

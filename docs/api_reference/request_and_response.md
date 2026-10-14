@@ -409,7 +409,7 @@ Below are the primary methods exposed by `Response`.
     Write(std::string_view)
     Write(const char*)
 
-    Write(const Shared::UUID&)
+    Write(const WFX::UUID&)
 
     Write(std::int64_t)
     Write(std::uint64_t)
@@ -494,7 +494,7 @@ Below are the primary methods exposed by `Response`.
 
     ```cpp
     SendFile(std::string_view path, bool autoHandle404 = true)
-    SendFile(Shared::StringView path, bool autoHandle404 = true)
+    SendFile(WFX::StringView path, bool autoHandle404 = true)
     ```
 
     Depending on the configured backend, optimized zero-copy transmission paths may be used internally.
@@ -522,8 +522,8 @@ Below are the primary methods exposed by `Response`.
     **Overloads**:
 
     ```cpp
-    SendTemplate(std::string_view path, Shared::JsonObject&& ctx)
-    SendTemplate(Shared::StringView path, Shared::JsonObject&& ctx)
+    SendTemplate(std::string_view path, WFX::JsonObject&& ctx)
+    SendTemplate(WFX::StringView path, WFX::JsonObject&& ctx)
     ```
 
     The provided JSON context is forwarded to the template renderer for dynamic value binding.
@@ -571,7 +571,7 @@ Below are the primary methods exposed by `Response`.
 
     **Streaming callback signature**:
     ```cpp
-    WFX::Shared::StreamResult(WFX::Shared::StreamBuffer)
+    WFX::StreamResult(WFX::StreamBuffer)
     ```
 
     **Definitions**:
@@ -608,14 +608,14 @@ Below are the primary methods exposed by `Response`.
 
     res.Stream([
         offset = std::size_t{0}
-    ](WFX::Shared::StreamBuffer buffer) mutable -> WFX::Shared::StreamResult {
+    ](WFX::StreamBuffer buffer) mutable -> WFX::StreamResult {
 
         std::size_t bytes = ReadFromSource(offset, buffer.buffer, buffer.size);
 
         if(bytes == 0) {
             return {
                 0,
-                WFX::Shared::StreamAction::STOP_AND_ALIVE_CONN
+                WFX::StreamDone
             };
         }
 
@@ -623,7 +623,7 @@ Below are the primary methods exposed by `Response`.
 
         return {
             bytes,
-            WFX::Shared::StreamAction::CONTINUE
+            WFX::StreamContinue
         };
     }, false);
     ```

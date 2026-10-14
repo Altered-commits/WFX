@@ -94,6 +94,7 @@ raw pointer past that point.
 `status` (the first element of the pair) tells you what happened. Always check it
 before touching `out`, a non-`EpOk` status means `out` is empty. The type behind these
 constants is `WFX::EndpointStatus`, if you need to name it explicitly instead of relying on `auto`.
+`WFX::EndpointStatusName(status)` gives its name (`"REQUEST_TIMEOUT"` etc.) for logs and error responses.
 
 | Status | Meaning |
 |--------|---------|
@@ -336,7 +337,7 @@ Wiring it up takes two pieces on `EndpointDesc`:
 // Requests that hash to the same key are treated as duplicates of one another
 std::uint64_t CoalesceByPath(const void* reqVoid) {
     auto& req = *static_cast<const ApiReq*>(reqVoid);
-    return WFX::Shared::Hasher::Fnv1a(req.path.data(), req.path.size());
+    return WFX::Fnv1a(req.path);
 }
 
 // Every waiter needs its own copy, ApiRes must be copyable
@@ -572,7 +573,7 @@ void DestroyOutput(void* outputPtr)
     WFX::Delete(static_cast<KvRes*>(outputPtr));
 }
 
-WFX::Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoid, char* buf, std::uint32_t bufLen,
+WFX::SerializeResult Serialize(void* slotStateVoid, const void* reqVoid, char* buf, std::uint32_t bufLen,
                                        std::uint32_t* written, std::uint64_t* /*streamKey, unused, no multiplexing*/)
 {
     auto* state = static_cast<KvSlotState*>(slotStateVoid);
@@ -587,7 +588,7 @@ WFX::Shared::SerializeResult Serialize(void* slotStateVoid, const void* reqVoid,
     return WFX::EpSerOk;
 }
 
-WFX::Shared::ParseResult Parse(void* /*slotState*/, void* parseStateVoid, const char* buf, std::uint32_t len,
+WFX::ParseResult Parse(void* /*slotState*/, void* parseStateVoid, const char* buf, std::uint32_t len,
                                std::uint32_t* consumed, void* outObjVoid, bool isEof,
                                std::uint64_t* /*completedKey, unused*/)
 {
@@ -1099,7 +1100,7 @@ struct MySlotState {
     std::uint32_t inFlight = 0;         // requests sent but not yet finished
 };
 
-WFX::Shared::SerializeResult Serialize(void* slotStateVoid, const void* req, char* buf, std::uint32_t bufLen,
+WFX::SerializeResult Serialize(void* slotStateVoid, const void* req, char* buf, std::uint32_t bufLen,
                                        std::uint32_t* written, std::uint64_t* streamKey)
 {
     auto* state = static_cast<MySlotState*>(slotStateVoid);
@@ -1112,7 +1113,7 @@ WFX::Shared::SerializeResult Serialize(void* slotStateVoid, const void* req, cha
     return WFX::EpSerOk;
 }
 
-WFX::Shared::ParseResult Parse(void* slotStateVoid, void* parseState, const char* buf, std::uint32_t len,
+WFX::ParseResult Parse(void* slotStateVoid, void* parseState, const char* buf, std::uint32_t len,
                                std::uint32_t* consumed, void* /*outObj, unused here*/, bool isEof,
                                std::uint64_t* completedKey)
 {

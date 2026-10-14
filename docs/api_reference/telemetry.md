@@ -174,9 +174,9 @@ counters:
 
 ```cpp
 struct RouteMetricsView {
-    Shared::StringView path;    // full registered pattern, e.g. "/api/users/<id:uint>"; valid for the process lifetime
-    Shared::HttpMethod method;  // GET, POST, ...
-    RouteMetrics       metrics;
+    WFX::StringView path;    // full registered pattern, e.g. "/api/users/<id:uint>"; valid for the process lifetime
+    WFX::HttpMethod method;  // GET, POST, ...
+    RouteMetrics    metrics;
 };
 
 struct RouteMetrics {
@@ -196,7 +196,7 @@ since a route is the same route in every worker. The counts are aggregated at re
 ```cpp
 for(std::uint16_t r = 0; r < WFX::RouteMetricCount(); r++) {
     const auto rv = WFX::GetRouteMetricsAt(r);
-    WFX::LogInfo(WFX::Shared::HttpMethodToStringView(rv.method), " ", rv.path,
+    WFX::LogInfo(WFX::HttpMethodToStringView(rv.method), " ", rv.path,
                  " requests=", rv.metrics.requests, " 5xx=", rv.metrics.status5xx);
 }
 ```
@@ -221,8 +221,8 @@ with the endpoint's host.
 
 ```cpp
 struct EndpointMetricsView {
-    Shared::StringView host;    // e.g. "api.example.com", valid for the process lifetime
-    EndpointMetrics    metrics;
+    WFX::StringView host;    // e.g. "api.example.com", valid for the process lifetime
+    EndpointMetrics metrics;
 };
 
 struct EndpointMetrics {

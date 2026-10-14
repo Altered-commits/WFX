@@ -197,6 +197,8 @@
 #include "async/endpoint.hpp"
 #include "wfx/async.hpp"
 
+#include <string_view>
+
 namespace WFX {
 
 // -----------------------------------------------------------------------
@@ -265,14 +267,16 @@ using AbortSlotHandle = Async::AbortSlotHandle;
 using SlotReceiveResult = Async::SlotReceiveResult;
 
 // -----------------------------------------------------------------------
-// Return type for onConnect functions
+// Return type for onConnect functions, a coroutine yielding a ConnectResult
+// (EpReady / EpRetry / EpFatal below)
 //
 //   WFX::EpCoro Authenticate(WFX::SlotHandle h, void* state) {
 //       // ... handshake ...
 //       co_return WFX::EpReady;
 //   }
 // -----------------------------------------------------------------------
-using EpCoro = Async::Task<Shared::ConnectResult>;
+using ConnectResult = Shared::ConnectResult;
+using EpCoro = Async::Task<ConnectResult>;
 
 // -----------------------------------------------------------------------
 // Return type for onAbort functions. No verdict to return, unlike EpCoro:
@@ -356,6 +360,8 @@ using EndpointStatus = Shared::EndpointStatus;
 // -----------------------------------------------------------------------
 // TLS mode (set in EndpointConfig::tlsConfig)
 // -----------------------------------------------------------------------
+using EndpointTLSConfig = Shared::EndpointTLSConfig;
+
 // NOLINTBEGIN(readability-identifier-naming)
 inline constexpr auto EpTlsAuto = Shared::EndpointTLSConfig::AUTO;
 inline constexpr auto EpTlsRequire = Shared::EndpointTLSConfig::FORCE_REQUIRE;
@@ -379,6 +385,45 @@ inline constexpr auto EpEpollError = Shared::EndpointStatus::EPOLL_ERROR;
 inline constexpr auto EpHandshakeTimeout = Shared::EndpointStatus::HANDSHAKE_TIMEOUT;
 inline constexpr auto EpRequestTimeout = Shared::EndpointStatus::REQUEST_TIMEOUT;
 
+// The status's name, "SUCCESS" or "REQUEST_TIMEOUT" etc., for logs and error responses
+constexpr std::string_view EndpointStatusName(EndpointStatus status) noexcept
+{
+    switch(status) {
+        case Shared::EndpointStatus::SUCCESS:
+            return "SUCCESS";
+        case Shared::EndpointStatus::PENDING:
+            return "PENDING";
+        case Shared::EndpointStatus::CHUNK_AVAILABLE:
+            return "CHUNK_AVAILABLE";
+        case Shared::EndpointStatus::BUFFER_ERROR:
+            return "BUFFER_ERROR";
+        case Shared::EndpointStatus::INSUFFICIENT_BUFFER:
+            return "INSUFFICIENT_BUFFER";
+        case Shared::EndpointStatus::INVALID_KEY:
+            return "INVALID_KEY";
+        case Shared::EndpointStatus::POOL_EXHAUSTED:
+            return "POOL_EXHAUSTED";
+        case Shared::EndpointStatus::SOCKET_FAILURE:
+            return "SOCKET_FAILURE";
+        case Shared::EndpointStatus::CONNECT_FAILURE:
+            return "CONNECT_FAILURE";
+        case Shared::EndpointStatus::SSL_FAILURE:
+            return "SSL_FAILURE";
+        case Shared::EndpointStatus::INTERNAL_ERROR:
+            return "INTERNAL_ERROR";
+        case Shared::EndpointStatus::SERIALIZE_ERROR:
+            return "SERIALIZE_ERROR";
+        case Shared::EndpointStatus::EPOLL_ERROR:
+            return "EPOLL_ERROR";
+        case Shared::EndpointStatus::HANDSHAKE_TIMEOUT:
+            return "HANDSHAKE_TIMEOUT";
+        case Shared::EndpointStatus::REQUEST_TIMEOUT:
+            return "REQUEST_TIMEOUT";
+    }
+
+    return "UNKNOWN";
+}
+
 // -----------------------------------------------------------------------
 // onConnect flow control (co_return one of these from your EpCoro)
 // -----------------------------------------------------------------------
@@ -399,6 +444,8 @@ inline constexpr auto EpDisconnectTlsError = Shared::DisconnectReason::TLS_ERROR
 // -----------------------------------------------------------------------
 // In serialize() (return value)
 // -----------------------------------------------------------------------
+using SerializeResult = Shared::SerializeResult;
+
 inline constexpr auto EpSerOk = Shared::SerializeResult::OK;
 inline constexpr auto EpSerBufferTooSmall = Shared::SerializeResult::BUFFER_TOO_SMALL;
 inline constexpr auto EpSerError = Shared::SerializeResult::ERROR;
@@ -406,6 +453,8 @@ inline constexpr auto EpSerError = Shared::SerializeResult::ERROR;
 // -----------------------------------------------------------------------
 // In parse() (return value)
 // -----------------------------------------------------------------------
+using ParseResult = Shared::ParseResult;
+
 inline constexpr auto EpParseIncomplete = Shared::ParseResult::INCOMPLETE;
 inline constexpr auto EpParseChunk = Shared::ParseResult::CHUNK_READY;
 inline constexpr auto EpParseChunkFetch = Shared::ParseResult::CHUNK_READY_FETCH;
@@ -418,6 +467,8 @@ inline constexpr auto EpParseError = Shared::ParseResult::ERROR;
 // .UpgradeToTLS(). Anything other than EpSlotOk is fatal for the slot:
 // co_return EpFatal
 // -----------------------------------------------------------------------
+using SlotStatus = Shared::SlotStatus;
+
 inline constexpr auto EpSlotOk = Shared::SlotStatus::OK;
 inline constexpr auto EpSlotBufferError = Shared::SlotStatus::BUFFER_ERROR;
 inline constexpr auto EpSlotEpollError = Shared::SlotStatus::EPOLL_ERROR;

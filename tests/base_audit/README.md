@@ -149,6 +149,7 @@ content, or missing/wrong header = finding.
 | Shared callable types | Two plain sync functions, two plain async functions and two closures from one middleware factory each run their own (`/fn/sync-a`, `/fn/sync-b`, `/fn/async-a`, `/fn/async-b`, `/mw/factory-a`, `/mw/factory-b`) |
 | Async handler | `/async/sleep` returns `slept`; 20 concurrent hits |
 | Inline async | Async middleware and routes that finish without suspending (`/mw/async-inline`, `/mw/async-inline-break`, `/async/inline`) |
+| Throwing child task | A `WFX::Task` that throws reaches the coroutine awaiting it: `/async/child-throws` catches it (`caught`), the uncaught `/async/void-child-throws` fails the request with `500` |
 | Pipelining | A request sent while the previous one is still suspended is never answered |
 | Abandoned coroutines | The worker survives a client leaving mid-sleep on a nested coroutine |
 | `ImJson` | `/json/im` body contains `"immediate"`, `"meta"` and a pushed string literal (`"tags":["admin"]`, not `true`) |
@@ -288,8 +289,8 @@ Exit code 1 on any mismatch or connection failure.
 
 ### CHAOS
 
-6 scenarios. Each is followed by a recovery wait and the full `ROUTE_CHECKS` sweep (66 checks
-over 51 distinct paths). The master process is never targeted: only worker children.
+6 scenarios. Each is followed by a recovery wait and the full `ROUTE_CHECKS` sweep (68 checks
+over 53 distinct paths). The master process is never targeted: only worker children.
 
 | # | Scenario | What happens |
 |---|----------|-------------|
@@ -348,6 +349,7 @@ every user-facing feature.
 | `/async/sleep` | Async coroutine + `WFX::SleepFor(25ms)` |
 | `/async/slow`, `/mw/async-slow` | An async handler or middleware suspended long enough for a pipelined request to arrive |
 | `/async/nested-slow` | A route suspended inside a nested coroutine, for the abandoned-client check |
+| `/async/child-throws`, `/async/void-child-throws` | A child `Task<WFX::String>` that throws, caught by its parent, and a child `Task<>` that throws, uncaught |
 | `/json/im` | `WFX::ImJson` streaming JSON |
 | `/json/rm` | `WFX::RmJson` DOM-then-serialise JSON |
 | `/json/merge`, `/json/overwrite` | `RmJson` `Merge`/`Set` from a destroyed source, and scalars assigned over containers |

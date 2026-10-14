@@ -478,7 +478,7 @@ static const WFX::PostgresEndpoint* PgEndpointOf(std::string_view e) noexcept
 // Reflecting the outcome
 
 template <typename OutT>
-static void Emit(WFX::Request& req, WFX::Response& res, WFX::Shared::EndpointStatus st, OutT& out)
+static void Emit(WFX::Request& req, WFX::Response& res, WFX::EndpointStatus st, OutT& out)
 {
     res.Status(200);
     auto j = WFX::ImJson(res);
@@ -498,7 +498,7 @@ static void Emit(WFX::Request& req, WFX::Response& res, WFX::Shared::EndpointSta
 }
 
 // EndpointStatus -> the plain integer JsonWriter has an overload for
-static std::uint64_t EpJ(WFX::Shared::EndpointStatus s) noexcept
+static std::uint64_t EpJ(WFX::EndpointStatus s) noexcept
 {
     return static_cast<std::uint64_t>(static_cast<unsigned>(s));
 }
@@ -525,7 +525,7 @@ static std::uint32_t HeaderU32(WFX::Request& req, const char* name, std::uint32_
 // string comparisons instead of a JSON field per possible C++ type. Arrays are the one
 // exception: the decoded shape and Count() are what pg_types actually needs to see,
 // not a stringified element list, so those get their own three fields instead.
-static void WritePgValue(WFX::Shared::JsonWriter& j, const WFX::PgResult& result, const WFX::PgRow& row,
+static void WritePgValue(WFX::JsonWriter& j, const WFX::PgResult& result, const WFX::PgRow& row,
                          std::uint16_t col)
 {
     if(row.IsNull(col)) {
@@ -990,7 +990,7 @@ WFX_POST("/pg/query", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     res.Status(200);
     auto j = WFX::ImJson(res);
 
-    auto emit = [&j](WFX::Shared::EndpointStatus status, const auto& result) {
+    auto emit = [&j](WFX::EndpointStatus status, const auto& result) {
         j.Write("ep", EpJ(status));
         if(status != WFX::EpOk)
             return;

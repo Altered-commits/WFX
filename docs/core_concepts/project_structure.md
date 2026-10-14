@@ -99,9 +99,9 @@ This directory contains all C++ source files that implement your application log
 
 By default, **main.cpp** is provided with a few example routes to demonstrate basic functionality. You are free to modify or remove this file as needed. You may also add any number of additional C++ source files and subdirectories inside `src/`.
 
-The WFX build system automatically discovers and compiles all `.cpp` files located under `src/`, including those inside nested folders. File and directory naming is entirely up to you, with one exception: **api_entry.cpp**.
+The WFX build system automatically discovers and compiles all `.cpp` files located under `src/`, including those inside nested folders. File and directory naming is entirely up to you.
 
-**api_entry.cpp** is a special, engine-required file and **must NOT be modified or deleted**. It is used internally by WFX to wire application code into the engine.
+The one thing every project needs is **api_entry.cpp**'s single line, `WFX_API_ENTRY()` from `<wfx/app.hpp>`: it defines the entry point the engine calls to wire application code into it. Keep it expanded **exactly once** across `src/` (`wfx new` puts it in `api_entry.cpp`); without it the engine refuses to load the app, and a second copy fails to link.
 
 ---
 

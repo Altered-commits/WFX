@@ -611,6 +611,9 @@ ROUTE_CHECKS = [
     # Async handler
     ("GET",  "/async/sleep",      None, b"", 200, b"slept", None),
     ("GET",  "/async/nested-slow", None, b"", 200, b"nested-done", None),
+    # A child coroutine that throws: its parent catches it, and an uncaught one fails the handler
+    ("GET",  "/async/child-throws", None, b"", 200, b"caught", None),
+    ("GET",  "/async/void-child-throws", None, b"", 500, None, None),
     # Async middleware and route that complete without ever suspending
     ("GET",  "/mw/async-inline",  None, b"", 200, b"async-mw-ok", ("X-Async-MW", b"hit")),
     ("GET",  "/mw/async-inline-break", None, b"", 403, b"async-blocked", None),

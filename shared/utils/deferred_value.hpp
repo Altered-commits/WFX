@@ -32,6 +32,7 @@ public: // Constructor and Destructor
 public: // Value Access
     template <typename... Args> void Emplace(Args&&... args)
     {
+        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch): hasValue_ defaults to false, frame init unmodeled
         if(hasValue_)
             Ptr()->~T();
 

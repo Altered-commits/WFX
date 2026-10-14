@@ -14,6 +14,10 @@
 //   WFX::UrlEncode(data) / UrlDecode(data)     : percent-encoding, RFC 3986
 //
 // Decode functions return {false, {}}; check the bool before using the result
+//
+// Base64 and hex also take a std::span to write into instead of allocating,
+// returning {ok, written}. Base64EncodedLen / Base64DecodedMaxLen /
+// HexEncodedLen / HexDecodedLen size that buffer
 // -----------------------------------------------------------------------
 
 #include "wfx/memory.hpp"
@@ -21,6 +25,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -67,12 +72,38 @@ inline constexpr std::array<CharInfo, 256> CHAR_TABLE = [] {
 
 } // namespace Detail
 
+// vvv Lengths vvv
+// What the out-buffer forms below need room for
+constexpr std::size_t Base64EncodedLen(std::size_t bytes, bool padded = true) noexcept
+{
+    return padded ? ((bytes + 2) / 3) * 4 : (bytes * 4 + 2) / 3;
+}
+
+// An upper bound: padding and a short final group only make the real length smaller
+constexpr std::size_t Base64DecodedMaxLen(std::size_t chars) noexcept
+{
+    return chars * 3 / 4;
+}
+
+constexpr std::size_t HexEncodedLen(std::size_t bytes) noexcept
+{
+    return bytes * 2;
+}
+
+constexpr std::size_t HexDecodedLen(std::size_t chars) noexcept
+{
+    return chars / 2;
+}
+
 // vvv Base64 vvv
-inline String Base64Encode(std::string_view data, bool urlSafe = false, bool padded = true)
+// Writes into out instead of allocating: {true, chars written}, or {false, 0} when out is
+// shorter than Base64EncodedLen(data.size(), padded)
+inline std::pair<bool, std::size_t> Base64Encode(std::string_view data, std::span<char> out, bool urlSafe = false,
+                                                 bool padded = true) noexcept
 {
     const std::size_t len = data.size();
-    const std::size_t outLen = padded ? ((len + 2) / 3) * 4 : (len * 4 + 2) / 3;
-    String out(outLen, '\0');
+    if(out.size() < Base64EncodedLen(len, padded))
+        return {false, 0};
 
     const auto* p = reinterpret_cast<const std::uint8_t*>(data.data());
     const char* alphabet = urlSafe ? Detail::BASE64_URL_ALPHABET : Detail::BASE64_STD_ALPHABET;
@@ -107,19 +138,27 @@ inline String Base64Encode(std::string_view data, bool urlSafe = false, bool pad
             out[o++] = '=';
     }
 
-    out.resize(o);
+    return {true, o};
+}
+
+inline String Base64Encode(std::string_view data, bool urlSafe = false, bool padded = true)
+{
+    String out(Base64EncodedLen(data.size(), padded), '\0');
+    Base64Encode(data, std::span<char>{out.data(), out.size()}, urlSafe, padded);
+
     return out;
 }
 
-// {false, {}} on an invalid character; trailing '=' is skipped rather than required, so padded
-// and unpadded input both work regardless of which alphabet produced them
-inline std::pair<bool, Vector<std::uint8_t>> Base64Decode(std::string_view data)
+// Writes into out instead of allocating: {true, bytes written}, or {false, 0} on an invalid
+// character or when out runs out of room (Base64DecodedMaxLen(data.size()) always suffices).
+// Trailing '=' is skipped rather than required, so padded and unpadded input both work
+// regardless of which alphabet produced them
+inline std::pair<bool, std::size_t> Base64Decode(std::string_view data, std::span<std::uint8_t> out) noexcept
 {
     std::size_t len = data.size();
     while(len > 0 && data[len - 1] == '=')
         --len;
 
-    Vector<std::uint8_t> out((len / 4 + 1) * 3);
     std::size_t o = 0;
     std::uint32_t buf = 0;
     int bits = 0;
@@ -127,52 +166,88 @@ inline std::pair<bool, Vector<std::uint8_t>> Base64Decode(std::string_view data)
     for(std::size_t i = 0; i < len; ++i) {
         const std::uint8_t v = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i])].base64;
         if(v == 0xFF)
-            return {false, {}};
+            return {false, 0};
 
         buf = (buf << 6) | v;
         bits += 6;
 
         if(bits >= 8) {
+            if(o == out.size())
+                return {false, 0};
+
             bits -= 8;
             out[o++] = static_cast<std::uint8_t>((buf >> bits) & 0xFF);
         }
     }
 
-    out.resize(o);
+    return {true, o};
+}
+
+inline std::pair<bool, Vector<std::uint8_t>> Base64Decode(std::string_view data)
+{
+    Vector<std::uint8_t> out(Base64DecodedMaxLen(data.size()));
+    const auto [ok, written] = Base64Decode(data, out);
+    if(!ok)
+        return {false, {}};
+
+    out.resize(written);
     return {true, std::move(out)};
 }
 
 // vvv Hex vvv
-inline String HexEncode(std::string_view data, bool upper = false)
+// Writes into out instead of allocating: {true, chars written}, or {false, 0} when out is
+// shorter than HexEncodedLen(data.size())
+inline std::pair<bool, std::size_t> HexEncode(std::string_view data, std::span<char> out, bool upper = false) noexcept
 {
-    const char* table = upper ? Detail::HEX_UPPER : Detail::HEX_LOWER;
-    String out(data.size() * 2, '\0');
+    if(out.size() < HexEncodedLen(data.size()))
+        return {false, 0};
 
+    const char* table = upper ? Detail::HEX_UPPER : Detail::HEX_LOWER;
     for(std::size_t i = 0; i < data.size(); ++i) {
         const auto byte = static_cast<std::uint8_t>(data[i]);
         out[i * 2] = table[byte >> 4];
         out[i * 2 + 1] = table[byte & 0x0F];
     }
 
+    return {true, HexEncodedLen(data.size())};
+}
+
+inline String HexEncode(std::string_view data, bool upper = false)
+{
+    String out(HexEncodedLen(data.size()), '\0');
+    HexEncode(data, std::span<char>{out.data(), out.size()}, upper);
+
     return out;
+}
+
+// Writes into out instead of allocating: {true, bytes written}, or {false, 0} on an odd length,
+// an invalid character, or out shorter than HexDecodedLen(data.size())
+inline std::pair<bool, std::size_t> HexDecode(std::string_view data, std::span<std::uint8_t> out) noexcept
+{
+    if(data.size() % 2 != 0 || out.size() < HexDecodedLen(data.size()))
+        return {false, 0};
+
+    for(std::size_t i = 0; i < data.size(); i += 2) {
+        const std::uint8_t hi = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i])].hex;
+        const std::uint8_t lo = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i + 1])].hex;
+        if(hi == 0xFF || lo == 0xFF)
+            return {false, 0};
+
+        out[i / 2] = static_cast<std::uint8_t>((hi << 4) | lo);
+    }
+
+    return {true, HexDecodedLen(data.size())};
 }
 
 // {false, {}} on an odd length or an invalid character
 inline std::pair<bool, Vector<std::uint8_t>> HexDecode(std::string_view data)
 {
-    if(data.size() % 2 != 0)
+    Vector<std::uint8_t> out(HexDecodedLen(data.size()));
+    const auto [ok, written] = HexDecode(data, out);
+    if(!ok)
         return {false, {}};
 
-    Vector<std::uint8_t> out(data.size() / 2);
-    for(std::size_t i = 0; i < data.size(); i += 2) {
-        const std::uint8_t hi = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i])].hex;
-        const std::uint8_t lo = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i + 1])].hex;
-        if(hi == 0xFF || lo == 0xFF)
-            return {false, {}};
-
-        out[i / 2] = static_cast<std::uint8_t>((hi << 4) | lo);
-    }
-
+    out.resize(written);
     return {true, std::move(out)};
 }
 

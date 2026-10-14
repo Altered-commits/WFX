@@ -235,26 +235,11 @@ worker_backoff_max   = 16      # Max backoff cap in seconds
 )");
 
     // 3. Bridge between engine and user code
-    CreateFile(projBase / "src/api_entry.cpp", R"(#include <core/deferred_init_vector.hpp>
-#include <core/core.hpp>
-#include <shared/utils/compiler_macro.hpp>
+    CreateFile(projBase / "src/api_entry.cpp", R"(#include <wfx/app.hpp>
 
-// To prevent name mangling 
-extern "C" {
-    WFX_EXPORT void RegisterMasterAPI(const WFX::Shared::MasterAPITable* api)
-    {
-        static bool registered = false;
-        if(registered)
-            return;
-
-        if(api) {
-            WFX::Core::SetMasterApi(api);
-            WFX::Core::ExecuteAndEraseDeferred();
-
-            registered = true;
-        }
-    }
-})");
+// The entry point the engine calls once it has loaded this app
+WFX_API_ENTRY()
+)");
 
     // 4. Code example
     CreateFile(projBase / "src/main.cpp", R"cxx(#include <wfx/http.hpp>

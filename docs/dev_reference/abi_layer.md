@@ -31,7 +31,7 @@ All six are bundled into a single **`MasterAPITable`**, which is one struct cont
 
 When a worker loads the user library (`dlopen`), it immediately calls `RegisterMasterAPI` which is the one exported symbol the user library must provide. The engine passes a pointer to its `MasterAPITable` into that function.
 
-On the user side, `RegisterMasterAPI` stores the table pointer and calls any deferred initialization that was waiting for the API to be available. After this call returns, user code can call any engine function through the table.
+On the user side, `RegisterMasterAPI` is what `WFX_API_ENTRY()` (`include/wfx/app.hpp`) expands to, and `Core::InstallMasterApi` does the work: it stores the table pointer and calls any deferred initialization that was waiting for the API to be available, once per load. After this call returns, user code can call any engine function through the table.
 
 ```
 Engine loads user .so

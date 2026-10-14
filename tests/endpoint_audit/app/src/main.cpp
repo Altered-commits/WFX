@@ -64,7 +64,7 @@
 namespace {
 
 // EndpointStatus -> the plain integer JsonWriter has an overload for
-std::uint64_t EpJ(WFX::Shared::EndpointStatus status) noexcept
+std::uint64_t EpJ(WFX::EndpointStatus status) noexcept
 {
     return static_cast<std::uint64_t>(static_cast<unsigned>(status));
 }
@@ -239,7 +239,7 @@ WFX::EpCoro MuxStallAuthenticate(WFX::SlotHandle h, void* slotStateVoid)
     co_return WFX::EpFatal; // never reached while the mock stalls
 }
 
-WFX::Shared::SerializeResult MuxSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
+WFX::SerializeResult MuxSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
                                           std::uint32_t bufLen, std::uint32_t* written,
                                           std::uint64_t* streamKey)
 {
@@ -258,7 +258,7 @@ WFX::Shared::SerializeResult MuxSerialize(void* slotStateVoid, const void* reqVo
     return WFX::EpSerOk;
 }
 
-WFX::Shared::ParseResult MuxParse(void* slotStateVoid, void* /*parseState, unused*/, const char* buf,
+WFX::ParseResult MuxParse(void* slotStateVoid, void* /*parseState, unused*/, const char* buf,
                                   std::uint32_t len, std::uint32_t* consumed, void* /*outObj, unused here*/,
                                   bool isEof, std::uint64_t* completedKey)
 {
@@ -794,7 +794,7 @@ WFX::EpAbortCoro SoloOnAbortAwaitClose(WFX::AbortSlotHandle h, void* slotStateVo
     }
 }
 
-WFX::Shared::SerializeResult SoloSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
+WFX::SerializeResult SoloSerialize(void* slotStateVoid, const void* reqVoid, char* buf,
                                            std::uint32_t bufLen, std::uint32_t* written,
                                            std::uint64_t* /*streamKey, not multiplexed*/)
 {
@@ -826,7 +826,7 @@ WFX::Shared::SerializeResult SoloSerialize(void* slotStateVoid, const void* reqV
     return WFX::EpSerOk;
 }
 
-WFX::Shared::ParseResult SoloParse(void* slotStateVoid, void* /*parseState*/, const char* buf,
+WFX::ParseResult SoloParse(void* slotStateVoid, void* /*parseState*/, const char* buf,
                                    std::uint32_t len, std::uint32_t* consumed, void* outObj,
                                    bool isEof, std::uint64_t* /*completedKey*/)
 {
@@ -1107,7 +1107,7 @@ WFX_GET("/mux/call", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 
     const MuxReq mreq{WFX::String(key.data(), key.size())};
 
-    WFX::Shared::EndpointStatus status{};
+    WFX::EndpointStatus status{};
     WFX::EndpointOutput<MuxRes> out;
 
     if(name == "padded")
@@ -1166,7 +1166,7 @@ WFX_GET("/solo/get", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
     const bool leak = HeaderU32(req, "X-Leak", 0) != 0;
     SoloReq sreq{SoloMode::GET, WFX::String(key.data(), key.size()), 0, 0, 0, 0, leak};
 
-    WFX::Shared::EndpointStatus status{};
+    WFX::EndpointStatus status{};
     WFX::EndpointOutput<SoloRes> out;
 
     if(name == "abort")
@@ -1459,7 +1459,7 @@ WFX_GET("/rss", [](WFX::Request, WFX::Response res) {
 // Per-endpoint metrics, summed across workers, each tagged with its host. Several
 // instances share one host, so the metrics phase asserts on the aggregate delta
 // across every slot rather than mapping a slot back to one instance. ev.host is a
-// Shared::StringView, written through the JsonWriter overload for it.
+// WFX::StringView, written through the JsonWriter overload for it.
 WFX_GET("/metrics", [](WFX::Request, WFX::Response res) {
     const bool latencyOn = WFX::MetricsLatencyEnabled();
 

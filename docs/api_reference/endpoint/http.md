@@ -167,7 +167,7 @@ std::uint64_t MyCoalesce(const void* reqVoid) {
     if(req.method != WFX::HttpMethod::GET)
         return 0; // never coalesce non-GET requests
 
-    return WFX::Shared::Hasher::Fnv1a(req.path.data(), req.path.size());
+    return WFX::Fnv1a(req.path);
 }
 
 inline const auto Api = WFX::HttpEndpoint{"api.example.com:443",
