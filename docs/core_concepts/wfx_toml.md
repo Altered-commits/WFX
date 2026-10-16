@@ -157,6 +157,8 @@ trusted_proxies              = []      # Array of Strings (CIDR blocks)
 - `max_requests_per_ip_per_sec`  
   How fast the token bucket for each IP is refilled, measured in **tokens per second**.  
   Once a subnet runs out of tokens, further requests are rejected with 429 until tokens are refilled.
+  Each of those carries `Retry-After: 1`, one token's worth of refill, so a client is told when to
+  come back instead of guessing and retrying straight back into the refusal.
 
 - `max_tracked_identities`  
   Maximum number of distinct resolved identities whose rate-limit bucket is kept in memory at

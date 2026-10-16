@@ -52,7 +52,7 @@ python3 base_audit.py --ci
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--phase PHASE` | `all` | `all`, `security`, `protocol`, `features`, `forms`, `query`, `cors`, `groups`, `metrics`, `soak`, `chaos` |
+| `--phase PHASE` | `all` | `all`, `security`, `logging`, `protocol`, `features`, `forms`, `query`, `cors`, `refusals`, `groups`, `metrics`, `soak`, `chaos` |
 | `--host HOST` | `127.0.0.1` | Server hostname |
 | `--port N` | `8080` | HTTP port |
 | `--wfx PATH` | `wfx` | Path to the wfx binary |
@@ -242,6 +242,19 @@ coverage:
 - **persistent-header survival**: CORS headers are written via
   `WritePersistentHeader` specifically so they outlive a later `AbortWithError`
   (404, etc.), asserted directly here
+
+### Refusals
+
+What the engine says when it turns a request away, rather than whether it survives one.
+
+- **wrong method vs wrong path**: a method a known path doesn't define is `405` with an `Allow:`
+  naming the ones it does (RFC 9110 15.5.6), and only a path with no route under any method is
+  `404`. Answering `404` to both tells a caller its URL is wrong when its method is, and lets a
+  prober map a path's methods by which refusal comes back
+- **framing of the canned refusals**: the responses written whole to the socket, before there is
+  a `Response` object to go through, declare a `Content-Length` by hand next to their body. Each
+  reachable one is checked to send exactly what it declares: short, and a client waits on bytes
+  that never arrive; long, and it reads the next response on that connection as part of this one
 
 Exit code 2 if an origin-matching bypass or credential leak lands, 1 for other
 failures.

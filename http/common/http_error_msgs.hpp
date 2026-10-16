@@ -7,77 +7,31 @@
 namespace WFX::Http {
 namespace HttpError {
 
-// 400 Bad Request
-static constexpr const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n"
-                                           "Content-Type: text/plain; charset=UTF-8\r\n"
-                                           "Connection: close\r\n"
-                                           "Content-Length: 12\r\n"
-                                           "\r\n"
-                                           "Bad Request";
+// These are whole responses, written to the socket as they stand: they are what the engine has to
+// say when a request failed before there was a Response object to say it through. The body length
+// is spelled out beside the body, so the macro asserts the two agree. Counted short, a client
+// waits on bytes that never arrive; counted long, it reads the next response as part of this one
+// NOLINTBEGIN(bugprone-macro-parentheses) 'name' is the thing being declared, it cannot be bracketed
+#define WFX_HTTP_ERROR(name, statusLine, body, length)                                                                 \
+    static_assert(sizeof(body) - 1 == (length), "Content-Length does not match the body of " #name);                   \
+    static constexpr const char* name = "HTTP/1.1 " statusLine "\r\n"                                                  \
+                                        "Content-Type: text/plain; charset=UTF-8\r\n"                                  \
+                                        "Connection: close\r\n"                                                        \
+                                        "Content-Length: " #length "\r\n"                                              \
+                                        "\r\n" body
+// NOLINTEND(bugprone-macro-parentheses)
 
-// 403 Forbidden
-static constexpr const char* FORBIDDEN = "HTTP/1.1 403 Forbidden\r\n"
-                                         "Content-Type: text/plain; charset=UTF-8\r\n"
-                                         "Connection: close\r\n"
-                                         "Content-Length: 9\r\n"
-                                         "\r\n"
-                                         "Forbidden";
+WFX_HTTP_ERROR(BAD_REQUEST, "400 Bad Request", "Bad Request", 11);
+WFX_HTTP_ERROR(FORBIDDEN, "403 Forbidden", "Forbidden", 9);
+WFX_HTTP_ERROR(NOT_FOUND, "404 Not Found", "Not Found", 9);
+WFX_HTTP_ERROR(METHOD_NOT_ALLOWED, "405 Method Not Allowed", "Method Not Allowed", 18);
+WFX_HTTP_ERROR(PAYLOAD_TOO_LARGE, "413 Payload Too Large", "Payload Too Large", 17);
+WFX_HTTP_ERROR(URI_TOO_LONG, "414 URI Too Long", "URI Too Long", 12);
+WFX_HTTP_ERROR(INTERNAL_ERROR, "500 Internal Server Error", "Internal Server Error", 21);
+WFX_HTTP_ERROR(NOT_IMPLEMENTED, "501 Not Implemented", "Not Implemented", 15);
+WFX_HTTP_ERROR(SERVICE_UNAVAILABLE, "503 Service Unavailable", "Service Unavailable", 19);
 
-// 404 Not Found
-static constexpr const char* NOT_FOUND = "HTTP/1.1 404 Not Found\r\n"
-                                         "Content-Type: text/plain; charset=UTF-8\r\n"
-                                         "Connection: close\r\n"
-                                         "Content-Length: 9\r\n"
-                                         "\r\n"
-                                         "Not Found";
-
-// 405 Method Not Allowed
-static constexpr const char* METHOD_NOT_ALLOWED = "HTTP/1.1 405 Method Not Allowed\r\n"
-                                                  "Content-Type: text/plain; charset=UTF-8\r\n"
-                                                  "Connection: close\r\n"
-                                                  "Content-Length: 18\r\n"
-                                                  "\r\n"
-                                                  "Method Not Allowed";
-
-// 413 Payload Too Large
-static constexpr const char* PAYLOAD_TOO_LARGE = "HTTP/1.1 413 Payload Too Large\r\n"
-                                                 "Content-Type: text/plain; charset=UTF-8\r\n"
-                                                 "Connection: close\r\n"
-                                                 "Content-Length: 19\r\n"
-                                                 "\r\n"
-                                                 "Payload Too Large";
-
-// 414 URI Too Long
-static constexpr const char* URI_TOO_LONG = "HTTP/1.1 414 URI Too Long\r\n"
-                                            "Content-Type: text/plain; charset=UTF-8\r\n"
-                                            "Connection: close\r\n"
-                                            "Content-Length: 13\r\n"
-                                            "\r\n"
-                                            "URI Too Long";
-
-// 500 Internal Server Error
-static constexpr const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n"
-                                              "Content-Type: text/plain; charset=UTF-8\r\n"
-                                              "Connection: close\r\n"
-                                              "Content-Length: 21\r\n"
-                                              "\r\n"
-                                              "Internal Server Error";
-
-// 501 Not Implemented
-static constexpr const char* NOT_IMPLEMENTED = "HTTP/1.1 501 Not Implemented\r\n"
-                                               "Content-Type: text/plain; charset=UTF-8\r\n"
-                                               "Connection: close\r\n"
-                                               "Content-Length: 15\r\n"
-                                               "\r\n"
-                                               "Not Implemented";
-
-// 503 Service Unavailable
-static constexpr const char* SERVICE_UNAVAILABLE = "HTTP/1.1 503 Service Unavailable\r\n"
-                                                   "Content-Type: text/plain; charset=UTF-8\r\n"
-                                                   "Connection: close\r\n"
-                                                   "Content-Length: 19\r\n"
-                                                   "\r\n"
-                                                   "Service Unavailable";
+#undef WFX_HTTP_ERROR
 
 } // namespace HttpError
 } // namespace WFX::Http

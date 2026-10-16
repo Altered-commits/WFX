@@ -345,6 +345,18 @@ JSON_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}([+-]\d{2}:\
 
 # What a level is called in JSON: the words Grafana and Loki already know
 JSON_LEVELS = {"trace", "debug", "info", "warn", "error", "fatal"}
+
+# The methods /cors/multi really defines in app/src/main.cpp, so an Allow on it has to name them
+ALLOW_MULTI = ("GET", "POST", "PUT")
+
+# Refusals the engine writes as a whole canned response rather than through a Response object, and
+# what provokes each. Their Content-Length is written out by hand beside a body it has to match
+REFUSAL_VECTORS = [
+    ("400 on conflicting Connection tokens",
+     b"GET /health HTTP/1.1\r\nHost: x\r\nConnection: close, keep-alive\r\n\r\n"),
+    ("501 on a chunked request body",
+     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"),
+]
 BODYBOMB_PAYLOADS = [
     # Exactly at limit: should be accepted (200)
     _build("POST", "/echo-body", body=b"B" * _BODY_LIMIT),
@@ -1800,6 +1812,45 @@ def _h(hdrs, name):
     vals = hdrs.get(name.lower().encode())
     return vals[0].decode(errors="replace") if vals else None
 
+# PHASE: refusals
+def phase_refusals(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    p = ctx.phase("refusals")
+
+    # A path that exists for other methods is not a missing path. RFC 9110 section 15.5.6 asks
+    # for 405 and an Allow naming what it does take, so a caller can tell the wrong door from
+    # no door, and a probe cannot use 404 to map which methods a path has
+    st, hdrs, _ = _cors_headers(host, port, "DELETE", "/cors/multi")
+    allow = _h(hdrs, "allow")
+    p.check("a method a known path does not take is 405, not 404",
+            st == 405, "status=%r for DELETE /cors/multi" % st)
+    p.check("that 405 names the methods the path does take",
+            allow is not None and set(ALLOW_MULTI) <= {m.strip() for m in allow.split(",")},
+            "Allow=%r, expected to name at least %r" % (allow, sorted(ALLOW_MULTI)))
+
+    st, hdrs, _ = _cors_headers(host, port, "POST", "/health")
+    allow = _h(hdrs, "allow")
+    p.check("a path with one method refuses another the same way",
+            st == 405 and allow is not None and "GET" in allow,
+            "status=%r Allow=%r" % (st, allow))
+
+    # A path that really is missing stays 404, or the two answers say the same thing again
+    st, _, _ = _cors_headers(host, port, "GET", "/no/such/door")
+    p.check("a path that does not exist at all is still 404", st == 404, "status=%r" % st)
+
+    # Every refusal written by hand has to declare the length it actually sends. Too short and a
+    # client waits on bytes that never arrive, too long and the next reply on that connection is
+    # read as part of this one
+    for label, vector in REFUSAL_VECTORS:
+        st, raw = raw_send(host, port, vector)
+        _, hdrs, body = parse_hdrs(raw)
+        declared = _h(hdrs, "content-length")
+        p.check("%s declares the body length it sends" % label,
+                declared is not None and declared.isdigit() and int(declared) == len(body),
+                "status=%r Content-Length=%r but the body is %d bytes: %r"
+                % (st, declared, len(body), body[:40]))
+
 # PHASE: cors
 def phase_cors(ctx):
     cfg = ctx.cfg
@@ -2444,6 +2495,7 @@ class BaseAudit(common.Suite):
         "forms":    phase_forms,
         "query":    phase_query,
         "cors":     phase_cors,
+        "refusals": phase_refusals,
         "groups":   phase_groups,
         "metrics":  phase_metrics,
         "soak":     phase_soak,
