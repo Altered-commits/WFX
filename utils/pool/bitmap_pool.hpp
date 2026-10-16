@@ -62,6 +62,10 @@ public: // vvv Constructor and Destructor vvv
             Shared::DeleteArray(bitmap_, words_);
             bitmap_ = nullptr;
         }
+        if(marks_) {
+            Shared::DeleteArray(marks_, words_);
+            marks_ = nullptr;
+        }
     }
 
     // No copying allowed
@@ -73,12 +77,14 @@ public: // vvv Constructor and Destructor vvv
     {
         pool_ = other.pool_;
         bitmap_ = other.bitmap_;
+        marks_ = other.marks_;
         slots_ = other.slots_;
         words_ = other.words_;
         lastUsedIndex_ = other.lastUsedIndex_;
 
         other.pool_ = nullptr;
         other.bitmap_ = nullptr;
+        other.marks_ = nullptr;
         other.slots_ = 0;
         other.words_ = 0;
         other.lastUsedIndex_ = 0;
@@ -89,15 +95,18 @@ public: // vvv Constructor and Destructor vvv
         if(this != &other) {
             Shared::DeleteArray(pool_, slots_);
             Shared::DeleteArray(bitmap_, words_);
+            Shared::DeleteArray(marks_, words_);
 
             pool_ = other.pool_;
             bitmap_ = other.bitmap_;
+            marks_ = other.marks_;
             slots_ = other.slots_;
             words_ = other.words_;
             lastUsedIndex_ = other.lastUsedIndex_;
 
             other.pool_ = nullptr;
             other.bitmap_ = nullptr;
+            other.marks_ = nullptr;
             other.slots_ = 0;
             other.words_ = 0;
             other.lastUsedIndex_ = 0;
@@ -136,6 +145,51 @@ public: // vvv Main Functions vvv
         return nullptr; // Fully exhausted
     }
 
+    // Allocates a marked slot that is still free, nullptr when none is. A mark says the slot
+    // holds something its owner would rather keep than rebuild (for the endpoint pool, a
+    // connection still open), so a caller tries this first and falls back to AllocSlot
+    T* AllocMarked()
+    {
+        if(!marks_)
+            return nullptr;
+
+        for(std::uint32_t w = 0; w < words_; ++w) {
+            // Marked AND free, in one word. A mark on a slot already handed out means nothing,
+            // so it is only ever cleared on the way in, never on the way out
+            const std::uint64_t available = marks_[w] & ~bitmap_[w];
+            if(available) {
+                const std::uint32_t bit = static_cast<std::uint32_t>(std::countr_zero(available));
+                bitmap_[w] |= 1ULL << bit;
+                marks_[w] &= ~(1ULL << bit);
+                return &pool_[(w << 6) + bit];
+            }
+        }
+
+        return nullptr;
+    }
+
+    // Flags a free slot for AllocMarked to prefer. The marks are built on first use, so a pool
+    // that never marks carries one null pointer and not a bit more
+    void Mark(std::uint32_t idx)
+    {
+        if(!marks_) {
+            marks_ = Shared::NewArray<std::uint64_t>(words_);
+
+            // Marks are an optimization. Without them a caller builds what it would have
+            // reused, which is exactly what it did before there were any
+            if(!marks_)
+                return;
+        }
+
+        marks_[idx >> 6] |= 1ULL << (idx & 63);
+    }
+
+    void Unmark(std::uint32_t idx)
+    {
+        if(marks_)
+            marks_[idx >> 6] &= ~(1ULL << (idx & 63));
+    }
+
     void FreeSlot(std::uint32_t idx)
     {
         const std::uint32_t w = idx >> 6;
@@ -170,6 +224,7 @@ private: // Constexpr stuff
 private: // Storage
     T* pool_{nullptr};
     std::uint64_t* bitmap_{nullptr};
+    std::uint64_t* marks_{nullptr}; // Allocated on the first Mark(), words_ long like bitmap_
     std::uint32_t slots_{0};
     std::uint32_t words_{0};
     std::uint32_t lastUsedIndex_{0};

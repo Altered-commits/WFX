@@ -74,6 +74,11 @@ RESOLVE_DIALS = 6
 # finished call hands its slot back and the next one reuses the connection instead of dialing
 RESOLVE_HOLD  = 0.5
 
+# SoloWarm's connLimit in app/src/main.cpp: two slots exactly, so the warm pool phase can close
+# one and leave the other open. Its two calls are held at once for the same reason as above
+WARM_SLOTS = 2
+WARM_HOLD  = 0.3
+
 # The mock upstream
 class Mock:
     """primitive_upstream.py: the mux, solo and gate listeners plus an HTTP counter plane."""
@@ -1034,6 +1039,36 @@ def phase_resolve(ctx):
 
     p.check("worker healthy after the resolve phase", wfx_healthy(cfg) and mock.ping())
 
+# PHASE: warm_pool
+def phase_warm_pool(ctx):
+    cfg, mock = ctx.cfg, ctx.mock
+    p = ctx.phase("warm_pool")
+
+    # Two calls at once take both of SoloWarm's slots, so both connections are open and
+    # waiting in the pool by the time they finish
+    joins = [in_background(solo_get, cfg, key="slow:%.2f" % WARM_HOLD, solo="warm")
+             for _ in range(WARM_SLOTS)]
+    warm = [join() for join in joins]
+    open_conns = {r.get("conn") for r in warm if is_ok(r)}
+    p.check("warm pool: two concurrent calls open two connections",
+            all(is_ok(r) for r in warm) and len(open_conns) == WARM_SLOTS, "warm=%r" % warm)
+
+    # The backend drops this one, which closes the slot it landed on. The other slot keeps
+    # its connection, open and idle
+    r = solo_get(cfg, key="reset", solo="warm")
+    p.check("warm pool: the backend dropping the connection fails that call", is_err(r), "r=%r" % r)
+
+    # The next call has to land on the connection still open. Leasing whichever slot happens to
+    # be free first hands it the closed one instead, and it pays for a connect, a handshake and
+    # an onConnect it never needed. That is what leaves a pool answering slowly long after it
+    # has a healthy connection to answer on, and it is worst right after an upstream recovers
+    r = solo_get(cfg, key="reuse", solo="warm")
+    p.check("warm pool: the next call reuses the connection still open instead of dialing",
+            is_ok(r) and r.get("conn") in open_conns,
+            "r=%r, connections already open %r" % (r, sorted(open_conns)))
+
+    p.check("worker healthy after the warm pool phase", wfx_healthy(cfg) and mock.ping())
+
 # PHASE: metrics
 def phase_metrics(ctx):
     cfg, mock = ctx.cfg, ctx.mock
@@ -1138,6 +1173,7 @@ class EndpointAudit(common.Suite):
         "solo_upgrade":   phase_solo_upgrade,
         "solo_abort":     phase_solo_abort,
         "resolve":        phase_resolve,
+        "warm_pool":      phase_warm_pool,
         "metrics":        phase_metrics,
     }
 

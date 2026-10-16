@@ -1795,7 +1795,16 @@ EndpointCtx* EpollConnectionHandler::GetEndpointConnection(std::uint16_t endpoin
 {
     WFX_TRACE();
 
-    EndpointCtx* ctx = endpoints_[endpointIdx].pool.AllocSlot();
+    auto& pool = endpoints_[endpointIdx].pool;
+
+    // A slot whose connection is still open, ahead of one that would have to dial for it: the
+    // pool holds both as simply free, so without this a request pays for a connect, a handshake
+    // and an onConnect with an idle connection sitting beside it. A mark that went stale just
+    // yields an ordinary free slot, which is what AllocSlot would have handed back anyway
+    EndpointCtx* ctx = pool.AllocMarked();
+    if(!ctx)
+        ctx = pool.AllocSlot();
+
     if(!ctx)
         return nullptr;
 
@@ -2074,6 +2083,9 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
 
     const std::uint32_t idx = entry.pool.GetIndex(ctx);
 
+    // This slot's connection is going away, so it is no longer the one to prefer
+    entry.pool.Unmark(idx);
+
     // SAME LOGIC PRETTY MUCH
     const std::uint32_t timerIdx = meta.timerBase + idx;
     timerWheel_.Cancel(timerIdx);
@@ -2161,6 +2173,9 @@ void EpollConnectionHandler::ReturnEndpointToPool(EndpointCtx* slotCtx)
         // ReleaseEndpoint checks this to avoid double-decrementing if the idle
         // timer actually fires before this slot is re-leased.
         slotCtx->isPooledIdle = 1;
+
+        // Marked so the next lease takes this open connection over a slot that has none
+        entry.pool.Mark(idx);
     }
 
     // Slot reached a healthy idle state (fresh connect, successful reconnect, or a completed

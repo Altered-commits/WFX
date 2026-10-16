@@ -944,6 +944,21 @@ inline const SoloEp SoloGood{
     }
 };
 
+// Exactly two slots, so the warm pool phase can close one and leave the other open and
+// idle. idleTimeoutSeconds is long enough that neither recycles underneath that phase.
+inline const SoloEp SoloWarm{
+    SOLO_UPSTREAM, SoloDesc("good:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 2,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 60,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+        .exactSlots            = true,
+    }
+};
+
 // The same mock and the same protocol, reached by name. exactSlots holds the pool to
 // connLimit, so the resolve phase's concurrent calls take one slot each and dial once
 // each, which is what walks the address cursor right around a multi-address name.
@@ -1111,6 +1126,7 @@ const SoloEp* SoloEndpointOf(std::string_view name) noexcept
     if(name == "downgrade")  return &SoloTlsDowngrade;
     if(name == "tlsgarbage") return &SoloTlsGarbage;
     if(name == "byname")     return &SoloByName;
+    if(name == "warm")       return &SoloWarm;
     return &SoloGood;
 }
 

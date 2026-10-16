@@ -163,6 +163,12 @@ through roughly this lifecycle:
 5. **Leased** -> actively serving one caller's request.
 6. Back to **idle** on a keep-alive-friendly completion, or **closed** if the protocol asked to close, the peer closed, or something failed.
 
+A request is leased a slot that is already connected whenever the pool has one, in
+preference to a closed slot that would have to connect, handshake and run `onConnect`
+first. It matters most just after an upstream recovers: the pool comes back one slot at
+a time, and without that preference a request can pay full connect cost while an idle
+connection sits beside it.
+
 ### Pool settings
 
 ```cpp
