@@ -67,6 +67,18 @@ CAPPED_BURST   = 6
 MISSING_CA     = "/nonexistent/wfx-endpoint-audit-ca.pem"
 CA_LOAD_FAILED = "Failed to load configured CA certificate for client ctx"
 
+# SoloByName's connLimit in app/src/main.cpp. The engine takes the next resolved address per
+# dial, so dialing this many times walks a two-address name right around, twice over
+RESOLVE_DIALS = 6
+# How long the mock holds each of those replies. All six have to be in flight at once, or a
+# finished call hands its slot back and the next one reuses the connection instead of dialing
+RESOLVE_HOLD  = 0.5
+
+# SoloWarm's connLimit in app/src/main.cpp: two slots exactly, so the warm pool phase can close
+# one and leave the other open. Its two calls are held at once for the same reason as above
+WARM_SLOTS = 2
+WARM_HOLD  = 0.3
+
 # The mock upstream
 class Mock:
     """primitive_upstream.py: the mux, solo and gate listeners plus an HTTP counter plane."""
@@ -995,6 +1007,68 @@ def phase_solo_abort(ctx):
     p.check("worker healthy after the never-responding backend timed out",
             wfx_healthy(cfg) and mock.ping())
 
+# PHASE: resolve
+def phase_resolve(ctx):
+    cfg, mock = ctx.cfg, ctx.mock
+    p = ctx.phase("resolve")
+
+    # SoloByName names its host instead of writing the address out, and the mock listens on
+    # 127.0.0.1 and nowhere else. Held replies keep all six calls in flight, so each takes a
+    # slot of its own and dials, walking the address cursor the whole way round. Answering
+    # 'localhost' with a guess at both loopback families, or giving up on the address that
+    # refused rather than taking the next, each leave half of these refused
+    before = metrics(cfg)
+    joins = [in_background(solo_get, cfg, key="slow:%.2f" % RESOLVE_HOLD, solo="byname",
+                           rtimeout=RESOLVE_HOLD + 15.0)
+             for _ in range(RESOLVE_DIALS)]
+    got = [join() for join in joins]
+    failures = metric(metrics(cfg), "connect_failures") - metric(before, "connect_failures")
+
+    p.check("a named host reaches an upstream bound to one address, on every dial",
+            all(is_ok(r) for r in got), "results=%r" % got)
+
+    conns = {r.get("conn") for r in got if is_ok(r)}
+    p.check("those calls really did dial, one connection each",
+            len(conns) == RESOLVE_DIALS,
+            "expected %d distinct connections, got %r" % (RESOLVE_DIALS, sorted(conns)))
+
+    # An address walked past is not an endpoint that failed: the request it was carrying
+    # was served. Counting it would have every dual-stack name reporting failures forever
+    p.check("no dial of a named host is recorded as a connect failure",
+            failures == 0, "connect_failures +%d" % failures)
+
+    p.check("worker healthy after the resolve phase", wfx_healthy(cfg) and mock.ping())
+
+# PHASE: warm_pool
+def phase_warm_pool(ctx):
+    cfg, mock = ctx.cfg, ctx.mock
+    p = ctx.phase("warm_pool")
+
+    # Two calls at once take both of SoloWarm's slots, so both connections are open and
+    # waiting in the pool by the time they finish
+    joins = [in_background(solo_get, cfg, key="slow:%.2f" % WARM_HOLD, solo="warm")
+             for _ in range(WARM_SLOTS)]
+    warm = [join() for join in joins]
+    open_conns = {r.get("conn") for r in warm if is_ok(r)}
+    p.check("warm pool: two concurrent calls open two connections",
+            all(is_ok(r) for r in warm) and len(open_conns) == WARM_SLOTS, "warm=%r" % warm)
+
+    # The backend drops this one, which closes the slot it landed on. The other slot keeps
+    # its connection, open and idle
+    r = solo_get(cfg, key="reset", solo="warm")
+    p.check("warm pool: the backend dropping the connection fails that call", is_err(r), "r=%r" % r)
+
+    # The next call has to land on the connection still open. Leasing whichever slot happens to
+    # be free first hands it the closed one instead, and it pays for a connect, a handshake and
+    # an onConnect it never needed. That is what leaves a pool answering slowly long after it
+    # has a healthy connection to answer on, and it is worst right after an upstream recovers
+    r = solo_get(cfg, key="reuse", solo="warm")
+    p.check("warm pool: the next call reuses the connection still open instead of dialing",
+            is_ok(r) and r.get("conn") in open_conns,
+            "r=%r, connections already open %r" % (r, sorted(open_conns)))
+
+    p.check("worker healthy after the warm pool phase", wfx_healthy(cfg) and mock.ping())
+
 # PHASE: metrics
 def phase_metrics(ctx):
     cfg, mock = ctx.cfg, ctx.mock
@@ -1098,6 +1172,8 @@ class EndpointAudit(common.Suite):
         "solo_streaming": phase_solo_streaming,
         "solo_upgrade":   phase_solo_upgrade,
         "solo_abort":     phase_solo_abort,
+        "resolve":        phase_resolve,
+        "warm_pool":      phase_warm_pool,
         "metrics":        phase_metrics,
     }
 

@@ -26,6 +26,7 @@
 #define WFX_IS_TTY() (::isatty(STDOUT_FILENO) != 0)
 #define WFX_STDOUT_WRITE(data, len) WriteRetry(STDOUT_FILENO, (data), (len))
 #define WFX_LOCALTIME(tm_ptr, tt_ptr) localtime_r((tt_ptr), (tm_ptr))
+#define WFX_GMTIME(tm_ptr, tt_ptr) gmtime_r((tt_ptr), (tm_ptr))
 
 namespace WFX::Utils {
 
@@ -77,19 +78,18 @@ private:
 // which is a vDSO read + integer math (~10ns, no syscall).
 class TimestampCache {
 public:
+    // Whichever zone the clock is read in. Set once at startup, before any line is written
+    void UseUtc(bool v) noexcept
+    {
+        utc_ = v;
+        synced_ = false;
+    }
+
     // Writes [HH:MM:SS.mmm] into out. Returns updated pointer.
     // Caller must ensure >= 14 bytes available
     char* Format(char* out) noexcept
     {
-        using namespace std::chrono;
-
-        const auto now = steady_clock::now();
-        const auto elapsed = duration_cast<milliseconds>(now - syncPoint_).count();
-
-        if(elapsed >= 1000 || !synced_)
-            Sync(now);
-
-        const int ms = static_cast<int>((epochMs_ + elapsed) % 1000);
+        const int ms = Tick();
 
         *out++ = '[';
         out = W2(out, cachedHour_);
@@ -104,7 +104,57 @@ public:
         return out;
     }
 
+    // Writes RFC 3339, 2026-10-16T13:27:16.060+05:30 or the same with Z, so a line can be placed on
+    // a clock rather than only within a day. Caller must ensure >= 29 bytes available
+    char* FormatRFC3339(char* out) noexcept
+    {
+        const int ms = Tick();
+
+        out = W4(out, cachedYear_);
+        *out++ = '-';
+        out = W2(out, cachedMonth_);
+        *out++ = '-';
+        out = W2(out, cachedDay_);
+        *out++ = 'T';
+        out = W2(out, cachedHour_);
+        *out++ = ':';
+        out = W2(out, cachedMin_);
+        *out++ = ':';
+        out = W2(out, cachedSec_);
+        *out++ = '.';
+        out = W3(out, ms);
+
+        if(utc_) {
+            *out++ = 'Z';
+            return out;
+        }
+
+        *out++ = (offsetMinutes_ < 0) ? '-' : '+';
+
+        const int offset = (offsetMinutes_ < 0) ? -offsetMinutes_ : offsetMinutes_;
+
+        out = W2(out, offset / 60);
+        *out++ = ':';
+        out = W2(out, offset % 60);
+
+        return out;
+    }
+
 private:
+    // The second this line falls in, cached, and the milliseconds into it
+    int Tick() noexcept
+    {
+        using namespace std::chrono;
+
+        const auto now = steady_clock::now();
+        const auto elapsed = duration_cast<milliseconds>(now - syncPoint_).count();
+
+        if(elapsed >= 1000 || !synced_)
+            Sync(now);
+
+        return static_cast<int>((epochMs_ + elapsed) % 1000);
+    }
+
     void Sync(std::chrono::steady_clock::time_point now) noexcept;
 
     static char* W2(char* p, int v) noexcept
@@ -122,12 +172,27 @@ private:
         return p;
     }
 
+    static char* W4(char* p, int v) noexcept
+    {
+        *p++ = static_cast<char>('0' + (v / 1000) % 10);
+        *p++ = static_cast<char>('0' + (v / 100) % 10);
+        *p++ = static_cast<char>('0' + (v / 10) % 10);
+        *p++ = static_cast<char>('0' + v % 10);
+        return p;
+    }
+
+private:
     std::chrono::steady_clock::time_point syncPoint_{};
+    int cachedYear_ = 0;
+    int cachedMonth_ = 0;
+    int cachedDay_ = 0;
     int cachedHour_ = 0;
     int cachedMin_ = 0;
     int cachedSec_ = 0;
+    int offsetMinutes_ = 0; // East of UTC, from tm_gmtoff, so a line says which clock wrote it
     int epochMs_ = 0;
     bool synced_ = false;
+    bool utc_ = false;
 };
 
 // Memory layout per instance:
@@ -167,6 +232,8 @@ public:
     void EnableTimestamps(bool v) noexcept;
     void EnableColors(bool v) noexcept;
     void EnableStdout(bool v) noexcept;
+    void EnableJson(bool v) noexcept;
+    void EnableUtc(bool v) noexcept;
 
     bool OpenFile(const char* path, std::size_t maxBytes = CircularFileSink::K_DEFAULT_MAX_BYTES,
                   int keepFiles = CircularFileSink::K_DEFAULT_KEEP_FILES) noexcept;
@@ -219,14 +286,15 @@ private:
     struct LevelMeta {
         const char* tag;
         const char* ansi;
+        const char* name; // What JSON calls it: the words Grafana and Loki already detect
     };
 
-    static constexpr std::array<LevelMeta, 6> K_META{{{"[TRC]", "\033[90m"},
-                                                      {"[DBG]", "\033[36m"},
-                                                      {"[INF]", "\033[32m"},
-                                                      {"[WRN]", "\033[33m"},
-                                                      {"[ERR]", "\033[31m"},
-                                                      {"[FTL]", "\033[35;1m"}}};
+    static constexpr std::array<LevelMeta, 6> K_META{{{"[TRC]", "\033[90m", "trace"},
+                                                      {"[DBG]", "\033[36m", "debug"},
+                                                      {"[INF]", "\033[32m", "info"},
+                                                      {"[WRN]", "\033[33m", "warn"},
+                                                      {"[ERR]", "\033[31m", "error"},
+                                                      {"[FTL]", "\033[35;1m", "fatal"}}};
 
     static constexpr const char* K_COLOR_GRAY = "\033[90m";
     static constexpr const char* K_COLOR_RESET = "\033[0m";
@@ -241,6 +309,10 @@ private:
     //           user message budget = 1024, prefix overhead = 32
     static constexpr std::size_t K_MSG_BUF_SIZE = 1024 + 32;
 
+    // lineBuf_ : the JSON line, only ever written when that format is on
+    //            message budget doubled, since " and \ cost two bytes each, plus the envelope
+    static constexpr std::size_t K_LINE_BUF_SIZE = 2048 + 128;
+
 private:
     template <typename... Args> void Emit(Level lvl, Args&&... args) noexcept
     {
@@ -253,6 +325,16 @@ private:
 
         char* mp = msgBuf_.data();
         char* end = mp + K_MSG_BUF_SIZE - 1;
+
+        // JSON carries the time and the level as its own fields, so msgBuf_ holds only what the
+        // caller wrote and EmitJson wraps it
+        if(json_) {
+            ((mp = Fmt(mp, end, std::forward<Args>(args))), ...);
+            EmitJson(meta, std::string_view(msgBuf_.data(), static_cast<std::size_t>(mp - msgBuf_.data())));
+            Count(lvl);
+
+            return;
+        }
 
         if(timestamps_) {
             mp = tsCache_.Format(mp);
@@ -302,15 +384,83 @@ private:
                 WFX_STDOUT_WRITE(msgBuf_.data(), totalLen);
         }
 
-        // IMPORTANT: This works assuming every metric is in the order:
-        //   -> trace, debug, info, warn, error, fatal
-        // Order is decided in 'shared/abis/types.hpp' -> 'LogMetrics'
-        // And we always use an if condition because we have no idea where this can be used
-        // Unlike us hardcoding pointer in, say, epoll backend (because its used in worker context)
+        Count(lvl);
+    }
+
+    // IMPORTANT: This works assuming every metric is in the order:
+    //   -> trace, debug, info, warn, error, fatal
+    // Order is decided in 'shared/abis/types.hpp' -> 'LogMetrics'
+    void Count(Level lvl) noexcept
+    {
         if(auto* metrics = MetricTracer::Current()) {
             std::uint64_t* lines = &metrics->log.trace;
             lines[static_cast<std::uint8_t>(lvl)]++;
         }
+    }
+
+    void EmitJson(const LevelMeta& meta, std::string_view msg) noexcept
+    {
+        char* p = lineBuf_.data();
+
+        // Two short of the end, so the closing quote, brace and newline always fit however much of
+        // the message had to be dropped to get here
+        char* end = p + K_LINE_BUF_SIZE - 4;
+
+        p = RawCopy(p, end, "{\"time\":\"");
+        p = tsCache_.FormatRFC3339(p);
+        p = RawCopy(p, end, "\",\"level\":\"");
+        p = RawCopy(p, end, meta.name);
+        p = RawCopy(p, end, "\",\"msg\":\"");
+        p = EscapeJson(p, end, msg);
+        p = RawCopy(p, end, "\"}");
+        *p++ = '\n';
+
+        const auto len = static_cast<std::size_t>(p - lineBuf_.data());
+
+        if(fileSink_.IsOpen())
+            fileSink_.Write(lineBuf_.data(), len);
+
+        // One write, whole line: two would let another worker's line land inside this one
+        if(stdout_)
+            WFX_STDOUT_WRITE(lineBuf_.data(), len);
+    }
+
+    // Escapes what JSON cannot carry raw. A message too long to fit escaped is cut rather than run
+    // past the buffer, and never mid-escape, so the line is always one readable object
+    static char* EscapeJson(char* p, char* end, std::string_view msg) noexcept
+    {
+        static constexpr char K_HEX[] = "0123456789abcdef";
+
+        for(const char c : msg) {
+            const auto byte = static_cast<unsigned char>(c);
+
+            if(byte == '"' || byte == '\\') {
+                if(end - p < 2)
+                    break;
+
+                *p++ = '\\';
+                *p++ = static_cast<char>(byte);
+            }
+            else if(byte >= 0x20) {
+                if(p >= end)
+                    break;
+
+                *p++ = static_cast<char>(byte);
+            }
+            else {
+                if(end - p < 6)
+                    break;
+
+                *p++ = '\\';
+                *p++ = 'u';
+                *p++ = '0';
+                *p++ = '0';
+                *p++ = K_HEX[byte >> 4];
+                *p++ = K_HEX[byte & 0x0F];
+            }
+        }
+
+        return p;
     }
 
     static void WriteRetry(int fd, const char* data, std::size_t len) noexcept;
@@ -389,9 +539,11 @@ private:
     bool timestamps_ = true;
     bool colors_ = true;
     bool stdout_ = true;
+    bool json_ = false;
 
     std::array<char, K_MSG_BUF_SIZE> msgBuf_{};
     std::array<char, K_PREFIX_BUF_SIZE> prefixBuf_{};
+    std::array<char, K_LINE_BUF_SIZE> lineBuf_{};
 
     TimestampCache tsCache_;
     CircularFileSink fileSink_;

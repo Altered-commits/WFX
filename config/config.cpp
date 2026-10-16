@@ -85,6 +85,8 @@ void Config::LoadCoreSettings(std::string_view path)
         ExtractValue(tbl, "Linux.Epoll", "max_events", osSpecificConfig.maxEvents);
 
         // vvv Logging vvv
+        ExtractValue(tbl, "Logging", "format", loggingConfig.format);
+        ExtractValue(tbl, "Logging", "utc_timestamps", loggingConfig.utcTimestamps);
         ExtractValue(tbl, "Logging", "min_level", loggingConfig.minLevel);
         ExtractValue(tbl, "Logging", "enable_stdout", loggingConfig.enableStdout);
         ExtractValue(tbl, "Logging", "enable_colors", loggingConfig.enableColors);
@@ -170,6 +172,10 @@ void Config::ValidateSettings()
     // here is undefined behavior, not just a silently-wrong log level
     if(loggingConfig.minLevel > 5)
         logger.Fatal("[Config]: min_level must be between 0 (trace) and 5 (fatal)");
+
+    // Compared once here, not per line, so a typo refuses to start instead of silently falling back
+    if(loggingConfig.format != "text" && loggingConfig.format != "json")
+        logger.Fatal("[Config]: format must be \"text\" or \"json\"");
 
     // vvv Misc vvv
     // Fed straight into nanosleep({masterPollInterval, 0}) in the master wait loop; 0 means a

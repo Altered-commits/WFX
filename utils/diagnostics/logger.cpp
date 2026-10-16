@@ -51,6 +51,16 @@ void Logger::EnableStdout(bool v) noexcept
     stdout_ = v;
 }
 
+void Logger::EnableJson(bool v) noexcept
+{
+    json_ = v;
+}
+
+void Logger::EnableUtc(bool v) noexcept
+{
+    tsCache_.UseUtc(v);
+}
+
 void Logger::EnableColors(bool v) noexcept
 {
     colors_ = v && WFX_IS_TTY();
@@ -90,11 +100,19 @@ void TimestampCache::Sync(std::chrono::steady_clock::time_point now) noexcept
     epochMs_ = static_cast<int>(duration_cast<milliseconds>(wall.time_since_epoch()).count() % 1000);
 
     std::tm tm{};
-    WFX_LOCALTIME(&tm, &tt);
 
+    if(utc_)
+        WFX_GMTIME(&tm, &tt);
+    else
+        WFX_LOCALTIME(&tm, &tt);
+
+    cachedYear_ = tm.tm_year + 1900;
+    cachedMonth_ = tm.tm_mon + 1;
+    cachedDay_ = tm.tm_mday;
     cachedHour_ = tm.tm_hour;
     cachedMin_ = tm.tm_min;
     cachedSec_ = tm.tm_sec;
+    offsetMinutes_ = static_cast<int>(tm.tm_gmtoff / 60);
 }
 
 //  CircularFileSink

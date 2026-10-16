@@ -143,8 +143,12 @@ inline std::pair<bool, std::size_t> Base64Encode(std::string_view data, std::spa
 
 inline String Base64Encode(std::string_view data, bool urlSafe = false, bool padded = true)
 {
+    // The buffer is measured by the very function the span overload checks it against, so coming
+    // up short is impossible. Sizing the result by what was actually written keeps that an
+    // invariant rather than an assumption, and leaves nothing to a caller on the unreachable path
     String out(Base64EncodedLen(data.size(), padded), '\0');
-    Base64Encode(data, std::span<char>{out.data(), out.size()}, urlSafe, padded);
+    const auto [ok, written] = Base64Encode(data, std::span<char>{out.data(), out.size()}, urlSafe, padded);
+    out.resize(ok ? written : 0);
 
     return out;
 }
@@ -214,8 +218,11 @@ inline std::pair<bool, std::size_t> HexEncode(std::string_view data, std::span<c
 
 inline String HexEncode(std::string_view data, bool upper = false)
 {
+    // Same as Base64Encode above: sized by the function the span overload measures against, and
+    // resized to what it wrote so the impossible short write cannot reach a caller as padding
     String out(HexEncodedLen(data.size()), '\0');
-    HexEncode(data, std::span<char>{out.data(), out.size()}, upper);
+    const auto [ok, written] = HexEncode(data, std::span<char>{out.data(), out.size()}, upper);
+    out.resize(ok ? written : 0);
 
     return out;
 }

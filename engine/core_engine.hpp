@@ -35,7 +35,9 @@ private: // Internal Functions
 private: // Helper Functions
     void RecordRouteMetrics(Http::ClientCtx* ctx);
     void FinishRequest(Http::ClientCtx* ctx);
-    void HandleError(Http::ClientCtx* ctx, Shared::HttpStatus code, std::string_view message);
+    void HandleError(Http::ClientCtx* ctx, Shared::HttpStatus code, std::string_view message,
+                     std::string_view headerKey = {}, std::string_view headerValue = {});
+    std::string BuildAllowList(std::string_view path);
     std::uint8_t HandleConnectionHeader(std::string_view header);
     void HandleUserDLLInjection(const char* dllDir);
     void HandleMiddlewareLoading();

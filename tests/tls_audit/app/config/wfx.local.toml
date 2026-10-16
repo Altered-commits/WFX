@@ -65,6 +65,8 @@ file_chunk_size  = 65536  # How big of a file chunk to send at once
 max_events       = 1024   # How many events should epoll handle at a time
 
 [Logging]
+format            = "text"     # "text" to read by eye, "json" for whatever collects it
+utc_timestamps    = false      # Timestamps in UTC instead of this machine's zone
 min_level         = 2          # Minimum level to emit (0->trace, 1->debug, 2->info, 3->warn, 4->error, 5->fatal)
 enable_stdout     = false      # Write to stdout
 enable_colors     = false      # ANSI colors on stdout (auto-disabled if not a tty)

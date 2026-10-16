@@ -173,7 +173,7 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
                     HandleError(ctx, HttpStatus::SERVICE_UNAVAILABLE, "503: Connection limit exceeded");
                     goto __HandleResponse;
                 case RateLimitResult::REQUEST_LIMIT:
-                    HandleError(ctx, HttpStatus::TOO_MANY_REQUESTS, "429: Rate limit exceeded");
+                    HandleError(ctx, HttpStatus::TOO_MANY_REQUESTS, "429: Rate limit exceeded", "Retry-After", "1");
                     goto __HandleResponse;
                 default:
                     break;
@@ -199,6 +199,15 @@ void CoreEngine::HandleRequest(ClientCtx* ctx)
                 if(!node) {
                     if(HandleGenericOptions(ctx))
                         goto __HandleResponse;
+
+                    // The path is there, this method is not. RFC 9110 section 15.5.6 asks for 405
+                    // and an Allow naming what it does take: answering 404 to both tells a caller
+                    // its URL is wrong when it is the method, and lets a probe map a path's
+                    // methods by which refusal it gets
+                    if(const std::string allow = BuildAllowList(reqInfo.path); !allow.empty()) {
+                        HandleError(ctx, HttpStatus::METHOD_NOT_ALLOWED, "405: Method not allowed", "Allow", allow);
+                        goto __HandleResponse;
+                    }
 
                     HandleError(ctx, HttpStatus::NOT_FOUND, "404: Route not found :(");
                     goto __HandleResponse;
@@ -414,13 +423,43 @@ void CoreEngine::FinishRequest(ClientCtx* ctx)
     connHandler_->RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 
-void CoreEngine::HandleError(ClientCtx* ctx, HttpStatus code, std::string_view message)
+void CoreEngine::HandleError(ClientCtx* ctx, HttpStatus code, std::string_view message, std::string_view headerKey,
+                             std::string_view headerValue)
 {
     auto& res = *ctx->responseInfo;
 
     // Reset the should close because it may have changed since
     res.SetShouldClose(ctx->GetConnectionState() == ConnectionState::CONNECTION_CLOSE);
-    res.AbortWithError(code, message);
+
+    if(headerKey.empty()) {
+        res.AbortWithError(code, message);
+        return;
+    }
+
+    // A refusal carrying a header of its own is written out instead, since AbortWithError
+    // truncates back to the persistent headers and would take it with it. Every caller that
+    // passes one reaches here on a response nothing has been written to yet
+    res.WriteHeader(headerKey, headerValue);
+    res.WriteStatus(code);
+    res.SendText(message);
+}
+
+std::string CoreEngine::BuildAllowList(std::string_view path)
+{
+    auto methods = router_.MethodsAt(path);
+
+    std::string allow;
+    allow.reserve(methods.size() * 6); // Average method name (~4-5 chars) plus ", " per entry
+
+    for(auto m : methods) {
+        if(!allow.empty())
+            allow += ", ";
+
+        const StringView sv = HttpMethodToStringView(m);
+        allow.append(sv.data, sv.length);
+    }
+
+    return allow;
 }
 
 std::uint8_t CoreEngine::HandleConnectionHeader(std::string_view header)
@@ -562,20 +601,9 @@ bool CoreEngine::HandleGenericOptions(ClientCtx* ctx)
     if(req.method != HttpMethod::OPTIONS)
         return false;
 
-    auto methods = router_.MethodsAt(req.path);
-    if(methods.empty())
+    const std::string allow = BuildAllowList(req.path);
+    if(allow.empty())
         return false;
-
-    std::string allow;
-    allow.reserve(methods.size() * 6); // Average method name (~4-5 chars) plus ", " per entry
-
-    for(auto m : methods) {
-        if(!allow.empty())
-            allow += ", ";
-
-        const StringView sv = HttpMethodToStringView(m);
-        allow.append(sv.data, sv.length);
-    }
 
     auto& res = *ctx->responseInfo;
     res.WriteHeader("Allow", allow);

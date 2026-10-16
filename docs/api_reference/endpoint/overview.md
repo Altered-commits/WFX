@@ -60,6 +60,14 @@ the same pool.
 The host string must be in `"hostname:port"` form, with no scheme prefix. A scheme
 prefix (`"https://..."`) or a missing port is a fatal startup error, not a runtime one.
 
+The name is resolved in the order the system itself would: an address written out
+literally is taken as it stands, then `/etc/hosts` is consulted, and only then is a DNS
+query sent. So a name that lives only in the hosts file, such as a container alias or a
+host pinned to a staging address, resolves exactly as it does for every other program on
+the machine, and a hosts entry overrides DNS rather than the other way round. A name
+resolving to several addresses is dialled round-robin, and an address that refuses the
+connection is walked past to the next one rather than failing the request.
+
 TLS is chosen automatically based on the port unless you override it, see
 [TLS mode](#tls-mode) below.
 
@@ -154,6 +162,12 @@ through roughly this lifecycle:
 4. **In the pool, idle** -> connected and healthy, waiting to be leased for a request.
 5. **Leased** -> actively serving one caller's request.
 6. Back to **idle** on a keep-alive-friendly completion, or **closed** if the protocol asked to close, the peer closed, or something failed.
+
+A request is leased a slot that is already connected whenever the pool has one, in
+preference to a closed slot that would have to connect, handshake and run `onConnect`
+first. It matters most just after an upstream recovers: the pool comes back one slot at
+a time, and without that preference a request can pay full connect cost while an idle
+connection sits beside it.
 
 ### Pool settings
 

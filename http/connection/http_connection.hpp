@@ -199,8 +199,8 @@ struct EndpointCtx : public ConnectionTag {
     std::uint16_t generationId = 1;      // 2 bytes
     std::uint16_t endpointIdx = 0;       // 2 bytes
     std::uint16_t reconnectAttempts = 0; // 2 bytes, backoff attempt count
-    std::uint16_t padding1 = 0;          // |
-    std::uint32_t padding2 = 0;          // | -> 6 bytes, aligns the pointers below to 8
+    std::uint16_t addrsTried = 0;        // 2 bytes, resolved addresses this connect attempt has walked
+    std::uint32_t padding1 = 0;          // 4 bytes, aligns the pointers below to 8
 
     ClientCtx* clientCtx = nullptr; // 8 bytes
     void* sslConn = nullptr;        // 8 bytes

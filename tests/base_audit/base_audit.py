@@ -24,6 +24,7 @@ import copy
 import json
 import os
 import random
+import re
 import shutil
 import signal
 import socket
@@ -331,6 +332,31 @@ CRLF_VALUES = [
 _BODY_LIMIT = 65536
 # Max header block size from wfx.toml (max_header_size) = 8192
 _HEADER_LIMIT = 8192
+# How long a protocol vector is given before its socket closes. The reply is thrown away, so this
+# only has to cover the server reading and parsing: a close it sees first drops the vector unparsed.
+# Most vectors leave it waiting for a body that never comes, so this is what each one costs
+_VECTOR_SETTLE = 0.25
+
+# The shape the text format has always had, which adding a format must leave alone
+TEXT_LINE = re.compile(r"^\[\d{2}:\d{2}:\d{2}\.\d{3}\] \[(TRC|DBG|INF|WRN|ERR|FTL)\] ")
+
+# RFC 3339 with an offset or Z, so a line can be placed on a clock
+JSON_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}([+-]\d{2}:\d{2}|Z)$")
+
+# What a level is called in JSON: the words Grafana and Loki already know
+JSON_LEVELS = {"trace", "debug", "info", "warn", "error", "fatal"}
+
+# The methods /cors/multi really defines in app/src/main.cpp, so an Allow on it has to name them
+ALLOW_MULTI = ("GET", "POST", "PUT")
+
+# Refusals the engine writes as a whole canned response rather than through a Response object, and
+# what provokes each. Their Content-Length is written out by hand beside a body it has to match
+REFUSAL_VECTORS = [
+    ("400 on conflicting Connection tokens",
+     b"GET /health HTTP/1.1\r\nHost: x\r\nConnection: close, keep-alive\r\n\r\n"),
+    ("501 on a chunked request body",
+     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"),
+]
 BODYBOMB_PAYLOADS = [
     # Exactly at limit: should be accepted (200)
     _build("POST", "/echo-body", body=b"B" * _BODY_LIMIT),
@@ -346,6 +372,26 @@ BODYBOMB_PAYLOADS = [
     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 99999999999999999999\r\n\r\n",
     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 18446744073709551615\r\n\r\n",
     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 18446744073709551616\r\n\r\n",
+]
+
+# A field whose name is not a token, or whose value carries a control byte, is
+# refused rather than read. RFC 9112 section 5.1 allows nothing between the name
+# and its colon, and RFC 9110 section 5.5 allows no control byte in a value. The
+# point is not that the server survives these, which HEADER_ABUSE already covers,
+# but that it never accepts one: whatever stands in front of it may read the same
+# bytes the other way, and then the two disagree about what the request was.
+# Each is one header line, and each must be answered 400.
+BAD_HEADER_FIELDS = [
+    (b"X-Ws : v",             "a space before the colon"),
+    (b"X-Tab\tName: v",       "a tab in the name"),
+    (b"X-Bad Name: v",        "a space in the name"),
+    (b"X-\x00name: v",        "a null in the name"),
+    (b"X-\x01name: v",        "a control byte in the name"),
+    (b"X-Nul: va\x00lue",     "a null in the value"),
+    (b"X-Ctl: va\x01lue",     "a control byte in the value"),
+    (b"X-Bel: va\x07lue",     "a bell in the value"),
+    (b"Content-Length : 0",   "a space before the colon of a length"),
+    (b"Transfer-Encoding : chunked", "a space before the colon of an encoding"),
 ]
 
 HEADER_ABUSE = [
@@ -844,7 +890,7 @@ def phase_security(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
     findings = []
-    stats = {"trav_url": 0, "trav_hdr": 0, "crlf": 0,
+    stats = {"trav_url": 0, "trav_hdr": 0, "crlf": 0, "bad_field": 0,
              "violate_ok": 0, "violate_bad": 0, "leak": 0}
 
     # 16 background threads: representative concurrent load during security probing
@@ -865,6 +911,20 @@ def phase_security(ctx):
         if isinstance(st, int) and st != 400:
             findings.append(("MISSING_HEADER_NOT_400",
                               "/download without X-File returned %s, expected 400" % st))
+
+        # A field the parser cannot read one way only is refused, never accepted
+        with term.progress("security", "bad-fields", len(BAD_HEADER_FIELDS)) as pr:
+            for vec, what in BAD_HEADER_FIELDS:
+                payload = (b"GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"
+                           + vec + b"\r\n\r\n")
+                st, _ = _probe(host, port, payload)
+                stats["bad_field"] += 1
+                if st == 400:
+                    pr.ok()
+                else:
+                    pr.bad()
+                    findings.append(("BAD_HEADER_ACCEPTED",
+                                      "%s was answered %s, expected 400  vec=%r" % (what, st, vec)))
 
         # URL path traversal
         with term.progress("security", "trav-url", len(TRAVERSAL_URL)) as pr:
@@ -1002,11 +1062,21 @@ def phase_protocol(ctx):
     term.log("protocol", "started  (%d corpora, %d total vectors, zero concurrent load)"
          % (len(corpora), sum(len(c) for c, _ in corpora)))
 
+    # One ordinary request on the same budget every vector gets, before spending it 156 times. A
+    # vector only counts as sent if the server read it, and one closed too early is read by nobody:
+    # the corpora would then all pass having proven nothing. This says plainly whether a round trip
+    # fits in that budget on this machine, so a runner too slow for it fails here and names itself
+    st, _ = raw_send(host, port, _build("GET", "/health"), rtimeout=_VECTOR_SETTLE)
+    if st != 200:
+        findings.append(("SETTLE_TOO_SHORT",
+                          "a plain /health answered %r within %ss, so the vectors below are closing "
+                          "before the server reads them: raise _VECTOR_SETTLE" % (st, _VECTOR_SETTLE)))
+
     for corpus, label in corpora:
         with term.progress("protocol", label, len(corpus)) as pr:
             for vec in corpus:
                 sent += 1
-                raw_send(host, port, vec, rtimeout=2.0)
+                raw_send(host, port, vec, rtimeout=_VECTOR_SETTLE)
                 pr.ok()
 
             alive_now = common.health(host, port, 5.0)
@@ -1742,6 +1812,45 @@ def _h(hdrs, name):
     vals = hdrs.get(name.lower().encode())
     return vals[0].decode(errors="replace") if vals else None
 
+# PHASE: refusals
+def phase_refusals(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    p = ctx.phase("refusals")
+
+    # A path that exists for other methods is not a missing path. RFC 9110 section 15.5.6 asks
+    # for 405 and an Allow naming what it does take, so a caller can tell the wrong door from
+    # no door, and a probe cannot use 404 to map which methods a path has
+    st, hdrs, _ = _cors_headers(host, port, "DELETE", "/cors/multi")
+    allow = _h(hdrs, "allow")
+    p.check("a method a known path does not take is 405, not 404",
+            st == 405, "status=%r for DELETE /cors/multi" % st)
+    p.check("that 405 names the methods the path does take",
+            allow is not None and set(ALLOW_MULTI) <= {m.strip() for m in allow.split(",")},
+            "Allow=%r, expected to name at least %r" % (allow, sorted(ALLOW_MULTI)))
+
+    st, hdrs, _ = _cors_headers(host, port, "POST", "/health")
+    allow = _h(hdrs, "allow")
+    p.check("a path with one method refuses another the same way",
+            st == 405 and allow is not None and "GET" in allow,
+            "status=%r Allow=%r" % (st, allow))
+
+    # A path that really is missing stays 404, or the two answers say the same thing again
+    st, _, _ = _cors_headers(host, port, "GET", "/no/such/door")
+    p.check("a path that does not exist at all is still 404", st == 404, "status=%r" % st)
+
+    # Every refusal written by hand has to declare the length it actually sends. Too short and a
+    # client waits on bytes that never arrive, too long and the next reply on that connection is
+    # read as part of this one
+    for label, vector in REFUSAL_VECTORS:
+        st, raw = raw_send(host, port, vector)
+        _, hdrs, body = parse_hdrs(raw)
+        declared = _h(hdrs, "content-length")
+        p.check("%s declares the body length it sends" % label,
+                declared is not None and declared.isdigit() and int(declared) == len(body),
+                "status=%r Content-Length=%r but the body is %d bytes: %r"
+                % (st, declared, len(body), body[:40]))
+
 # PHASE: cors
 def phase_cors(ctx):
     cfg = ctx.cfg
@@ -1933,6 +2042,64 @@ def phase_cors(ctx):
     term.log("cors", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
 
     ctx.phase("cors").record(findings, security=("CORS_ORIGIN_LEAK",), vectors=checks)
+
+# PHASE: logging
+def phase_logging(ctx):
+    cfg, host, port = ctx.cfg, ctx.cfg.host, ctx.cfg.port
+    p = ctx.phase("logging")
+    toml_path = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
+
+    def lines():
+        return [line.strip() for line in common.logs._worker_lines(cfg.app_dir) if line.strip()]
+
+    # The format it ships with, unchanged
+    common.health(host, port, 4.0)
+    text = lines()
+    p.check("text: every line keeps the timestamp and tag it always had",
+            text and all(TEXT_LINE.match(line) for line in text),
+            "%d lines, first unmatched: %r" % (len(text), next((l for l in text if not TEXT_LINE.match(l)), None)))
+
+    for fmt_value, want_utc in (("json", False), ("json", True)):
+        common.toml.patch(toml_path, "format", fmt_value)
+        common.toml.patch(toml_path, "utc_timestamps", want_utc)
+
+        try:
+            if not ctx.server.restart():
+                p.failed("JSON_BOOT", "server never came back with format=%r utc=%r" % (fmt_value, want_utc))
+                continue
+
+            common.health(host, port, 4.0)
+            got = lines()
+
+            bad = None
+            for line in got:
+                try:
+                    entry = json.loads(line)
+                except ValueError as exc:
+                    bad = "not JSON: %r (%s)" % (line, exc)
+                    break
+
+                if set(entry) != {"time", "level", "msg"}:
+                    bad = "fields are %r, expected time, level and msg: %r" % (sorted(entry), line)
+                elif entry["level"] not in JSON_LEVELS:
+                    bad = "level %r is not one of %s: %r" % (entry["level"], sorted(JSON_LEVELS), line)
+                elif not JSON_TIME.match(entry["time"]):
+                    bad = "time %r is not RFC 3339: %r" % (entry["time"], line)
+                elif want_utc and not entry["time"].endswith("Z"):
+                    bad = "utc_timestamps is on but time %r carries an offset: %r" % (entry["time"], line)
+                elif not want_utc and entry["time"].endswith("Z"):
+                    bad = "utc_timestamps is off but time %r is UTC: %r" % (entry["time"], line)
+
+                if bad:
+                    break
+
+            p.check("json%s: every line is one object of time, level and msg" % (" utc" if want_utc else ""),
+                    bool(got) and bad is None, bad or "no lines were written")
+        finally:
+            common.toml.restore(toml_path)
+
+    if not ctx.server.restart():
+        p.failed("LOGGING_RESTORE_BOOT", "server never came back after restoring the log format")
 
 def _find_route(metrics, pred):
     for r in metrics.get("routes", []):
@@ -2319,14 +2486,16 @@ def phase_soak(ctx):
 #   - a per-phase timeout, because a phase that wedges under load would otherwise stall the run
 class BaseAudit(common.Suite):
     name = "base_audit"
-    description = "WFX server torture audit: security, protocol, features, forms, query, cors, groups, metrics, soak, chaos"
+    description = "WFX server torture audit: security, logging, protocol, features, forms, query, cors, groups, metrics, soak, chaos"
     phases = {
         "security": phase_security,
+        "logging":  phase_logging,
         "protocol": phase_protocol,
         "features": phase_features,
         "forms":    phase_forms,
         "query":    phase_query,
         "cors":     phase_cors,
+        "refusals": phase_refusals,
         "groups":   phase_groups,
         "metrics":  phase_metrics,
         "soak":     phase_soak,

@@ -63,8 +63,9 @@ way `WFX_GET_EX` works, see [Routes with Middleware](#routes-with-middleware) be
 Two of these methods have engine-level behavior worth knowing before you reach for them:
 
 - `WFX_HEAD` - WFX does **not** automatically fall back to a matching `WFX_GET` handler for a path
-  with no `WFX_HEAD` registered. A `HEAD` request to a `GET`-only route is a plain `404` today, not
-  an automatic bodyless `GET`. Register `WFX_HEAD` explicitly wherever you need it.
+  with no `WFX_HEAD` registered. A `HEAD` request to a `GET`-only route is answered `405 Method Not
+  Allowed` with `Allow: GET`, not an automatic bodyless `GET`. Register `WFX_HEAD` explicitly
+  wherever you need it.
 - `WFX_OPTIONS` - see [CORS and OPTIONS](#cors-and-options) directly below. A registered
   `WFX_OPTIONS` handler only runs for requests the engine doesn't already answer for you, which is
   most `OPTIONS` traffic in practice.
@@ -102,7 +103,12 @@ method. If you registered a `WFX_OPTIONS` handler at that path, it runs normally
 other route. If you didn't, and the path has a real route under at least one other method, the
 engine auto-answers with `204 No Content` and an `Allow:` header listing every method actually
 registered there, e.g. `Allow: GET, POST, PUT`. If the path has no route under any method, it's a
-plain `404`, same as it would be for any other unmatched method.
+plain `404`.
+
+Any other method the path doesn't define is answered `405 Method Not Allowed`, carrying the same
+per-path `Allow:` header. Only a path with no route under *any* method is a `404`, so the two
+answers stay distinguishable: a caller can tell a wrong URL from a wrong method, and a prober
+can't read one as the other.
 
 !!! note "The two Allow-Methods lists are unrelated"
     A CORS preflight's `Access-Control-Allow-Methods` header always comes from `[CORS]`'s static
@@ -118,7 +124,8 @@ plain `404`, same as it would be for any other unmatched method.
 3. Everything else (`OPTIONS` with no marker, no `Origin`, or an unmatched `Origin`) -> normal
    routing. A registered `WFX_OPTIONS` handler runs.
 4. No `WFX_OPTIONS` handler, but the path exists under other methods -> auto `204` + `Allow:`.
-5. No route under any method -> `404`.
+5. Any other method the path doesn't define, but it exists under some -> `405` + `Allow:`.
+6. No route under any method -> `404`.
 
 ---
 

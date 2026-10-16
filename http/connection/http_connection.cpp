@@ -236,6 +236,7 @@ void EndpointCtx::Reset()
     asyncData = AsyncData{};
     coalesceKey = 0;
     reconnectAttempts = 0;
+    addrsTried = 0;
     socket = WFX_INVALID_SOCKET;
     // endpointState, endpointIdx, isSideConnection:        preserved, TLS config and pool identity survive reset
     // sslConn:                                             caller freed it before Reset()
