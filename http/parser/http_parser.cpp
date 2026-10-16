@@ -9,6 +9,7 @@
 #include "http/request/http_request.hpp"
 #include "utils/string/string.hpp"
 #include "shared/utils/memory.hpp"
+#include <array>
 #include <cstring>
 
 namespace WFX::Http {
@@ -27,6 +28,8 @@ bool SafeFindCRLF(const char* data, std::size_t size, std::size_t from, std::siz
                   std::string_view& outLine);
 bool SafeFindHeaderEnd(const char* data, std::size_t size, std::size_t from, std::size_t& outPos);
 std::string_view Trim(std::string_view sv);
+std::size_t FindFieldEnd(std::string_view line);
+bool IsFieldSanitized(std::string_view value);
 bool PrepareForBody(ClientCtx* ctx, std::size_t headerEnd, std::size_t contentLen, std::uint32_t maxBufferSize);
 
 // vvv Function definitions vvv
@@ -298,12 +301,17 @@ bool ParseHeaders(const char* data, std::size_t size, std::size_t& pos, RequestH
         if(line.empty())
             break;
 
-        const std::size_t colon = line.find(':');
-        if(colon == std::string_view::npos || colon == 0)
+        // Refused rather than dropped: a field this cannot read one way only is one whatever stands
+        // in front of this may have read the other way
+        const std::size_t colon = FindFieldEnd(line);
+        if(colon == std::string_view::npos)
             return false;
 
         const std::string_view key = line.substr(0, colon);
         const std::string_view val = Trim(line.substr(colon + 1));
+
+        if(!IsFieldSanitized(val))
+            return false;
 
         // Null-terminate key and value in-place, so even if we use pointer as is, its harmless
         char* writableKey = const_cast<char*>(data + (key.data() - data));
@@ -390,6 +398,59 @@ std::string_view Trim(std::string_view sv)
         --end;
 
     return sv.substr(start, end - start);
+}
+
+std::size_t FindFieldEnd(std::string_view line)
+{
+    // tchar as a bitmap, RFC 9110 section 5.1: 32 bytes of table rather than 256, filled at compile time
+    static constexpr std::array<std::uint32_t, 8> K_TCHAR = [] {
+        std::array<std::uint32_t, 8> bits{};
+        const auto set = [&bits](unsigned char c) { bits[c >> 5] |= 1u << (c & 31u); };
+
+        for(unsigned char c = '0'; c <= '9'; ++c)
+            set(c);
+        for(unsigned char c = 'A'; c <= 'Z'; ++c)
+            set(c);
+        for(unsigned char c = 'a'; c <= 'z'; ++c)
+            set(c);
+
+        for(const char c : {'!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~'})
+            set(static_cast<unsigned char>(c));
+
+        return bits;
+    }();
+
+    std::size_t at = 0;
+
+    // Walks to the colon and checks the name on the way: both read the same bytes, so one pass does
+    // for the two of them. A space before the colon is refused with the rest, since a reader that
+    // drops such a field and one that keeps it disagree about what the request was
+    while(at < line.size() && line[at] != ':') {
+        const auto c = static_cast<unsigned char>(line[at]);
+
+        if(((K_TCHAR[c >> 5] >> (c & 31u)) & 1u) == 0u)
+            return std::string_view::npos;
+
+        ++at;
+    }
+
+    return (at == 0 || at == line.size()) ? std::string_view::npos : at;
+}
+
+bool IsFieldSanitized(std::string_view value)
+{
+    unsigned bad = 0;
+
+    // RFC 9110 section 5.5 takes visible characters, spaces, tabs and the bytes above ASCII; a control
+    // byte would end the line, or the record, for whatever reads this value later. Gathered rather
+    // than returned on the first one, so the loop carries no branch out and can go several bytes at a
+    // time: a good value is read to its end either way, and nearly every value is good
+    for(const char c : value) {
+        const auto byte = static_cast<unsigned char>(c);
+        bad |= static_cast<unsigned>((byte < 0x20 && byte != '\t') || byte == 0x7F);
+    }
+
+    return bad == 0;
 }
 
 } // namespace HttpParser

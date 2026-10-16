@@ -88,6 +88,12 @@ max_connections              = 2000    # 32-bit Unsigned Integer
 - `max_header_count`: Max number of headers allowed. **Validated: must be greater than 0**, or every request is rejected outright.
 - `max_body_size`: Max request body size
 
+Size is not the only thing checked. A header whose name is not a token (RFC 9110
+section 5.1), including one with a space before its colon, or whose value carries
+a control byte (RFC 9110 section 5.5), fails the parse and the request is answered
+`400`. WFX refuses such a field rather than dropping it: a proxy in front may read
+the same bytes the other way, and the two would then disagree about the request.
+
 ### Timeouts
 
 - `header_timeout`: Time allowed to fully receive headers

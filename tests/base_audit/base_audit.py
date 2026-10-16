@@ -348,6 +348,26 @@ BODYBOMB_PAYLOADS = [
     b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 18446744073709551616\r\n\r\n",
 ]
 
+# A field whose name is not a token, or whose value carries a control byte, is
+# refused rather than read. RFC 9112 section 5.1 allows nothing between the name
+# and its colon, and RFC 9110 section 5.5 allows no control byte in a value. The
+# point is not that the server survives these, which HEADER_ABUSE already covers,
+# but that it never accepts one: whatever stands in front of it may read the same
+# bytes the other way, and then the two disagree about what the request was.
+# Each is one header line, and each must be answered 400.
+BAD_HEADER_FIELDS = [
+    (b"X-Ws : v",             "a space before the colon"),
+    (b"X-Tab\tName: v",       "a tab in the name"),
+    (b"X-Bad Name: v",        "a space in the name"),
+    (b"X-\x00name: v",        "a null in the name"),
+    (b"X-\x01name: v",        "a control byte in the name"),
+    (b"X-Nul: va\x00lue",     "a null in the value"),
+    (b"X-Ctl: va\x01lue",     "a control byte in the value"),
+    (b"X-Bel: va\x07lue",     "a bell in the value"),
+    (b"Content-Length : 0",   "a space before the colon of a length"),
+    (b"Transfer-Encoding : chunked", "a space before the colon of an encoding"),
+]
+
 HEADER_ABUSE = [
     # Oversized values: test header size limits
     b"X-Big: "  + b"A" * 16384  + b"\r\n",
@@ -844,7 +864,7 @@ def phase_security(ctx):
     cfg, srv = ctx.cfg, ctx.server
     host, port = cfg.host, cfg.port
     findings = []
-    stats = {"trav_url": 0, "trav_hdr": 0, "crlf": 0,
+    stats = {"trav_url": 0, "trav_hdr": 0, "crlf": 0, "bad_field": 0,
              "violate_ok": 0, "violate_bad": 0, "leak": 0}
 
     # 16 background threads: representative concurrent load during security probing
@@ -865,6 +885,20 @@ def phase_security(ctx):
         if isinstance(st, int) and st != 400:
             findings.append(("MISSING_HEADER_NOT_400",
                               "/download without X-File returned %s, expected 400" % st))
+
+        # A field the parser cannot read one way only is refused, never accepted
+        with term.progress("security", "bad-fields", len(BAD_HEADER_FIELDS)) as pr:
+            for vec, what in BAD_HEADER_FIELDS:
+                payload = (b"GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"
+                           + vec + b"\r\n\r\n")
+                st, _ = _probe(host, port, payload)
+                stats["bad_field"] += 1
+                if st == 400:
+                    pr.ok()
+                else:
+                    pr.bad()
+                    findings.append(("BAD_HEADER_ACCEPTED",
+                                      "%s was answered %s, expected 400  vec=%r" % (what, st, vec)))
 
         # URL path traversal
         with term.progress("security", "trav-url", len(TRAVERSAL_URL)) as pr:
