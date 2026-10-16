@@ -60,6 +60,11 @@
 #define SOLO_UPSTREAM "127.0.0.1:8093"
 #define GATE_UPSTREAM "127.0.0.1:8094"
 
+// The solo listener again, named instead of written out as an address. The mock binds
+// 127.0.0.1 and nothing else, so reaching it proves the resolver answers with what this
+// host actually has, and that a refused address is walked past rather than given up on
+#define NAMED_UPSTREAM "localhost:8093"
+
 // Shared helpers
 namespace {
 
@@ -939,6 +944,22 @@ inline const SoloEp SoloGood{
     }
 };
 
+// The same mock and the same protocol, reached by name. exactSlots holds the pool to
+// connLimit, so the resolve phase's concurrent calls take one slot each and dial once
+// each, which is what walks the address cursor right around a multi-address name.
+inline const SoloEp SoloByName{
+    NAMED_UPSTREAM, SoloDesc("good:0:0"),
+    WFX::EndpointConfig{
+        .connLimit             = 6,
+        .connectTimeoutSeconds = 5,
+        .requestTimeoutSeconds = 10,
+        .idleTimeoutSeconds    = 5,
+        .maxReconnectAttempts  = 1,
+        .tlsConfig             = WFX::EpTlsInsecure,
+        .exactSlots            = true,
+    }
+};
+
 // Probes STARTTLS and requires it. The mock answers "N", so onConnect has to fail
 // closed rather than continuing in plaintext (CVE-2015-3152 / CVE-2025-49146).
 inline const SoloEp SoloTlsDowngrade{
@@ -1089,6 +1110,7 @@ const SoloEp* SoloEndpointOf(std::string_view name) noexcept
 {
     if(name == "downgrade")  return &SoloTlsDowngrade;
     if(name == "tlsgarbage") return &SoloTlsGarbage;
+    if(name == "byname")     return &SoloByName;
     return &SoloGood;
 }
 

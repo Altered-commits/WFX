@@ -21,12 +21,13 @@ ProcessResult RunProcess(std::string& cmd, const std::string& workingDirectory)
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
 
-    // Change working directory if provided
     if(!workingDirectory.empty()) {
-        // posix_spawnattr_t doesn’t directly change cwd, so we use file_actions workaround
-        if(chdir(workingDirectory.c_str()) != 0) {
+        // Moves the CHILD, between fork and exec. A plain chdir() here moves US instead, and every
+        // relative path the engine resolves afterwards goes with it
+        const int chdirRes = posix_spawn_file_actions_addchdir_np(&actions, workingDirectory.c_str());
+        if(chdirRes != 0) {
             posix_spawn_file_actions_destroy(&actions);
-            return ProcessResult{-1, (std::uint32_t)errno};
+            return ProcessResult{-1, static_cast<std::uint32_t>(chdirRes)};
         }
     }
 

@@ -60,6 +60,14 @@ the same pool.
 The host string must be in `"hostname:port"` form, with no scheme prefix. A scheme
 prefix (`"https://..."`) or a missing port is a fatal startup error, not a runtime one.
 
+The name is resolved in the order the system itself would: an address written out
+literally is taken as it stands, then `/etc/hosts` is consulted, and only then is a DNS
+query sent. So a name that lives only in the hosts file, such as a container alias or a
+host pinned to a staging address, resolves exactly as it does for every other program on
+the machine, and a hosts entry overrides DNS rather than the other way round. A name
+resolving to several addresses is dialled round-robin, and an address that refuses the
+connection is walked past to the next one rather than failing the request.
+
 TLS is chosen automatically based on the port unless you override it, see
 [TLS mode](#tls-mode) below.
 

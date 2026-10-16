@@ -233,7 +233,9 @@ struct EndpointMetrics {
     std::uint64_t status3xx;       // completed responses with 3xx status
     std::uint64_t status4xx;       // completed responses with 4xx status
     std::uint64_t status5xx;       // completed responses with 5xx status
-    std::uint64_t connectFailures; // refused, timed out (onConnect included), or rejected by onConnect
+    std::uint64_t connectFailures; // connects that ended the slot: refused, timed out (onConnect
+                                   // included), or rejected by onConnect. A refused address the
+                                   // engine walked past is not one, the request it carried was served
     std::uint64_t tlsFailures;     // TLS wrap or handshake failures that ended the slot, in-band upgrades included
     std::uint64_t requestTimeouts; // requests still in flight when the request timeout fired
     std::uint64_t poolExhausted;   // sends refused because the connection pool was full
