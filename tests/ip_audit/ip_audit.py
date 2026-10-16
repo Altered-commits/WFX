@@ -117,6 +117,31 @@ def _send_on(sock, buf, path="/health", headers=None, close=False, rtimeout=4.0)
     status, _, buf = net.read_response(sock, buf, rtimeout)
     return status, buf
 
+def _send_on_header(sock, buf, name, path="/health", headers=None, rtimeout=4.0):
+    """Like _send_on(), but reads one named response header back with the status. Asks for close,
+    so the whole reply arrives and ends. Returns (status, header value or None)."""
+    try:
+        sock.sendall(_build("GET", path, headers, close=True))
+    except OSError:
+        return None, None
+
+    raw = buf
+    try:
+        while b"\r\n\r\n" not in raw:
+            data = sock.recv(65536)
+            if not data:
+                break
+            raw += data
+    except OSError:
+        pass
+
+    wanted = name.lower() + ":"
+    for line in raw.split(b"\r\n\r\n", 1)[0].decode("latin-1", "replace").split("\r\n")[1:]:
+        if line.lower().startswith(wanted):
+            return net.status(raw), line.split(":", 1)[1].strip()
+
+    return net.status(raw), None
+
 def _open_held_v6(port, path="/health", headers=None, rtimeout=4.0):
     """Like _open_held(), but a genuine (non-mapped) native IPv6 loopback connection. ::1 is
     the only IPv6 address available without root, so this proves ::1 itself is enforced
@@ -554,6 +579,23 @@ def phase_rate_limit(ctx):
         sock.close()
     else:
         p.failed("RATE_LIMIT_CONNECT2", "could not open the held connection for G2")
+
+    # G3: a 429 has to say when it is worth coming back (RFC 9110 section 10.2.3). Without it a
+    # client can only guess, and a client that guesses short spends the whole refill window
+    # being refused again, which is the retry storm the limit was meant to stop
+    st0, sock, buf = _open_held(host, port, TRUSTED, headers={"X-Forwarded-For": "10.30.3.1"})
+    if sock is not None:
+        for _ in range(1, BURST):
+            _send_on(sock, buf, headers={"X-Forwarded-For": "10.30.3.1"})
+
+        st_hdr, retry = _send_on_header(sock, buf, "Retry-After",
+                                        headers={"X-Forwarded-For": "10.30.3.1"})
+        p.check("a throttled response says when to come back, as whole seconds",
+                st_hdr == 429 and retry is not None and retry.isdigit() and int(retry) >= 1,
+                "status=%r Retry-After=%r" % (st_hdr, retry))
+        sock.close()
+    else:
+        p.failed("RATE_LIMIT_CONNECT3", "could not open the held connection for G3")
 
     if not _alive(host, port):
         p.failed("RATE_LIMIT_SERVER_DEAD", "did not answer the dedicated liveness probe")

@@ -247,6 +247,7 @@ private: // Prewarm / reconnect
     void HandlePrewarm();
     void HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,
                               DisconnectReason reason = DisconnectReason::ERROR);
+    bool TryNextAddress(EndpointCtx* ctx, EndpointEntry& entry);
     void ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& entry);
     void HandleReconnects();
     std::uint32_t ComputeBackoffSeconds(const EndpointConfig& config, std::uint16_t attempt);

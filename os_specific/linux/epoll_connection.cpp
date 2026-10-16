@@ -1795,7 +1795,16 @@ EndpointCtx* EpollConnectionHandler::GetEndpointConnection(std::uint16_t endpoin
 {
     WFX_TRACE();
 
-    EndpointCtx* ctx = endpoints_[endpointIdx].pool.AllocSlot();
+    auto& pool = endpoints_[endpointIdx].pool;
+
+    // A slot whose connection is still open, ahead of one that would have to dial for it: the
+    // pool holds both as simply free, so without this a request pays for a connect, a handshake
+    // and an onConnect with an idle connection sitting beside it. A mark that went stale just
+    // yields an ordinary free slot, which is what AllocSlot would have handed back anyway
+    EndpointCtx* ctx = pool.AllocMarked();
+    if(!ctx)
+        ctx = pool.AllocSlot();
+
     if(!ctx)
         return nullptr;
 
@@ -2074,6 +2083,9 @@ void EpollConnectionHandler::ReleaseEndpoint(EndpointCtx* ctx, DisconnectReason 
 
     const std::uint32_t idx = entry.pool.GetIndex(ctx);
 
+    // This slot's connection is going away, so it is no longer the one to prefer
+    entry.pool.Unmark(idx);
+
     // SAME LOGIC PRETTY MUCH
     const std::uint32_t timerIdx = meta.timerBase + idx;
     timerWheel_.Cancel(timerIdx);
@@ -2161,6 +2173,9 @@ void EpollConnectionHandler::ReturnEndpointToPool(EndpointCtx* slotCtx)
         // ReleaseEndpoint checks this to avoid double-decrementing if the idle
         // timer actually fires before this slot is re-leased.
         slotCtx->isPooledIdle = 1;
+
+        // Marked so the next lease takes this open connection over a slot that has none
+        entry.pool.Mark(idx);
     }
 
     // Slot reached a healthy idle state (fresh connect, successful reconnect, or a completed
@@ -4205,6 +4220,8 @@ void EpollConnectionHandler::ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& 
     ctx->inOnConnectPhase = 0;
     ctx->clientCtx = nullptr; // background slot, no waiting client (already failed/never had one)
     ctx->isAwaitingReconnect = 1;
+    ctx->addrsTried = 0;                      // a fresh attempt, so the whole address list is open to it again
+    ctx->eventType = EventType::EVENT_ACCEPT; // same as TryNextAddress, an immediate connect must read as one
 
     const std::uint32_t backoff = ComputeBackoffSeconds(meta.config, ctx->reconnectAttempts);
     ctx->reconnectAttempts++;
@@ -4218,6 +4235,43 @@ void EpollConnectionHandler::ScheduleReconnect(EndpointCtx* ctx, EndpointEntry& 
                   " in ", backoff, "s");
 }
 
+bool EpollConnectionHandler::TryNextAddress(EndpointCtx* ctx, EndpointEntry& entry)
+{
+    WFX_TRACE();
+
+    auto& meta = entry.meta;
+
+    while(ctx->addrsTried < meta.addrs.size()) {
+        // Drop the socket the last address refused, and nothing else: the client, its parse objects
+        // and the slot's own state all carry over, since this is one attempt still running
+        timerWheel_.Cancel(meta.timerBase + entry.pool.GetIndex(ctx));
+        (void)RegisterEpoll(ctx, EPOLL_CTL_DEL);
+
+        if(ctx->socket != WFX_INVALID_SOCKET) {
+            close(ctx->socket);
+            ctx->socket = WFX_INVALID_SOCKET;
+        }
+
+        // Back to the slot default, the value WrapConnect reads to tell an immediate connect from
+        // an EINPROGRESS one. Left at EVENT_CONNECT by the address that just failed, an address
+        // that answers straight away is mistaken for one still in flight, and skips the state,
+        // the TLS wrap and the EnterState that branch owes it
+        ctx->eventType = EventType::EVENT_ACCEPT;
+
+        // CreateAndConnect advances nextAddrIdx, so each pass lands on the next resolved address
+        const EndpointStatus status = WrapConnect(ctx, entry);
+        if(status == EndpointStatus::PENDING)
+            return true;
+
+        // Only another refusal is the address's fault. A socket or epoll failure is ours, and
+        // belongs to the caller's funnel
+        if(status != EndpointStatus::CONNECT_FAILURE)
+            break;
+    }
+
+    return false;
+}
+
 void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntry& entry, bool fatal,
                                                   DisconnectReason reason)
 {
@@ -4229,6 +4283,16 @@ void EpollConnectionHandler::HandleConnectFailure(EndpointCtx* ctx, EndpointEntr
         FailAuxConnect(ctx, reason == DisconnectReason::TLS_ERROR ? SlotStatus::TLS_ERROR : SlotStatus::IO_ERROR);
         return;
     }
+
+    // One address refusing us says nothing about the others the same name resolved to, so walk the
+    // list before giving up on the slot. Only a TCP connect that never came up qualifies: past that
+    // the address answered, and TLS or onConnect would fail alike on every one of them. A connect
+    // that timed out is left out too, so a name with N addresses can't cost N connect timeouts
+    const bool addressRefused =
+        !fatal && reason == DisconnectReason::ERROR && ctx->GetConnectionState() != ConnectionState::CONNECTION_ALIVE;
+
+    if(addressRefused && TryNextAddress(ctx, entry))
+        return;
 
     auto& meta = entry.meta;
 
@@ -4484,6 +4548,7 @@ EndpointStatus EpollConnectionHandler::CreateAndConnect(EndpointCtx* ctx, Endpoi
     // stored cursor never needs to know or care about addrs.size() directly.
     const std::uint16_t idx = epMeta.nextAddrIdx % static_cast<std::uint16_t>(epMeta.addrs.size());
     epMeta.nextAddrIdx++;
+    ctx->addrsTried++;
 
     ResolvedAddr& chosen = epMeta.addrs[idx];
 
