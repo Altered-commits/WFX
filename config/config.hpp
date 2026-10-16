@@ -128,11 +128,13 @@ struct OSSpecificConfig {
 };
 
 struct LoggingConfig {
-    std::uint8_t minLevel = 2; // 0=trace 1=debug 2=info 3=warn 4=error 5=fatal
+    std::string format = "text"; // "text" to read by eye, "json" for whatever collects it
+    std::uint8_t minLevel = 2;   // 0=trace 1=debug 2=info 3=warn 4=error 5=fatal
     bool enableStdout = true;
     bool enableColors = true;
     bool enableTimestamps = true;
     bool enableFile = false;
+    bool utcTimestamps = false; // Timestamps in UTC instead of this machine's zone
     std::uint16_t maxRotations = 2;
     std::uint32_t maxFileSize = 16 * 1024 * 1024;
 };

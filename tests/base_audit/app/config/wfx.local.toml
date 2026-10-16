@@ -87,6 +87,8 @@ file_chunk_size  = 65536  # How big of a file chunk to send at once
 max_events       = 1024   # How many events should epoll handle at a time
 
 [Logging]
+format            = "text"     # "text" to read by eye, "json" for whatever collects it
+utc_timestamps    = false      # Timestamps in UTC instead of this machine's zone
 min_level         = 2          # info: surfaces "Server running", [ERR] contract-violations, [FTL] crashes
 enable_stdout     = false      # Off: the audit tails the logs/ files, stdout is discarded under --detach
 enable_colors     = false      # No ANSI codes -> clean log scanning by the harness

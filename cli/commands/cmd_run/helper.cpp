@@ -441,6 +441,8 @@ int RunServerImpl(const ServerConfig& cfg, const std::string& logsDir, const std
     logger.EnableStdout(loggingConfig.enableStdout);
     logger.EnableColors(loggingConfig.enableColors);
     logger.EnableTimestamps(loggingConfig.enableTimestamps);
+    logger.EnableJson(loggingConfig.format == "json");
+    logger.EnableUtc(loggingConfig.utcTimestamps);
 
     // Master will have it's own logging file, why discriminate yeah?
     if(loggingConfig.enableFile)

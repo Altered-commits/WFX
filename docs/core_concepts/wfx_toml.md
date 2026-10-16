@@ -387,6 +387,8 @@ Controls how WFX emits log output. This section is **optional**.
 
 ```toml
 [Logging]
+format            = "text"    # String ("text" or "json")
+utc_timestamps    = false     # Boolean
 min_level         = 2         # 8-bit Unsigned Integer (0 to 5)
 enable_stdout     = true      # Boolean
 enable_colors     = true      # Boolean
@@ -396,10 +398,33 @@ max_file_size     = 16777216  # 32-bit Unsigned Integer (In bytes)
 max_rotations     = 2         # 16-bit Unsigned Integer
 ```
 
+- `format`: How a line is written. **Validated: must be `"text"` or `"json"`.**
+
+  `"text"` is the format for reading by eye, and is what WFX has always written:
+
+  ```
+  [14:05:47.556] [INF] [BufferPool]: Ready, usable=1048576 raw=1055128 (both in bytes)
+  ```
+
+  `"json"` is one object per line, for whatever collects them. The level is a field rather than
+  something a collector has to pull out of the text with a pattern, and the time is complete enough
+  to place on a clock rather than only within a day:
+
+  ```json
+  {"time":"2026-10-16T14:05:47.556+00:00","level":"info","msg":"[BufferPool]: Ready, usable=1048576 raw=1055128 (both in bytes)"}
+  ```
+
+  Levels are `trace`, `debug`, `info`, `warn`, `error` and `fatal`. The whole line is written in one
+  call whichever format is set, so two workers never land inside each other's line. `enable_colors`
+  and `enable_timestamps` apply to `"text"` alone: JSON carries its time as a field and never ANSI.
+- `utc_timestamps`: Read the clock in UTC rather than this machine's zone. Text then reads
+  `[HH:MM:SS.mmm]` in UTC, and JSON ends its time in `Z` instead of an offset. Worth turning on
+  wherever logs from several machines are read together, since offsets otherwise have to be
+  reconciled before lines from two zones can be ordered.
 - `min_level`: Minimum log level to emit. `0` = trace, `1` = debug, `2` = info, `3` = warn, `4` = error, `5` = fatal. Lines below this level are discarded entirely. **Validated: must be between 0 and 5.**
 - `enable_stdout`: Write log output to stdout.
-- `enable_colors`: ANSI color codes on stdout. Automatically disabled if stdout is not a TTY.
-- `enable_timestamps`: Prepend `[HH:MM:SS.mmm]` to each log line.
+- `enable_colors`: ANSI color codes on stdout. Automatically disabled if stdout is not a TTY. Ignored when `format = "json"`.
+- `enable_timestamps`: Prepend `[HH:MM:SS.mmm]` to each log line. Ignored when `format = "json"`, which always carries its own `time` field.
 - `enable_file`: Write log output to files under `logs/default_logs/`: `master.log` plus one log file per worker.
 - `max_file_size`: Max size of a single log file before it rotates. Only applies when `enable_file = true`.
 - `max_rotations`: Number of rotated log files to keep. Files are named `.1` through `.N`, oldest are discarded. Only applies when `enable_file = true`. Must be 1 to 32; anything else falls back to 4.

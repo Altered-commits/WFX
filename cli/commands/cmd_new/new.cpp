@@ -213,6 +213,8 @@ backlog                 = 1024   # Max pending connections in OS listen queue
 max_events       = 1024   # How many events should epoll handle at a time
 
 [Logging]
+format            = "text"     # "text" to read by eye, "json" for whatever collects it
+utc_timestamps    = false      # Timestamps in UTC instead of this machine's zone
 min_level         = 2          # Minimum level to emit (0->trace, 1->debug, 2->info, 3->warn, 4->error, 5->fatal)
 enable_stdout     = true       # Write to stdout
 enable_colors     = true       # ANSI colors on stdout (auto-disabled if not a tty)

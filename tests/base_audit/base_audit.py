@@ -24,6 +24,7 @@ import copy
 import json
 import os
 import random
+import re
 import shutil
 import signal
 import socket
@@ -331,6 +332,19 @@ CRLF_VALUES = [
 _BODY_LIMIT = 65536
 # Max header block size from wfx.toml (max_header_size) = 8192
 _HEADER_LIMIT = 8192
+# How long a protocol vector is given before its socket closes. The reply is thrown away, so this
+# only has to cover the server reading and parsing: a close it sees first drops the vector unparsed.
+# Most vectors leave it waiting for a body that never comes, so this is what each one costs
+_VECTOR_SETTLE = 0.25
+
+# The shape the text format has always had, which adding a format must leave alone
+TEXT_LINE = re.compile(r"^\[\d{2}:\d{2}:\d{2}\.\d{3}\] \[(TRC|DBG|INF|WRN|ERR|FTL)\] ")
+
+# RFC 3339 with an offset or Z, so a line can be placed on a clock
+JSON_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}([+-]\d{2}:\d{2}|Z)$")
+
+# What a level is called in JSON: the words Grafana and Loki already know
+JSON_LEVELS = {"trace", "debug", "info", "warn", "error", "fatal"}
 BODYBOMB_PAYLOADS = [
     # Exactly at limit: should be accepted (200)
     _build("POST", "/echo-body", body=b"B" * _BODY_LIMIT),
@@ -1036,11 +1050,21 @@ def phase_protocol(ctx):
     term.log("protocol", "started  (%d corpora, %d total vectors, zero concurrent load)"
          % (len(corpora), sum(len(c) for c, _ in corpora)))
 
+    # One ordinary request on the same budget every vector gets, before spending it 156 times. A
+    # vector only counts as sent if the server read it, and one closed too early is read by nobody:
+    # the corpora would then all pass having proven nothing. This says plainly whether a round trip
+    # fits in that budget on this machine, so a runner too slow for it fails here and names itself
+    st, _ = raw_send(host, port, _build("GET", "/health"), rtimeout=_VECTOR_SETTLE)
+    if st != 200:
+        findings.append(("SETTLE_TOO_SHORT",
+                          "a plain /health answered %r within %ss, so the vectors below are closing "
+                          "before the server reads them: raise _VECTOR_SETTLE" % (st, _VECTOR_SETTLE)))
+
     for corpus, label in corpora:
         with term.progress("protocol", label, len(corpus)) as pr:
             for vec in corpus:
                 sent += 1
-                raw_send(host, port, vec, rtimeout=2.0)
+                raw_send(host, port, vec, rtimeout=_VECTOR_SETTLE)
                 pr.ok()
 
             alive_now = common.health(host, port, 5.0)
@@ -1968,6 +1992,64 @@ def phase_cors(ctx):
 
     ctx.phase("cors").record(findings, security=("CORS_ORIGIN_LEAK",), vectors=checks)
 
+# PHASE: logging
+def phase_logging(ctx):
+    cfg, host, port = ctx.cfg, ctx.cfg.host, ctx.cfg.port
+    p = ctx.phase("logging")
+    toml_path = os.path.join(cfg.app_dir, "config", "wfx.local.toml")
+
+    def lines():
+        return [line.strip() for line in common.logs._worker_lines(cfg.app_dir) if line.strip()]
+
+    # The format it ships with, unchanged
+    common.health(host, port, 4.0)
+    text = lines()
+    p.check("text: every line keeps the timestamp and tag it always had",
+            text and all(TEXT_LINE.match(line) for line in text),
+            "%d lines, first unmatched: %r" % (len(text), next((l for l in text if not TEXT_LINE.match(l)), None)))
+
+    for fmt_value, want_utc in (("json", False), ("json", True)):
+        common.toml.patch(toml_path, "format", fmt_value)
+        common.toml.patch(toml_path, "utc_timestamps", want_utc)
+
+        try:
+            if not ctx.server.restart():
+                p.failed("JSON_BOOT", "server never came back with format=%r utc=%r" % (fmt_value, want_utc))
+                continue
+
+            common.health(host, port, 4.0)
+            got = lines()
+
+            bad = None
+            for line in got:
+                try:
+                    entry = json.loads(line)
+                except ValueError as exc:
+                    bad = "not JSON: %r (%s)" % (line, exc)
+                    break
+
+                if set(entry) != {"time", "level", "msg"}:
+                    bad = "fields are %r, expected time, level and msg: %r" % (sorted(entry), line)
+                elif entry["level"] not in JSON_LEVELS:
+                    bad = "level %r is not one of %s: %r" % (entry["level"], sorted(JSON_LEVELS), line)
+                elif not JSON_TIME.match(entry["time"]):
+                    bad = "time %r is not RFC 3339: %r" % (entry["time"], line)
+                elif want_utc and not entry["time"].endswith("Z"):
+                    bad = "utc_timestamps is on but time %r carries an offset: %r" % (entry["time"], line)
+                elif not want_utc and entry["time"].endswith("Z"):
+                    bad = "utc_timestamps is off but time %r is UTC: %r" % (entry["time"], line)
+
+                if bad:
+                    break
+
+            p.check("json%s: every line is one object of time, level and msg" % (" utc" if want_utc else ""),
+                    bool(got) and bad is None, bad or "no lines were written")
+        finally:
+            common.toml.restore(toml_path)
+
+    if not ctx.server.restart():
+        p.failed("LOGGING_RESTORE_BOOT", "server never came back after restoring the log format")
+
 def _find_route(metrics, pred):
     for r in metrics.get("routes", []):
         if pred(r):
@@ -2353,9 +2435,10 @@ def phase_soak(ctx):
 #   - a per-phase timeout, because a phase that wedges under load would otherwise stall the run
 class BaseAudit(common.Suite):
     name = "base_audit"
-    description = "WFX server torture audit: security, protocol, features, forms, query, cors, groups, metrics, soak, chaos"
+    description = "WFX server torture audit: security, logging, protocol, features, forms, query, cors, groups, metrics, soak, chaos"
     phases = {
         "security": phase_security,
+        "logging":  phase_logging,
         "protocol": phase_protocol,
         "features": phase_features,
         "forms":    phase_forms,
