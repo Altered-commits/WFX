@@ -371,11 +371,17 @@ if(status != WFX::CryptoOk) {
 #### Signing and verifying
 
 ```cpp
+std::uint32_t SigLen(CryptoAsymScheme scheme) const;
+
 std::pair<CryptoStatus, Vector<std::uint8_t>> Sign(CryptoAsymScheme scheme, std::string_view msg) const;
+std::pair<CryptoStatus, std::size_t> Sign(CryptoAsymScheme scheme, std::string_view msg,
+                                          std::span<std::uint8_t> out) const;
+
 CryptoStatus Verify(CryptoAsymScheme scheme, std::string_view msg, std::string_view sig) const;
 ```
 
-- **`Sign`**: one-shot only, no streaming variant, for any scheme. Ed25519 in particular cannot be streamed at all (RFC 8032 signs the whole message in a single call), so there's no incremental signing API here regardless of scheme. Requires a private key; `CryptoInvalidArg` if the key/scheme don't match.
+- **`SigLen`**: how many bytes a signature of this scheme takes, `0` when the scheme does not fit this key. It is fixed per scheme and known before signing, so a caller can size a buffer up front.
+- **`Sign`**: one-shot only, no streaming variant, for any scheme. Ed25519 in particular cannot be streamed at all (RFC 8032 signs the whole message in a single call), so there's no incremental signing API here regardless of scheme. Requires a private key; `CryptoInvalidArg` if the key/scheme don't match. The out-buffer form writes into a `std::span` instead of allocating and returns `{status, written}`, or `{CryptoBufferTooSmall, 0}` when the span is shorter than `SigLen(scheme)`, which is what a handler signing per request should reach for.
 - **`Verify`**: `CryptoOk` if the signature verifies, `CryptoAuthFailed` if it's well-formed but cryptographically rejected (tampered message, wrong key, or a signature that just doesn't verify), `CryptoInvalidArg` for a key/scheme mismatch, an empty signature, or an `ES256`/`ES384` signature of the wrong length. A wrong-length RSA or Ed25519 signature is `CryptoAuthFailed`.
 
 **Example (verifying an externally-issued signature against a loaded public key)**:

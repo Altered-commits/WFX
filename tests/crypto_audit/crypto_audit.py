@@ -539,11 +539,14 @@ def crypto_verify(pub, scheme_name, msg, sig):
     except InvalidSignature:
         return False
 
-def build_jwt(priv_key, scheme, payload, kid="test-1", alg_override=None):
+def build_jwt(priv_key, scheme, payload, kid="test-1", alg_override=None, extra_header=None):
     """Builds a compact JWT signed with `cryptography`, in WFX's own wire format. Returns
     (token, signing_input, signature) so tamper tests can recombine the pieces themselves.
-    'priv_key=None' produces an empty signature, for the alg=none attack vector."""
+    'priv_key=None' produces an empty signature, for the alg=none attack vector.
+    'extra_header' merges extra claims into the header, e.g. to make it oversized."""
     header = {"alg": alg_override if alg_override is not None else JOSE_ALG[scheme], "typ": "JWT", "kid": kid}
+    if extra_header:
+        header.update(extra_header)
     signing_input = b64url(json.dumps(header).encode()) + "." + b64url(json.dumps(payload).encode())
     sig = crypto_sign(priv_key, scheme, signing_input.encode()) if priv_key is not None else b""
     return signing_input + "." + b64url(sig), signing_input, sig
@@ -873,6 +876,28 @@ def phase_jwt(ctx):
     # Only need one scheme/key pair for everything below, RS256 is as good as any
     priv, pub = keys["rsa"], pems["rsa"]
 
+    # vvv Segment sizes vvv
+    # A header and a payload are decoded into a stack buffer when they fit and onto the heap when
+    # they do not, so a token big enough to spill is the only thing that exercises the second path.
+    # Both must parse and verify identically, and the claims must survive the crossing intact
+    for name, filler in [("inside the scratch buffer", 64), ("spilling past it", 4096)]:
+        big = "x" * filler
+        token, _, _ = build_jwt(priv, "rs256", {"aud": "myapp", "exp": now + 3600, "nbf": now - 10, "pad": big})
+
+        r = wfx_jwt_verify(cfg, token, pub, "myapp")
+        p.check("payload %s parses and verifies" % name,
+                bool(r) and r.get("parseStatus") == ST_OK and r.get("verifyStatus") == ST_OK
+                and r.get("audOk") is True and r.get("timeOk") is True,
+                "filler=%d got %r" % (filler, r))
+
+    # The same for the header, which is decoded through the same path but is normally tiny
+    token, _, _ = build_jwt(priv, "rs256", {"aud": "myapp", "exp": now + 3600},
+                            extra_header={"pad": "y" * 4096})
+    r = wfx_jwt_verify(cfg, token, pub, "myapp")
+    p.check("oversized header parses and still reports its alg",
+            bool(r) and r.get("parseStatus") == ST_OK and r.get("alg") == JOSE_ALG["rs256"],
+            "got %r" % r)
+
     # vvv Tamper detection, signature and payload vvv
     token, signing_input, sig = build_jwt(priv, "rs256", {"aud": "myapp", "exp": now + 3600})
 
@@ -1121,6 +1146,62 @@ def phase_out_buffer(ctx):
     r = into_call(cfg, "/encoding/hex/decode-into", data.hex().encode(), len(data) - 1)
     p.check("hex decode-into: a buffer shorter than the payload is refused",
             bool(r) and r.get("status") == 0, "got %r" % r)
+
+    # URL. Its buffer is sized by an upper bound rather than an exact length, since only a reserved
+    # byte costs three characters, so written is what says how much of it was actually used
+    raw = b"a b/c?d=e&f"
+    escaped = b"a%20b%2Fc%3Fd%3De%26f"
+
+    r = into_call(cfg, "/encoding/url/encode-into", raw, len(raw) * 3)
+    p.check("url encode-into: the worst-case buffer writes the reference encoding and reports its real length",
+            bool(r) and r.get("status") == 1 and r.get("written") == len(escaped)
+            and buf(r)[:len(escaped)] == escaped, "got %r want %r" % (r, escaped))
+
+    r = into_call(cfg, "/encoding/url/encode-into", raw, len(raw) * 3 - 1)
+    p.check("url encode-into: one short of the worst case is refused, the buffer untouched",
+            bool(r) and r.get("status") == 0 and buf(r) == fill * (len(raw) * 3 - 1), "got %r" % r)
+
+    r = into_call(cfg, "/encoding/url/decode-into", escaped, len(escaped))
+    p.check("url decode-into: decodes to the original and reports the shorter length",
+            bool(r) and r.get("status") == 1 and r.get("written") == len(raw)
+            and buf(r)[:len(raw)] == raw, "got %r want %r" % (r, raw))
+
+    r = into_call(cfg, "/encoding/url/decode-into", escaped, len(escaped) - 1)
+    p.check("url decode-into: a buffer shorter than the input is refused",
+            bool(r) and r.get("status") == 0, "got %r" % r)
+
+    # A truncated escape must leave nothing behind, the same way a failed decrypt does
+    r = into_call(cfg, "/encoding/url/decode-into", b"ab%4", 8)
+    p.check("url decode-into: a truncated escape writes nothing",
+            bool(r) and r.get("status") == 0 and r.get("written") == 0, "got %r" % r, security=True)
+
+    # Signing. SigLen() is what sizes the buffer, so the two must agree, and a signature written
+    # into the caller's room must be the same one the allocating form produces
+    priv = ec.generate_private_key(ec.SECP256R1())
+    pem = priv.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                             serialization.NoEncryption())
+    msg = b"sign me"
+    headers = {"X-Key": pem.hex(), "X-Scheme": "es256"}
+
+    r = into_call(cfg, "/crypto/asym/sign-into", msg, 256, headers)
+    sig_len = r.get("sigLen") if r else 0
+    p.check("asym sign-into: room to spare signs and reports what it actually wrote",
+            bool(r) and r.get("status") == ST_OK and 0 < r.get("written") <= sig_len,
+            "got %r" % r)
+
+    # Verified through the allocating path, so the out-buffer form is checked against real crypto
+    # rather than against itself
+    written = r.get("written") if r else 0
+    sig = bytes.fromhex(r.get("buf", ""))[:written] if r else b""
+    v = call(cfg, "POST", "/crypto/asym/verify",
+             {"X-Key": pub_pem(priv).hex(), "X-Scheme": "es256", "X-Sig": sig.hex()}, msg)
+    p.check("asym sign-into: the signature it wrote verifies against the public key",
+            bool(v) and v.get("status") == ST_OK, "got %r" % v)
+
+    r = into_call(cfg, "/crypto/asym/sign-into", msg, max(sig_len - 1, 0), headers)
+    p.check("asym sign-into: a buffer shorter than SigLen is refused before signing",
+            bool(r) and r.get("status") == ST_BUFFER_TOO_SMALL and r.get("written") == 0,
+            "got %r" % r)
 
 class CryptoAudit(common.Suite):
     name = "crypto_audit"
