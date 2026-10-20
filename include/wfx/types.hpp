@@ -113,6 +113,25 @@ using StreamBuffer = Shared::StreamBuffer;
 inline constexpr auto StreamContinue = Shared::StreamAction::CONTINUE;
 inline constexpr auto StreamDone = Shared::StreamAction::STOP_AND_ALIVE_CONN;
 inline constexpr auto StreamClose = Shared::StreamAction::STOP_AND_CLOSE_CONN;
+
+// -----------------------------------------------------------------------
+// Chunked streaming flow control
+//
+// What co_await res.Flush() / res.FlushEnd() resumes with. FlushFailed
+// means the connection is being closed, so a loop that keeps producing
+// chunks is filling a buffer nobody will read:
+//
+//   if(co_await res.Flush() == WFX::FlushFailed)
+//       co_return;
+//
+// FlushPending is returned to the engine, not to you: it suspends there
+// and resumes with FlushOk or FlushFailed once the socket drains.
+// -----------------------------------------------------------------------
+using FlushStatus = Shared::FlushStatus;
+
+inline constexpr auto FlushOk = Shared::FlushStatus::COMPLETED;
+inline constexpr auto FlushPending = Shared::FlushStatus::PENDING;
+inline constexpr auto FlushFailed = Shared::FlushStatus::FAILED;
 // NOLINTEND(readability-identifier-naming)
 
 } // namespace WFX

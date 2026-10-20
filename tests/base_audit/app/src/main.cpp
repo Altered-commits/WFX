@@ -150,7 +150,9 @@ WFX_GET("/flush/zero", [](WFX::Request, WFX::Response res) -> WFX::Coro {
 })
 
 // 200 rounds of "<index>\n", each its own Flush(), then a FlushEnd() with no data of its own
-// (empty final chunk after real ones): exercises repeated gap-reserve/backfill across many rounds
+// (empty final chunk after real ones): exercises repeated gap-reserve/backfill across many rounds.
+// The status is checked rather than dropped, since a client that leaves partway through should end
+// the loop rather than have it write another 200 chunks into a connection that is closing
 WFX_GET("/flush/multi", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     res.Status(200);
     res.FlushStart();
@@ -158,7 +160,9 @@ WFX_GET("/flush/multi", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     for(int i = 0; i < 200; i++) {
         res.Write(i);
         res.Write("\n");
-        co_await res.Flush();
+
+        if(co_await res.Flush() == WFX::FlushFailed)
+            co_return;
     }
 
     co_await res.FlushEnd();

@@ -511,6 +511,26 @@ WFX_GET("/export", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
 });
 ```
 
+`Stream()` hands back a `WFX::PgStream`. `auto` covers the common case above,
+but the name is there for when the drain loop is worth lifting into a helper
+of its own, which otherwise has no way to write down what it is being passed:
+
+```cpp
+WFX::Task<std::uint64_t> CountRows(WFX::PgStream stream)
+{
+    std::uint64_t rows = 0;
+    while(true) {
+        auto chunk = co_await stream.Next();
+        if(chunk.status != WFX::EpOk || chunk.done)
+            break;
+
+        rows += chunk.data->RowCount();
+    }
+
+    co_return rows;
+}
+```
+
 The first argument is `chunkRows`, how many rows one `Execute` asks for at a
 time; the rest is the same SQL-plus-parameters shape `Query()` takes.
 Postgres calls this a *portal*: the server keeps the query's cursor open
