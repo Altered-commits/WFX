@@ -51,9 +51,11 @@ namespace WFX {
 using Request = Http::Request;
 using Response = Http::Response;
 
-// What Request::GetQueryParams() hands back. Named here so a helper that reads several parameters can
-// take the parsed set as an argument, rather than parsing the path again for each one it wants
+// What Request::GetQueryParams() and GetQueryParams<N>() hand back. Named here so a helper that reads
+// several parameters can take the parsed set as an argument, rather than parsing the path again for
+// each one it wants
 using QueryParams = Http::QueryParams;
+template <std::size_t N> using FixedQueryParams = Http::FixedQueryParams<N>;
 
 // -----------------------------------------------------------------------
 // HTTP helpers
