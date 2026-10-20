@@ -667,6 +667,18 @@ WFX_POST("/encoding/hex/decode-into", [](WFX::Request req, WFX::Response res) {
     WriteInto(res, ok ? 1 : 0, written, buf);
 })
 
+WFX_POST("/encoding/url/encode-into", [](WFX::Request req, WFX::Response res) {
+    WFX::String buf(UintHeader(req, "X-Cap"), static_cast<char>(OUT_BUFFER_FILL));
+    auto [ok, written] = WFX::UrlEncode(req.Body(), std::span<char>{buf.data(), buf.size()});
+    WriteInto(res, ok ? 1 : 0, written, buf);
+})
+
+WFX_POST("/encoding/url/decode-into", [](WFX::Request req, WFX::Response res) {
+    WFX::String buf(UintHeader(req, "X-Cap"), static_cast<char>(OUT_BUFFER_FILL));
+    auto [ok, written] = WFX::UrlDecode(req.Body(), std::span<char>{buf.data(), buf.size()});
+    WriteInto(res, ok ? 1 : 0, written, buf);
+})
+
 WFX_POST("/encoding/url/encode", [](WFX::Request req, WFX::Response res) {
     res.Status(200);
     auto w = WFX::ImJson(res);

@@ -123,12 +123,22 @@ Below are the primary members exposed by the `Request` structure.
     std::uint64_t total = qp.Count();
     ```
 
+    A query is parsed up to 32 pairs, so a request line cannot turn into an unbounded list of them. Past that the set stops and `Truncated()` says so, which is how a key reading as absent is told apart from one that was never sent. A route that genuinely wants more passes its own cap, as `req.GetQueryParams(64)`.
+
+    When the count is known up front, which is most handlers, `GetQueryParams<N>()` holds the pairs inline instead and parsing allocates nothing at all:
+
+    ```cpp
+    auto qp = req.GetQueryParams<4>();
+    ```
+
+    It reads exactly the same way; `N` is that handler's own cap, and `Truncated()` reports a query that carried more.
+
     !!! important
         - `Get()` returns the raw value exactly as it appeared on the wire. It is not percent-decoded, the same way `GetHeader()` does not decode header values either. If a client sends `?email=a%40b.com`, `Get("email", out)` gives you `"a%40b.com"`, not `"a@b.com"`, decode it yourself if you need to.
         - If a key appears more than once (`?v=first&v=second`), `Get()` returns the first one it finds.
 
     !!! tip
-        `GetQueryParams()` parses the whole query string every time it's called. If a handler reads several keys, call it once and reuse the result rather than calling it once per key.
+        `GetQueryParams()` parses the whole query string every time it's called. If a handler reads several keys, call it once and reuse the result rather than calling it once per key. `RawQuery()` gives you the undecoded `?...` suffix on its own if you would rather read it yourself.
 
 - **`Context Store`**  
     Allows storing request-scoped values for the lifetime of the active request lifecycle.

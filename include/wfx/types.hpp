@@ -42,6 +42,7 @@ using Any = Shared::Any;
 using JsonObject = Shared::JsonObject;
 using JsonWriter = Shared::JsonWriter;
 using JsonParseResult = Shared::JsonParseResult;
+using JsonRef = Shared::JsonRef;
 
 // -----------------------------------------------------------------------
 // Segment variant tags, use with Request::GetSegment().Tag()

@@ -1122,6 +1122,34 @@ def phase_out_buffer(ctx):
     p.check("hex decode-into: a buffer shorter than the payload is refused",
             bool(r) and r.get("status") == 0, "got %r" % r)
 
+    # URL. Its buffer is sized by an upper bound rather than an exact length, since only a reserved
+    # byte costs three characters, so written is what says how much of it was actually used
+    raw = b"a b/c?d=e&f"
+    escaped = b"a%20b%2Fc%3Fd%3De%26f"
+
+    r = into_call(cfg, "/encoding/url/encode-into", raw, len(raw) * 3)
+    p.check("url encode-into: the worst-case buffer writes the reference encoding and reports its real length",
+            bool(r) and r.get("status") == 1 and r.get("written") == len(escaped)
+            and buf(r)[:len(escaped)] == escaped, "got %r want %r" % (r, escaped))
+
+    r = into_call(cfg, "/encoding/url/encode-into", raw, len(raw) * 3 - 1)
+    p.check("url encode-into: one short of the worst case is refused, the buffer untouched",
+            bool(r) and r.get("status") == 0 and buf(r) == fill * (len(raw) * 3 - 1), "got %r" % r)
+
+    r = into_call(cfg, "/encoding/url/decode-into", escaped, len(escaped))
+    p.check("url decode-into: decodes to the original and reports the shorter length",
+            bool(r) and r.get("status") == 1 and r.get("written") == len(raw)
+            and buf(r)[:len(raw)] == raw, "got %r want %r" % (r, raw))
+
+    r = into_call(cfg, "/encoding/url/decode-into", escaped, len(escaped) - 1)
+    p.check("url decode-into: a buffer shorter than the input is refused",
+            bool(r) and r.get("status") == 0, "got %r" % r)
+
+    # A truncated escape must leave nothing behind, the same way a failed decrypt does
+    r = into_call(cfg, "/encoding/url/decode-into", b"ab%4", 8)
+    p.check("url decode-into: a truncated escape writes nothing",
+            bool(r) and r.get("status") == 0 and r.get("written") == 0, "got %r" % r, security=True)
+
 class CryptoAudit(common.Suite):
     name = "crypto_audit"
     description = "WFX crypto ABI audit"
