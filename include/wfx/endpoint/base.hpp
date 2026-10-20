@@ -98,12 +98,20 @@
 //                                          std::uint32_t* written, std::uint64_t* /*streamKey*/)
 //   {
 //       auto& r = *static_cast<const ApiReq*>(req);
-//       int n = snprintf(buf, len, "GET %s HTTP/1.0\r\nHost: api.example.com\r\n\r\n",
-//                        r.path.data());
-//       if(n >= (int)len)
+//
+//       // CR or LF here would end the request line and start a header of its own, so anything
+//       // a caller supplies is screened before it goes into one
+//       if(r.path.find_first_of("\r\n") != std::string_view::npos)
+//           return WFX::EpSerError;
+//
+//       // "%.*s" with the size, never "%s": a string_view is not null terminated, so %s reads
+//       // until it happens to find a zero byte somewhere past the end of it
+//       int n = snprintf(buf, len, "GET %.*s HTTP/1.0\r\nHost: api.example.com\r\n\r\n",
+//                        static_cast<int>(r.path.size()), r.path.data());
+//       if(n < 0 || static_cast<std::uint32_t>(n) >= len)
 //           return WFX::EpSerBufferTooSmall;
 //
-//       *written = n;
+//       *written = static_cast<std::uint32_t>(n);
 //       return WFX::EpSerOk;
 //   }
 //

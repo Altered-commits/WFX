@@ -1782,18 +1782,49 @@ def phase_query(ctx):
               st == 200 and echoed_path == "/echo-full?v=" + traversal_value,
               "status=%s echoed_path=%r" % (st, echoed_path[:120]))
 
-    # Many pairs: correctness and basic responsiveness, not a hard DoS bound like forms' equivalent
-    # check (there's no per-request pair-count cap here), just confirms a large-but-legal query
-    # string still parses correctly and promptly
-    with term.progress("query", "many-pairs") as pr:
-        pairs = "&".join("k%d=v%d" % (i, i) for i in range(100))
+    # Many pairs: a query is parsed up to QueryParams::DEFAULT_MAX_PARAMS (32) and no further, so
+    # eight kilobytes of request line cannot turn into four thousand slots. Under the cap everything
+    # parses; over it the set stops and says it was truncated rather than reading as a short query
+    with term.progress("query", "pair cap") as pr:
+        pairs = "&".join("k%d=v%d" % (i, i) for i in range(31))
         t0 = time.time()
         st, j = _query_json(host, port, "/query/echo?" + pairs + "&v=findme", rtimeout=5.0)
         dt = time.time() - t0
-        check("100 pairs parsed correctly and promptly",
+        check("32 pairs, right at the cap, parse whole",
               st == 200 and j and j.get("present") is True and j.get("value") == "findme"
-              and j.get("count") == 101 and dt < 3.0,
+              and j.get("count") == 32 and j.get("truncated") is False and dt < 3.0,
               "st=%s j=%r elapsed=%.2fs" % (st, j, dt))
+
+        pairs = "&".join("k%d=v%d" % (i, i) for i in range(100))
+        st, j = _query_json(host, port, "/query/echo?" + pairs + "&v=findme", rtimeout=5.0)
+        check("past the cap stops at it and reports truncated",
+              st == 200 and j and j.get("count") == 32 and j.get("truncated") is True
+              and j.get("present") is False,
+              "st=%s j=%r" % (st, j))
+
+    # The inline form caps where its caller said, not where the default does
+    with term.progress("query", "inline form") as pr:
+        st, j = _query_json(host, port, "/query/fixed?a=1&v=hi&c=3")
+        check("reads a value without allocating a set",
+              st == 200 and j and j.get("present") is True and j.get("value") == "hi"
+              and j.get("count") == 3 and j.get("truncated") is False, "st=%s j=%r" % (st, j))
+
+        st, j = _query_json(host, port, "/query/fixed?a=1&b=2&c=3&d=4&v=hi")
+        check("past the caller's own N stops and reports truncated",
+              st == 200 and j and j.get("count") == 4 and j.get("truncated") is True
+              and j.get("present") is False, "st=%s j=%r" % (st, j))
+
+    # Valueless pairs used to make the '=' search run to the end of the query and get thrown away,
+    # so every pair after one rescanned the same tail. Thousands of them with a single '=' last is
+    # the shape that was quadratic: it must stay prompt, and the one real pair must still read back
+    with term.progress("query", "valueless-pair blowup") as pr:
+        blowup = "&".join("a" for _ in range(4000))
+        t0 = time.time()
+        st, j = _query_json(host, port, "/query/echo?" + blowup + "&v=last", rtimeout=5.0)
+        dt = time.time() - t0
+        check("thousands of valueless pairs stay prompt",
+              st == 200 and j is not None and dt < 3.0,
+              "st=%s elapsed=%.2fs" % (st, dt), tag="QUERY_QUADRATIC")
 
     if not common.health(host, port, 4.0):
         findings.append(("SERVER_DEAD", "server unreachable after query phase"))
@@ -1801,7 +1832,7 @@ def phase_query(ctx):
     nf = len(findings)
     term.log("query", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
 
-    ctx.phase("query").record(findings, security=("QUERY_TRAVERSAL_MANGLED",), vectors=checks)
+    ctx.phase("query").record(findings, security=("QUERY_TRAVERSAL_MANGLED", "QUERY_QUADRATIC"), vectors=checks)
 
 def _cors_headers(host, port, method, path, headers=None, rtimeout=3.0):
     st, raw = req(host, port, method, path, headers=headers, rtimeout=rtimeout)

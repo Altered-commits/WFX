@@ -123,12 +123,22 @@ Below are the primary members exposed by the `Request` structure.
     std::uint64_t total = qp.Count();
     ```
 
+    A query is parsed up to 32 pairs, so a request line cannot turn into an unbounded list of them. Past that the set stops and `Truncated()` says so, which is how a key reading as absent is told apart from one that was never sent. A route that genuinely wants more passes its own cap, as `req.GetQueryParams(64)`.
+
+    When the count is known up front, which is most handlers, `GetQueryParams<N>()` holds the pairs inline instead and parsing allocates nothing at all:
+
+    ```cpp
+    auto qp = req.GetQueryParams<4>();
+    ```
+
+    It reads exactly the same way; `N` is that handler's own cap, and `Truncated()` reports a query that carried more.
+
     !!! important
         - `Get()` returns the raw value exactly as it appeared on the wire. It is not percent-decoded, the same way `GetHeader()` does not decode header values either. If a client sends `?email=a%40b.com`, `Get("email", out)` gives you `"a%40b.com"`, not `"a@b.com"`, decode it yourself if you need to.
         - If a key appears more than once (`?v=first&v=second`), `Get()` returns the first one it finds.
 
     !!! tip
-        `GetQueryParams()` parses the whole query string every time it's called. If a handler reads several keys, call it once and reuse the result rather than calling it once per key.
+        `GetQueryParams()` parses the whole query string every time it's called. If a handler reads several keys, call it once and reuse the result rather than calling it once per key. `RawQuery()` gives you the undecoded `?...` suffix on its own if you would rather read it yourself.
 
 - **`Context Store`**  
     Allows storing request-scoped values for the lifetime of the active request lifecycle.
@@ -673,6 +683,10 @@ Below are the primary methods exposed by `Response`.
     Calling `Flush()` with nothing written since the last round is a harmless no-op: nothing goes
     out, and the same reserved framing stays ready for whenever real data eventually shows up.
 
+    It resumes with a `WFX::FlushStatus`: `WFX::FlushOk` when the chunk went out, `WFX::FlushFailed`
+    when the connection is being closed. Check it. A loop that keeps producing chunks after a failed
+    flush is reading rows, formatting them and filling a buffer for a client that has already gone.
+
     **Example** (streaming a database export without buffering the whole result set):
     ```cpp
     WFX_GET("/export.csv", [](WFX::Request req, WFX::Response res) -> WFX::Coro {
@@ -694,7 +708,9 @@ Below are the primary methods exposed by `Response`.
                     .Write("\r\n");
             }
 
-            co_await res.Flush();
+            // The client is gone: stop reading rows for a connection that is closing
+            if(co_await res.Flush() == WFX::FlushFailed)
+                co_return;
         }
 
         co_await res.FlushEnd();

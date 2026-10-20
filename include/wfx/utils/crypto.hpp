@@ -593,21 +593,45 @@ public: // Main functions
         return Export(true);
     }
 
-    std::pair<CryptoStatus, Vector<std::uint8_t>> Sign(CryptoAsymScheme scheme, std::string_view msg) const
+    // How many bytes a signature of this scheme needs, 0 when the scheme does not fit this key.
+    // What SigLen() sizes, Sign() fills
+    std::uint32_t SigLen(CryptoAsymScheme scheme) const
     {
-        if(!ctx_)
-            return {CryptoInvalidArg, {}};
+        return ctx_ ? Core::CryptoApiExt1()->asymSigLen(ctx_, scheme) : 0;
+    }
 
-        const std::uint32_t sigLen = Core::CryptoApiExt1()->asymSigLen(ctx_, scheme);
+    // Writes into out instead of allocating: {CryptoOk, bytes written}, or {CryptoBufferTooSmall, 0}
+    // when out is shorter than SigLen(scheme). A signature is small and its length is known before
+    // the call, so a caller signing per request need not reach the heap for it
+    std::pair<CryptoStatus, std::size_t> Sign(CryptoAsymScheme scheme, std::string_view msg,
+                                              std::span<std::uint8_t> out) const
+    {
+        const std::uint32_t sigLen = SigLen(scheme);
         if(sigLen == 0)
-            return {CryptoInvalidArg, {}};
+            return {CryptoInvalidArg, 0};
 
-        Vector<std::uint8_t> out(sigLen);
+        if(out.size() < sigLen)
+            return {CryptoBufferTooSmall, 0};
+
         std::uint32_t written = 0;
         const CryptoStatus status =
             Core::CryptoApiExt1()->asymSign(ctx_, scheme, reinterpret_cast<const std::uint8_t*>(msg.data()),
                                             static_cast<std::uint32_t>(msg.size()), out.data(),
                                             static_cast<std::uint32_t>(out.size()), &written);
+
+        return {status, status == CryptoOk ? written : 0};
+    }
+
+    std::pair<CryptoStatus, Vector<std::uint8_t>> Sign(CryptoAsymScheme scheme, std::string_view msg) const
+    {
+        const std::uint32_t sigLen = SigLen(scheme);
+        if(sigLen == 0)
+            return {CryptoInvalidArg, {}};
+
+        // Sized by the very function the span overload checks against, so coming up short is
+        // impossible, and resized to what was written rather than to what was reserved
+        Vector<std::uint8_t> out(sigLen);
+        const auto [status, written] = Sign(scheme, msg, out);
 
         if(status == CryptoOk)
             out.resize(written);

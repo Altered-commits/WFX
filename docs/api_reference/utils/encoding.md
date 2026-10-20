@@ -11,7 +11,7 @@ Base64, hex, and URL (percent) encoding. Pure user-space, no engine ABI call inv
 
 Every decode function returns `{bool, result}`; `false` means the input was malformed, and the result is empty in that case.
 
-Base64 and hex also come in an out-buffer form that writes into a `std::span` instead of allocating and returns `{ok, written}`. Size the buffer with `Base64EncodedLen(bytes, padded)`, `Base64DecodedMaxLen(chars)`, `HexEncodedLen(bytes)` and `HexDecodedLen(chars)`; a buffer that is too small returns `{false, 0}`.
+All of them also come in an out-buffer form that writes into a `std::span` instead of allocating and returns `{ok, written}`. Size the buffer with `Base64EncodedLen(bytes, padded)`, `Base64DecodedMaxLen(chars)`, `HexEncodedLen(bytes)`, `HexDecodedLen(chars)`, `UrlEncodedMaxLen(bytes)` and `UrlDecodedMaxLen(chars)`; a buffer that is too small returns `{false, 0}`.
 
 ---
 
@@ -71,9 +71,17 @@ if(!ok) {
 ```cpp
 String UrlEncode(std::string_view data);
 std::pair<bool, String> UrlDecode(std::string_view data);
+
+std::pair<bool, std::size_t> UrlEncode(std::string_view data, std::span<char> out);
+std::pair<bool, std::size_t> UrlDecode(std::string_view data, std::span<char> out);
+
+constexpr std::size_t UrlEncodedMaxLen(std::size_t bytes);
+constexpr std::size_t UrlDecodedMaxLen(std::size_t chars);
 ```
 
 RFC 3986 percent-encoding. `UrlEncode` leaves the unreserved set (`A-Z a-z 0-9 - . _ ~`) untouched and percent-escapes everything else. `UrlDecode` also treats `+` as a space, tolerating form-encoded input alongside strict `%20`, and returns `{false, {}}` on a truncated or invalid `%XX` escape.
+
+Both come in the same out-buffer form as Base64 and hex, writing into a `std::span` instead of allocating. Size it with `UrlEncodedMaxLen(bytes)` or `UrlDecodedMaxLen(chars)`; these are upper bounds, since encoding costs three characters only for a byte that is actually reserved, so `written` is usually smaller.
 
 **Example**:
 ```cpp

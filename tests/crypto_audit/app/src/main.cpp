@@ -475,6 +475,29 @@ WFX_POST("/crypto/asym/sign", [](WFX::Request req, WFX::Response res) {
     WriteStatusHex(res, s, sig);
 })
 
+// The out-buffer form, into an X-Cap byte buffer, beside SigLen() so one call can report both what
+// the scheme needs and what signing actually wrote into the room it was given
+WFX_POST("/crypto/asym/sign-into", [](WFX::Request req, WFX::Response res) {
+    const WFX::String keyPem = HexHeader(req, "X-Key");
+    const auto scheme = SchemeFromHeader(req);
+
+    auto [ls, key] = WFX::AsymKey::Load(keyPem, true);
+    if(ls != WFX::CryptoOk) {
+        WriteInto(res, static_cast<std::uint64_t>(ls), 0, WFX::Vector<std::uint8_t>{});
+        return;
+    }
+
+    WFX::Vector<std::uint8_t> buf(UintHeader(req, "X-Cap"), OUT_BUFFER_FILL);
+    auto [s, written] = key.Sign(scheme, req.Body(), buf);
+
+    res.Status(200);
+    auto w = WFX::ImJson(res);
+    w.Write("status", static_cast<std::uint64_t>(s));
+    w.Write("written", static_cast<std::uint64_t>(written));
+    w.Write("sigLen", static_cast<std::uint64_t>(key.SigLen(scheme)));
+    w.Write("buf", ToHex(std::string_view(reinterpret_cast<const char*>(buf.data()), buf.size())));
+})
+
 WFX_POST("/crypto/asym/verify", [](WFX::Request req, WFX::Response res) {
     const WFX::String keyPem = HexHeader(req, "X-Key");
     const WFX::String sig = HexHeader(req, "X-Sig");
@@ -664,6 +687,18 @@ WFX_POST("/encoding/hex/encode-into", [](WFX::Request req, WFX::Response res) {
 WFX_POST("/encoding/hex/decode-into", [](WFX::Request req, WFX::Response res) {
     WFX::Vector<std::uint8_t> buf(UintHeader(req, "X-Cap"), OUT_BUFFER_FILL);
     auto [ok, written] = WFX::HexDecode(req.Body(), buf);
+    WriteInto(res, ok ? 1 : 0, written, buf);
+})
+
+WFX_POST("/encoding/url/encode-into", [](WFX::Request req, WFX::Response res) {
+    WFX::String buf(UintHeader(req, "X-Cap"), static_cast<char>(OUT_BUFFER_FILL));
+    auto [ok, written] = WFX::UrlEncode(req.Body(), std::span<char>{buf.data(), buf.size()});
+    WriteInto(res, ok ? 1 : 0, written, buf);
+})
+
+WFX_POST("/encoding/url/decode-into", [](WFX::Request req, WFX::Response res) {
+    WFX::String buf(UintHeader(req, "X-Cap"), static_cast<char>(OUT_BUFFER_FILL));
+    auto [ok, written] = WFX::UrlDecode(req.Body(), std::span<char>{buf.data(), buf.size()});
     WriteInto(res, ok ? 1 : 0, written, buf);
 })
 

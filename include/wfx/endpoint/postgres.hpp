@@ -112,6 +112,12 @@ using PgError = Postgres::Detail::PgError;
 using PgColumn = Postgres::Detail::PgColumn;
 using PgArrayView = Postgres::Detail::PgArrayView;
 
+// vvv Streaming vvv
+// What Stream() hands back. Named so a drain loop can be lifted into a helper of its own, which
+// otherwise has no way to write down the type it is handed
+using PgRequest = Postgres::Detail::PgRequest;
+using PgStream = StreamHandle<PgRequest, PgResult>;
+
 // vvv Parameter and value types vvv
 using PgNull = Postgres::Detail::PgNull;
 using PgBytes = Postgres::Detail::PgBytes;

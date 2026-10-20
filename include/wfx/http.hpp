@@ -9,7 +9,7 @@
 // The primary include for building HTTP handlers.
 //
 // Provides:
-//   WFX::Request, WFX::Response
+//   WFX::Request, WFX::Response, WFX::QueryParams
 //   WFX_GET, WFX_POST, WFX_GET_EX, WFX_POST_EX
 //   WFX_MIDDLEWARE, WFX_MW_LIST
 //   WFX_GROUP_START, WFX_GROUP_END
@@ -50,6 +50,10 @@ namespace WFX {
 // -----------------------------------------------------------------------
 using Request = Http::Request;
 using Response = Http::Response;
+
+// What Request::GetQueryParams() hands back. Named here so a helper that reads several parameters can
+// take the parsed set as an argument, rather than parsing the path again for each one it wants
+using QueryParams = Http::QueryParams;
 
 // -----------------------------------------------------------------------
 // HTTP helpers

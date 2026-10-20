@@ -26,11 +26,43 @@
 #include "wfx/utils/crypto.hpp"
 #include "wfx/utils/encoding.hpp"
 
+#include <array>
 #include <chrono>
+#include <span>
 #include <string_view>
 #include <utility>
 
 namespace WFX {
+
+namespace Detail {
+
+// A header and a payload are a few claims of JSON each, so this covers any ordinary token without
+// touching the heap. A bigger one still parses, it just pays for the room
+inline constexpr std::size_t JWT_SEGMENT_SCRATCH = 512;
+
+// Decodes one segment for parsing only. The bytes die with the call either way, which is what
+// ParseJwt wants: ParseJson copies whatever it keeps, so nothing here has to outlive it
+inline bool DecodeSegment(std::string_view b64, std::span<std::uint8_t> scratch, Vector<std::uint8_t>& spill,
+                          std::string_view& out)
+{
+    if(Base64DecodedMaxLen(b64.size()) <= scratch.size()) {
+        const auto [ok, written] = Base64Decode(b64, scratch);
+        out = {reinterpret_cast<const char*>(scratch.data()), written};
+
+        return ok;
+    }
+
+    auto [ok, bytes] = Base64Decode(b64);
+    if(!ok)
+        return false;
+
+    spill = std::move(bytes);
+    out = {reinterpret_cast<const char*>(spill.data()), spill.size()};
+
+    return true;
+}
+
+} // namespace Detail
 
 struct JwtParts {
     JsonObject header;
@@ -56,15 +88,27 @@ inline std::pair<CryptoStatus, JwtParts> ParseJwt(std::string_view token)
     // The signature covers header+payload exactly as they appeared on the wire, before decoding
     parts.signingInput = token.substr(0, dot2);
 
-    auto [hdrOk, headerBytes] = Base64Decode(token.substr(0, dot1));
-    auto [payloadOk, payloadBytes] = Base64Decode(token.substr(dot1 + 1, dot2 - dot1 - 1));
+    // Only the signature is kept, so only it is decoded onto the heap. The other two are read by
+    // ParseJson and thrown away, which a stack buffer serves without allocating per request
+    std::array<std::uint8_t, Detail::JWT_SEGMENT_SCRATCH> headerScratch;
+    std::array<std::uint8_t, Detail::JWT_SEGMENT_SCRATCH> payloadScratch;
+    Vector<std::uint8_t> headerSpill;
+    Vector<std::uint8_t> payloadSpill;
+
+    std::string_view headerText;
+    std::string_view payloadText;
+
+    const bool hdrOk = Detail::DecodeSegment(token.substr(0, dot1), headerScratch, headerSpill, headerText);
+    const bool payloadOk =
+        Detail::DecodeSegment(token.substr(dot1 + 1, dot2 - dot1 - 1), payloadScratch, payloadSpill, payloadText);
+
     auto [sigOk, sig] = Base64Decode(token.substr(dot2 + 1));
 
     if(!hdrOk || !payloadOk || !sigOk)
         return {CryptoInvalidArg, std::move(parts)};
 
-    auto header = ParseJson({reinterpret_cast<char*>(headerBytes.data()), headerBytes.size()});
-    auto payload = ParseJson({reinterpret_cast<char*>(payloadBytes.data()), payloadBytes.size()});
+    auto header = ParseJson(headerText);
+    auto payload = ParseJson(payloadText);
 
     if(!header.IsValid() || !payload.IsValid())
         return {CryptoInvalidArg, std::move(parts)};

@@ -76,7 +76,8 @@ WFX_PUT("/cors/multi", [](WFX::Request, WFX::Response res) { res.Status(200).Sen
 // Query-string parsing: GetQueryParams()/QueryParams::Get(). Always looks up "v" and also
 // reports how many pairs the parser found overall, so one request can assert on both a specific
 // key's raw (undecoded) value and how the whole set got parsed (duplicate keys, empty segments
-// from stray '&'s collapsing, etc.)
+// from stray '&'s collapsing, etc.). truncated says whether the query carried more pairs than
+// the cap parsed, which is how a key reading as absent is told apart from one never sent
 WFX_GET("/query/echo", [](WFX::Request req, WFX::Response res) {
     auto qp = req.GetQueryParams();
 
@@ -89,6 +90,23 @@ WFX_GET("/query/echo", [](WFX::Request req, WFX::Response res) {
     j.Write("len", static_cast<std::uint64_t>(present ? v.size() : 0));
     j.Write("value", present ? v : std::string_view{});
     j.Write("count", static_cast<std::uint64_t>(qp.Count()));
+    j.Write("truncated", qp.Truncated());
+})
+
+// The same through the inline form, which holds its pairs in the handler rather than on the heap.
+// Sized deliberately small so one request can show the caller's own cap taking effect
+WFX_GET("/query/fixed", [](WFX::Request req, WFX::Response res) {
+    auto qp = req.GetQueryParams<4>();
+
+    std::string_view v;
+    const bool present = qp.Get("v", v);
+
+    res.Status(200);
+    auto j = WFX::ImJson(res);
+    j.Write("present", present);
+    j.Write("value", present ? v : std::string_view{});
+    j.Write("count", static_cast<std::uint64_t>(qp.Count()));
+    j.Write("truncated", qp.Truncated());
 })
 
 WFX_GET("/big", [](WFX::Request, WFX::Response res) {
@@ -132,7 +150,9 @@ WFX_GET("/flush/zero", [](WFX::Request, WFX::Response res) -> WFX::Coro {
 })
 
 // 200 rounds of "<index>\n", each its own Flush(), then a FlushEnd() with no data of its own
-// (empty final chunk after real ones): exercises repeated gap-reserve/backfill across many rounds
+// (empty final chunk after real ones): exercises repeated gap-reserve/backfill across many rounds.
+// The status is checked rather than dropped, since a client that leaves partway through should end
+// the loop rather than have it write another 200 chunks into a connection that is closing
 WFX_GET("/flush/multi", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     res.Status(200);
     res.FlushStart();
@@ -140,7 +160,9 @@ WFX_GET("/flush/multi", [](WFX::Request, WFX::Response res) -> WFX::Coro {
     for(int i = 0; i < 200; i++) {
         res.Write(i);
         res.Write("\n");
-        co_await res.Flush();
+
+        if(co_await res.Flush() == WFX::FlushFailed)
+            co_return;
     }
 
     co_await res.FlushEnd();

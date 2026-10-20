@@ -15,9 +15,10 @@
 //
 // Decode functions return {false, {}}; check the bool before using the result
 //
-// Base64 and hex also take a std::span to write into instead of allocating,
+// All of them also take a std::span to write into instead of allocating,
 // returning {ok, written}. Base64EncodedLen / Base64DecodedMaxLen /
-// HexEncodedLen / HexDecodedLen size that buffer
+// HexEncodedLen / HexDecodedLen / UrlEncodedMaxLen / UrlDecodedMaxLen size
+// that buffer
 // -----------------------------------------------------------------------
 
 #include "wfx/memory.hpp"
@@ -88,6 +89,19 @@ constexpr std::size_t Base64DecodedMaxLen(std::size_t chars) noexcept
 constexpr std::size_t HexEncodedLen(std::size_t bytes) noexcept
 {
     return bytes * 2;
+}
+
+// An upper bound: every byte reserved costs three characters, and most text reserves none of them
+constexpr std::size_t UrlEncodedMaxLen(std::size_t bytes) noexcept
+{
+    return bytes * 3;
+}
+
+// An upper bound the other way: an escape is three characters for one byte, and nothing decodes longer
+// than it was written
+constexpr std::size_t UrlDecodedMaxLen(std::size_t chars) noexcept
+{
+    return chars;
 }
 
 constexpr std::size_t HexDecodedLen(std::size_t chars) noexcept
@@ -259,51 +273,77 @@ inline std::pair<bool, Vector<std::uint8_t>> HexDecode(std::string_view data)
 }
 
 // vvv URL / percent-encoding vvv
-inline String UrlEncode(std::string_view data)
+// Writes into out instead of allocating: {true, chars written}, or {false, 0} when out is
+// shorter than UrlEncodedMaxLen(data.size())
+inline std::pair<bool, std::size_t> UrlEncode(std::string_view data, std::span<char> out) noexcept
 {
-    String out;
-    out.reserve(data.size());
+    if(out.size() < UrlEncodedMaxLen(data.size()))
+        return {false, 0};
 
+    std::size_t o = 0;
     for(const char c : data) {
         const auto byte = static_cast<std::uint8_t>(c);
         if(Detail::CHAR_TABLE[byte].urlSafe)
-            out.push_back(c);
+            out[o++] = c;
         else {
-            out.push_back('%');
-            out.push_back(Detail::HEX_UPPER[byte >> 4]);
-            out.push_back(Detail::HEX_UPPER[byte & 0x0F]);
+            out[o++] = '%';
+            out[o++] = Detail::HEX_UPPER[byte >> 4];
+            out[o++] = Detail::HEX_UPPER[byte & 0x0F];
         }
     }
 
+    return {true, o};
+}
+
+inline String UrlEncode(std::string_view data)
+{
+    // Sized by the same function the span overload measures against, so coming up short is
+    // impossible, and resized to what was written since the worst case is rarely the real one
+    String out(UrlEncodedMaxLen(data.size()), '\0');
+    const auto [ok, written] = UrlEncode(data, std::span<char>{out.data(), out.size()});
+    out.resize(ok ? written : 0);
+
     return out;
+}
+
+// Writes into out instead of allocating: {true, bytes written}, or {false, 0} when out is shorter
+// than UrlDecodedMaxLen(data.size()) or an escape is truncated or not hex
+inline std::pair<bool, std::size_t> UrlDecode(std::string_view data, std::span<char> out) noexcept
+{
+    if(out.size() < UrlDecodedMaxLen(data.size()))
+        return {false, 0};
+
+    std::size_t o = 0;
+    for(std::size_t i = 0; i < data.size(); ++i) {
+        if(data[i] == '%') {
+            if(i + 2 >= data.size())
+                return {false, 0};
+
+            const std::uint8_t hi = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i + 1])].hex;
+            const std::uint8_t lo = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i + 2])].hex;
+            if(hi == 0xFF || lo == 0xFF)
+                return {false, 0};
+
+            out[o++] = static_cast<char>((hi << 4) | lo);
+            i += 2;
+        }
+        else if(data[i] == '+')
+            out[o++] = ' '; // form-encoded space, tolerated alongside strict '%20'
+        else
+            out[o++] = data[i];
+    }
+
+    return {true, o};
 }
 
 // {false, {}} on a truncated/invalid '%XX' escape
 inline std::pair<bool, String> UrlDecode(std::string_view data)
 {
-    String out;
-    out.reserve(data.size());
+    String out(UrlDecodedMaxLen(data.size()), '\0');
+    const auto [ok, written] = UrlDecode(data, std::span<char>{out.data(), out.size()});
+    out.resize(ok ? written : 0);
 
-    for(std::size_t i = 0; i < data.size(); ++i) {
-        if(data[i] == '%') {
-            if(i + 2 >= data.size())
-                return {false, {}};
-
-            const std::uint8_t hi = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i + 1])].hex;
-            const std::uint8_t lo = Detail::CHAR_TABLE[static_cast<std::uint8_t>(data[i + 2])].hex;
-            if(hi == 0xFF || lo == 0xFF)
-                return {false, {}};
-
-            out.push_back(static_cast<char>((hi << 4) | lo));
-            i += 2;
-        }
-        else if(data[i] == '+')
-            out.push_back(' '); // form-encoded space, tolerated alongside strict '%20'
-        else
-            out.push_back(data[i]);
-    }
-
-    return {true, std::move(out)};
+    return {ok, std::move(out)};
 }
 
 } // namespace WFX
