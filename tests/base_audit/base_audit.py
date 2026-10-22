@@ -1014,6 +1014,39 @@ def phase_security(ctx):
                                   "route=%s  marker=%r" % (path, marker)))
                 term.log("security", _red("  !! LEAK on %s: %r" % (path, marker)))
 
+        # Cross-request body leak: req.Body() is a view into the connection's reused read buffer.
+        # On one keep-alive connection, a body-bearing request followed by a body-less one (here
+        # Content-Length: 0) must not let the second handler see the first body. The big padding
+        # header on the first request pushes its body past where the short second request's bytes
+        # land, so a leak surfaces whole rather than being partly overwritten.
+        term.log("security", "cross-request body leak on keep-alive connection ...")
+        secret = b"CROSS-REQ-BODY-SECRET-" + b"7f3a9c1e" * 48  # ~400 bytes, distinctive
+        first = (b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\nX-Pad: "
+                 + b"P" * 300 + b"\r\nContent-Length: " + str(len(secret)).encode()
+                 + b"\r\n\r\n" + secret)
+        second = b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n"
+        try:
+            sock = socket.create_connection((host, port), timeout=5.0)
+            try:
+                sock.sendall(first)
+                st1, b1, buf = net.read_response(sock, b"", 5.0)
+                sock.sendall(second)
+                st2, b2, _ = net.read_response(sock, buf, 5.0)
+            finally:
+                sock.close()
+        except OSError as e:
+            st1, b1, st2, b2 = None, b"", None, str(e).encode()
+
+        if st1 != 200 or b1 != secret:
+            findings.append(("CROSS_REQUEST_SETUP",
+                              "/echo-body did not echo the first body: status=%r len=%d" % (st1, len(b1))))
+        elif b2 != b"":
+            stats["leak"] += 1
+            findings.append(("CROSS_REQUEST_BODY_LEAK",
+                              "body-less 2nd request saw %d bytes, secret present=%s"
+                              % (len(b2), secret in b2)))
+            term.log("security", _red("  !! cross-request body leak: 2nd request saw %d bytes" % len(b2)))
+
         # Contract violations: must return 500, never crash
         term.log("security", "contract violations (%d routes x 10 hits) ..." % len(VIOLATE_ROUTES))
         for route in VIOLATE_ROUTES:
@@ -1040,7 +1073,7 @@ def phase_security(ctx):
     term.log("security", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
 
     ctx.phase("security").record(findings, security=("PATH_TRAVERSAL_URL", "PATH_TRAVERSAL_HDR",
-                                                     "RESPONSE_SPLIT", "INFO_LEAK"),
+                                                     "RESPONSE_SPLIT", "INFO_LEAK", "CROSS_REQUEST_BODY_LEAK"),
                                  vectors=stats["trav_url"] + stats["trav_hdr"] + stats["crlf"]
                                          + stats["leak"] + stats["violate_ok"] + stats["violate_bad"])
 
