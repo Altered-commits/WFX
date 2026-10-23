@@ -19,95 +19,7 @@ TrieNode* RouteTrie::Insert(std::string_view fullRoute, RouteCallback handler)
 
 const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& outParams) const
 {
-    const TrieNode* current = &root_;
-    requestPath = StripRoute(requestPath);
-
-    while(!requestPath.empty()) {
-        const std::size_t slashPos = requestPath.find('/');
-        const std::string_view segment =
-            (slashPos == std::string_view::npos) ? requestPath : requestPath.substr(0, slashPos);
-
-        requestPath = (slashPos == std::string_view::npos) ? std::string_view{} : requestPath.substr(slashPos + 1);
-
-        const TrieNode* next = nullptr;
-
-        for(const auto& child : current->children) {
-            if(child.IsStatic()) {
-                // Special Case: Wildcard '*' match, we copy the whole thing into DynamicSegment STRING type
-                if(child.MatchesStatic("*")) {
-                    std::size_t len = segment.size();
-
-                    if(!requestPath.empty())
-                        len += 1 + requestPath.size(); // include '/' and rest of path
-
-                    outParams.emplace_back(SegmentVariant::FromString(StringView{segment.data(), len}));
-
-                    // Signal that wildcard consumed all the remaining path
-                    requestPath = std::string_view{};
-                    next = child.GetChild();
-                    break;
-                }
-
-                // Normal static match
-                if(child.MatchesStatic(segment)) {
-                    next = child.GetChild();
-                    break;
-                }
-            }
-            else if(child.IsParam()) {
-                switch(child.GetParamType()) {
-                    case ParamType::UINT: {
-                        std::uint64_t val;
-                        if(!StringUtils::StrToUInt64(segment, val))
-                            continue;
-
-                        outParams.emplace_back(SegmentVariant::FromU64(val));
-                        break;
-                    }
-
-                    case ParamType::INT: {
-                        std::int64_t val;
-                        if(!StringUtils::StrToInt64(segment, val))
-                            continue;
-
-                        outParams.emplace_back(SegmentVariant::FromI64(val));
-                        break;
-                    }
-
-                    case ParamType::UUID: {
-                        Shared::UUID uuid;
-                        if(!Shared::UUID::FromString(Shared::StringView{segment.data(), segment.size()}, uuid))
-                            continue;
-
-                        outParams.emplace_back(SegmentVariant::FromUUID(uuid));
-                        break;
-                    }
-
-                    case ParamType::STRING:
-                        outParams.emplace_back(SegmentVariant::FromString(StringView{segment.data(), segment.size()}));
-                        break;
-
-                    // Unknown or unsupported ParamType, this should not happen silently
-                    default:
-                        return nullptr;
-                }
-
-                // Match found for dynamic segment, store parameter and proceed
-                next = child.GetChild();
-            }
-        }
-
-        if(!next)
-            return nullptr;
-
-        current = next;
-    }
-
-    // No callback registered on this node
-    if(current->callback.IsEmpty())
-        return nullptr;
-
-    return current;
+    return MatchNode(&root_, StripRoute(requestPath), outParams);
 }
 
 void RouteTrie::PushGroup(std::string_view prefix)
@@ -126,6 +38,93 @@ void RouteTrie::PopGroup()
 }
 
 // vvv Helper Functions vvv
+const TrieNode* RouteTrie::MatchNode(const TrieNode* node, std::string_view requestPath, PathSegments& outParams) const
+{
+    // Whole path consumed: this node answers only if a handler was registered on it
+    if(requestPath.empty())
+        return node->callback.IsEmpty() ? nullptr : node;
+
+    const std::size_t slashPos = requestPath.find('/');
+    const std::string_view segment =
+        (slashPos == std::string_view::npos) ? requestPath : requestPath.substr(0, slashPos);
+    const std::string_view rest =
+        (slashPos == std::string_view::npos) ? std::string_view{} : requestPath.substr(slashPos + 1);
+
+    for(const auto& child : node->children) {
+        if(child.IsStatic()) {
+            // Wildcard '*' swallows this segment and everything after it into one STRING capture
+            if(child.MatchesStatic("*")) {
+                std::size_t len = segment.size();
+
+                if(!rest.empty())
+                    len += 1 + rest.size(); // include the '/' and the rest of the path
+
+                outParams.emplace_back(SegmentVariant::FromString(StringView{segment.data(), len}));
+                if(const TrieNode* hit = MatchNode(child.GetChild(), std::string_view{}, outParams))
+                    return hit;
+
+                outParams.pop_back();
+                continue;
+            }
+
+            // A static match captures nothing, so a dead end below just moves on to the next sibling
+            if(child.MatchesStatic(segment)) {
+                if(const TrieNode* hit = MatchNode(child.GetChild(), rest, outParams))
+                    return hit;
+
+                continue;
+            }
+        }
+        else if(child.IsParam()) {
+            switch(child.GetParamType()) {
+                case ParamType::UINT: {
+                    std::uint64_t val;
+                    if(!StringUtils::StrToUInt64(segment, val))
+                        continue;
+
+                    outParams.emplace_back(SegmentVariant::FromU64(val));
+                    break;
+                }
+
+                case ParamType::INT: {
+                    std::int64_t val;
+                    if(!StringUtils::StrToInt64(segment, val))
+                        continue;
+
+                    outParams.emplace_back(SegmentVariant::FromI64(val));
+                    break;
+                }
+
+                case ParamType::UUID: {
+                    Shared::UUID uuid;
+                    if(!Shared::UUID::FromString(Shared::StringView{segment.data(), segment.size()}, uuid))
+                        continue;
+
+                    outParams.emplace_back(SegmentVariant::FromUUID(uuid));
+                    break;
+                }
+
+                case ParamType::STRING:
+                    outParams.emplace_back(SegmentVariant::FromString(StringView{segment.data(), segment.size()}));
+                    break;
+
+                // Unknown or unsupported ParamType, this should not happen silently
+                default:
+                    return nullptr;
+            }
+
+            if(const TrieNode* hit = MatchNode(child.GetChild(), rest, outParams))
+                return hit;
+
+            // This sibling captured the segment but could not complete the path, drop it and move on
+            outParams.pop_back();
+            continue;
+        }
+    }
+
+    return nullptr;
+}
+
 TrieNode* RouteTrie::InsertRoute(std::string_view route)
 {
     auto& logger = GetLogger();

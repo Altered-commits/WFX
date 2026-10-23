@@ -637,6 +637,12 @@ ROUTE_CHECKS = [
     ("GET",  "/items/notanumber", None, b"", 404, None, None),
     ("GET",  "/uuid/not-a-uuid",  None, b"", 404, None, None),
     ("GET",  "/uuid/12345",       None, b"", 404, None, None),
+    # Sibling parameter routes at one depth: a numeric segment matches both captures, so the router
+    # must still pick the tail that exists and leave index 0 as that route's own single capture
+    ("GET",  "/route-shift/42/end-a",    None, b"", 200, b"42",    None),
+    ("GET",  "/route-shift/7/end-a",     None, b"", 200, b"7",     None),
+    ("GET",  "/route-shift/hello/end-b", None, b"", 200, b"hello", None),
+    ("GET",  "/route-shift/42/end-b",    None, b"", 200, b"42",    None),
     # Route groups
     ("GET",  "/api/v1/status",    None, b"", 200, b"ok", None),
     ("GET",  "/api/v1/item/7",    None, b"", 200, b"7",  None),
@@ -1014,6 +1020,39 @@ def phase_security(ctx):
                                   "route=%s  marker=%r" % (path, marker)))
                 term.log("security", _red("  !! LEAK on %s: %r" % (path, marker)))
 
+        # Cross-request body leak: req.Body() is a view into the connection's reused read buffer.
+        # On one keep-alive connection, a body-bearing request followed by a body-less one (here
+        # Content-Length: 0) must not let the second handler see the first body. The big padding
+        # header on the first request pushes its body past where the short second request's bytes
+        # land, so a leak surfaces whole rather than being partly overwritten.
+        term.log("security", "cross-request body leak on keep-alive connection ...")
+        secret = b"CROSS-REQ-BODY-SECRET-" + b"7f3a9c1e" * 48  # ~400 bytes, distinctive
+        first = (b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\nX-Pad: "
+                 + b"P" * 300 + b"\r\nContent-Length: " + str(len(secret)).encode()
+                 + b"\r\n\r\n" + secret)
+        second = b"POST /echo-body HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n"
+        try:
+            sock = socket.create_connection((host, port), timeout=5.0)
+            try:
+                sock.sendall(first)
+                st1, b1, buf = net.read_response(sock, b"", 5.0)
+                sock.sendall(second)
+                st2, b2, _ = net.read_response(sock, buf, 5.0)
+            finally:
+                sock.close()
+        except OSError as e:
+            st1, b1, st2, b2 = None, b"", None, str(e).encode()
+
+        if st1 != 200 or b1 != secret:
+            findings.append(("CROSS_REQUEST_SETUP",
+                              "/echo-body did not echo the first body: status=%r len=%d" % (st1, len(b1))))
+        elif b2 != b"":
+            stats["leak"] += 1
+            findings.append(("CROSS_REQUEST_BODY_LEAK",
+                              "body-less 2nd request saw %d bytes, secret present=%s"
+                              % (len(b2), secret in b2)))
+            term.log("security", _red("  !! cross-request body leak: 2nd request saw %d bytes" % len(b2)))
+
         # Contract violations: must return 500, never crash
         term.log("security", "contract violations (%d routes x 10 hits) ..." % len(VIOLATE_ROUTES))
         for route in VIOLATE_ROUTES:
@@ -1040,7 +1079,7 @@ def phase_security(ctx):
     term.log("security", _green("all clear") if nf == 0 else _red("%d finding(s)" % nf))
 
     ctx.phase("security").record(findings, security=("PATH_TRAVERSAL_URL", "PATH_TRAVERSAL_HDR",
-                                                     "RESPONSE_SPLIT", "INFO_LEAK"),
+                                                     "RESPONSE_SPLIT", "INFO_LEAK", "CROSS_REQUEST_BODY_LEAK"),
                                  vectors=stats["trav_url"] + stats["trav_hdr"] + stats["crlf"]
                                          + stats["leak"] + stats["violate_ok"] + stats["violate_bad"])
 
@@ -2508,6 +2547,65 @@ def phase_soak(ctx):
 
     ctx.phase("soak").record(findings, vectors=completed)
 
+# PHASE: reaping
+# A connection that opens and then says nothing, or stalls partway through its header, must be
+# reaped by the server's own timeouts rather than held open forever. Held connections cost a slot
+# each and enough of them exhaust max_connections, locking every real client out. The app config
+# sets header_timeout = 5 and idle_timeout = 10, so a correct server closes both cases within those.
+def phase_reaping(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    findings = []
+
+    HEADER_TIMEOUT = 5   # app/config/wfx.local.toml [Network] header_timeout
+    IDLE_TIMEOUT   = 10  # app/config/wfx.local.toml [Network] idle_timeout
+
+    # True once the server closes the socket (recv returns b"") within `deadline` seconds. A socket
+    # the server never reaps instead keeps timing out with nothing to read until the deadline.
+    def closed_within(sock, deadline):
+        end = time.time() + deadline
+        sock.settimeout(0.5)
+        while time.time() < end:
+            try:
+                if sock.recv(64) == b"":
+                    return True
+            except socket.timeout:
+                continue
+            except OSError:
+                return True
+        return False
+
+    term.log("reaping", "connect-and-silent, then stalled-mid-header (header=%ds idle=%ds)"
+             % (HEADER_TIMEOUT, IDLE_TIMEOUT))
+
+    # 1. Opens and sends not one byte: must be reaped, not held until max_connections runs out
+    try:
+        s = socket.create_connection((host, port), timeout=5.0)
+        if not closed_within(s, IDLE_TIMEOUT + 5):
+            findings.append(("DEAD_CONN_NOT_REAPED",
+                              "a connection that sent nothing was still open after %ds" % (IDLE_TIMEOUT + 5)))
+        s.close()
+    except OSError as e:
+        findings.append(("REAP_CONNECT", "could not open a socket: %s" % e))
+
+    # 2. Sends a header line but never the terminating blank line: must be reaped by header_timeout
+    try:
+        s = socket.create_connection((host, port), timeout=5.0)
+        s.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\n")
+        if not closed_within(s, HEADER_TIMEOUT + 5):
+            findings.append(("PARTIAL_HEADER_NOT_REAPED",
+                              "a connection stalled mid-header was still open after %ds" % (HEADER_TIMEOUT + 5)))
+        s.close()
+    except OSError as e:
+        findings.append(("REAP_CONNECT", "could not open a socket: %s" % e))
+
+    if not common.health(host, port, 4.0):
+        findings.append(("SERVER_DEAD", "unreachable after reaping phase"))
+
+    nf = len(findings)
+    term.log("reaping", _green("both reaped") if nf == 0 else _red("%d finding(s)" % nf))
+    ctx.phase("reaping").record(findings)
+
 # Torture suite: hostile load and deliberate worker kills, so the interesting output is what went
 # wrong rather than a pass count. Phases collect findings and flush them with Phase.record()
 #
@@ -2517,7 +2615,7 @@ def phase_soak(ctx):
 #   - a per-phase timeout, because a phase that wedges under load would otherwise stall the run
 class BaseAudit(common.Suite):
     name = "base_audit"
-    description = "WFX server torture audit: security, logging, protocol, features, forms, query, cors, groups, metrics, soak, chaos"
+    description = "WFX server torture audit: security, logging, protocol, features, forms, query, cors, groups, metrics, soak, reaping, chaos"
     phases = {
         "security": phase_security,
         "logging":  phase_logging,
@@ -2530,6 +2628,7 @@ class BaseAudit(common.Suite):
         "groups":   phase_groups,
         "metrics":  phase_metrics,
         "soak":     phase_soak,
+        "reaping":  phase_reaping,
         "chaos":    phase_chaos,
     }
 

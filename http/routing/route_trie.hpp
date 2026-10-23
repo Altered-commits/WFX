@@ -19,6 +19,7 @@ public:
 
 private: // Helper functions
     TrieNode* InsertRoute(std::string_view route);
+    const TrieNode* MatchNode(const TrieNode* node, std::string_view requestPath, PathSegments& outParams) const;
     static std::string_view StripRoute(std::string_view route);
 
 private:
