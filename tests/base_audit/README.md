@@ -52,7 +52,7 @@ python3 base_audit.py --ci
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--phase PHASE` | `all` | `all`, `security`, `logging`, `protocol`, `features`, `forms`, `query`, `cors`, `refusals`, `groups`, `metrics`, `soak`, `chaos` |
+| `--phase PHASE` | `all` | `all`, `security`, `logging`, `protocol`, `features`, `forms`, `query`, `cors`, `refusals`, `groups`, `metrics`, `soak`, `reaping`, `chaos` |
 | `--host HOST` | `127.0.0.1` | Server hostname |
 | `--port N` | `8080` | HTTP port |
 | `--wfx PATH` | `wfx` | Path to the wfx binary |
@@ -72,7 +72,7 @@ python3 base_audit.py --ci
 |------|---------|
 | `0` | All phases passed |
 | `1` | A check failed, a phase timed out or raised, a sanitizer report was written, a worker ignored SIGTERM at shutdown, or the server was dead at the end |
-| `2` | Security finding: path traversal, response splitting, info leak, form header injection or decode bypass, query value mangling, or a CORS origin leak. The run stops after the phase that produced it: later phases would be measuring an already-compromised server |
+| `2` | Security finding: path traversal, response splitting, info leak, cross-request body leak, form header injection or decode bypass, query value mangling, or a CORS origin leak. The run stops after the phase that produced it: later phases would be measuring an already-compromised server |
 | `3` | WFX never answered `/health`, so nothing was exercised |
 
 ---
@@ -99,10 +99,13 @@ All vectors are retried up to 3 times. Findings are collected: no early bail.
   `Set-Cookie`, and a double CRLF faking a second response.
 - **Info leakage**: 16 routes scanned for password-file entries, environment variables, keys
   and certificates, process maps and command lines, and source or config text.
+- **Cross-request body leak**: on one keep-alive connection, a body-bearing `POST /echo-body`
+  followed by a body-less one (`Content-Length: 0`); the second must echo nothing, proving a
+  request's body view does not survive into the next request on the same connection.
 - **Contract violations**: each `/violate/*` route is hit 10 times; every
   response must be 500 without crashing the worker.
 
-Exit code 2 for traversal, response-splitting or info-leak findings; 1 for other failures.
+Exit code 2 for traversal, response-splitting, info-leak or cross-request-body-leak findings; 1 for other failures.
 
 ---
 
@@ -297,6 +300,17 @@ match exactly. Regression coverage for read/write buffer reuse across many
 requests on the same connection, not just a handful.
 
 Exit code 1 on any mismatch or connection failure.
+
+---
+
+### REAPING
+
+Two connections that never complete a request must be closed by the server's own timeouts, not
+held forever: one that connects and sends nothing (reaped by `idle_timeout`), and one that sends a
+header line but never the terminating blank line (reaped by `header_timeout`). Held connections
+each cost a slot, so enough of them exhaust `max_connections` and lock out every real client.
+
+Exit code 1 if either connection is still open past its timeout.
 
 ---
 

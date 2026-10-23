@@ -44,6 +44,7 @@ public: // Helper functions
             v.Reset();
 
         routeNode_ = nullptr;
+        body = {};
         headers.Clear();
         pathSegments.clear();
         context.clear();
