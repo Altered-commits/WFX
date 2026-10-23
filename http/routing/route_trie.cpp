@@ -38,8 +38,7 @@ void RouteTrie::PopGroup()
 }
 
 // vvv Helper Functions vvv
-const TrieNode* RouteTrie::MatchNode(const TrieNode* node, std::string_view requestPath,
-                                     PathSegments& outParams) const
+const TrieNode* RouteTrie::MatchNode(const TrieNode* node, std::string_view requestPath, PathSegments& outParams) const
 {
     // Whole path consumed: this node answers only if a handler was registered on it
     if(requestPath.empty())
