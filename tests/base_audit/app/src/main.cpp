@@ -328,6 +328,18 @@ WFX_GET("/uuid/<id:uuid>", [](WFX::Request req, WFX::Response res) {
     res.Status(200).Write(seg.AsUUID()).Commit();
 })
 
+// Two sibling parameter routes at one depth, differing only in the capture's type and the static
+// tail. A numeric segment parses as both <id:uint> and <tag:string>, so the router must still match
+// the right tail and hand each handler its own single capture at index 0 rather than pushing one
+// segment per sibling and shifting the index. Each handler reads GetSegment(0) as its own type
+WFX_GET("/route-shift/<id:uint>/end-a", [](WFX::Request req, WFX::Response res) {
+    res.Status(200).Write(req.GetSegment(0).AsU64()).Commit();
+})
+WFX_GET("/route-shift/<tag:string>/end-b", [](WFX::Request req, WFX::Response res) {
+    auto sv = req.GetSegment(0).AsString();
+    res.Status(200).Write(std::string_view{sv.Data(), sv.Size()}).Commit();
+})
+
 
 // Group-prefixed paths, via WFX_GROUP_START/WFX_GROUP_END
 

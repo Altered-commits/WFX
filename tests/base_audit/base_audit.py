@@ -637,6 +637,12 @@ ROUTE_CHECKS = [
     ("GET",  "/items/notanumber", None, b"", 404, None, None),
     ("GET",  "/uuid/not-a-uuid",  None, b"", 404, None, None),
     ("GET",  "/uuid/12345",       None, b"", 404, None, None),
+    # Sibling parameter routes at one depth: a numeric segment matches both captures, so the router
+    # must still pick the tail that exists and leave index 0 as that route's own single capture
+    ("GET",  "/route-shift/42/end-a",    None, b"", 200, b"42",    None),
+    ("GET",  "/route-shift/7/end-a",     None, b"", 200, b"7",     None),
+    ("GET",  "/route-shift/hello/end-b", None, b"", 200, b"hello", None),
+    ("GET",  "/route-shift/42/end-b",    None, b"", 200, b"42",    None),
     # Route groups
     ("GET",  "/api/v1/status",    None, b"", 200, b"ok", None),
     ("GET",  "/api/v1/item/7",    None, b"", 200, b"7",  None),
