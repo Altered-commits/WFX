@@ -4604,8 +4604,9 @@ void EpollConnectionHandler::WrapAccept(ClientCtx* ctx)
 
     metrics_->network.accepts++;
 
-    // Set an initial timeout for the new connection so they don't connect
-    // and stay idle forever.
+    // Mark alive so the idle-timeout reaper actually closes it: the reset default CONNECTION_CLOSE
+    // is skipped by the reaper, so a connection that never sends a byte would hold its slot forever.
+    ctx->SetConnectionState(ConnectionState::CONNECTION_ALIVE);
     RefreshExpiry(ctx, config_.networkConfig.idleTimeout);
 }
 

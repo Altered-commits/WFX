@@ -52,7 +52,7 @@ python3 base_audit.py --ci
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--phase PHASE` | `all` | `all`, `security`, `logging`, `protocol`, `features`, `forms`, `query`, `cors`, `refusals`, `groups`, `metrics`, `soak`, `chaos` |
+| `--phase PHASE` | `all` | `all`, `security`, `logging`, `protocol`, `features`, `forms`, `query`, `cors`, `refusals`, `groups`, `metrics`, `soak`, `reaping`, `chaos` |
 | `--host HOST` | `127.0.0.1` | Server hostname |
 | `--port N` | `8080` | HTTP port |
 | `--wfx PATH` | `wfx` | Path to the wfx binary |
@@ -300,6 +300,17 @@ match exactly. Regression coverage for read/write buffer reuse across many
 requests on the same connection, not just a handful.
 
 Exit code 1 on any mismatch or connection failure.
+
+---
+
+### REAPING
+
+Two connections that never complete a request must be closed by the server's own timeouts, not
+held forever: one that connects and sends nothing (reaped by `idle_timeout`), and one that sends a
+header line but never the terminating blank line (reaped by `header_timeout`). Held connections
+each cost a slot, so enough of them exhaust `max_connections` and lock out every real client.
+
+Exit code 1 if either connection is still open past its timeout.
 
 ---
 

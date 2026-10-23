@@ -2547,6 +2547,65 @@ def phase_soak(ctx):
 
     ctx.phase("soak").record(findings, vectors=completed)
 
+# PHASE: reaping
+# A connection that opens and then says nothing, or stalls partway through its header, must be
+# reaped by the server's own timeouts rather than held open forever. Held connections cost a slot
+# each and enough of them exhaust max_connections, locking every real client out. The app config
+# sets header_timeout = 5 and idle_timeout = 10, so a correct server closes both cases within those.
+def phase_reaping(ctx):
+    cfg = ctx.cfg
+    host, port = cfg.host, cfg.port
+    findings = []
+
+    HEADER_TIMEOUT = 5   # app/config/wfx.local.toml [Network] header_timeout
+    IDLE_TIMEOUT   = 10  # app/config/wfx.local.toml [Network] idle_timeout
+
+    # True once the server closes the socket (recv returns b"") within `deadline` seconds. A socket
+    # the server never reaps instead keeps timing out with nothing to read until the deadline.
+    def closed_within(sock, deadline):
+        end = time.time() + deadline
+        sock.settimeout(0.5)
+        while time.time() < end:
+            try:
+                if sock.recv(64) == b"":
+                    return True
+            except socket.timeout:
+                continue
+            except OSError:
+                return True
+        return False
+
+    term.log("reaping", "connect-and-silent, then stalled-mid-header (header=%ds idle=%ds)"
+             % (HEADER_TIMEOUT, IDLE_TIMEOUT))
+
+    # 1. Opens and sends not one byte: must be reaped, not held until max_connections runs out
+    try:
+        s = socket.create_connection((host, port), timeout=5.0)
+        if not closed_within(s, IDLE_TIMEOUT + 5):
+            findings.append(("DEAD_CONN_NOT_REAPED",
+                              "a connection that sent nothing was still open after %ds" % (IDLE_TIMEOUT + 5)))
+        s.close()
+    except OSError as e:
+        findings.append(("REAP_CONNECT", "could not open a socket: %s" % e))
+
+    # 2. Sends a header line but never the terminating blank line: must be reaped by header_timeout
+    try:
+        s = socket.create_connection((host, port), timeout=5.0)
+        s.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\n")
+        if not closed_within(s, HEADER_TIMEOUT + 5):
+            findings.append(("PARTIAL_HEADER_NOT_REAPED",
+                              "a connection stalled mid-header was still open after %ds" % (HEADER_TIMEOUT + 5)))
+        s.close()
+    except OSError as e:
+        findings.append(("REAP_CONNECT", "could not open a socket: %s" % e))
+
+    if not common.health(host, port, 4.0):
+        findings.append(("SERVER_DEAD", "unreachable after reaping phase"))
+
+    nf = len(findings)
+    term.log("reaping", _green("both reaped") if nf == 0 else _red("%d finding(s)" % nf))
+    ctx.phase("reaping").record(findings)
+
 # Torture suite: hostile load and deliberate worker kills, so the interesting output is what went
 # wrong rather than a pass count. Phases collect findings and flush them with Phase.record()
 #
@@ -2556,7 +2615,7 @@ def phase_soak(ctx):
 #   - a per-phase timeout, because a phase that wedges under load would otherwise stall the run
 class BaseAudit(common.Suite):
     name = "base_audit"
-    description = "WFX server torture audit: security, logging, protocol, features, forms, query, cors, groups, metrics, soak, chaos"
+    description = "WFX server torture audit: security, logging, protocol, features, forms, query, cors, groups, metrics, soak, reaping, chaos"
     phases = {
         "security": phase_security,
         "logging":  phase_logging,
@@ -2569,6 +2628,7 @@ class BaseAudit(common.Suite):
         "groups":   phase_groups,
         "metrics":  phase_metrics,
         "soak":     phase_soak,
+        "reaping":  phase_reaping,
         "chaos":    phase_chaos,
     }
 

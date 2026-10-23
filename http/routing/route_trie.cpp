@@ -22,10 +22,22 @@ const TrieNode* RouteTrie::Match(std::string_view requestPath, PathSegments& out
     return MatchNode(&root_, StripRoute(requestPath), outParams);
 }
 
-// Depth-first match with backtracking: a child is tried, descended into, and on a dead end any
-// parameter it captured is popped so the next sibling starts clean. Without that pop a segment that
-// parses as several sibling parameter types (a number is both <id:uint> and <tag:string>) would
-// leave one capture per sibling and shift every index the matched handler reads
+void RouteTrie::PushGroup(std::string_view prefix)
+{
+    cursorStack_.push_back(insertCursor_);
+    insertCursor_ = InsertRoute(prefix);
+}
+
+void RouteTrie::PopGroup()
+{
+    if(cursorStack_.empty())
+        GetLogger().Fatal("[RouteTrie]: PopGroup called without corresponding PushGroup.");
+
+    insertCursor_ = cursorStack_.back();
+    cursorStack_.pop_back();
+}
+
+// vvv Helper Functions vvv
 const TrieNode* RouteTrie::MatchNode(const TrieNode* node, std::string_view requestPath,
                                      PathSegments& outParams) const
 {
@@ -114,22 +126,6 @@ const TrieNode* RouteTrie::MatchNode(const TrieNode* node, std::string_view requ
     return nullptr;
 }
 
-void RouteTrie::PushGroup(std::string_view prefix)
-{
-    cursorStack_.push_back(insertCursor_);
-    insertCursor_ = InsertRoute(prefix);
-}
-
-void RouteTrie::PopGroup()
-{
-    if(cursorStack_.empty())
-        GetLogger().Fatal("[RouteTrie]: PopGroup called without corresponding PushGroup.");
-
-    insertCursor_ = cursorStack_.back();
-    cursorStack_.pop_back();
-}
-
-// vvv Helper Functions vvv
 TrieNode* RouteTrie::InsertRoute(std::string_view route)
 {
     auto& logger = GetLogger();
